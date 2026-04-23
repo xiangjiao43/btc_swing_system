@@ -195,22 +195,14 @@ layer_4_risk:
     # 各来源对 final_permission 的建议档;归并取最严(从严档 → 宽松档排序)
     # 注意:hold_only 不参与归并,是 HOLD 状态下的默认 permission,在
     # state_machine 里作为 on_enter 副作用设置,不走归并逻辑。
+    # permission 枚举全集在 layers.yaml → layer_3_opportunity.
+    # output_enums.execution_permission(含 hold_only);本处只是严格度排序。
     severity_rank:
       - protective
       - watch
       - ambush_only
       - cautious_open
       - can_open
-
-    # permission 枚举值全集(含不参与归并的 hold_only);供程序校验 AI 输出
-    # 合法性时使用,也供状态机的 on_enter 副作用引用。
-    permission_enum:
-      - protective
-      - watch
-      - ambush_only
-      - cautious_open
-      - can_open
-      - hold_only     # HOLD 状态专用;不进归并
 
     # L4 overall_risk_level 建议
     l4_risk_suggestions:

@@ -1,0 +1,545 @@
+# ============================================================
+# layers.yaml — 五层证据层的结构性契约
+# ============================================================
+# 用途:五层证据 + Observation Classifier 的**非阈值类**配置:
+#       - 层级执行顺序契约(M30)
+#       - 数据新鲜度契约(M29)
+#       - 每层的 computation_method、output_enums、消费的组合因子
+#       - 每层的否决类型(M21)
+#       - EvidenceReport 通用结构的枚举
+#       - Observation Classifier 的分类布尔规则(M28)
+#
+# 与 thresholds.yaml 的分工:
+#   - thresholds.yaml:数字(ADX 阈值、评分权重、乘数表、持续天数等)
+#   - layers.yaml:    结构(枚举、布尔规则、执行顺序、否决分类、
+#                      消费契约)
+#   跨文件引用用 `thresholds_ref: <key.path>` 字符串,代码层 resolve。
+#
+# 对应建模文档:§4.1-§4.7 + §3.2 + §2.4。
+#
+# 创建于:2026-04-23(Sprint 1 前置工作 · 优化二第 3 批)
+# 建模版本:v1.2
+# ============================================================
+
+
+# -------- EvidenceReport 通用结构(§4.1)------------------------------
+# 所有五层输出遵循同一基础结构。
+evidence_report_common:
+
+  computation_method_enum:
+    - rule_based       # 纯规则(L1, L2, L3, L4)
+    - ai_assisted      # AI 辅助,规则主导
+    - ai_primary       # AI 主导(L5)
+    - hybrid           # 混合
+
+  health_status_enum:
+    - healthy
+    - degraded             # 部分数据 stale 或降级
+    - insufficient_data    # 依赖层失败或数据缺失超阈值
+    - error                # 计算错误
+
+  # confidence 分档(§4.1)
+  confidence_tier_bands:
+    high:     0.75        # ≥ 0.75
+    medium:   0.50        # [0.50, 0.75)
+    low:      0.30        # [0.30, 0.50)
+    # very_low < 0.30
+
+  contribution_enum:
+    - supportive
+    - neutral
+    - challenging
+    - blocking
+
+
+# -------- 单次运行执行顺序(§3.2.1,M30)-----------------------------
+# 严禁并发与滞后(§2.2 "先抓后算")。
+execution_order:
+
+  # 阶段顺序
+  phases:
+    - data_collection
+    - evidence_layers
+    - observation_classify
+    - ai_adjudicate
+    - validate_and_output
+
+  # 证据层内部 L1→L5 强制顺序(M30)
+  layer_sequence:
+    - L1_regime
+    - L2_direction
+    - L3_opportunity
+    - L4_risk
+    - L5_macro
+
+  # 上层失败时下层的处理规则
+  # (§3.2.1:若上层失败,本层标记 depends_on_failed_upstream,
+  #  输出 insufficient_data)
+  upstream_failure_policy:
+    downstream_action: mark_depends_on_failed_upstream
+    downstream_verdict_enum: insufficient_data
+    # 整条链上任一层失败,后续全部 insufficient_data(不尝试跳过)
+    short_circuit_on_failure: true
+
+  # reference_timestamp 机制(§3.2.2,M29)
+  reference_timestamp:
+    source: data_collection_phase_end_utc   # 数据采集结束时的 UTC 时刻
+    usage: all_freshness_checks_reference_this
+    written_to_strategy_state: reference_timestamp_utc
+
+
+# -------- 数据新鲜度契约(§3.2.3,§3.2.4,M29)-----------------------
+# 所有 card 的 stale 判定以 reference_timestamp 为基准。
+# 单位秒;对应建模文档"> X 分钟/小时"阈值。
+freshness_thresholds_sec:
+  price:       1800         # 30 分钟
+  derivatives: 21600        # 6 小时
+  macro:       129600       # 36 小时
+  onchain:     172800       # 48 小时
+  event:       86400        # 24 小时(自定义,事件日历刷新上限)
+
+# Stale 数据的处理规则(§3.2.4)
+stale_data_policy:
+  # 单个 stale 数据点 → 对应组合因子 confidence × 0.7
+  single_point:
+    target_composite_factor_confidence_multiplier: 0.7
+
+  # 某数据源全部 stale → 对应证据层 health_status = degraded
+  whole_source:
+    evidence_layer_health_status: degraded
+
+  # 3+ 数据源全部 stale → 触发 Fallback Level 2
+  many_sources_threshold: 3
+  many_sources_action: trigger_fallback_level_2
+
+  # 每个 evidence_card 和 evidence_summary 都携带 data_freshness 字段
+  carry_freshness_field_everywhere: true
+
+
+# -------- 否决分类(§2.4,M21)---------------------------------------
+# 三类否决的显式分类。代码层在聚合结论时按此分支。
+veto_classification:
+
+  hard:
+    # 硬否决:强制结果,不经归并
+    - source: L4.hard_invalidation_levels
+      trigger: any_level_breached
+      effect: force_exit_position
+    - source: L5.extreme_event_detected
+      trigger: value_is_true
+      effect: force_protection
+
+  soft:
+    # 软否决:效果接近否决,但走标准归并通道
+    - source: L1.regime
+      trigger: value_is_chaos
+      effect: downstream_permission_watch
+    - source: L1.volatility_regime
+      trigger: value_is_extreme
+      effect: position_cap_multiplier_0_5
+    - source: L4.overall_risk_level
+      trigger: value_is_critical
+      effect: final_permission_protective
+
+  non_veto:
+    # 非否决:只修正
+    - source: L2.stance
+      trigger: value_is_neutral
+    - source: L3.opportunity_grade
+      trigger: value_is_none
+    - source: L4.other_risk_tags
+    - source: L5.non_extreme_events
+
+
+# ============================================================
+# Layer 1 — 市场状态层(§4.2)
+# ============================================================
+layer_1_regime:
+  description: "当前市场性格是什么?趋势性还是震荡性,稳定还是动荡?"
+  computation_method: rule_based
+  reads_upstream: []                      # 无上游
+  veto_type: soft                         # chaos / volatility_extreme 走软否决
+
+  # 消费的组合因子(单一作用点,§2.2 第 7 条)
+  composite_factor_consumed: truth_trend
+
+  # 输出枚举
+  output_enums:
+    regime_primary:
+      - trend_up
+      - trend_down
+      - range_high
+      - range_mid
+      - range_low
+      - transition_up
+      - transition_down
+      - chaos
+    regime_stability:
+      - stable
+      - slightly_shifting
+      - actively_shifting
+      - unstable
+    volatility_level:
+      - low
+      - normal
+      - elevated
+      - extreme
+    trend_direction:
+      - up
+      - down
+      - flat
+
+  # 专属字段清单(§4.2.4)
+  output_fields:
+    - regime_primary
+    - regime_stability
+    - regime_duration_days
+    - volatility_level
+    - volatility_percentile
+    - trend_strength
+    - trend_direction
+    - structure_coherence
+    - timeframe_alignment       # {tf_4h, tf_1d, tf_1w, aligned}
+    - environmental_flags       # {is_trending, is_ranging, trust_breakouts, trust_mean_reversion}
+    - truth_trend_score         # 来自 TruthTrend,L1 内部使用
+
+  # 阈值引用(数值在 thresholds.yaml)
+  thresholds_ref: layer_1_regime
+
+
+# ============================================================
+# Layer 2 — 方向与结构层(§4.3)
+# ============================================================
+layer_2_direction:
+  description: "方向偏哪边?阶段在哪?"
+  computation_method: rule_based
+  reads_upstream: [L1_regime]
+  veto_type: non_veto                     # neutral 是合法输出,不否决
+
+  # 消费两个组合因子
+  composite_factors_consumed:
+    - band_position         # → phase
+    - cycle_position        # → long_cycle_context
+  # 另外消费 L2 内部修正项(§3.9)
+  internal_modifiers_consumed:
+    - exchange_momentum_score     # 多头侧生效,空头侧忽略(B5)
+
+  output_enums:
+    stance:
+      - bullish
+      - bearish
+      - neutral
+    stance_strength:
+      - strong
+      - moderate
+      - weak
+    phase:
+      - early
+      - mid
+      - late
+      - exhausted
+      - unclear
+      - n_a
+    cycle_position:
+      - accumulation
+      - early_bull
+      - mid_bull
+      - late_bull
+      - distribution
+      - early_bear
+      - mid_bear
+      - late_bear
+      - unclear
+
+  output_fields:
+    - stance
+    - stance_confidence         # M18:仅供动态门槛比较的内部量
+    - stance_strength
+    - phase
+    - phase_evidence
+    - structure_features         # {hh_count, hl_count, lh_count, ll_count, latest_structure}
+    - key_levels                 # {nearest_support, resistance, major_*, current_position}
+    - trend_position             # {estimated_pct_of_move, basis, reliability}
+    - long_cycle_context         # {cycle_position, cycle_confidence, data_basis, last_stable_cycle_position}
+    - band_position_score
+    - exchange_momentum_score
+
+  # M18 纪律
+  stance_confidence_discipline:
+    usage: internal_threshold_comparison_only
+    external_display_field: ai_verdict.confidence_breakdown.overall
+    forbidden: mixing_with_overall_confidence
+
+  thresholds_ref: layer_2_direction
+
+
+# ============================================================
+# Layer 3 — 机会与执行层(§4.4,v1.2 重写为纯规则判档)
+# ============================================================
+layer_3_opportunity:
+  description: "现在是不是好的动手时机?怎么动手?"
+  computation_method: rule_based          # M16 纯规则判档层
+  reads_upstream: [L1_regime, L2_direction]
+  veto_type: non_veto                     # 只能降到 watch
+
+  # B1:L3 读取 L1/L2 的最终结论,不读原始分数
+  upstream_reading_contract: final_verdicts_only
+  forbidden_upstream_fields:
+    - truth_trend_score_raw     # TruthTrend 在 L1 内部用完
+    - band_position_score_raw   # BandPosition 在 L2 内部用完
+
+  # opportunity_grade 单一产出点(§4.4.6,三重封闭)
+  opportunity_grade_single_source: L3
+  opportunity_grade_write_permission:
+    layers: [L3]
+    ai: false                              # AI 不得修改
+    fallback: false                        # Fallback 不得旁路
+
+  output_enums:
+    opportunity_grade:
+      - A
+      - B
+      - C
+      - none
+    execution_permission:                  # permission 枚举全集,含 hold_only
+      - can_open
+      - cautious_open
+      - ambush_only
+      - watch
+      - protective
+      - hold_only
+
+  # permission 在归并里的参与性
+  # (归并 severity_rank 在 thresholds.yaml → layer_4_risk.
+  #  execution_permission_merging.severity_rank;
+  #  hold_only 不参与归并,是 HOLD 状态 on_enter 副作用)
+  permission_participates_in_merging:
+    can_open: true
+    cautious_open: true
+    ambush_only: true
+    watch: true
+    protective: true
+    hold_only: false
+
+  output_fields:
+    - opportunity_grade
+    - opportunity_reason
+    - execution_permission              # L3 初步建议,最终归并后见 L4
+    - suggested_entry_plan
+    - risk_reward                        # {estimated_target, stop, rr_ratio, win_rate}
+    - timing_assessment                  # {momentum_phase, is_extended, needs_pullback, depth}
+    - liquidity_context                  # {nearby_long_liq, short_liq, imbalance}
+    - entry_confirmation_timeframe       # 默认 1h(§4.4.7)
+
+  # 1H 数据访问边界(§4.4.8,P5)
+  one_hour_access:
+    allowed_functions:
+      - entry_confirmation
+      - early_failure_protection         # 仅 OPEN 阶段
+    forbidden_in_other_functions: true   # linter + 函数签名强制
+
+  thresholds_ref: layer_3_opportunity
+
+
+# ============================================================
+# Layer 4 — 风险与失效层(§4.5)
+# ============================================================
+layer_4_risk:
+  description: "判断在什么条件下失效?有哪些风险?"
+  computation_method: rule_based
+  reads_upstream: [L1_regime, L2_direction, L3_opportunity]
+  veto_type: hard                         # hard_invalidation_levels + critical 为硬否决
+
+  composite_factors_consumed:
+    - crowding
+    - event_risk
+
+  # hard_invalidation_levels 的唯一权威(§4.5.4,P4 + 问题 1)
+  hard_invalidation_contract:
+    authority: L4_only
+    write_permission:
+      layers: [L4]
+      ai: false                            # AI 不得凭空另设
+      modify_existing: false
+    trade_plan_stop_loss_relationship:
+      type: surface_copy_of_l4             # trade_plan.stop_loss 是 L4 的表层复制
+      conflict_policy: reject_ai_output_and_trigger_fallback_level_1
+    fields_per_level:
+      - price
+      - direction                          # long / short
+      - basis                              # 结构位 / 关键位 / 波动率边界 等
+      - priority                           # primary / secondary
+      - confirmation_timeframe             # 默认 4h;1H 超过 prewarning_deviation 标"预警触发"
+
+  output_enums:
+    overall_risk_level:
+      - low
+      - moderate
+      - elevated
+      - high
+      - critical
+
+  # 风险标签枚举(§4.5.9;数值清单同时在 thresholds.yaml.
+  # layer_4_risk.risk_tag_enum,此处为结构登记)
+  risk_tag_enum:
+    - funding_extreme
+    - oi_spike
+    - crowded_long
+    - crowded_short
+    - liquidity_thin
+    - correlation_break
+    - leverage_stretched
+    - volatility_regime_shift
+    - structural_divergence
+
+  output_fields:
+    - overall_risk_level
+    - hard_invalidation_levels           # list,权威来源
+    - active_risk_tags
+    - event_windows
+    - worst_case_estimate                # {scenario, drawdown_pct, probability_hint}
+    - recommended_position_cap_pct
+    - position_cap_composition           # 见 thresholds 串行合成
+    - permission_composition             # 每个因子的建议值
+    - crowding_score                     # 来自 Crowding
+    - event_risk_score                   # 来自 EventRisk
+
+  thresholds_ref: layer_4_risk
+
+
+# ============================================================
+# Layer 5 — 背景与事件层(§4.6)
+# ============================================================
+layer_5_macro:
+  description: "宏观与外部事件对当前 BTC 判断是加分、减分还是不确定?"
+  computation_method: ai_primary          # AI 主导(§2.3)
+  reads_upstream: [L1_regime, L2_direction, L3_opportunity, L4_risk]
+  veto_type: hard_when_extreme_event      # extreme_event_detected=true 时强制 PROTECTION
+
+  composite_factor_consumed: macro_headwind
+
+  output_enums:
+    macro_stance:
+      - risk_on
+      - risk_neutral
+      - risk_off
+      - extreme_risk_off
+    macro_trend:
+      - improving
+      - stable
+      - deteriorating
+      - volatile
+
+  output_fields:
+    - macro_stance
+    - macro_trend
+    - structured_macro                   # {DXY, US10Y, VIX, sp500, nasdaq, ...}
+    - active_macro_tags
+    - active_event_summaries             # list(AI 生成)
+    - extreme_event_detected             # bool
+    - extreme_event_details
+    - adjustment_guidance                # {stance_modifier, position_cap_multiplier, permission_adjustment, note}
+    - macro_headwind_score
+
+  # AI 置信度降级机制(§4.6.3 纪律 4)
+  ai_confidence_downgrade:
+    threshold_ref: thresholds.layer_5_macro.ai_summary_confidence_downgrade
+    effect_when_below: reduce_influence_one_tier
+
+  # 四类数据处理(§4.6.2)
+  data_categories:
+    structured_macro_indicators:
+      handler: program_collect_to_macro_headwind
+      sources: [yahoo_dxy, yahoo_us10y, yahoo_vix, yahoo_ndx, yahoo_sp500]
+    structured_event_calendar:
+      handler: program_collect_to_event_risk
+      sources: [event_calendar_manual]
+    qualitative_event_summary:
+      handler: ai_generate
+      activation_version: v0.5           # §4.6.2:v0.5 启用
+    extreme_event_detection:
+      handler: program_detect_then_force_protection
+      rule_ref: thresholds.layer_5_macro.extreme_event_btc_daily_pct
+
+  thresholds_ref: layer_5_macro
+
+
+# ============================================================
+# Observation Classifier(§4.7,M28)
+# ============================================================
+# 规则层产出,不由 AI 产出。位置:L3 证据层输出之后、AI 裁决之前。
+# 实现:src/strategy/observation_classifier.py::classify
+observation_classifier:
+  computation_method: rule_based
+  position_in_pipeline: after_layers_before_ai
+
+  # 输出枚举
+  output_enum:
+    - disciplined              # 证据明确不利于开仓
+    - watchful                 # 证据有正面但不足以开仓
+    - possibly_suppressed      # 多项正面证据但叠加后仍无机会
+    - cold_start_warming_up    # v1.2 第四临时标签(M35,仅冷启动期)
+
+  # 三类规则(§4.7.3)
+  rules:
+
+    disciplined:
+      # 任一成立即触发(OR)
+      trigger_mode: any_of
+      conditions:
+        - l1_regime_in: [chaos, transition_up, transition_down]
+        - l1_volatility_regime_equals: extreme
+        - l2_stance_equals: neutral
+        - l2_cycle_position_equals: unclear
+        - l4_overall_risk_level_in: [high, critical]
+        - l5_macro_stance_equals: extreme_risk_off
+        - state_in: [PROTECTION, POST_PROTECTION_REASSESS]
+
+    watchful:
+      # 全部满足(AND)
+      trigger_mode: all_of
+      conditions:
+        - not_matching: disciplined       # 不满足 disciplined
+        - l1_regime_in: [trend_up, trend_down, range_high, range_mid, range_low]
+        - l2_stance_in: [bullish, bearish]
+        - l3_opportunity_grade_in: [C, none]
+        - l4_overall_risk_level_in: [low, moderate, elevated]
+
+    possibly_suppressed:
+      # 全部满足 + 持续性检查(AND + persistence)
+      trigger_mode: all_of_with_persistence
+      conditions:
+        - not_matching: disciplined
+        - l1_regime_in: [trend_up, trend_down]
+        - l1_regime_confidence_at_or_above: 0.7
+        - l2_stance_confidence_at_or_above_dynamic_threshold: true
+        - l2_cycle_position_not: unclear
+        - l3_opportunity_grade_equals: none
+      persistence_required: true
+      # 具体天数见 thresholds.yaml
+      persistence_ref: thresholds.observation_category.suppressed_continuous_days
+
+  # 冷启动第四标签(§4.7.5 + §8.10,M35)
+  cold_start_category:
+    value: cold_start_warming_up
+    # 冷启动期间允许输出此第四标签,替代上面 3 种中可能触发 possibly_suppressed 的情况
+    # 具体开关见 base.yaml → cold_start.during_warming_up.allow_cold_start_warming_up_category
+
+  # 告警阈值引用(§4.7.5)
+  alert_thresholds_ref:
+    warning: thresholds.observation_category.suppressed_warning_days     # ≥ 14 天 warning
+    critical: thresholds.observation_category.suppressed_critical_days   # ≥ 30 天 critical
+
+  # 纪律(§4.7.4,M28)
+  discipline:
+    access: read_only
+    forbidden_in:
+      - any_layer_evidence_logic
+      - composite_factor_computation
+      - position_cap_composition
+      - permission_merging
+      - state_machine_transition_rules
+      - layer_3_rule_table
+      - fallback_rules
+    ai_may_read: true
+    ai_may_adjust_behavior_based_on: false   # AI 不得因 possibly_suppressed 而激进

@@ -7,10 +7,12 @@ src.evidence — 五层证据层。
 
 from ._base import EvidenceLayerBase, confidence_tier_from_value, downgrade_tier
 from .layer1_regime import Layer1Regime
+from .layer2_direction import Layer2Direction
 
 __all__ = [
     "EvidenceLayerBase",
     "confidence_tier_from_value",
     "downgrade_tier",
     "Layer1Regime",
+    "Layer2Direction",
 ]

@@ -293,6 +293,114 @@ layer_4_risk:
         - l4_overall_risk_critical       # 强制 protective
         - l1_regime_chaos                # 强制 watch
 
+  # ============================================================
+  # Sprint 1.10 新增:Per-trade 风险配置(与 position_cap_composition
+  # 不冲突 —— 前者是账户级组合 cap,此处是单笔机会的 cap)。
+  # ============================================================
+
+  # Per-trade 基础 cap(按 grade 查表)
+  grade_to_base_cap:
+    A:    0.15      # 最大 15% 净值
+    B:    0.10
+    C:    0.05
+    none: 0.0
+
+  # 逐项衰减因子(乘法累乘)
+  per_trade_decay:
+    crowding:
+      low:       1.00
+      moderate:  1.00
+      normal:    1.00    # composite 输出可能用 normal/mild/extreme
+      mild:      0.90
+      elevated:  0.85
+      extreme:   0.60
+    event_risk:
+      low:       1.00
+      moderate:  0.95
+      medium:    0.95    # composite 可能用 medium
+      high:      0.70
+      extreme:   0.50
+    volatility:
+      low:       1.00
+      normal:    1.00
+      elevated:  0.80
+      extreme:   0.60
+    # stance_confidence 分档(按 min 阈值查表,首个命中)
+    stance_confidence:
+      - {min: 0.75, multiplier: 1.05}
+      - {min: 0.65, multiplier: 1.00}
+      - {min: 0.55, multiplier: 0.85}
+      - {min: 0.00, multiplier: 0.60}
+    anti_pattern_count:
+      zero: 1.00
+      one:  0.85
+      two_or_more: 0.70
+    cold_start_multiplier: 0.50
+
+  # 最小 cap 保护:低于此值则强制 cap=0 + permission=watch
+  position_cap_min: 0.015
+
+  # ---- Stop loss ----
+  stop_loss:
+    # ATR 乘数(按波动 regime)
+    atr_multipliers:
+      low:      1.5
+      normal:   2.0
+      elevated: 2.5
+      extreme:  3.0
+    # swing 缓冲:swing_low × (1 - buffer)  或 swing_high × (1 + buffer)
+    swing_buffer_pct: 0.015
+    # swing 离现价 > 此阈值视为过远,失效
+    swing_max_distance_pct: 0.10
+
+  # ---- Risk-Reward ----
+  risk_reward:
+    full_threshold:    2.0   # RR ≥ 2.0 不扣 cap
+    reduced_threshold: 1.5   # [1.5, 2.0) 扣 × 0.8 + permission 最多 cautious_open
+    reduced_cap_multiplier: 0.8
+    # 若没明确 target,用 ATR × 这个乘数做粗估
+    fallback_target_atr_multiplier: 3.0
+
+  # ---- 加仓分层计划(§7.10)----
+  scale_in_plans:
+    A:
+      layers: 3
+      allocations: [0.40, 0.30, 0.30]
+      trigger_conditions:
+        - "第 1 层:初始进场(突破前回调到 EMA20 位置)"
+        - "第 2 层:突破确认后回踩(4H 收盘站稳)"
+        - "第 3 层:第二轮回踩不破前低"
+    B:
+      layers: 2
+      allocations: [0.50, 0.50]
+      trigger_conditions:
+        - "第 1 层:初始进场(建模 §4.4 入场信号)"
+        - "第 2 层:第一轮盈利保护后的加仓(趋势延续)"
+    C:
+      layers: 1
+      allocations: [1.00]
+      trigger_conditions:
+        - "观察仓(hold_only),不计划加仓"
+    none:
+      layers: 0
+      allocations: []
+      trigger_conditions: []
+
+  # ---- Permission 严格度(Sprint 1.10 新,L4 内部 merging 用)----
+  # 宽 → 严。L4 merge 取"更严"(索引更大者)。
+  # 与 Sprint 1.2 v2 的 execution_permission_merging.severity_rank 不同的是:
+  #   * 本列表**含 hold_only**(位于 no_chase 和 watch 之间)
+  #   * ambush_only 排在 no_chase **之前**(视作更严)
+  # 详见 sprint_1_10.md Trigger。
+  permission_strictness_order_wide_to_strict:
+    - can_open
+    - cautious_open
+    - ambush_only
+    - no_chase
+    - hold_only
+    - watch
+    - protective
+
   # ---- 拥挤度相关衍生品阈值(§4.5.8)----
   crowding_thresholds:
     funding_rate_extreme_pct: 0.0003        # 0.03%

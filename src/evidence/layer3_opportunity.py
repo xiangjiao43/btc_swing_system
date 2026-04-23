@@ -182,8 +182,8 @@ class Layer3Opportunity(EvidenceLayerBase):
             for flag in flags:
                 cap = (details.get(flag) or {}).get("permission_cap")
                 if cap:
-                    from ._anti_patterns import _stricter
-                    final_permission = _stricter(final_permission, cap)
+                    from ..utils.permission import merge_permissions
+                    final_permission = merge_permissions(final_permission, cap)
 
         # ---- Observation mode ----
         observation_mode = _GRADE_TO_OBS_MODE[final_grade]

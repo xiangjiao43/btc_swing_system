@@ -14,6 +14,34 @@
 
 
 # ============================================================
+# 0. 全局 permission 纪律(Sprint 1.11 统一,跨层权威)
+# ============================================================
+# 跨层共享的 execution_permission 严格度顺序(wide → strict,
+# 索引越大越严)。L3 / L4 / state_machine 归并 permission 时,
+# 取索引更大者(更严者胜)。
+#
+# 记忆要点:
+#   protective > watch:protective 是"已需主动减仓"状态,最严
+#   watch > hold_only:watch = 完全不动;hold_only = 保持现有持仓,
+#                      但禁止新开仓
+#   hold_only > no_chase:hold_only 禁任何 open;no_chase 禁主动追入
+#                          但允许反向等待
+#   no_chase > ambush_only:ambush 可在特定条件(回踩等)开仓;
+#                            no_chase 完全不追
+#   cautious_open > ambush_only:cautious_open 允许主动开(谨慎档位);
+#                                  ambush_only 只等价格到特定区才开
+#   can_open > cautious_open:can_open 最宽,无额外约束
+permission_strictness_order:
+  - can_open
+  - cautious_open
+  - ambush_only
+  - no_chase
+  - hold_only
+  - watch
+  - protective
+
+
+# ============================================================
 # 1. Layer-1 市场状态(§4.2.5)
 # ============================================================
 layer_1_regime:
@@ -386,20 +414,10 @@ layer_4_risk:
       allocations: []
       trigger_conditions: []
 
-  # ---- Permission 严格度(Sprint 1.10 新,L4 内部 merging 用)----
-  # 宽 → 严。L4 merge 取"更严"(索引更大者)。
-  # 与 Sprint 1.2 v2 的 execution_permission_merging.severity_rank 不同的是:
-  #   * 本列表**含 hold_only**(位于 no_chase 和 watch 之间)
-  #   * ambush_only 排在 no_chase **之前**(视作更严)
-  # 详见 sprint_1_10.md Trigger。
-  permission_strictness_order_wide_to_strict:
-    - can_open
-    - cautious_open
-    - ambush_only
-    - no_chase
-    - hold_only
-    - watch
-    - protective
+  # ---- Permission 严格度 ----
+  # Sprint 1.11 统一到顶层 `permission_strictness_order`。
+  # L4 通过 src/utils/permission.py 的 merge_permissions() 调用。
+  # 老的 execution_permission_merging.severity_rank 保留作文档,不被代码读取。
 
   # ---- 拥挤度相关衍生品阈值(§4.5.8)----
   crowding_thresholds:

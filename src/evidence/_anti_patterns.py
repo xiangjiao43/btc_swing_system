@@ -282,12 +282,6 @@ def _check_macro_misalignment(
 
 _DOWNGRADE_ONE = {"A": "B", "B": "C", "C": "none", "none": "none"}
 
-# execution_permission 严格度排序(最宽 → 最严),用于 "permission_cap" 取最严
-_PERMISSION_STRICTNESS = [
-    "can_open", "cautious_open", "no_chase", "ambush_only",
-    "watch", "protective", "hold_only",
-]
-
 
 def apply_anti_pattern_impacts(
     base_grade: str, base_permission: str,
@@ -301,8 +295,10 @@ def apply_anti_pattern_impacts(
       * 任一 flag impact = force_none → grade=none
       * 任一 flag impact = force_protective → grade=none + permission=protective
       * 普通 downgrade_one 累积(A→B→C→none)
-      * permission_cap 取所有 flag 里最严的
+      * permission_cap 取所有 flag 里最严的(src.utils.permission.merge_permissions)
     """
+    from ..utils.permission import merge_permissions
+
     grade = base_grade
     perm = base_permission
 
@@ -314,22 +310,13 @@ def apply_anti_pattern_impacts(
         if impact == IMPACT_FORCE_NONE:
             grade = "none"
             if cap:
-                perm = _stricter(perm, cap)
+                perm = merge_permissions(perm, cap)
         elif impact == IMPACT_FORCE_PROTECTIVE:
             grade = "none"
-            perm = _stricter(perm, cap or "protective")
+            perm = merge_permissions(perm, cap or "protective")
         elif impact == IMPACT_DOWNGRADE:
             grade = _DOWNGRADE_ONE.get(grade, "none")
             if cap:
-                perm = _stricter(perm, cap)
+                perm = merge_permissions(perm, cap)
 
     return grade, perm
-
-
-def _stricter(a: str, b: str) -> str:
-    """返回两个 permission 中更严格的那个。"""
-    if a not in _PERMISSION_STRICTNESS:
-        return b
-    if b not in _PERMISSION_STRICTNESS:
-        return a
-    return a if _PERMISSION_STRICTNESS.index(a) >= _PERMISSION_STRICTNESS.index(b) else b

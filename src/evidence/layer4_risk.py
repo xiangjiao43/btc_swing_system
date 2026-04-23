@@ -25,6 +25,7 @@ import pandas as pd
 
 from ..indicators.structure import swing_points
 from ..indicators.volatility import atr
+from ..utils.permission import get_permission_order, merge_permissions
 from ._base import EvidenceLayerBase
 
 
@@ -54,9 +55,7 @@ class Layer4Risk(EvidenceLayerBase):
         stop_cfg = self.scoring_config.get("stop_loss", {}) or {}
         rr_cfg = self.scoring_config.get("risk_reward", {}) or {}
         scale_plans = self.scoring_config.get("scale_in_plans", {}) or {}
-        strictness = self.scoring_config.get(
-            "permission_strictness_order_wide_to_strict"
-        ) or _DEFAULT_STRICTNESS
+        strictness = get_permission_order()
 
         # ---- 基础字段提取 ----
         grade = l3.get("opportunity_grade", l3.get("grade", "none"))
@@ -195,9 +194,7 @@ class Layer4Risk(EvidenceLayerBase):
             final_cap, stop_loss_ref, rr_result
         )
 
-        risk_permission = _stricter_permission(
-            l3_permission, l4_internal_permission, strictness
-        )
+        risk_permission = merge_permissions(l3_permission, l4_internal_permission)
 
         rationale_parts = [f"L3 gave {l3_permission}"]
         if l4_internal_permission != l3_permission:
@@ -274,7 +271,7 @@ class Layer4Risk(EvidenceLayerBase):
         strictness: list[str], scale_plans: dict, grade: str,
     ) -> dict[str, Any]:
         """grade=none / stance=neutral 的统一出口。"""
-        risk_permission = _stricter_permission(l3_permission, "watch", strictness)
+        risk_permission = merge_permissions(l3_permission, "watch")
         return {
             "position_cap": 0.0,
             "position_cap_breakdown": {
@@ -515,15 +512,8 @@ def _compute_rr(
 
 
 # ============================================================
-# 辅助:Permission 合并
+# 辅助:Permission 合并(Sprint 1.11 统一使用 src.utils.permission)
 # ============================================================
-
-# 默认严格度(wide → strict)
-_DEFAULT_STRICTNESS: list[str] = [
-    "can_open", "cautious_open", "ambush_only", "no_chase",
-    "hold_only", "watch", "protective",
-]
-
 
 def _l4_internal_permission(
     final_cap: float,
@@ -542,17 +532,6 @@ def _l4_internal_permission(
         return "cautious_open"
     # full pass + 有 cap + 有 stop → L4 不额外收紧,保留 L3
     return "can_open"  # 最宽松档(实际会被 L3 限制)
-
-
-def _stricter_permission(
-    a: str, b: str, strictness: list[str],
-) -> str:
-    """返回两个 permission 中更严(索引更大)的那个。"""
-    if a not in strictness:
-        return b
-    if b not in strictness:
-        return a
-    return a if strictness.index(a) >= strictness.index(b) else b
 
 
 def _grade_to_tier(grade: str) -> str:

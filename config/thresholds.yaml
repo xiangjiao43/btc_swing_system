@@ -1,0 +1,598 @@
+# ============================================================
+# thresholds.yaml — 所有阈值 / 门槛 / 乘数 / 评分权重
+# ============================================================
+# 用途:所有"可调阈值"的**单一真相来源**。代码只读取,不硬编码。
+#       校准纪律(§10.6):每次调参记录调前/调后/理由/样本,并 bump
+#       base.yaml → project.rules_version。
+#
+# 布局:顺着建模文档的层级(L1→L2→L3→L4→L5)+ 观察分类 + KPI
+#       + 6 个组合因子的评分权重。每块都在注释里写清楚对应章节。
+#
+# 创建于:2026-04-23(Sprint 1 前置工作 · 优化二第 2 批)
+# 建模版本:v1.2
+# ============================================================
+
+
+# ============================================================
+# 1. Layer-1 市场状态(§4.2.5)
+# ============================================================
+layer_1_regime:
+  adx:
+    # ADX ≥ strong_threshold → 强趋势;震荡误判多上调至 28
+    strong_threshold: 25
+    # ADX ≥ weak_threshold(但 < strong)→ 弱趋势;漏早期趋势下调至 18
+    weak_threshold: 20
+
+  atr_percentile:
+    # 按过去 180 天分位分级(compact / normal / elevated / extreme)
+    low: 30          # < low → compact(平静)
+    elevated: 60     # [low, elevated) → normal;[elevated, extreme) → elevated
+    extreme: 85      # ≥ extreme → extreme 波动(L4 position_cap × 0.5)
+
+  # regime 切换最少连续次数 —— 防止单点噪音翻牌
+  regime_switch_min_consecutive: 3
+
+  # Swing 识别左右窗口(swing_highs_lows_1d)
+  swing_window: 5
+
+  # ATR 回溯窗口(用于分位计算)
+  atr_lookback_days: 180
+
+
+# ============================================================
+# 2. Layer-2 方向与结构(§4.3)
+# ============================================================
+layer_2_direction:
+
+  # ---- 做多/做空动态门槛表(§4.3.6)----
+  # 键为 cycle_position(九档),值为 {long_threshold, short_threshold}。
+  # 语义:L2 stance 迁移到该方向,需要 stance_confidence ≥ 对应门槛。
+  #
+  # 关于 cycle=unclear 的边界行为:
+  #   cycle=unclear 时,CyclePosition confidence 固定 0.30(见
+  #   cycle_position_decision.voting.empty_pool_confidence),而 L2 的
+  #   stance_confidence 在长周期背景不明时通常自然偏低,所以 0.65/0.70
+  #   门槛**不意味着必然触发迁移**。编码期需验证这个组合下的实际覆盖率。
+  dynamic_direction_thresholds:
+    accumulation:  { long: 0.60, short: 0.70 }
+    early_bull:    { long: 0.55, short: 0.75 }
+    mid_bull:      { long: 0.60, short: 0.70 }
+    late_bull:     { long: 0.65, short: 0.65 }
+    distribution:  { long: 0.70, short: 0.60 }
+    early_bear:    { long: 0.75, short: 0.55 }
+    mid_bear:      { long: 0.75, short: 0.55 }
+    late_bear:     { long: 0.65, short: 0.65 }
+    unclear:       { long: 0.65, short: 0.70 }   # v1.2 明确(原建模默认)
+
+  # stance_confidence 的硬边界(§4.3.6)
+  stance_confidence_floor:   0.55
+  stance_confidence_ceiling: 0.75
+
+  # cycle_position 切换后门槛延迟生效天数(§4.3.6)
+  # 过渡期内对新旧档位的门槛做线性插值
+  cycle_position_switch_delay_days: 7
+
+
+# ============================================================
+# 3. Layer-3 机会与执行(§4.4)
+# ============================================================
+# L3 是**纯规则判档层**(§4.4.2)。下面的判档条件必须以
+# 查找表形式实现,禁止在代码里写 score += X 的加权(M16)。
+layer_3_opportunity:
+
+  # ---- 做多判档规则(§4.4.4)----
+  # 每条规则是一组 AND 条件;第一个匹配的 grade 即为输出。
+  # 条件语法:{字段名: 允许值集合};位置字段是 L2 key_levels.current_position。
+  long_grade_rules:
+    - grade: A
+      conditions:
+        regime: [trend_up, transition_up]
+        stance: [bullish]
+        stance_confidence_at_or_above_dynamic_threshold: true
+        phase: [early, mid]
+        position: [near_support, mid_range]
+    - grade: B
+      conditions:
+        regime: [trend_up, transition_up]
+        stance: [bullish]
+        stance_confidence_at_or_above_dynamic_threshold: true
+        phase: [early, mid, late]
+        # "位置 ≠ above_all_key_levels"
+        position_not_in: [above_all_key_levels]
+    - grade: C
+      conditions:
+        regime: [trend_up, transition_up]
+        stance: [bullish]
+        stance_confidence_at_or_above_dynamic_threshold: true
+        phase: [late]
+        position: [near_resistance]
+    # 未匹配任一规则 → none(由判档函数默认返回)
+
+  # ---- 做空判档规则(§4.4.5,v1.2 简化为 A / B / none)----
+  short_grade_rules:
+    - grade: A
+      conditions:
+        cycle_position: [distribution, early_bear, mid_bear]
+        stance: [bearish]
+        stance_confidence_at_or_above_dynamic_threshold: true
+        regime: [trend_down, transition_down, range_high]
+        position: [near_resistance, above_all_key_levels]
+        crowding_score_at_or_above: 6
+        truth_trend_score_at_or_above: 6
+        truth_trend_direction: down
+    - grade: B
+      conditions:
+        cycle_position: [distribution, early_bear, mid_bear]
+        stance: [bearish]
+        stance_confidence_at_or_above_dynamic_threshold: true
+        regime: [trend_down, transition_down, range_high]
+        position: [near_resistance, above_all_key_levels]
+        crowding_score_at_or_above: 6
+        truth_trend_score_range: [4, 5]
+        truth_trend_direction: down
+    # 其他情况 → none。v1 不允许 C 级(M3 + B3)
+
+  # ---- 入场确认(§4.4.7)----
+  entry_confirmation_timeframe: "1h"          # 1H 收盘确认成交
+  hard_invalidation_confirmation_timeframe: "4h"  # 4H 收盘确认失效
+  hard_invalidation_prewarning_deviation_pct: 0.01   # 1% 预警
+  early_failure_protection_holding_hours: 24          # 持仓 < 24h 允许 1H 反向触发
+
+  # ---- 仓位分层(§4.4.10)----
+  position_layering_weights: [30, 40, 30]     # 3 档权重之和 = 100
+  max_deepest_retracement_fib: 0.5            # entry_zone 最深档回撤(斐波那契)
+
+
+# ============================================================
+# 4. Layer-4 风险与失效(§4.5)
+# ============================================================
+layer_4_risk:
+
+  # ---- position_cap 串行合成(§4.5.5,M19)----
+  position_cap_composition:
+    base_position_cap_pct: 70       # §4.5.8 v0.1 初始
+
+    # 全局硬下限 15%(critical 可低于)
+    hard_floor_pct: 15
+    # 仅在以下 permission 下硬下限生效(§4.5.5 问题 4)
+    hard_floor_applies_to_permissions:
+      - can_open
+      - cautious_open
+      - ambush_only
+
+    # step 2:L4 overall_risk_level 乘数
+    risk_level_multipliers:
+      low:      1.0
+      moderate: 0.9
+      elevated: 0.7
+      high:     0.5
+      critical: 0.3     # 此档时允许 final < hard_floor,甚至为 0
+
+    # step 3:Crowding 乘数(score 0-8)
+    crowding_multipliers:
+      - { score_range: [0, 3], multiplier: 1.00 }
+      - { score_range: [4, 5], multiplier: 0.85 }
+      - { score_range: [6, 8], multiplier: 0.70 }
+
+    # step 4:MacroHeadwind 乘数(score -10..+10)
+    macro_headwind_multipliers:
+      - { score_range: [-1, 10],  multiplier: 1.00 }
+      - { score_range: [-4, -2],  multiplier: 0.85 }
+      - { score_range: [-10, -5], multiplier: 0.70 }
+
+    # step 5:EventRisk 乘数(score 0-15+)
+    event_risk_multipliers:
+      - { score_range: [0, 3],    multiplier: 1.00 }
+      - { score_range: [4, 7],    multiplier: 0.85 }
+      - { score_range: [8, 999],  multiplier: 0.70 }
+
+    # L1 volatility_regime = extreme 时对 position_cap 的额外乘数
+    # (§2.4 软否决条目)
+    l1_extreme_volatility_multiplier: 0.5
+
+  # ---- execution_permission 归并(§4.5.6,M20)----
+  execution_permission_merging:
+    # 各来源对 final_permission 的建议档;归并取最严(从严档 → 宽松档排序)
+    # 注意:hold_only 不参与归并,是 HOLD 状态下的默认 permission,在
+    # state_machine 里作为 on_enter 副作用设置,不走归并逻辑。
+    severity_rank:
+      - protective
+      - watch
+      - ambush_only
+      - cautious_open
+      - can_open
+
+    # permission 枚举值全集(含不参与归并的 hold_only);供程序校验 AI 输出
+    # 合法性时使用,也供状态机的 on_enter 副作用引用。
+    permission_enum:
+      - protective
+      - watch
+      - ambush_only
+      - cautious_open
+      - can_open
+      - hold_only     # HOLD 状态专用;不进归并
+
+    # L4 overall_risk_level 建议
+    l4_risk_suggestions:
+      critical: protective
+      high:     watch
+      elevated: ambush_only
+      moderate: cautious_open
+      low:      can_open
+
+    # L4 Crowding 建议(score 触发的最严档)
+    l4_crowding_suggestions:
+      - { score_at_or_above: 6, suggests: cautious_open }
+      - { score_at_or_above: 0, suggests: can_open }
+
+    # L4 EventRisk 建议
+    l4_event_risk_suggestions:
+      - { score_at_or_above: 8, suggests: ambush_only }
+      - { score_at_or_above: 4, suggests: cautious_open }
+      - { score_at_or_above: 0, suggests: can_open }
+
+    # L5 MacroHeadwind 建议
+    l5_macro_headwind_suggestions:
+      - { score_at_or_below: -5, suggests: ambush_only }
+      - { score_at_or_below: -2, suggests: cautious_open }
+      - { score_at_or_below: 10, suggests: can_open }
+
+    # A 级缓冲(§4.5.6)
+    a_grade_buffer:
+      enabled: true
+      # 需同时满足以下条件才启用 A 级缓冲
+      conditions:
+        opportunity_grade: [A]
+        regime: [trend_up, trend_down]
+        regime_stability: [stable, slightly_shifting]
+      # 缓冲后的 final_permission 下限(不得严于此档)
+      min_permission_floor: cautious_open
+      # 例外(§4.5.6 问题 3):以下硬状态不受 A 级缓冲覆盖
+      overrides:
+        - state_in_protection            # PROTECTION 态
+        - l5_extreme_event_detected      # 强制 PROTECTION
+        - l4_overall_risk_critical       # 强制 protective
+        - l1_regime_chaos                # 强制 watch
+
+  # ---- 拥挤度相关衍生品阈值(§4.5.8)----
+  crowding_thresholds:
+    funding_rate_extreme_pct: 0.0003        # 0.03%
+    funding_rate_extreme_consecutive: 3      # 连续 3 次(24h 跨度)
+    funding_rate_30d_percentile_alert: 85
+    oi_change_24h_alert_pct: 0.15            # 15%
+    long_short_ratio_alert: 2.5
+    basis_annualized_alert: 0.20             # 20%
+    put_call_ratio_low: 0.5                  # < 0.5 即看涨极端
+
+  # ---- 事件窗口激活 ----
+  event_window_activation_hours: 48          # §4.5.8
+
+  # ---- Risk tag 枚举(§4.5.9)----
+  # 程序侧检查 active_risk_tags 时用这份清单做值校验
+  risk_tag_enum:
+    - funding_extreme
+    - oi_spike
+    - crowded_long
+    - crowded_short
+    - liquidity_thin
+    - correlation_break
+    - leverage_stretched
+    - volatility_regime_shift
+    - structural_divergence
+
+
+# ============================================================
+# 5. Layer-5 宏观与事件(§4.6.5)
+# ============================================================
+layer_5_macro:
+  dxy_20d_change_threshold_pct: 0.02       # ±2% 触发宏观逆风评分
+  us10y_30d_change_bp_threshold: 30        # ±30bp 触发
+  vix_elevated: 25
+  vix_extreme: 35
+  btc_nasdaq_correlation_strong: 0.7       # 相关性加权阈值
+  extreme_event_btc_daily_pct: 0.15        # BTC 单日 ±15% 视为极端事件
+  ai_summary_confidence_downgrade: 0.6     # AI 置信度 < 此值 → 影响力自动降级
+
+
+# ============================================================
+# 6. Observation Category(§4.7.3 + §4.7.5)
+# ============================================================
+# 只读产物,不得进入决策(M28)。
+observation_category:
+  # possibly_suppressed 状态需连续成立的最少天数
+  suppressed_continuous_days: 7
+  # 连续 ≥ N 天 → warning 告警
+  suppressed_warning_days: 14
+  # 连续 ≥ N 天 → critical 告警
+  suppressed_critical_days: 30
+  # 冷启动(base.yaml → cold_start.warming_up_days)期间允许输出
+  # cold_start_warming_up 第四标签;实际开关见 base.yaml
+
+
+# ============================================================
+# 7. KPI 追踪(§8.8,M27)
+# ============================================================
+kpi_tracker:
+  # KPI-1 主升浪捕捉率
+  uptrend_capture:
+    identification_price_up_pct: 0.40    # > 40% 涨幅
+    identification_duration_days: 60     # 且持续 > 60 天
+    window_review_months: 6              # 每 6 个月回看
+    # 未达标处理:推送 kpi_unmet + 人工审视 L3 判档
+
+  # KPI-2 主跌浪反应率
+  downtrend_response:
+    identification_drawdown_from_ath_pct: 0.30  # 从 ATH 跌 > 30%
+    identification_duration_days: 45
+    # 未达标 → 人工审视 L2 方向识别
+
+  # KPI-3 持续观望时长
+  prolonged_watch:
+    critical_runs: 180         # 连续 FLAT ≥ 180 次(约 30 天)→ critical
+    forced_human_runs: 420     # ≥ 420 次(约 70 天)→ 必须停机人工介入
+
+  # 冷启动期间 KPI 不累计(§8.10,实际开关在 base.yaml)
+
+
+# ============================================================
+# 8. 组合因子评分权重
+# ============================================================
+# 所有组合因子的评分规则、权重、分档边界都集中在这里;对应
+# config/data_catalog.yaml → composite_factors.*.formula_ref 的实现读取。
+
+# ---- 8.1 TruthTrend(§3.8.1,L1)----
+truth_trend_scoring:
+  # 每项评分项:condition + points(满足则加分)
+  items:
+    - name: adx_14_1d_strong
+      condition: "adx_14_1d >= layer_1_regime.adx.strong_threshold"
+      points: 2
+    - name: adx_14_4h_weak_or_above
+      condition: "adx_14_4h >= layer_1_regime.adx.weak_threshold"
+      points: 1
+    - name: multi_tf_aligned
+      condition: "multi_tf_direction_consistency == true"  # 4H/1D/1W 一致
+      points: 3
+    - name: ma_alignment
+      condition: "MA-20/60/120 按方向正确排列"
+      points: 2
+    - name: price_vs_ma200
+      condition: "当前价格与 MA-200 相对位置符合趋势方向"
+      points: 1
+
+  # 输出分档(总分 0-9)
+  output_bands:
+    true_trend_at_or_above: 6          # ≥ 6:真趋势
+    weak_trend_at_or_above: 4          # 4-5:弱趋势
+    # < 4:无趋势(no_trend)
+
+  # regime 切换第一周滞后提醒(§3.8.1 失真提醒)
+  regime_switch_first_week_confidence_penalty: 0.15
+
+
+# ---- 8.2 BandPosition(§3.8.2,L2)----
+# v1.2 只用价格几何(移除 MVRV Z 和 STH-SOPR 档位)
+band_position_scoring:
+  # 四个评分维度,每个挑得分最高的 phase 累积 +N;
+  # 最终 phase = argmax;confidence = top_score / theoretical_max_score
+  items:
+    # 价格结构项(impulse 扩展比率)
+    - name: impulse_extension_early
+      condition: "impulse_extension_ratio < 0.50"
+      assigns_to_phase: early
+      points: 3
+    - name: impulse_extension_mid
+      condition: "0.50 <= impulse_extension_ratio < 1.00"
+      assigns_to_phase: mid
+      points: 3
+    - name: impulse_extension_late
+      condition: "1.00 <= impulse_extension_ratio < 1.38"
+      assigns_to_phase: late
+      points: 3
+    - name: impulse_extension_exhausted
+      condition: "impulse_extension_ratio >= 1.38"
+      assigns_to_phase: exhausted
+      points: 3
+    # Swing 序列项
+    - name: hh_hl_pronounced
+      condition: "近期 HH+HL 明显"
+      assigns_to_phase: [early, mid]
+      points: 2
+    - name: lh_or_ll_recent
+      condition: "最近出现 LH 或 LL"
+      assigns_to_phase: [late, exhausted]
+      points: 2
+    # 均线距离项
+    - name: near_ma60
+      condition: "价格贴近 MA-60"
+      assigns_to_phase: [early, mid]
+      points: 1
+    - name: far_above_ma60
+      condition: "价格远离 MA-60 上方"
+      assigns_to_phase: [late, exhausted]
+      points: 1
+    # 回撤深度项
+    - name: recent_retracement_deep
+      condition: "最近回撤 > 0.5 × impulse"
+      assigns_to_phase: [early]
+      points: 1
+    - name: recent_retracement_shallow
+      condition: "最近回撤 < 0.2 × impulse"
+      assigns_to_phase: [late, exhausted]
+      points: 1
+
+
+# ---- 8.3 CyclePosition(§3.8.4,L2,九档)----
+cycle_position_decision:
+  # 九档判定:每档规定 MVRV Z / NUPL / LTH 90d 变化的允许范围
+  # 和必要的辅助条件(时间/跌幅)。投票池 = 通过辅助检查的主指标候选。
+  bands:
+    accumulation:
+      mvrv_z:       { range: [null, -0.5] }         # < -0.5
+      nupl:         { range: [null, 0] }            # < 0
+      lth_90d_chg:  { range: [0.02, null] }         # > +2% 持续增持
+      aux_min_days_since_last_distribution: 180
+
+    early_bull:
+      mvrv_z:       { range: [-0.5, 2] }
+      nupl:         { range: [0, 0.25] }
+      lth_90d_chg:  { range: [-0.005, null] }       # 持续增持或稳定
+      aux_min_days_since_last_accumulation: 60
+
+    mid_bull:
+      mvrv_z:       { range: [2, 4] }
+      nupl:         { range: [0.25, 0.5] }
+      lth_90d_chg:  { range: [null, 0.005] }        # 缓慢减持或稳定
+
+    late_bull:
+      mvrv_z:       { range: [4, 6] }
+      nupl:         { range: [0.5, 0.65] }
+      lth_90d_chg:  { range: [null, 0] }            # 开始减持
+
+    distribution:
+      mvrv_z:       { range: [6, null] }            # > 6
+      nupl:         { range: [0.65, null] }
+      lth_90d_chg:  { range: [null, -0.03] }        # < -3% 快速减持
+
+    early_bear:
+      mvrv_z:       { range: [2, 6], trend: down }
+      nupl:         { range: [0.25, 0.5], trend: down }
+      lth_90d_chg:  { range: [null, 0] }
+      aux_min_ath_drawdown_pct: 0.20                # 已跌 > 20%
+
+    mid_bear:
+      mvrv_z:       { range: [-0.5, 2], trend: down }
+      nupl:         { range: [-0.25, 0.25] }
+      lth_90d_chg:  { range: [-0.01, null] }        # 减持放缓
+      aux_min_drawdown_duration_days: 90
+
+    late_bear:
+      # 建模 §3.8.4 原文:MVRV Z "< -0.5 未企稳"。数值范围只表达
+      # "< -0.5",语义上还需要"未企稳"这层检查。代码侧需实现
+      # is_mvrv_z_stabilizing(series) -> bool,该 flag = true 时
+      # late_bear 候选只在"未企稳" 成立时才进投票池。
+      # 具体判据(如 MVRV Z 一阶差分均值是否仍 < 0、变化率是否持续负
+      # 等)在 Sprint 1 时定义。
+      mvrv_z:       { range: [null, -0.5] }
+      nupl:         { range: [null, -0.25] }
+      lth_90d_chg:  { range: [null, null] }         # 减持放缓或转增持(宽)
+      aux_min_drawdown_duration_days: 180
+      trend_stabilizing_check_required: true
+
+    unclear:
+      # 伪档(pseudo band):不走 bands 数值匹配,仅作配置完整性登记。
+      # 触发条件:投票池为空,或三主指标全不一致(§3.8.4 判定优先级)。
+      # 运行时逻辑:CyclePosition.compute() 先按其他 8 档跑候选匹配
+      #   → 投票 → 若三票全不一致或池空 → 输出 unclear + confidence=0.30
+      # M17 纪律:不允许维持上一次档位,必须输出 unclear。
+      auto_fallback: true
+
+  # 投票与置信度(§3.8.4 判定优先级)
+  voting:
+    three_agree_confidence: 0.85
+    two_agree_confidence:   0.60
+    empty_pool_confidence:  0.30       # unclear + 0.30
+
+  # 失真修正
+  # 减半前后 6 个月 CyclePosition 置信度自动降一档(-0.15)
+  halving_confidence_penalty: 0.15
+  halving_window_months_around: 6
+
+  # ETF 时代 MVRV 基准偏移(每半年人工校准一次,提醒占位)
+  etf_era_mvrv_recalibrate_months: 6
+
+
+# ---- 8.4 Crowding(§3.8.3,L4)----
+crowding_scoring:
+  items:
+    - name: funding_rate_high_3x
+      condition: "funding_rate > 0.0003 且连续 3 次(24h)"
+      points: 2
+    - name: funding_rate_percentile_high
+      condition: "funding_rate_30d_percentile > 85"
+      points: 2
+    - name: oi_spike
+      condition: "oi_change_24h > +0.15"
+      points: 1
+    - name: top_long_short_extreme
+      condition: "top_long_short_account_ratio > 2.5"
+      points: 1
+    - name: basis_high
+      condition: "basis_annualized > 0.20"
+      points: 1
+    - name: put_call_low
+      condition: "put_call_ratio_oi < 0.5"
+      points: 1
+    - name: upward_liquidation_density
+      condition: "上方清算热力图密集"
+      points: -1       # 反向减分(§3.8.3)
+
+  # 输出分档与对应 position_cap 乘数
+  output_bands:
+    crowded_extreme_at_or_above: 6     # × 0.7
+    crowded_mild_at_or_above: 4        # × 0.85
+    # < 4:正常(× 1.0)
+  # 空头侧对称打分(crowded_short)
+
+
+# ---- 8.5 MacroHeadwind(§3.8.5,L5)----
+macro_headwind_scoring:
+  items:
+    - name: dxy_strengthening
+      condition: "dxy_20d_change > +0.02"
+      points: -2
+    - name: us10y_rising
+      condition: "us10y_30d_change_bp > +30"
+      points: -2
+    - name: vix_elevated
+      condition: "vix_current > 25"
+      points: -2
+    - name: nasdaq_falling
+      condition: "nasdaq_20d_change < -0.05"
+      points: -2
+    - name: nasdaq_rising
+      condition: "nasdaq_20d_change > +0.05"
+      points: +2
+
+  # BTC-纳指相关性 > 0.7 时所有项权重 × 1.5
+  btc_nasdaq_correlation_amplify:
+    threshold: 0.7
+    multiplier: 1.5
+
+  # 输出分档
+  output_bands:
+    strong_headwind_at_or_below: -5    # × 0.7
+    mild_headwind_at_or_below: -2      # × 0.85
+    # ≥ -1:中性或顺风(× 1.0)
+
+
+# ---- 8.6 EventRisk(§3.8.6,L4)----
+event_risk_scoring:
+  # 事件类型基础分(表示"该类事件赋予的风险权重")
+  # 批 4 做 event_calendar.yaml 时将新增 event_type_mapping 块,
+  # 把常见事件(PPI / 零售销售 / ADP / FOMC minutes / Powell 讲话 /
+  # 减半窗口 等)显式分类,减少 other 的兜底频率。
+  event_type_weights:
+    fomc: 4
+    cpi:  3
+    nfp:  3
+    options_expiry_major: 2     # 大到期(月 / 季)
+    other: 1                    # 兜底;应尽量少用
+
+  # 距离窗口加权
+  distance_multipliers:
+    - { hours_range: [0, 24],   multiplier: 1.5 }
+    - { hours_range: [24, 48],  multiplier: 1.0 }
+    - { hours_range: [48, 72],  multiplier: 0.5 }
+
+  # 波动率 extreme 时所有事件分 +1
+  volatility_extreme_bonus: 1
+
+  # BTC-纳指相关性 > 0.7 时美国经济事件分 +1
+  us_macro_bonus_when_correlated: 1
+
+  # 输出分档
+  output_bands:
+    high_at_or_above: 8          # × 0.7,permission 降档建议(ambush_only)
+    medium_at_or_above: 4        # × 0.85
+    # < 4:低(× 1.0)

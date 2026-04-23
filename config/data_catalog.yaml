@@ -1,0 +1,927 @@
+# ============================================================
+# data_catalog.yaml — 数据源、单因子、组合因子的统一目录
+# ============================================================
+# 用途:所有"数据点"和"因子"的**唯一注册中心**。采集层按此决定抓什么,
+#       计算层按此决定怎么算,证据层按此决定哪个因子在哪个层发挥作用。
+#
+# 结构(§3.11):
+#   sources            原始数据端点(与 data_sources.yaml 的平台一一映射)
+#   single_factors     L2 单因子(计算自一个或多个 source)
+#   composite_factors  L3 组合因子(v1.2 最终 6 个)
+#
+# 重要纪律(v1.2):
+#   1) "单一作用点" —— 每个组合因子只在指定的一个证据层生效。
+#   2) "先抓后算" —— 采集完成后才开始证据层计算(§2.2 第 6 条)。
+#   3) 凡写 role_in_v1: delayed 的,v1.x 才抓,v1 不启用。
+#   4) 新增任何因子 **必须先在此文件登记**,再写实现代码。
+#
+# 创建于:2026-04-23(Sprint 1 前置工作 · 优化二第 2 批)
+# 建模版本:v1.2
+# ============================================================
+
+
+# ============================================================
+# PART 1 — sources(L1 原始数据端点)
+# ============================================================
+# 字段:
+#   name:          源端点的唯一 ID(下游用 depends_on 引用)
+#   platform:      对应 data_sources.yaml 中的 source key(binance / glassnode / ...)
+#   endpoint:      REST 路径(相对 base_url);computed 表示本地计算
+#   params:        默认查询参数(可被采集器覆盖)
+#   frequency:     抓取频率(per_run / hourly / four_hourly / daily / weekly)
+#   timeframe:     K 线专属,原始时间粒度
+#   freshness_class: price / derivatives / macro / onchain / event(§3.2.3)
+#   role_in_v1:    primary / display / delayed
+#   serves:        此数据被哪些单因子消费(审计用)
+
+sources:
+
+  # ---- Binance 现货 K 线(§3.6.1)----
+  - name: binance_klines_1h
+    platform: binance
+    endpoint: /api/v3/klines
+    params: { symbol: BTCUSDT, interval: 1h }
+    frequency: hourly
+    timeframe: 1h
+    freshness_class: price
+    role_in_v1: primary
+    serves: [execution_confirmation_only]       # §4.4.8 白名单模块才读
+
+  - name: binance_klines_4h
+    platform: binance
+    endpoint: /api/v3/klines
+    params: { symbol: BTCUSDT, interval: 4h }
+    frequency: four_hourly
+    timeframe: 4h
+    freshness_class: price
+    role_in_v1: primary
+    serves: [adx_14_4h, multi_tf_direction_consistency, hard_invalidation_confirm]
+
+  - name: binance_klines_1d
+    platform: binance
+    endpoint: /api/v3/klines
+    params: { symbol: BTCUSDT, interval: 1d }
+    frequency: daily
+    timeframe: 1d
+    freshness_class: price
+    role_in_v1: primary
+    serves: [adx_14_1d, atr_14_1d, ma_*_1d, swing_highs_lows_1d,
+             multi_tf_direction_consistency, ath_drawdown, band_position]
+
+  - name: binance_klines_1w
+    platform: binance
+    endpoint: /api/v3/klines
+    params: { symbol: BTCUSDT, interval: 1w }
+    frequency: weekly
+    timeframe: 1w
+    freshness_class: price
+    role_in_v1: primary
+    serves: [multi_tf_direction_consistency]
+
+  # ---- Binance 永续 K 线(同四周期,用于 L4 验证)----
+  - name: binance_perp_klines_1h
+    platform: binance
+    endpoint: /fapi/v1/klines
+    params: { symbol: BTCUSDT, interval: 1h }
+    frequency: hourly
+    timeframe: 1h
+    freshness_class: price
+    role_in_v1: primary
+    serves: [l4_hard_invalidation_prewarning]
+
+  - name: binance_perp_klines_4h
+    platform: binance
+    endpoint: /fapi/v1/klines
+    params: { symbol: BTCUSDT, interval: 4h }
+    frequency: four_hourly
+    timeframe: 4h
+    freshness_class: price
+    role_in_v1: primary
+    serves: [l4_hard_invalidation_confirm]
+
+  - name: binance_perp_klines_1d
+    platform: binance
+    endpoint: /fapi/v1/klines
+    params: { symbol: BTCUSDT, interval: 1d }
+    frequency: daily
+    timeframe: 1d
+    freshness_class: price
+    role_in_v1: primary
+    serves: [l4_cross_check]
+
+  - name: binance_perp_klines_1w
+    platform: binance
+    endpoint: /fapi/v1/klines
+    params: { symbol: BTCUSDT, interval: 1w }
+    frequency: weekly
+    timeframe: 1w
+    freshness_class: price
+    role_in_v1: primary
+    serves: [l4_cross_check]
+
+  # ---- Binance 现货行情 / 深度 ----
+  - name: binance_ticker_24h
+    platform: binance
+    endpoint: /api/v3/ticker/24hr
+    params: { symbol: BTCUSDT }
+    frequency: per_run
+    freshness_class: price
+    role_in_v1: primary
+    serves: [l3_opportunity]
+
+  - name: binance_depth
+    platform: binance
+    endpoint: /api/v3/depth
+    params: { symbol: BTCUSDT, limit: 100 }
+    frequency: per_run
+    freshness_class: price
+    role_in_v1: primary
+    serves: [liquidation_density_index, l3_opportunity]
+
+  # ---- Binance 衍生品(§3.6.2)----
+  - name: binance_funding_rate
+    platform: binance
+    endpoint: /fapi/v1/fundingRate
+    params: { symbol: BTCUSDT, limit: 100 }
+    frequency: hourly                    # 结算 8h/次,但每小时检查
+    freshness_class: derivatives
+    role_in_v1: primary
+    serves: [funding_rate_current, funding_rate_7d_mean,
+             funding_rate_30d_percentile, funding_rate_zscore_90d]
+
+  - name: binance_oi_hist
+    platform: binance
+    endpoint: /futures/data/openInterestHist
+    params: { symbol: BTCUSDT, period: 1h }
+    frequency: hourly
+    freshness_class: derivatives
+    role_in_v1: primary
+    serves: [oi_change_24h, oi_mcap_ratio]
+
+  - name: binance_top_long_short_account_ratio
+    platform: binance
+    endpoint: /futures/data/topLongShortAccountRatio
+    params: { symbol: BTCUSDT, period: 1h }
+    frequency: hourly
+    freshness_class: derivatives
+    role_in_v1: primary
+    serves: [long_short_ratio_change_24h]
+
+  - name: binance_global_long_short_account_ratio
+    platform: binance
+    endpoint: /futures/data/globalLongShortAccountRatio
+    params: { symbol: BTCUSDT, period: 1h }
+    frequency: hourly
+    freshness_class: derivatives
+    role_in_v1: primary
+    serves: [long_short_ratio_change_24h]
+
+  # ---- BTC ATH(本地计算,无端点)----
+  - name: btc_ath_price
+    platform: computed
+    endpoint: null
+    params: {}
+    frequency: per_run
+    freshness_class: price
+    role_in_v1: primary
+    serves: [ath_drawdown]                # §3.6.1 "从 K 线计算"
+
+  # ---- Coinglass 衍生品聚合(§3.6.2)----
+  # 注:中转路径待编码期首次调用后以实际为准;此处用 coinglass 官方约定作模板。
+  - name: coinglass_funding_rate
+    platform: coinglass
+    endpoint: /api/futures/fundingRate
+    params: { symbol: BTC }
+    frequency: hourly
+    freshness_class: derivatives
+    role_in_v1: primary
+    serves: [funding_rate_current, crowding_cross_exchange]
+
+  - name: coinglass_oi_aggregated
+    platform: coinglass
+    endpoint: /api/futures/openInterest/aggregated
+    params: { symbol: BTC }
+    frequency: hourly
+    freshness_class: derivatives
+    role_in_v1: primary
+    serves: [oi_change_24h]
+
+  - name: coinglass_liquidation
+    platform: coinglass
+    endpoint: /api/futures/liquidation
+    params: { symbol: BTC }
+    frequency: hourly
+    freshness_class: derivatives
+    role_in_v1: primary
+    serves: [liquidation_density_index]
+
+  - name: coinglass_liquidation_chart
+    platform: coinglass
+    endpoint: /api/futures/liquidationChart
+    params: { symbol: BTC }
+    frequency: four_hourly
+    freshness_class: derivatives
+    role_in_v1: primary
+    serves: [liquidation_density_index, crowding]   # 上方清算密集 → Crowding -1
+
+  - name: coinglass_etf_flows
+    platform: coinglass
+    endpoint: /api/etf/flows
+    params: { symbol: BTC }
+    frequency: daily
+    freshness_class: derivatives
+    role_in_v1: primary
+    serves: [l4_risk_display]
+
+  - name: coinglass_options_oi
+    platform: coinglass
+    endpoint: /api/options/openInterest
+    params: { symbol: BTC }
+    frequency: hourly
+    freshness_class: derivatives
+    role_in_v1: primary
+    serves: [put_call_ratio_oi, event_risk_options]
+
+  - name: coinglass_put_call_ratio
+    platform: coinglass
+    endpoint: /api/options/putCallRatio
+    params: { symbol: BTC }
+    frequency: hourly
+    freshness_class: derivatives
+    role_in_v1: primary
+    serves: [put_call_ratio_oi]
+
+  - name: coinglass_basis
+    platform: coinglass
+    endpoint: /api/futures/basis
+    params: { symbol: BTC }
+    frequency: hourly
+    freshness_class: derivatives
+    role_in_v1: primary
+    serves: [basis_annualized]
+
+  # ---- Glassnode 链上 · 第一类:主裁决(§3.6.3 前 5)----
+  - name: glassnode_mvrv_z_score
+    platform: glassnode
+    endpoint: /v1/metrics/market/mvrv_z_score
+    params: { a: BTC }
+    frequency: daily
+    freshness_class: onchain
+    role_in_v1: primary
+    serves: [mvrv_z_score, cycle_position]
+
+  - name: glassnode_nupl
+    platform: glassnode
+    endpoint: /v1/metrics/indicators/net_unrealized_profit_loss
+    params: { a: BTC }
+    frequency: daily
+    freshness_class: onchain
+    role_in_v1: primary
+    serves: [nupl, cycle_position]
+
+  - name: glassnode_lth_sum
+    platform: glassnode
+    endpoint: /v1/metrics/supply/lth_sum
+    params: { a: BTC }
+    frequency: daily
+    freshness_class: onchain
+    role_in_v1: primary
+    serves: [lth_supply_90d_change, cycle_position]
+
+  - name: glassnode_exchange_net_flow
+    platform: glassnode
+    endpoint: /v1/metrics/transactions/transfers_volume_exchanges_net
+    params: { a: BTC }
+    frequency: hourly
+    freshness_class: onchain
+    role_in_v1: primary
+    serves: [exchange_net_flow_7d_mean, exchange_momentum_score]
+
+  # ---- Glassnode 链上 · 第二类:展示用(§3.6.3 后 8)----
+  - name: glassnode_mvrv
+    platform: glassnode
+    endpoint: /v1/metrics/market/mvrv
+    params: { a: BTC }
+    frequency: daily
+    freshness_class: onchain
+    role_in_v1: display
+    serves: [mvrv]
+
+  - name: glassnode_realized_price
+    platform: glassnode
+    endpoint: /v1/metrics/market/price_realized_usd
+    params: { a: BTC }
+    frequency: daily
+    freshness_class: onchain
+    role_in_v1: display
+    serves: [realized_price]
+
+  - name: glassnode_realized_price_lth
+    platform: glassnode
+    endpoint: /v1/metrics/indicators/realized_price_lth
+    params: { a: BTC }
+    frequency: daily
+    freshness_class: onchain
+    role_in_v1: display
+    serves: [lth_realized_price]
+
+  - name: glassnode_realized_price_sth
+    platform: glassnode
+    endpoint: /v1/metrics/indicators/realized_price_sth
+    params: { a: BTC }
+    frequency: daily
+    freshness_class: onchain
+    role_in_v1: display
+    serves: [sth_realized_price]
+
+  - name: glassnode_sopr
+    platform: glassnode
+    endpoint: /v1/metrics/indicators/sopr
+    params: { a: BTC }
+    frequency: daily
+    freshness_class: onchain
+    role_in_v1: display
+    serves: [sopr]
+
+  - name: glassnode_sopr_adjusted
+    platform: glassnode
+    endpoint: /v1/metrics/indicators/sopr_adjusted
+    params: { a: BTC }
+    frequency: daily
+    freshness_class: onchain
+    role_in_v1: display
+    serves: [asopr]
+
+  - name: glassnode_reserve_risk
+    platform: glassnode
+    endpoint: /v1/metrics/indicators/reserve_risk
+    params: { a: BTC }
+    frequency: daily
+    freshness_class: onchain
+    role_in_v1: display
+    serves: [reserve_risk]
+
+  - name: glassnode_puell_multiple
+    platform: glassnode
+    endpoint: /v1/metrics/indicators/puell_multiple
+    params: { a: BTC }
+    frequency: daily
+    freshness_class: onchain
+    role_in_v1: display
+    serves: [puell_multiple]
+
+  # ---- 第三类:延后到 v1.x(§3.6.3 明确列出)----
+  # 这些在 v1 不抓;登记在此仅作 v1.x 启用时的 TODO 清单。
+  - name: glassnode_hodl_waves
+    platform: glassnode
+    endpoint: /v1/metrics/supply/hodl_waves
+    params: { a: BTC }
+    frequency: null
+    freshness_class: onchain
+    role_in_v1: delayed
+    serves: []
+
+  - name: glassnode_cdd
+    platform: glassnode
+    endpoint: /v1/metrics/indicators/cdd
+    params: { a: BTC }
+    frequency: null
+    freshness_class: onchain
+    role_in_v1: delayed
+    serves: []
+
+  - name: glassnode_liveliness
+    platform: glassnode
+    endpoint: /v1/metrics/indicators/liveliness
+    params: { a: BTC }
+    frequency: null
+    freshness_class: onchain
+    role_in_v1: delayed
+    serves: []
+
+  - name: glassnode_lth_sopr
+    platform: glassnode
+    endpoint: /v1/metrics/indicators/sopr_lth
+    params: { a: BTC }
+    frequency: null
+    freshness_class: onchain
+    role_in_v1: delayed
+    serves: []
+
+  - name: glassnode_sth_sopr
+    platform: glassnode
+    endpoint: /v1/metrics/indicators/sopr_sth
+    params: { a: BTC }
+    frequency: null
+    freshness_class: onchain
+    role_in_v1: delayed
+    serves: []
+
+  - name: glassnode_active_addresses
+    platform: glassnode
+    endpoint: /v1/metrics/addresses/active_count
+    params: { a: BTC }
+    frequency: null
+    freshness_class: onchain
+    role_in_v1: delayed
+    serves: []
+
+  - name: glassnode_hash_ribbon
+    platform: glassnode
+    endpoint: /v1/metrics/mining/hash_rate_mean
+    params: { a: BTC }
+    frequency: null
+    freshness_class: onchain
+    role_in_v1: delayed
+    serves: []
+
+  # ---- 宏观(§3.6.4,Yahoo Finance 直连)----
+  - name: yahoo_dxy
+    platform: yahoo_finance
+    endpoint: ticker
+    params: { symbol: "^DXY" }
+    frequency: daily
+    freshness_class: macro
+    role_in_v1: primary
+    serves: [dxy_20d_change, macro_headwind]
+
+  - name: yahoo_us10y
+    platform: yahoo_finance
+    endpoint: ticker
+    params: { symbol: "^TNX" }            # FRED DGS10 为备用
+    frequency: daily
+    freshness_class: macro
+    role_in_v1: primary
+    serves: [us10y_30d_change_bp, macro_headwind]
+
+  - name: yahoo_vix
+    platform: yahoo_finance
+    endpoint: ticker
+    params: { symbol: "^VIX" }
+    frequency: daily
+    freshness_class: macro
+    role_in_v1: primary
+    serves: [vix_current, macro_headwind]
+
+  - name: yahoo_sp500
+    platform: yahoo_finance
+    endpoint: ticker
+    params: { symbol: "^GSPC" }
+    frequency: daily
+    freshness_class: macro
+    role_in_v1: primary
+    serves: [l5_display]
+
+  - name: yahoo_ndx
+    platform: yahoo_finance
+    endpoint: ticker
+    params: { symbol: "^NDX" }
+    frequency: daily
+    freshness_class: macro
+    role_in_v1: primary
+    serves: [nasdaq_20d_change, btc_nasdaq_corr_60d, macro_headwind]
+
+  - name: yahoo_gold
+    platform: yahoo_finance
+    endpoint: ticker
+    params: { symbol: "GC=F" }
+    frequency: daily
+    freshness_class: macro
+    role_in_v1: primary
+    serves: [btc_gold_corr_60d]
+
+  # ---- FRED 备用宏观 ----
+  - name: fred_dgs10
+    platform: fred
+    endpoint: /series/observations
+    params: { series_id: DGS10, file_type: json }
+    frequency: daily
+    freshness_class: macro
+    role_in_v1: primary
+    serves: [us10y_30d_change_bp]      # Yahoo 失败时兜底
+
+  # ---- 事件日历(§3.6.5,v1 手动维护优先)----
+  - name: event_calendar_manual
+    platform: local_yaml
+    endpoint: config/event_calendar.yaml
+    params: {}
+    frequency: daily                     # 每天 reload 一次
+    freshness_class: event
+    role_in_v1: primary
+    serves: [event_risk]
+
+
+# ============================================================
+# PART 2 — single_factors(L2 单因子)
+# ============================================================
+# 字段:
+#   name:        因子 ID
+#   depends_on:  所需 source 或其他 single_factor 的 name 列表
+#   formula_ref: 计算函数的相对路径 module::function(编码期实现)
+#   frequency:   重新计算频率;null 表示 "延后 / v1 不启用"
+#   layer:       主要归属证据层(§3.7 表格;L2 长周期复用时写 "L2")
+#   role_in_v1:  primary / display / delayed
+#   notes:       可选备注
+
+single_factors:
+
+  # ---- 价格结构(§3.7.1)----
+  - name: adx_14_1d
+    depends_on: [binance_klines_1d]
+    formula_ref: src/indicators/price_structure.py::wilder_adx
+    frequency: daily
+    layer: L1
+    role_in_v1: primary
+    notes: "Wilder ADX 周期 14"
+
+  - name: adx_14_4h
+    depends_on: [binance_klines_4h]
+    formula_ref: src/indicators/price_structure.py::wilder_adx
+    frequency: four_hourly
+    layer: L1
+    role_in_v1: primary
+    notes: "L1 辅助,用于 TruthTrend 评分"
+
+  - name: atr_14_1d
+    depends_on: [binance_klines_1d]
+    formula_ref: src/indicators/price_structure.py::atr
+    frequency: daily
+    layer: L1
+    role_in_v1: primary
+
+  - name: atr_to_price_ratio
+    depends_on: [atr_14_1d, binance_klines_1d]
+    formula_ref: src/indicators/price_structure.py::atr_price_ratio
+    frequency: daily
+    layer: L1
+    role_in_v1: primary
+
+  - name: atr_percentile_180d
+    depends_on: [atr_14_1d]
+    formula_ref: src/indicators/price_structure.py::rolling_percentile
+    frequency: daily
+    layer: L1
+    role_in_v1: primary
+    notes: "过去 180 天分位,阈值见 thresholds.layer_1_regime"
+
+  - name: ma_20_1d
+    depends_on: [binance_klines_1d]
+    formula_ref: src/indicators/price_structure.py::sma
+    frequency: daily
+    layer: L1
+    role_in_v1: primary
+
+  - name: ma_60_1d
+    depends_on: [binance_klines_1d]
+    formula_ref: src/indicators/price_structure.py::sma
+    frequency: daily
+    layer: L1
+    role_in_v1: primary
+
+  - name: ma_120_1d
+    depends_on: [binance_klines_1d]
+    formula_ref: src/indicators/price_structure.py::sma
+    frequency: daily
+    layer: L1
+    role_in_v1: primary
+
+  - name: ma_200_1d
+    depends_on: [binance_klines_1d]
+    formula_ref: src/indicators/price_structure.py::sma
+    frequency: daily
+    layer: L1
+    role_in_v1: primary
+
+  - name: swing_highs_lows_1d
+    depends_on: [binance_klines_1d]
+    formula_ref: src/indicators/price_structure.py::detect_swings
+    frequency: daily
+    layer: L2
+    role_in_v1: primary
+    notes: "左右 N=5 窗口 (thresholds.layer_1_regime.swing_window)"
+
+  - name: multi_tf_direction_consistency
+    depends_on: [binance_klines_4h, binance_klines_1d, binance_klines_1w]
+    formula_ref: src/indicators/price_structure.py::multi_tf_consistency
+    frequency: four_hourly
+    layer: L1
+    role_in_v1: primary
+    notes: "4H/1D/1W 方向一致性,TruthTrend 输入项"
+
+  # ---- 衍生品(§3.7.2)----
+  - name: funding_rate_current
+    depends_on: [binance_funding_rate, coinglass_funding_rate]
+    formula_ref: src/indicators/derivatives.py::funding_current
+    frequency: hourly
+    layer: L4
+    role_in_v1: primary
+
+  - name: funding_rate_7d_mean
+    depends_on: [binance_funding_rate]
+    formula_ref: src/indicators/derivatives.py::funding_rolling_mean
+    frequency: hourly
+    layer: L4
+    role_in_v1: primary
+    notes: "最近 21 个 8h 均值"
+
+  - name: funding_rate_30d_percentile
+    depends_on: [binance_funding_rate]
+    formula_ref: src/indicators/derivatives.py::funding_percentile
+    frequency: hourly
+    layer: L4
+    role_in_v1: primary
+
+  - name: funding_rate_zscore_90d
+    depends_on: [binance_funding_rate]
+    formula_ref: src/indicators/derivatives.py::funding_zscore
+    frequency: hourly
+    layer: L4
+    role_in_v1: primary
+
+  - name: oi_change_24h
+    depends_on: [binance_oi_hist, coinglass_oi_aggregated]
+    formula_ref: src/indicators/derivatives.py::oi_change
+    frequency: hourly
+    layer: L4
+    role_in_v1: primary
+
+  - name: oi_mcap_ratio
+    depends_on: [coinglass_oi_aggregated, binance_klines_1d]
+    formula_ref: src/indicators/derivatives.py::oi_mcap_ratio
+    frequency: hourly
+    layer: L4
+    role_in_v1: primary
+
+  - name: long_short_ratio_change_24h
+    depends_on: [binance_top_long_short_account_ratio, binance_global_long_short_account_ratio]
+    formula_ref: src/indicators/derivatives.py::ls_ratio_change
+    frequency: hourly
+    layer: L4
+    role_in_v1: primary
+
+  - name: liquidation_density_index
+    depends_on: [coinglass_liquidation, coinglass_liquidation_chart, binance_depth]
+    formula_ref: src/indicators/derivatives.py::liquidation_density
+    frequency: four_hourly
+    layer: L4
+    role_in_v1: primary
+    notes: "关键位附近潜在清算总量;§3.7.2 同属 L3 + L4"
+
+  - name: basis_annualized
+    depends_on: [coinglass_basis]
+    formula_ref: src/indicators/derivatives.py::basis_annualized
+    frequency: hourly
+    layer: L4
+    role_in_v1: primary
+
+  - name: put_call_ratio_oi
+    depends_on: [coinglass_put_call_ratio, coinglass_options_oi]
+    formula_ref: src/indicators/derivatives.py::put_call_ratio
+    frequency: hourly
+    layer: L4
+    role_in_v1: primary
+
+  # ---- 链上(§3.7.3)----
+  - name: mvrv
+    depends_on: [glassnode_mvrv]
+    formula_ref: src/indicators/onchain.py::read_glassnode_direct
+    frequency: daily
+    layer: L2
+    role_in_v1: display
+
+  - name: mvrv_z_score
+    depends_on: [glassnode_mvrv_z_score]
+    formula_ref: src/indicators/onchain.py::read_glassnode_direct
+    frequency: daily
+    layer: L2
+    role_in_v1: primary
+    notes: "CyclePosition 三主指标之一"
+
+  - name: nupl
+    depends_on: [glassnode_nupl]
+    formula_ref: src/indicators/onchain.py::read_glassnode_direct
+    frequency: daily
+    layer: L2
+    role_in_v1: primary
+
+  - name: lth_supply_90d_change
+    depends_on: [glassnode_lth_sum]
+    formula_ref: src/indicators/onchain.py::lth_supply_change_pct
+    frequency: daily
+    layer: L2
+    role_in_v1: primary
+    notes: "90 日百分比变化,CyclePosition 三主指标之一"
+
+  - name: exchange_net_flow_7d_mean
+    depends_on: [glassnode_exchange_net_flow]
+    formula_ref: src/indicators/onchain.py::rolling_mean
+    frequency: hourly
+    layer: L2
+    role_in_v1: primary
+    notes: "喂给 ExchangeMomentum(L2 内部修正项)"
+
+  - name: reserve_risk
+    depends_on: [glassnode_reserve_risk]
+    formula_ref: src/indicators/onchain.py::read_glassnode_direct
+    frequency: daily
+    layer: L2
+    role_in_v1: display
+
+  - name: puell_multiple
+    depends_on: [glassnode_puell_multiple]
+    formula_ref: src/indicators/onchain.py::read_glassnode_direct
+    frequency: daily
+    layer: L2
+    role_in_v1: display
+
+  - name: sopr
+    depends_on: [glassnode_sopr]
+    formula_ref: src/indicators/onchain.py::read_glassnode_direct
+    frequency: daily
+    layer: L2
+    role_in_v1: display
+
+  - name: asopr
+    depends_on: [glassnode_sopr_adjusted]
+    formula_ref: src/indicators/onchain.py::read_glassnode_direct
+    frequency: daily
+    layer: L2
+    role_in_v1: display
+    notes: "B4:展示,不进规则"
+
+  - name: ath_drawdown
+    depends_on: [btc_ath_price, binance_klines_1d]
+    formula_ref: src/indicators/onchain.py::ath_drawdown
+    frequency: daily
+    layer: L2
+    role_in_v1: primary
+    notes: "CyclePosition 辅助条件(early_bear / mid_bear / late_bear 的时间/跌幅门槛)"
+
+  - name: lth_realized_price
+    depends_on: [glassnode_realized_price_lth]
+    formula_ref: src/indicators/onchain.py::read_glassnode_direct
+    frequency: daily
+    layer: L2
+    role_in_v1: display
+
+  - name: sth_realized_price
+    depends_on: [glassnode_realized_price_sth]
+    formula_ref: src/indicators/onchain.py::read_glassnode_direct
+    frequency: daily
+    layer: L2
+    role_in_v1: display
+
+  - name: realized_price
+    depends_on: [glassnode_realized_price]
+    formula_ref: src/indicators/onchain.py::read_glassnode_direct
+    frequency: daily
+    layer: L2
+    role_in_v1: display
+
+  # ---- 宏观(§3.7.4)----
+  - name: dxy_20d_change
+    depends_on: [yahoo_dxy]
+    formula_ref: src/indicators/macro.py::rolling_change_pct
+    frequency: daily
+    layer: L5
+    role_in_v1: primary
+
+  - name: us10y_30d_change_bp
+    depends_on: [yahoo_us10y, fred_dgs10]
+    formula_ref: src/indicators/macro.py::rolling_change_bp
+    frequency: daily
+    layer: L5
+    role_in_v1: primary
+
+  - name: vix_current
+    depends_on: [yahoo_vix]
+    formula_ref: src/indicators/macro.py::read_latest
+    frequency: daily
+    layer: L5
+    role_in_v1: primary
+
+  - name: nasdaq_20d_change
+    depends_on: [yahoo_ndx]
+    formula_ref: src/indicators/macro.py::rolling_change_pct
+    frequency: daily
+    layer: L5
+    role_in_v1: primary
+
+  - name: btc_nasdaq_corr_60d
+    depends_on: [yahoo_ndx, binance_klines_1d]
+    formula_ref: src/indicators/macro.py::rolling_correlation
+    frequency: daily
+    layer: L5
+    role_in_v1: primary
+
+  - name: btc_gold_corr_60d
+    depends_on: [yahoo_gold, binance_klines_1d]
+    formula_ref: src/indicators/macro.py::rolling_correlation
+    frequency: daily
+    layer: L5
+    role_in_v1: primary
+
+  # ---- L2 内部修正项(§3.9 ExchangeMomentum)----
+  # v1.2 纪律:不作为独立组合因子,而是作为单因子由 L2 内部消费,
+  # 修正 stance_confidence ×1.05 / ×0.95。登记在 single_factors。
+  - name: exchange_momentum_score
+    depends_on: [exchange_net_flow_7d_mean]
+    formula_ref: src/indicators/onchain.py::exchange_momentum_score
+    frequency: hourly
+    layer: L2
+    role_in_v1: primary
+    notes: >
+      v1.2 降级为 L2 内部修正项;做空侧不参与 stance_confidence 计算(B5)。
+      评分细节见 thresholds.yaml / 建模 §3.9。
+
+
+# ============================================================
+# PART 3 — composite_factors(L3 组合因子,v1.2 最终 6 个)
+# ============================================================
+# v1.2 纪律(§2.2 第 7 条):每个组合因子**只在 single_use_point 指定的
+# 唯一位置消费**;跨层再次评分属于反模式。
+# 删除项:EntryWindowQuality(v1.2 M 条目删除)
+# 降级项:ExchangeMomentum(降为 L2 内部修正项,见 single_factors 上方)
+
+composite_factors:
+
+  - name: truth_trend
+    depends_on:
+      - adx_14_1d
+      - adx_14_4h
+      - multi_tf_direction_consistency
+      - ma_20_1d
+      - ma_60_1d
+      - ma_120_1d
+      - ma_200_1d
+    formula_ref: src/composite/truth_trend.py::compute
+    layer: L1
+    single_use_point: l1_regime_and_confidence
+    output_range: [0, 9]
+    notes: "§3.8.1;输出不跨层传递,L3 不读原始分数(B1)"
+
+  - name: band_position
+    depends_on:
+      - binance_klines_1d
+      - swing_highs_lows_1d
+      - ma_60_1d
+    formula_ref: src/composite/band_position.py::compute
+    layer: L2
+    single_use_point: l2_phase
+    output_range: null                   # 输出 phase + confidence,不是单一数值
+    notes: "§3.8.2;v1.2 只用价格几何,已移除 MVRV Z 和 STH-SOPR"
+
+  - name: cycle_position
+    depends_on:
+      - mvrv_z_score
+      - nupl
+      - lth_supply_90d_change
+      - ath_drawdown
+    formula_ref: src/composite/cycle_position.py::compute
+    layer: L2
+    single_use_point: l2_long_cycle_context
+    output_range: null                   # 九档枚举 + confidence
+    notes: >
+      §3.8.4;v1.2 九档完整化(M1/M2)。辅助条件是否决权(B2),
+      投票池为空 → unclear,不允许维持上一次档位(M17)。
+
+  - name: crowding
+    depends_on:
+      - funding_rate_current
+      - funding_rate_30d_percentile
+      - oi_change_24h
+      - long_short_ratio_change_24h
+      - basis_annualized
+      - put_call_ratio_oi
+      - liquidation_density_index
+    formula_ref: src/composite/crowding.py::compute
+    layer: L4
+    single_use_point: l4_risk_and_position_cap
+    output_range: [0, 8]
+    notes: >
+      §3.8.3;v1.2 限定 L4,不进 L2,不进 L3 opportunity_grade,
+      无方向反转含义。
+
+  - name: macro_headwind
+    depends_on:
+      - dxy_20d_change
+      - us10y_30d_change_bp
+      - vix_current
+      - nasdaq_20d_change
+      - btc_nasdaq_corr_60d
+    formula_ref: src/composite/macro_headwind.py::compute
+    layer: L5
+    single_use_point: l5_adjustment_guidance
+    output_range: [-10, 10]
+    notes: "§3.8.5;BTC-纳指相关性 > 0.7 时所有宏观项权重 × 1.5"
+
+  - name: event_risk
+    depends_on:
+      - event_calendar_manual
+      - btc_nasdaq_corr_60d
+      - atr_percentile_180d                # 当前波动率 extreme 时所有事件分 +1
+    formula_ref: src/composite/event_risk.py::compute
+    layer: L4
+    single_use_point: l4_position_cap_and_permission
+    output_range: [0, 15]
+    notes: "§3.8.6;事件窗口前 48h 生效(thresholds.layer_4_risk.event_window_activation_hours)"

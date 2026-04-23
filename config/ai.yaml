@@ -1,0 +1,123 @@
+# ============================================================
+# ai.yaml — AI 服务配置(主裁决 + L5 宏观摘要)
+# ============================================================
+# 用途:集中管理所有 AI 调用参数(base_url / key / 模型名 /
+#       采样参数 / 成本控制)。与数据源解耦,单独一个文件。
+#
+# 重要说明 —— 协议与 SDK 选择:
+#   * 中转站协议:**OpenAI Compatible**(不是 Anthropic 原生协议)
+#   * SDK 选择:使用 `openai` Python SDK(不使用 `anthropic` SDK)
+#   * 这与建模文档 §10.2 的原始示例(anthropic SDK)不同 —— 因
+#     本项目用的中转站走 OpenAI 兼容 API,直接调 openai SDK 更省事。
+#
+# 重要说明 —— 模型选择:
+#   * 建模文档 v1.2 原写的是 claude-opus-4-7(见 §10.2 的 AI_MODEL_NAME)
+#   * 因成本考虑,v0.x 默认改用 **claude-sonnet-4-5-20250929**
+#   * 调用端需从响应里读实际模型名,写入 StrategyState.ai_model_actual
+#     (M37,见下面 model_tracking 段),以防中转站隐式降级。
+#
+# 创建于:2026-04-23(Sprint 1 前置工作 · 优化二第 1 批微调)
+# 建模版本:v1.2
+# ============================================================
+
+
+# -------- 协议与 SDK ------------------------------------------------
+protocol:
+  # 中转站暴露的 API 协议:openai_compat / anthropic_native
+  flavor: "openai_compat"
+  # 客户端 SDK:用 openai 还是 anthropic;当前用 openai
+  sdk: "openai"
+
+
+# -------- Endpoint & 鉴权 -------------------------------------------
+# 真值写在 .env,这里只声明环境变量名 + 兜底默认。
+endpoint:
+  # OpenAI 兼容的 base URL,需带 /v1 后缀(openai SDK 约定)
+  base_url_env: "OPENAI_API_BASE"
+  base_url_default: "https://us.novaiapi.com/v1"
+
+  # API key 走 Authorization: Bearer …(openai SDK 自动处理)
+  api_key_env: "OPENAI_API_KEY"
+
+  # 某些中转站要求额外 org header,留空即不发送
+  organization_env: null
+
+
+# -------- 主裁决(Final Adjudicator)--------------------------------
+# 对应建模 §6(AI 裁决契约)、§2.3 的"最终裁决 AI 主导 + 程序约束"。
+# 策略生成要确定性高,temperature 偏低;输出含 StrategyState 完整 JSON,
+# max_tokens 要足够。
+adjudicator:
+  # 默认调用的模型名。.env 的 OPENAI_MODEL 可覆盖。
+  model_name_env: "OPENAI_MODEL"
+  model_name_default: "claude-sonnet-4-5-20250929"
+
+  # 采样参数
+  temperature: 0.1         # 策略生成优先确定性;0.0 有时会触发中转站的"非法值"校验
+  top_p: 1.0
+  max_tokens: 4000         # StrategyState JSON + narrative 合计大致 2-3k,留裕量
+
+  # 单次调用的超时与重试(网络层)
+  timeout_sec: 60          # 叙事生成较慢,放宽
+  retry:
+    max_attempts: 2        # 失败超过 2 次走 Fallback Level 1(base.yaml)
+    backoff_sec: 3
+    backoff_strategy: "exponential"
+    retry_on_status: [408, 429, 500, 502, 503, 504]
+
+  # 输出格式强制:让 AI 返回 JSON(openai SDK 的 response_format 支持)
+  response_format: "json_object"
+  # AI 输出需通过 program validator(src/decision/validator.py);
+  # 校验失败 → Fallback Level 1 或重试(见 §6 裁决契约)
+  strict_schema_validation: true
+
+
+# -------- L5 宏观摘要(Layer-5 Macro Summarizer)--------------------
+# 对应建模 §4.6(L5 层由 AI 主导),生成 2-3 行叙事 + event_flag。
+# 任务更短,可以用更激进的 temperature 保证生动度,max_tokens 小。
+layer5_macro_summary:
+  # 允许和主裁决不同的模型;默认同主裁决
+  model_name_env: "OPENAI_L5_MODEL"
+  model_name_default: "claude-sonnet-4-5-20250929"
+
+  temperature: 0.3         # 叙事可以稍微活一点
+  top_p: 1.0
+  max_tokens: 800
+
+  timeout_sec: 30
+  retry:
+    max_attempts: 2
+    backoff_sec: 2
+    backoff_strategy: "exponential"
+    retry_on_status: [408, 429, 500, 502, 503, 504]
+
+  response_format: "json_object"
+  strict_schema_validation: true
+
+
+# -------- 实际模型名追踪(M37)--------------------------------------
+# 中转站可能在额度紧张时静默降级到更便宜的模型。每次调用都要从
+# 响应里读 model 字段,写进 StrategyState.ai_model_actual;与
+# 本文件配置的 model_name_default 作对照。
+model_tracking:
+  # 实际模型名写进这个 StrategyState 字段
+  target_field: "ai_model_actual"
+  # 若实际模型名与配置不一致,告警级别
+  mismatch_alert_severity: "warning"
+  # 累计 N 次不一致 → 升级为 critical(提醒用户换中转)
+  mismatch_critical_threshold: 3
+
+
+# -------- 成本控制 --------------------------------------------------
+# v0.x 人工留意即可;v1.0 后进监控模块自动熔断。
+cost_guard:
+  # 启用总开关
+  enabled: true
+  # 每日最大调用次数(两类调用合计)。超过 → warning 告警 + 跳过当次
+  daily_call_limit: 50
+  # 剩余额度 < 20% 时提前告警
+  early_warning_ratio: 0.2
+  # 计数窗口:按 UTC 自然日还是按北京自然日重置
+  reset_timezone: "Asia/Shanghai"
+  # 单条响应异常长(> token 阈值)视为可疑,记录
+  suspicious_token_threshold: 6000

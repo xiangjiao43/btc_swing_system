@@ -1,0 +1,182 @@
+# ============================================================
+# base.yaml — 项目全局基础配置
+# ============================================================
+# 用途:存放"不会频繁改"的项目基础信息 —— 项目身份、时区、
+#       运行模式、目录路径、Fallback 策略、冷启动。频繁调整的
+#       阈值不放这里(放 thresholds.yaml),数据源配置也不放这里
+#       (放 data_sources.yaml)。
+#
+# 创建于:2026-04-22(Sprint 1 前置工作 · 优化二第 1 批)
+# 建模版本:v1.2
+# ============================================================
+
+
+# -------- 项目身份 ----------------------------------------------------
+# 对应建模文档 7.x(StrategyState 头部字段)与 M36
+project:
+  # 项目名称,同时用作数据目录子项
+  name: "btc_swing_system"
+
+  # 系统版本:跟随 docs/modeling.md 的模型版本(主要反映架构/契约)。
+  # 取值格式 "vMAJOR.MINOR";里程碑完成(v0.1/v0.2 等)时 bump。
+  system_version: "v0.0.1"
+
+  # 规则版本(M36 独立版本号):反映 L3 判档表、门槛表、CyclePosition
+  # 九档、因子权重等"规则内容"的每次变更。
+  # —— 任何规则内容改动必须 bump,哪怕 system_version 不变。
+  # —— StrategyState 与 review_reports 均会记录本次运行使用的 rules_version。
+  rules_version: "v1.2.0"
+
+  # 人类可读的用途说明(用于日志头/报告头,不参与逻辑)
+  description: >
+    BTC 中长线低频双向波段交易辅助系统 —— 输出带证据链的 StrategyState,
+    交易下单由人执行;系统本身不自动下单。
+
+
+# -------- 时区配置(M39)---------------------------------------------
+# 规则:所有存储统一 UTC;美国事件日历以 America/New_York 存储
+# (因夏令时自动切换需要);展示层可换成北京时间。
+timezone:
+  # 数据库与内部 timestamp 的存储时区(所有 *_utc 字段)。
+  storage: "UTC"
+
+  # 美国宏观事件日历的原始时区(event_calendar.yaml 里写 New_York 时间,
+  # 系统运行时再 zoneinfo 转 UTC)。夏令时自动切换由 zoneinfo 负责。
+  us_events: "America/New_York"
+
+  # 前端默认展示时区(用户是大陆用户,看北京时间更方便)。
+  display: "Asia/Shanghai"
+
+
+# -------- 运行模式(M38)---------------------------------------------
+runtime:
+  # 定时基线运行:北京时间每日 6 次,整点。
+  # cron 表达式用 UTC 计算(因为 APScheduler 在 UTC 时区跑)。
+  # 北京 00/04/08/12/16/20 ≡ UTC 16/20/00/04/08/12。
+  scheduled:
+    enabled: true
+    cron_timezone: "UTC"
+    # APScheduler CronTrigger 的标准 cron 字段。多个时刻用列表形式。
+    cron_hours_utc: [0, 4, 8, 12, 16, 20]
+    # 每次 scheduled run 在 StrategyState.run_trigger 里写的值
+    run_trigger_tag: "scheduled"
+
+  # 事件触发运行(v1.2 新增第二层)。
+  # 类型与 run_trigger 枚举见 3.3.3,这里只打开/关闭开关。
+  event_driven:
+    enabled: true
+    types:
+      event_macro: true       # 宏观数据发布后 15 min
+      event_onchain: true     # Glassnode 日级更新(北京 08:15-08:30)
+      event_funding: true     # 资金费率结算后 15 min
+      event_options: true     # 期权月/季到期前 1 h
+      event_price: true       # ±3% 价格异动
+      event_invalidation: true  # 硬失效位触发
+    # 节流规则(3.3.2):防止事件风暴导致 AI 配额烧光
+    throttle:
+      # 同类事件 N 秒内只触发一次
+      same_type_cooldown_sec: 7200
+      # 整点运行进行中,事件触发推迟 N 秒
+      defer_during_scheduled_sec: 300
+      # 距上次整点运行 < N 秒,跳过本次事件触发(避免噪音)
+      skip_if_recent_scheduled_sec: 1800
+
+  # 手动触发(调试 / 人工介入)
+  manual:
+    enabled: true
+    run_trigger_tag: "manual"
+
+
+# -------- 目录路径(全部相对项目根)-----------------------------------
+# 运行时代码统一从这里读取;不要在业务代码里硬写目录。
+paths:
+  data_dir: "data"               # 存放 SQLite、缓存、临时下载
+  db_path: "data/btc_strategy.db"  # v0.x SQLite;v1.0 切 Postgres 再改
+  log_dir: "data/logs"           # 运行日志(按天轮转)
+  config_dir: "config"
+  fixtures_dir: "tests/fixtures"  # 测试快照(Sprint 1 前置工作优化三产出)
+  docs_dir: "docs"
+
+
+# -------- 日志 -------------------------------------------------------
+logging:
+  # DEBUG / INFO / WARNING / ERROR —— 也可由 .env 的 LOG_LEVEL 覆盖
+  level: "INFO"
+  # 文件轮转:按天切割,保留 N 天
+  rotation_when: "D"
+  rotation_backup_count: 30
+  # 每条日志附带的通用字段(便于追溯)
+  include_fields:
+    - run_id
+    - reference_timestamp_utc
+    - fallback_level
+    - rules_version
+
+
+# -------- Fallback 三档(M33)----------------------------------------
+# 详见建模文档 §6.9。这里只配置"触发阈值"和"开关",每档的
+# 业务行为(保持/清挂单/强制 watch/强制 protection)写在代码里,
+# 不可 YAML 化。
+fallback:
+  # 是否全局启用 Fallback 机制。关掉仅用于调试,生产必须开启。
+  enabled: true
+
+  level_1:
+    # AI 校验失败连续 N 次 → 触发 L1
+    ai_validation_failures_threshold: 1
+    # L1 连续触发 ≥ N 次 → 自动升级 L2(v1.2 新增)
+    auto_upgrade_to_l2_consecutive: 5
+    # 告警级别(warning / critical)
+    alert_severity: "warning"
+
+  level_2:
+    # AI 连续失败 ≥ N 次 → 触发 L2
+    ai_consecutive_failures_threshold: 3
+    # 数据源全 stale 数量 ≥ N → 触发 L2(对齐 §3.2.4)
+    stale_sources_threshold: 3
+    # 进入 L2 后等待 N 秒无恢复 → 考虑 L3
+    wait_before_l3_sec: 7200
+    alert_severity: "critical"
+
+  level_3:
+    # 数据源完全失效 > N 秒 → 触发 L3
+    data_outage_threshold_sec: 7200
+    # 触发 L3 后是否停止自动调度(只留 manual)
+    stop_scheduled_on_trigger: true
+    alert_severity: "critical"
+
+
+# -------- 冷启动(M35)-----------------------------------------------
+# v0.1 启动前必须先 backfill,前 7 天各层宽松处理。
+cold_start:
+  enabled: true
+
+  # 启动时历史数据回填的天数(scripts/backfill_data.py 参考此值)
+  backfill_days: 180
+
+  # 系统实际上线后前 N 天视为冷启动期
+  warming_up_days: 7
+  # 对应 6 次/天的运行数(纯派生,方便监控模块对照)
+  warming_up_runs: 42
+
+  # 冷启动期间的宽松处理开关(对齐 §8.10)
+  during_warming_up:
+    # observation_classifier 跳过 possibly_suppressed 的持续性检查
+    skip_possibly_suppressed_persistence_check: true
+    # observation_category 允许输出 cold_start_warming_up
+    allow_cold_start_warming_up_category: true
+    # KPI 不累计进 kpi_snapshots
+    kpi_accumulation_enabled: false
+    # Fallback 阈值宽松一档(L1 阈值 +1 次,L2 等待 +N 秒)
+    fallback_threshold_relaxation: true
+
+
+# -------- 低频保守边界(M25 监控常量)---------------------------------
+# 不是用来影响决策的,只用于监控模块判断"过度保守"。
+# 具体监控逻辑在 src/monitoring/ 下实现,这里是阈值常量。
+low_frequency_guard:
+  # 连续 > N 天无 PLANNED 迁移 → 告警"过度保守"
+  max_days_without_planned: 90
+  # position_cap final 连续 ≥ N 次 < threshold 视为过度保守
+  consecutive_low_cap_runs: 10
+  consecutive_low_cap_threshold: 0.20

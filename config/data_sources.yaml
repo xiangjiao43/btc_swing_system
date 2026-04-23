@@ -1,0 +1,232 @@
+# ============================================================
+# data_sources.yaml — 数据源与中转站配置
+# ============================================================
+# 用途:声明本项目所有数据源及其访问参数(URL / 认证 / 超时 / 重试 /
+#       速率限制)。真实 URL 和 API key **永远不写在这里**,
+#       只写对应的环境变量名,运行时代码从 .env 读取真值。
+#
+# 与建模文档的对应:§3.1(数据平台清单)、§3.1.2(中转站配置)、
+#                   §10.2(中转站 .env 模板)。
+#
+# 编码期惯例(§3.1.2):
+#   1) 所有数据采集器的 base_url 从本文件读取,指向环境变量名。
+#   2) 中转站 URL 与 API key 放 .env,不进代码库。
+#   3) 中转站切换或失效时,只改 .env,不改代码也不改本文件。
+#   4) 每个数据源独立配置 timeout / 重试 / 速率限制。
+#
+# 创建于:2026-04-22(Sprint 1 前置工作 · 优化二第 1 批)
+# 建模版本:v1.2
+# ============================================================
+
+
+# -------- 全局默认值 -------------------------------------------------
+# 各 source 未显式指定字段时,回退到这里。减少重复。
+# 单位: *_sec = 秒; requests_per_minute = 每分钟请求数
+defaults:
+  timeout_sec: 10
+  retry:
+    max_attempts: 3          # 首次请求失败后最多重试的次数(不含首次)
+    backoff_sec: 2           # 首次重试前的等待秒数(exponential 模式时作为基数)
+    backoff_strategy: "exponential"   # exponential | linear | fixed
+    # HTTP 状态码在下列集合中时才重试;其他错误(如 4xx auth)直接抛出
+    retry_on_status: [408, 429, 500, 502, 503, 504]
+  rate_limit:
+    # 客户端侧限流,避免打满中转站的上游额度。具体上限请对照官方文档调整。
+    requests_per_minute: 60
+    # 请求排队策略:queue = 阻塞等待,reject = 直接抛错
+    on_exceed: "queue"
+
+
+# -------- 数据源声明 -------------------------------------------------
+# 每个条目使用统一 schema,字段语义:
+#   enabled:         是否启用该数据源(关闭仅用于调试)
+#   name:            人类可读名称(用于日志 / 告警)
+#   purpose:         该源在本系统中的用途(对应证据层的数据需求)
+#   base_url_env:    base_url 存放的环境变量名;.env 里可选覆盖。
+#                    未设置或为空时,代码回退到 base_url_default。
+#   base_url_default: 兜底 URL(直连官方 / 默认中转站)。
+#   auth_type:       api_key / none
+#   api_key_env:     API key 存放的环境变量名;auth_type = none 时置 null
+#   api_key_header:  把 API key 注入请求时的 Header 名;为 null 时按查询参数
+#   api_key_query:   查询参数名(api_key_header 为 null 时生效);两者互斥
+#   timeout_sec:     单次请求超时
+#   retry:           见 defaults.retry
+#   rate_limit:      见 defaults.rate_limit
+#   freshness_class: 新鲜度分档(price / derivatives / macro / onchain /
+#                    event),对应 §3.2.3 阈值表;stale 判定由 freshness.py
+#                    查 data_catalog.yaml 做。
+#   notes:           人类备注(不参与逻辑)
+
+sources:
+
+  # ---- 1. 币安 Binance(价格 + 衍生品,直连官方)---------------------
+  # 提供 K 线(现货 / U 本位永续)、资金费率、持仓量、订单簿。
+  # §3.6.1 / §3.6.2 都依赖这个源。
+  # v1:用户本地有科学上网,直接访问官方,不走中转。公共行情端点免 key。
+  binance:
+    enabled: true
+    name: "Binance (direct, official)"
+    purpose: "Spot / perpetual K-lines, funding rate, open interest, depth"
+    # 现货和合约是两个不同的官方域名,代码里按端点选择。
+    # base_url 字段保留为"现货",合约路径用 futures_base_url_default 兜底。
+    base_url_env: "BINANCE_BASE_URL"                  # 可选:用户若想走自建中转,在 .env 覆盖
+    base_url_default: "https://api.binance.com"       # 现货 + 通用行情
+    futures_base_url_env: "BINANCE_FUTURES_BASE_URL"  # 可选
+    futures_base_url_default: "https://fapi.binance.com"  # U 本位永续(fundingRate / OI 等)
+    auth_type: "none"                # 公共行情端点无需 key
+    api_key_env: null
+    api_key_header: null
+    api_key_query: null
+    timeout_sec: 10
+    retry:
+      max_attempts: 3
+      backoff_sec: 2
+      backoff_strategy: "exponential"
+      retry_on_status: [408, 418, 429, 500, 502, 503, 504]
+    rate_limit:
+      # 官方公共端点按 IP 限流,spot 1200 request-weight/min;保守取 600/min
+      requests_per_minute: 600
+      on_exceed: "queue"
+    freshness_class: "price"   # 价格与衍生品混合;细分在 data_catalog.yaml
+    notes: >
+      同源既含价格(stale 30 min)又含衍生品(stale 6 h);细分阈值按
+      每个 card 的 freshness_class 判定。用户 VPN 访问官方,无 key 需求;
+      若后续上云要走中转,在 .env 设 BINANCE_BASE_URL / BINANCE_FUTURES_BASE_URL 即可。
+
+  # ---- 2. Glassnode(链上,走 alphanode 中转)---------------------
+  # §3.6.3:Advanced 档三档分层(MVRV / NUPL / SOPR / Reserve Risk 等)。
+  glassnode:
+    enabled: true
+    name: "Glassnode Advanced (via api.alphanode.work)"
+    purpose: "On-chain metrics (MVRV, NUPL, SOPR, Reserve Risk, LTH/STH, ...)"
+    base_url_env: "GLASSNODE_BASE_URL"
+    base_url_default: "https://api.alphanode.work"    # 中转站入口
+    auth_type: "api_key"
+    api_key_env: "GLASSNODE_API_KEY"
+    # 走 query 参数(官方兼容路径);若中转站要求 header 形式,编码时改这里
+    api_key_header: null
+    api_key_query: "api_key"
+    timeout_sec: 15
+    retry:
+      max_attempts: 3
+      backoff_sec: 3
+      backoff_strategy: "exponential"
+      retry_on_status: [408, 429, 500, 502, 503, 504]
+    rate_limit:
+      # 中转站侧限流未知;保守 120/min,编码期首次调用后按实际额度调
+      requests_per_minute: 120
+      on_exceed: "queue"
+    freshness_class: "onchain"   # > 48 h 视为 stale(§3.2.3)
+    notes: >
+      走中转站 api.alphanode.work;具体路径前缀和鉴权方式(query ?api_key=
+      vs header x-api-key)等编码期首次调用验证。与 Coinglass 共用中转站,
+      但路径前缀可能不同。链上数据多为日级;采集计划 08:15-08:30(北京)
+      事件触发,见 base.yaml → runtime.event_driven.types.event_onchain。
+
+  # ---- 3. Coinglass(衍生品聚合,走 alphanode 中转)----------------
+  # §3.6.2:跨交易所资金费率、多空比、清算、ETF 资金流。
+  coinglass:
+    enabled: true
+    name: "Coinglass Professional (via api.alphanode.work)"
+    purpose: "Cross-exchange funding, long/short, liquidation, ETF flows"
+    base_url_env: "COINGLASS_BASE_URL"
+    base_url_default: "https://api.alphanode.work"    # 和 Glassnode 共用中转
+    auth_type: "api_key"
+    # 留独立字段:中转站通常共用 key,但若将来拆分(例如直连 Coinglass 官方),
+    # 只改这里不会影响 Glassnode。用户在 .env 里两个 env 变量可填同一个值。
+    api_key_env: "COINGLASS_API_KEY"
+    api_key_header: null             # 编码期首次调用后按中转站实际方式确定
+    api_key_query: "api_key"
+    timeout_sec: 10
+    retry:
+      max_attempts: 3
+      backoff_sec: 2
+      backoff_strategy: "exponential"
+      retry_on_status: [408, 429, 500, 502, 503, 504]
+    rate_limit:
+      requests_per_minute: 120
+      on_exceed: "queue"
+    freshness_class: "derivatives"   # > 6 h 视为 stale
+    notes: >
+      和 Glassnode 共用中转站 api.alphanode.work,但路径前缀可能不同,
+      等编码时验证。中转站通常共用 key,用户可在 .env 里把 COINGLASS_API_KEY
+      和 GLASSNODE_API_KEY 填成同一个值。与 Binance 同类数据交叉校验
+      (§3.6.2);两者冲突时以 Binance 价格 + Coinglass 聚合为准。
+
+  # ---- 4. Yahoo Finance(宏观,直连)------------------------------
+  # §3.6.4:DXY / US10Y / VIX / 美股指数。yfinance 库直连,无 API key。
+  yahoo_finance:
+    enabled: true
+    name: "Yahoo Finance (direct)"
+    purpose: "Macro series: DXY, US10Y, VIX, SPX, NDX"
+    # 直连而非中转;留 env 名方便将来改成中转(值留空即代表直连默认)
+    base_url_env: "YAHOO_FINANCE_BASE_URL"   # 可选,未设置时 yfinance 走默认
+    auth_type: "none"
+    api_key_env: null
+    api_key_header: null
+    api_key_query: null
+    timeout_sec: 15
+    retry:
+      max_attempts: 3
+      backoff_sec: 2
+      backoff_strategy: "exponential"
+      retry_on_status: [408, 429, 500, 502, 503, 504]
+    rate_limit:
+      # yfinance 无官方上限,但太快易被限流;保守 30/min
+      requests_per_minute: 30
+      on_exceed: "queue"
+    freshness_class: "macro"   # > 36 h 视为 stale
+    notes: >
+      v1 使用 yfinance 库调用;v1.0 上云后可切 Yahoo 官方 REST 或 FRED 主源。
+
+  # ---- 5. FRED(宏观,直连,备用)-----------------------------------
+  # §3.6.4:Yahoo 缺失或停更时的备用宏观源(美联储公开数据)。
+  fred:
+    enabled: true
+    name: "FRED (direct)"
+    purpose: "Backup macro: DGS10, DGS2, DEXBZUS, VIX ..."
+    base_url_env: "FRED_BASE_URL"   # 默认 https://api.stlouisfed.org/fred/
+    auth_type: "api_key"            # FRED 免费但需要注册拿 key
+    api_key_env: "FRED_API_KEY"
+    api_key_header: null
+    api_key_query: "api_key"
+    timeout_sec: 10
+    retry:
+      max_attempts: 3
+      backoff_sec: 2
+      backoff_strategy: "exponential"
+      retry_on_status: [408, 429, 500, 502, 503, 504]
+    rate_limit:
+      # FRED 官方 120/min 的软上限
+      requests_per_minute: 60
+      on_exceed: "queue"
+    freshness_class: "macro"
+    notes: >
+      只在 Yahoo 失败或数据缺失时启用(由 collector 兜底逻辑触发),
+      平时可关 enabled 节省。
+
+  # ---- 6. 事件日历源(v1 手动维护为主)-----------------------------
+  # §3.6.5:FOMC / CPI / NFP / 期权到期 / ETF 审批窗口等事件时间表。
+  # v1.2 纪律:手动维护 event_calendar.yaml 为主,本源仅用于校对。
+  event_calendar_source:
+    enabled: false               # v1 默认关闭,仅用 event_calendar.yaml
+    name: "Investpy / Trading Economics (direct, optional)"
+    purpose: "Backup / verification for event_calendar.yaml"
+    base_url_env: "EVENT_CAL_BASE_URL"
+    auth_type: "api_key"
+    api_key_env: "EVENT_CAL_API_KEY"
+    api_key_header: null
+    api_key_query: "api_key"
+    timeout_sec: 15
+    retry:
+      max_attempts: 2
+      backoff_sec: 2
+      backoff_strategy: "linear"
+      retry_on_status: [408, 429, 500, 502, 503, 504]
+    rate_limit:
+      requests_per_minute: 30
+      on_exceed: "reject"
+    freshness_class: "event"
+    notes: >
+      v1 纪律(§3.6.5):手动维护 event_calendar.yaml 为唯一事件源;
+      本条目留作将来上云后的校对来源,默认关闭。

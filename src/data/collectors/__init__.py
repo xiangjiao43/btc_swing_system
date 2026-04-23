@@ -14,11 +14,17 @@ Binance 已从架构移除(美国 IP 全线不可用);详见 docs/PROJECT_LOG.md
 from src import _env_loader  # noqa: F401
 
 from .coinglass import CoinglassCollector, CoinglassCollectorError
+from .fred import FredCollector, FredCollectorError
 from .glassnode import GlassnodeCollector, GlassnodeCollectorError
+from .yahoo_finance import YahooCollectorError, YahooFinanceCollector
 
 __all__ = [
     "CoinglassCollector",
     "CoinglassCollectorError",
     "GlassnodeCollector",
     "GlassnodeCollectorError",
+    "YahooFinanceCollector",
+    "YahooCollectorError",
+    "FredCollector",
+    "FredCollectorError",
 ]

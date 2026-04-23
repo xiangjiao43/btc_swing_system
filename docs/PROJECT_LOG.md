@@ -5,6 +5,42 @@
 
 ---
 
+## 2026-04-23 — Sprint 1.2 架构修正:Binance 仅抓 K 线,衍生品改走 CoinGlass
+
+### 背景
+
+Sprint 1.2 完成 BinanceCollector 后本地验证遇到**美国 IP 访问 api.binance.com 返回 HTTP 451**(地域封禁)。用户回忆旧系统验证过的方案:
+
+- **Binance K 线**走 `data.binance.vision`(公开数据镜像,美国 IP 可访问)
+- **衍生品**走 **CoinGlass**(因为 data.binance.vision 不提供 fundingRate / OI / long_short 等 fapi 端点)
+
+### 决策
+
+1. **拆分职责**
+   - `BinanceCollector` 仅抓 K 线(1h / 4h / 1d / 1w)
+   - `CoinGlassCollector`(Sprint 1.4 实现)抓所有衍生品
+
+2. **数据源真实域名(旧系统验证过)**
+   - Binance K 线:`https://data.binance.vision`
+   - CoinGlass:`https://coinglass-api.alphanode.work`(注意 `coinglass-` 前缀)
+     - 认证:HTTP header `coinglass-secret: <key>`
+   - Glassnode:`https://api.alphanode.work`(裸域名)
+     - 认证:查询参数 `?api_key=<key>`
+
+3. **代码层改动**(2026-04-23 commit `Sprint 1.2 fix`)
+   - `src/data/collectors/binance.py`:删除 5 个衍生品 fetch 方法,只留 `fetch_klines` + 简化版 `collect_and_save_all`
+   - `config/data_sources.yaml`:binance/glassnode/coinglass 三条目 URL + 认证配置校准为真实值;字段命名统一(`api_key_header`/`api_key_query` → `api_key_header_name`/`api_key_query_name` + 新增 `auth_method`)
+   - `.env.example`:删除 `BINANCE_FUTURES_BASE_URL`,修正 Glassnode / CoinGlass 说明
+   - `scripts/test_binance_collector.py`:删掉衍生品测试段,只测 4 档 K 线
+   - `src/data/collectors/_config_loader.py`:跟随字段重命名
+
+### 对后续 Sprint 的影响
+
+- **Sprint 1.4**(CoinGlass collector)职责扩大:需覆盖 funding_rate / open_interest / long_short_ratio / basis / put_call_ratio / liquidation / ETF flows(即 §3.6.2 全部衍生品指标)
+- 涉及字段命名迁移(`api_key_header` → `api_key_header_name` 等)的后续 collector 读配置时要用新字段名
+
+---
+
 ## 2026-04-22 — 项目初始化 / v1.2 建模完成,Sprint 1 前置工作计划
 
 ### 里程碑

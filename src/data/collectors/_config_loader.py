@@ -86,9 +86,6 @@ def load_source_config(source_name: str) -> dict[str, Any]:
     base_url = resolve_env_or_default(
         src.get("base_url_env"), src.get("base_url_default")
     )
-    futures_base_url = resolve_env_or_default(
-        src.get("futures_base_url_env"), src.get("futures_base_url_default")
-    )
 
     # ---- API key 解析(不返回真值,只返回是否启用) ----
     api_key_env = src.get("api_key_env")
@@ -103,12 +100,12 @@ def load_source_config(source_name: str) -> dict[str, Any]:
         "purpose": src.get("purpose", ""),
         "enabled": bool(src.get("enabled", False)),
         "base_url": base_url,
-        "futures_base_url": futures_base_url,
         "auth_type": src.get("auth_type", "none"),
+        "auth_method": src.get("auth_method"),         # header / query / null
         "api_key_env": api_key_env,
-        "api_key": api_key,                        # 运行时值;空字符串表示未设置
-        "api_key_header": src.get("api_key_header"),
-        "api_key_query": src.get("api_key_query"),
+        "api_key": api_key,                            # 运行时值;空字符串表示未设置
+        "api_key_header_name": src.get("api_key_header_name"),
+        "api_key_query_name": src.get("api_key_query_name"),
         "timeout_sec": int(src.get("timeout_sec") or defaults.get("timeout_sec") or 10),
         "retry": merged_retry,
         "rate_limit": merged_rate,

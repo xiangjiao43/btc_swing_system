@@ -132,6 +132,51 @@ layer_3_opportunity:
         truth_trend_direction: down
     # 其他情况 → none。v1 不允许 C 级(M3 + B3)
 
+  # ---- Grade 硬门槛(Sprint 1.9 新增)----
+  # 结构化的 A/B/C 门槛,供 Layer3Opportunity._compute_specific 使用。
+  # 与上面的 long_grade_rules / short_grade_rules 并存:老版规则是原始表达
+  # (文档一致性),新版 grade_*_floors 是代码实际读取的执行参数。
+  grade_a_floors:
+    stance_confidence:             0.70
+    cycle_confidence:              0.85
+    truth_trend_allowed_bands:     ["true_trend"]
+    band_position_allowed_phases:  ["early", "mid"]    # bullish & bearish 皆然
+    crowding_disallowed_bands:     ["extreme"]
+    regime_allowed:                ["trend_up", "trend_down"]
+    event_risk_disallowed_bands:   ["high"]
+    macro_disallowed_bands_bullish: ["strong_headwind"]
+  grade_b_floors:
+    stance_confidence:             0.62
+    cycle_confidence:              0.60
+    truth_trend_allowed_bands:     ["true_trend", "weak_trend"]
+    band_position_disallowed_phases_bullish: ["exhausted"]  # 不能顶
+    band_position_disallowed_phases_bearish: ["exhausted"]  # 不能底
+    crowding_disallowed_bands:     []         # elevated/mild 可 B,仅 flag
+    regime_allowed:                ["trend_up", "trend_down",
+                                    "transition_up", "transition_down",
+                                    "range_high", "range_low", "range_mid"]
+    event_risk_disallowed_bands:   []         # high 可 B,但会降 execution
+  grade_c_floors:
+    stance_confidence:             0.55
+
+  # ---- 反模式参数(Sprint 1.9,§7.9)----
+  # 每个 anti_pattern 的触发参数;impact 固定在代码里(不同类型的处罚不同)。
+  anti_patterns:
+    chasing_high:
+      recent_bars: 3
+      rally_threshold_pct: 0.08     # 近 3 根日线涨幅 > 8%
+    catching_falling_knife:
+      recent_bars: 5
+      move_threshold_pct: 0.10      # 近 5 根日线逆势 > 10%
+    overtrading_crowding:
+      crowding_triggers: ["extreme"]
+    event_window_trading:
+      hours_window: 24
+      high_event_types: ["fomc", "cpi", "nfp", "options_expiry_major"]
+    macro_misalignment:
+      bullish_against_bands: ["strong_headwind"]
+      # bearish 侧 v1 不设(见 sprint_1_9.md Trigger)
+
   # ---- 入场确认(§4.4.7)----
   entry_confirmation_timeframe: "1h"          # 1H 收盘确认成交
   hard_invalidation_confirmation_timeframe: "4h"  # 4H 收盘确认失效

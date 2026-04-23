@@ -12,9 +12,11 @@ from .state_builder import (
     BuildResult,
     DEFAULT_RULES_VERSION,
 )
+from .state_machine import StateMachine
 
 __all__ = [
     "StrategyStateBuilder",
     "BuildResult",
     "DEFAULT_RULES_VERSION",
+    "StateMachine",
 ]

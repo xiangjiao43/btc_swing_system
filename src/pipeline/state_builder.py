@@ -125,6 +125,7 @@ class StrategyStateBuilder:
         "layer_4",
         "layer_5",
         "ai_summary",
+        "state_machine",
         "persist_state",
     )
 
@@ -138,6 +139,8 @@ class StrategyStateBuilder:
         klines_lookback: int = 600,
         macro_lookback_days: int = 365,
         events_window_hours: float = 72.0,
+        state_machine: Any = None,
+        account_state_provider: Optional[Callable[[], dict[str, Any]]] = None,
     ) -> None:
         """
         Args:
@@ -156,6 +159,13 @@ class StrategyStateBuilder:
         self.klines_lookback = klines_lookback
         self.macro_lookback_days = macro_lookback_days
         self.events_window_hours = events_window_hours
+        self._account_state_provider = account_state_provider
+        # 延迟 import 避免循环依赖
+        if state_machine is None:
+            from .state_machine import StateMachine
+            self._state_machine = StateMachine()
+        else:
+            self._state_machine = state_machine
 
         self._base_cfg = _load_base_cfg()
 
@@ -370,7 +380,17 @@ class StrategyStateBuilder:
             degraded_stages=degraded_stages,
         )
 
-        # === Stage 15: persist ===
+        # === Stage 15: State Machine ===
+        sm_block = self._run_stage(
+            "state_machine", failures, degraded_stages, run_ts_utc,
+            lambda: self._run_state_machine(state, run_ts_utc),
+            default=_state_machine_fallback(
+                "state_machine stage failed", run_ts_utc,
+            ),
+        )
+        state["state_machine"] = sm_block
+
+        # === Stage 16: persist ===
         persisted = False
         if persist and self.conn is not None:
             persisted_val = self._run_stage(
@@ -644,6 +664,32 @@ class StrategyStateBuilder:
         )
         return True
 
+    # ------------------------------------------------------------------
+    # State Machine stage
+    # ------------------------------------------------------------------
+
+    def _run_state_machine(
+        self,
+        state: dict[str, Any],
+        run_ts_utc: str,
+    ) -> dict[str, Any]:
+        """查上一条 state + 调 StateMachine.determine_state。"""
+        previous_record = None
+        if self.conn is not None:
+            previous_record = StrategyStateDAO.get_latest_state(self.conn)
+        account_state: Optional[dict[str, Any]] = None
+        if self._account_state_provider is not None:
+            try:
+                account_state = self._account_state_provider()
+            except Exception as e:
+                logger.warning("account_state_provider failed: %s", e)
+        return self._state_machine.determine_state(
+            state,
+            previous_record=previous_record,
+            account_state=account_state,
+            conn=self.conn,
+        )
+
 
 # ==================================================================
 # 降级占位符构造
@@ -655,6 +701,24 @@ def _factor_degraded(name: str, reason: str = "stage exception") -> dict[str, An
         "health_status": "error",
         "computation_method": "error",
         "notes": [reason],
+    }
+
+
+def _state_machine_fallback(reason: str, run_ts_utc: str) -> dict[str, Any]:
+    """state_machine stage 整体失败时的占位(保守回到 neutral_observation)。"""
+    return {
+        "previous_state": None,
+        "current_state": "neutral_observation",
+        "transition_reason": f"state_machine degraded: {reason}",
+        "transition_evidence": {
+            "matched_conditions": [],
+            "evaluated_order": [],
+            "state_entered": "neutral_observation",
+            "fields_snapshot": {},
+        },
+        "stable_in_state": False,
+        "minutes_since_previous_transition": None,
+        "state_entered_at_utc": run_ts_utc,
     }
 
 

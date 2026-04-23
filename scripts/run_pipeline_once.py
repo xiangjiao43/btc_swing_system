@@ -45,6 +45,7 @@ def _summarize(state: dict[str, Any]) -> dict[str, Any]:
     l5 = (state.get("evidence_reports") or {}).get("layer_5") or {}
     ctx = state.get("context_summary") or {}
     pm = state.get("pipeline_meta") or {}
+    sm = state.get("state_machine") or {}
     return {
         "run_id": state.get("run_id"),
         "reference_ts": state.get("reference_timestamp_utc"),
@@ -67,6 +68,10 @@ def _summarize(state: dict[str, Any]) -> dict[str, Any]:
         "ai.tokens_in": ctx.get("tokens_in"),
         "ai.tokens_out": ctx.get("tokens_out"),
         "ai.summary_preview": (ctx.get("summary_text") or "")[:200],
+        "state_machine.previous": sm.get("previous_state"),
+        "state_machine.current": sm.get("current_state"),
+        "state_machine.transition_reason": sm.get("transition_reason"),
+        "state_machine.stable_in_state": sm.get("stable_in_state"),
         "pipeline.degraded_stages": pm.get("degraded_stages"),
         "pipeline.failure_count": len(pm.get("failures") or []),
     }

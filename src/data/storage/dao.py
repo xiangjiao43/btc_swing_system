@@ -562,6 +562,39 @@ class StrategyStateDAO:
         return int(row["n"])
 
     @staticmethod
+    def get_latest_with_state_in(
+        conn: sqlite3.Connection,
+        state_names: list[str],
+    ) -> Optional[dict[str, Any]]:
+        """
+        返回最近一条 state_machine.current_state ∈ state_names 的记录。
+        无命中返回 None。Sprint 1.13 用于 post_execution_cooldown 计算
+        "距最近一次 active_* 执行多少分钟"。
+
+        state_json 里字段路径:
+          $.state_machine.current_state
+        """
+        if not state_names:
+            return None
+        placeholders = ",".join(["?"] * len(state_names))
+        sql = f"""
+            SELECT * FROM strategy_state_history
+            WHERE json_extract(state_json, '$.state_machine.current_state')
+                  IN ({placeholders})
+            ORDER BY run_timestamp_utc DESC
+            LIMIT 1
+        """
+        try:
+            row = conn.execute(sql, tuple(state_names)).fetchone()
+        except sqlite3.OperationalError:
+            return None
+        if row is None:
+            return None
+        d = dict(row)
+        d["state"] = json.loads(d.pop("state_json"))
+        return d
+
+    @staticmethod
     def get_latest_non_unclear_cycle(
         conn: sqlite3.Connection,
     ) -> Optional[str]:

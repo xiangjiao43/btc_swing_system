@@ -1,0 +1,51 @@
+[本次运行上下文]
+当前时间: {generated_at_bjt} (BJT)
+参考时间戳: {reference_timestamp_utc} (UTC)
+BTC 价格: ${btc_price_usd}
+当前系统状态: {current_state}
+本次运行触发源: {run_trigger}
+合法迁移选项: {allowed_transitions}
+观察类别: {observation_category}
+
+[数据新鲜度]
+{data_freshness_summary}
+
+[系统约束]
+最大仓位上限: {max_position_cap_pct}%
+仓位合成过程: {position_cap_composition}
+硬失效位:
+{hard_invalidation_levels_formatted}
+保护态是否激活: {protection_mode_active}
+FLIP_WATCH 冷却范围: {flip_watch_effective_min_hours}-{flip_watch_effective_max_hours} 小时
+当前多空门槛: 多头 {active_direction_thresholds.long} / 空头 {active_direction_thresholds.short}
+L3 判档结果: {l3_opportunity_grade}  ← 不可修改,必须原样引用
+
+[当前生命周期]
+{current_lifecycle_json_or_none}
+
+[五层证据报告]
+
+L1 市场状态:
+{layer1_report_json}
+
+L2 方向结构:
+{layer2_report_json}
+
+L3 机会执行:
+{layer3_report_json}
+
+L4 风险失效:
+{layer4_report_json}
+
+L5 背景事件:
+{layer5_report_json}
+
+[证据卡摘要 ID 清单]
+可供 primary_drivers 引用的 card_id(共 {evidence_cards_count} 张):
+{evidence_cards_summary_list}
+
+[最近 3 次运行的浓缩历史]
+{recent_runs_digest}
+
+═══ 请按 AIAdjudicatorOutput schema 输出你的裁决 ═══
+仅输出 JSON,第一个字符必须是 {{。

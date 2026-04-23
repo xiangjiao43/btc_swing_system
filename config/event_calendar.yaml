@@ -1,0 +1,645 @@
+# ============================================================
+# event_calendar.yaml — 事件日历(手动维护,每年 12 月更新下一年)
+# ============================================================
+# 用途:
+#   - 所有美国宏观事件(FOMC / CPI / NFP / ...)按"美国东部时间"存储
+#   - 所有 UTC 基准事件(资金费率结算 / Glassnode 日更新 / 期权到期)按 UTC 存储
+#   - 减半事件独立登记
+#   - 事件名 → 类型映射,衔接 thresholds.yaml → event_risk_scoring.event_type_weights
+#
+# 硬纪律(§3.4.1,M39):
+#   * 美国事件 timezone 必须是 America/New_York(夏令时 zoneinfo 自动切换)
+#   * UTC 事件 timezone 必须是 UTC
+#   * 绝不直接存北京时间
+#
+# 维护纪律(§3.4.4):
+#   * 每年 12 月人工更新下一年度日程
+#   * 来源:federalreserve.gov / bls.gov / 交易所财经日历
+#   * 对于具体日期未公布的条目,date 写 "TBD_CHECK_FED_SITE",
+#     notes 注明核对来源,**不要**虚构日期
+#
+# 编码读取(§3.4.5):
+#   * Python zoneinfo 做时区转换
+#   * 单元测试覆盖"夏令时切换日前后各 3 天"(tests/timezone_dst_test.py)
+#   * 加载失败时:仅运行定时整点 6 次,不执行事件触发;推送 warning
+#
+# impact_level 分级(1-5,影响力粗估):
+#   5 = 顶级(FOMC / CPI / Core CPI)
+#   4 = 高(NFP / FOMC minutes / Powell 讲话)
+#   3 = 中(PPI / GDP / Retail Sales)
+#   2 = 低(ADP / 期权月度到期 / Consumer Confidence)
+#   1 = 信息(一般数据点)
+#
+# 创建于:2026-04-23(Sprint 1 前置工作 · 优化二第 4 批)
+# 建模版本:v1.2
+# 日历覆盖年度:2026
+# ============================================================
+
+
+# ============================================================
+# PART 1 — 事件名 → event_type 映射
+# ============================================================
+# 运行时代码:
+#   event_type = event_type_mapping[event.name]  # 找到 type
+#   base_weight = thresholds.event_risk_scoring.event_type_weights[event_type]
+# 未在映射表中的事件走 other(weight 1)。
+# 本表尽量覆盖常见事件名,减少 other 的兜底频率(§6.批 2 注释)。
+
+event_type_mapping:
+  # ---- FOMC 族(全部 map 到 fomc = weight 4)----
+  FOMC_decision:            fomc
+  FOMC_statement:           fomc
+  FOMC_press_conference:    fomc
+  FOMC_minutes:             fomc
+  FOMC_economic_projections: fomc
+  Powell_speech:            fomc
+  Powell_testimony:         fomc
+  Fed_official_speech:      fomc
+
+  # ---- CPI 族(map 到 cpi = weight 3)----
+  CPI:                      cpi
+  Core_CPI:                 cpi
+  CPI_YoY:                  cpi
+  CPI_MoM:                  cpi
+
+  # ---- NFP 族(map 到 nfp = weight 3)----
+  NFP:                      nfp
+  Nonfarm_Payrolls:         nfp
+  Unemployment_Rate:        nfp
+  Average_Hourly_Earnings:  nfp
+
+  # ---- 期权到期(map 到 options_expiry_major = weight 2)----
+  Options_expiry_monthly:   options_expiry_major
+  Options_expiry_quarterly: options_expiry_major
+  BTC_options_expiry:       options_expiry_major
+
+  # ---- 其他数据(map 到 other = weight 1)----
+  PPI:                      other
+  Core_PPI:                 other
+  Retail_Sales:             other
+  Core_Retail_Sales:        other
+  ADP:                      other
+  ADP_Employment_Change:    other
+  GDP:                      other
+  GDP_advance:              other
+  GDP_revision:             other
+  ISM_Manufacturing:        other
+  ISM_Services:             other
+  Consumer_Confidence:      other
+  Michigan_Consumer_Sentiment: other
+  JOLTS:                    other
+  Initial_Jobless_Claims:   other
+
+
+# ============================================================
+# PART 2 — 美国宏观事件(America/New_York 时区)
+# ============================================================
+# 字段:
+#   name:           事件名(必须在 event_type_mapping 里有映射)
+#   date:           YYYY-MM-DD(或 "TBD_CHECK_FED_SITE" 占位)
+#   local_time:     "HH:MM"(24h 制,ET 当地时间)
+#   timezone:       "America/New_York"(强制,不可改)
+#   impact_level:   1-5
+#   notes:          人类备注;占位日期必须注明核对来源
+#
+# 2026 年覆盖:FOMC 8 次 / CPI 12 次 / NFP 12 次 / GDP 4 次 / PPI 12 次
+# NFP 为每月第一个周五,日期可精确计算并写入。
+# FOMC / CPI / PPI 日期需人工从官网核对,模板里先用 TBD 占位覆盖月份。
+
+macro_events:
+
+  # ---------- FOMC 决议(8 次/年)----------
+  # 传统月份节奏:1-2月 / 3月 / 4-5月 / 6月 / 7月 / 9月 / 11月 / 12月
+  # 决议:14:00 ET;新闻发布会:14:30 ET(非每次都有,按官网公布)
+  # 纪要:3 周后 14:00 ET
+  # 源:federalreserve.gov/monetarypolicy/fomccalendars.htm
+
+  - name: FOMC_decision
+    date: TBD_CHECK_FED_SITE
+    target_month: 2026-01
+    local_time: "14:00"
+    timezone: "America/New_York"
+    impact_level: 5
+    notes: "2026 Q1 第一次 FOMC(1 月或 2 月初)。核对 federalreserve.gov/monetarypolicy/fomccalendars.htm"
+  - name: FOMC_press_conference
+    date: TBD_CHECK_FED_SITE
+    target_month: 2026-01
+    local_time: "14:30"
+    timezone: "America/New_York"
+    impact_level: 5
+    notes: "跟随同次 FOMC 决议;是否举行按官网"
+  - name: FOMC_minutes
+    date: TBD_CHECK_FED_SITE
+    target_month: 2026-02
+    local_time: "14:00"
+    timezone: "America/New_York"
+    impact_level: 4
+    notes: "对应 1 月 FOMC 的会议纪要(约 3 周后)"
+
+  - name: FOMC_decision
+    date: TBD_CHECK_FED_SITE
+    target_month: 2026-03
+    local_time: "14:00"
+    timezone: "America/New_York"
+    impact_level: 5
+    notes: "含经济预测更新(SEP),市场影响通常更大"
+  - name: FOMC_press_conference
+    date: TBD_CHECK_FED_SITE
+    target_month: 2026-03
+    local_time: "14:30"
+    timezone: "America/New_York"
+    impact_level: 5
+    notes: "SEP 发布当次通常有发布会"
+  - name: FOMC_minutes
+    date: TBD_CHECK_FED_SITE
+    target_month: 2026-04
+    local_time: "14:00"
+    timezone: "America/New_York"
+    impact_level: 4
+    notes: "对应 3 月 FOMC 纪要"
+
+  - name: FOMC_decision
+    date: TBD_CHECK_FED_SITE
+    target_month: 2026-05
+    local_time: "14:00"
+    timezone: "America/New_York"
+    impact_level: 5
+    notes: "4-5 月交接期 FOMC"
+  - name: FOMC_minutes
+    date: TBD_CHECK_FED_SITE
+    target_month: 2026-05
+    local_time: "14:00"
+    timezone: "America/New_York"
+    impact_level: 4
+    notes: "对应 4-5 月 FOMC 纪要"
+
+  - name: FOMC_decision
+    date: TBD_CHECK_FED_SITE
+    target_month: 2026-06
+    local_time: "14:00"
+    timezone: "America/New_York"
+    impact_level: 5
+    notes: "含 SEP 更新"
+  - name: FOMC_press_conference
+    date: TBD_CHECK_FED_SITE
+    target_month: 2026-06
+    local_time: "14:30"
+    timezone: "America/New_York"
+    impact_level: 5
+  - name: FOMC_minutes
+    date: TBD_CHECK_FED_SITE
+    target_month: 2026-07
+    local_time: "14:00"
+    timezone: "America/New_York"
+    impact_level: 4
+    notes: "对应 6 月 FOMC 纪要"
+
+  - name: FOMC_decision
+    date: TBD_CHECK_FED_SITE
+    target_month: 2026-07
+    local_time: "14:00"
+    timezone: "America/New_York"
+    impact_level: 5
+  - name: FOMC_minutes
+    date: TBD_CHECK_FED_SITE
+    target_month: 2026-08
+    local_time: "14:00"
+    timezone: "America/New_York"
+    impact_level: 4
+
+  - name: FOMC_decision
+    date: TBD_CHECK_FED_SITE
+    target_month: 2026-09
+    local_time: "14:00"
+    timezone: "America/New_York"
+    impact_level: 5
+    notes: "含 SEP 更新"
+  - name: FOMC_press_conference
+    date: TBD_CHECK_FED_SITE
+    target_month: 2026-09
+    local_time: "14:30"
+    timezone: "America/New_York"
+    impact_level: 5
+  - name: FOMC_minutes
+    date: TBD_CHECK_FED_SITE
+    target_month: 2026-10
+    local_time: "14:00"
+    timezone: "America/New_York"
+    impact_level: 4
+
+  - name: FOMC_decision
+    date: TBD_CHECK_FED_SITE
+    target_month: 2026-11
+    local_time: "14:00"
+    timezone: "America/New_York"
+    impact_level: 5
+  - name: FOMC_minutes
+    date: TBD_CHECK_FED_SITE
+    target_month: 2026-12
+    local_time: "14:00"
+    timezone: "America/New_York"
+    impact_level: 4
+
+  - name: FOMC_decision
+    date: TBD_CHECK_FED_SITE
+    target_month: 2026-12
+    local_time: "14:00"
+    timezone: "America/New_York"
+    impact_level: 5
+    notes: "年末最后一次 FOMC,含 SEP 更新"
+  - name: FOMC_press_conference
+    date: TBD_CHECK_FED_SITE
+    target_month: 2026-12
+    local_time: "14:30"
+    timezone: "America/New_York"
+    impact_level: 5
+
+  # ---------- 美国 CPI(每月 1 次,中旬)----------
+  # 发布:8:30 ET,通常当月 10-15 日。来源:bls.gov/schedule/news_release/cpi.htm
+  - name: CPI
+    date: TBD_CHECK_FED_SITE
+    target_month: 2026-01
+    local_time: "08:30"
+    timezone: "America/New_York"
+    impact_level: 5
+    notes: "2026 年 1 月 CPI 数据(12 月读数)。核对 bls.gov"
+  - name: CPI
+    date: TBD_CHECK_FED_SITE
+    target_month: 2026-02
+    local_time: "08:30"
+    timezone: "America/New_York"
+    impact_level: 5
+  - name: CPI
+    date: TBD_CHECK_FED_SITE
+    target_month: 2026-03
+    local_time: "08:30"
+    timezone: "America/New_York"
+    impact_level: 5
+  - name: CPI
+    date: TBD_CHECK_FED_SITE
+    target_month: 2026-04
+    local_time: "08:30"
+    timezone: "America/New_York"
+    impact_level: 5
+  - name: CPI
+    date: TBD_CHECK_FED_SITE
+    target_month: 2026-05
+    local_time: "08:30"
+    timezone: "America/New_York"
+    impact_level: 5
+  - name: CPI
+    date: TBD_CHECK_FED_SITE
+    target_month: 2026-06
+    local_time: "08:30"
+    timezone: "America/New_York"
+    impact_level: 5
+  - name: CPI
+    date: TBD_CHECK_FED_SITE
+    target_month: 2026-07
+    local_time: "08:30"
+    timezone: "America/New_York"
+    impact_level: 5
+  - name: CPI
+    date: TBD_CHECK_FED_SITE
+    target_month: 2026-08
+    local_time: "08:30"
+    timezone: "America/New_York"
+    impact_level: 5
+  - name: CPI
+    date: TBD_CHECK_FED_SITE
+    target_month: 2026-09
+    local_time: "08:30"
+    timezone: "America/New_York"
+    impact_level: 5
+  - name: CPI
+    date: TBD_CHECK_FED_SITE
+    target_month: 2026-10
+    local_time: "08:30"
+    timezone: "America/New_York"
+    impact_level: 5
+  - name: CPI
+    date: TBD_CHECK_FED_SITE
+    target_month: 2026-11
+    local_time: "08:30"
+    timezone: "America/New_York"
+    impact_level: 5
+  - name: CPI
+    date: TBD_CHECK_FED_SITE
+    target_month: 2026-12
+    local_time: "08:30"
+    timezone: "America/New_York"
+    impact_level: 5
+
+  # ---------- NFP(每月第一个周五,8:30 ET)----------
+  # 2026 年第一个周五的日期可精确计算(见文件头 knowledge 备注)。
+  - name: NFP
+    date: 2026-01-02
+    local_time: "08:30"
+    timezone: "America/New_York"
+    impact_level: 4
+    notes: "2026 年 1 月 NFP(反映 2025 年 12 月就业)。每月第一个周五"
+  - name: NFP
+    date: 2026-02-06
+    local_time: "08:30"
+    timezone: "America/New_York"
+    impact_level: 4
+  - name: NFP
+    date: 2026-03-06
+    local_time: "08:30"
+    timezone: "America/New_York"
+    impact_level: 4
+  - name: NFP
+    date: 2026-04-03
+    local_time: "08:30"
+    timezone: "America/New_York"
+    impact_level: 4
+  - name: NFP
+    date: 2026-05-01
+    local_time: "08:30"
+    timezone: "America/New_York"
+    impact_level: 4
+  - name: NFP
+    date: 2026-06-05
+    local_time: "08:30"
+    timezone: "America/New_York"
+    impact_level: 4
+  - name: NFP
+    date: 2026-07-03
+    local_time: "08:30"
+    timezone: "America/New_York"
+    impact_level: 4
+    notes: "注意:7 月 3 日接近独立日,部分机构可能提前或延后发布"
+  - name: NFP
+    date: 2026-08-07
+    local_time: "08:30"
+    timezone: "America/New_York"
+    impact_level: 4
+  - name: NFP
+    date: 2026-09-04
+    local_time: "08:30"
+    timezone: "America/New_York"
+    impact_level: 4
+  - name: NFP
+    date: 2026-10-02
+    local_time: "08:30"
+    timezone: "America/New_York"
+    impact_level: 4
+  - name: NFP
+    date: 2026-11-06
+    local_time: "08:30"
+    timezone: "America/New_York"
+    impact_level: 4
+  - name: NFP
+    date: 2026-12-04
+    local_time: "08:30"
+    timezone: "America/New_York"
+    impact_level: 4
+
+  # ---------- PPI(每月 1 次,通常在 CPI 之后 1 天)----------
+  - name: PPI
+    date: TBD_CHECK_FED_SITE
+    target_month: 2026-01
+    local_time: "08:30"
+    timezone: "America/New_York"
+    impact_level: 3
+    notes: "通常在 CPI 之后 1 天;具体日期查 bls.gov"
+  - name: PPI
+    date: TBD_CHECK_FED_SITE
+    target_month: 2026-02
+    local_time: "08:30"
+    timezone: "America/New_York"
+    impact_level: 3
+  - name: PPI
+    date: TBD_CHECK_FED_SITE
+    target_month: 2026-03
+    local_time: "08:30"
+    timezone: "America/New_York"
+    impact_level: 3
+  - name: PPI
+    date: TBD_CHECK_FED_SITE
+    target_month: 2026-04
+    local_time: "08:30"
+    timezone: "America/New_York"
+    impact_level: 3
+  - name: PPI
+    date: TBD_CHECK_FED_SITE
+    target_month: 2026-05
+    local_time: "08:30"
+    timezone: "America/New_York"
+    impact_level: 3
+  - name: PPI
+    date: TBD_CHECK_FED_SITE
+    target_month: 2026-06
+    local_time: "08:30"
+    timezone: "America/New_York"
+    impact_level: 3
+  - name: PPI
+    date: TBD_CHECK_FED_SITE
+    target_month: 2026-07
+    local_time: "08:30"
+    timezone: "America/New_York"
+    impact_level: 3
+  - name: PPI
+    date: TBD_CHECK_FED_SITE
+    target_month: 2026-08
+    local_time: "08:30"
+    timezone: "America/New_York"
+    impact_level: 3
+  - name: PPI
+    date: TBD_CHECK_FED_SITE
+    target_month: 2026-09
+    local_time: "08:30"
+    timezone: "America/New_York"
+    impact_level: 3
+  - name: PPI
+    date: TBD_CHECK_FED_SITE
+    target_month: 2026-10
+    local_time: "08:30"
+    timezone: "America/New_York"
+    impact_level: 3
+  - name: PPI
+    date: TBD_CHECK_FED_SITE
+    target_month: 2026-11
+    local_time: "08:30"
+    timezone: "America/New_York"
+    impact_level: 3
+  - name: PPI
+    date: TBD_CHECK_FED_SITE
+    target_month: 2026-12
+    local_time: "08:30"
+    timezone: "America/New_York"
+    impact_level: 3
+
+  # ---------- GDP(季度,初值 / 修正值 / 终值)----------
+  # BEA 发布,8:30 ET。初值通常在季度结束后第 4 周。
+  - name: GDP_advance
+    date: TBD_CHECK_FED_SITE
+    target_month: 2026-01
+    local_time: "08:30"
+    timezone: "America/New_York"
+    impact_level: 3
+    notes: "2025 Q4 GDP 初值;来源 bea.gov"
+  - name: GDP_advance
+    date: TBD_CHECK_FED_SITE
+    target_month: 2026-04
+    local_time: "08:30"
+    timezone: "America/New_York"
+    impact_level: 3
+    notes: "2026 Q1 GDP 初值"
+  - name: GDP_advance
+    date: TBD_CHECK_FED_SITE
+    target_month: 2026-07
+    local_time: "08:30"
+    timezone: "America/New_York"
+    impact_level: 3
+    notes: "2026 Q2 GDP 初值"
+  - name: GDP_advance
+    date: TBD_CHECK_FED_SITE
+    target_month: 2026-10
+    local_time: "08:30"
+    timezone: "America/New_York"
+    impact_level: 3
+    notes: "2026 Q3 GDP 初值"
+
+
+# ============================================================
+# PART 3 — UTC 基准事件(固定 UTC,不受夏令时影响)
+# ============================================================
+# §3.4.3 明确指定:以下三类事件用 UTC 存储。
+utc_events:
+
+  # ---------- 币安资金费率结算(UTC 00 / 08 / 16)----------
+  # 每日 3 次,运行时代码展开为当日 3 个事件实例。
+  - name: binance_funding_rate_settlement
+    recurrence: daily
+    times_utc: ["00:00", "08:00", "16:00"]
+    timezone: "UTC"
+    impact_level: 2
+    notes: "资金费率结算后 15 分钟事件触发(base.yaml → event_driven.types.event_funding)"
+
+  # ---------- Glassnode 日级数据更新(UTC 00:00)----------
+  - name: glassnode_daily_update
+    recurrence: daily
+    times_utc: ["00:00"]
+    timezone: "UTC"
+    impact_level: 1
+    notes: >
+      北京 08:00 ≈ UTC 00:00;实际数据可用时间通常在北京 08:15-08:30
+      (中转/清洗延迟),所以事件触发窗口在 UTC 00:15-00:30,见
+      base.yaml → event_driven.types.event_onchain
+
+  # ---------- 期权月度到期(每月最后一个周五 UTC 08:00)----------
+  # Deribit BTC 期权到期时间:UTC 08:00
+  - name: options_expiry_monthly
+    date: 2026-01-30
+    time: "08:00"
+    timezone: "UTC"
+    impact_level: 2
+    notes: "1 月最后一个周五"
+  - name: options_expiry_monthly
+    date: 2026-02-27
+    time: "08:00"
+    timezone: "UTC"
+    impact_level: 2
+  - name: options_expiry_monthly
+    date: 2026-03-27
+    time: "08:00"
+    timezone: "UTC"
+    impact_level: 3
+    notes: "Q1 季度到期,影响更大"
+  - name: options_expiry_monthly
+    date: 2026-04-24
+    time: "08:00"
+    timezone: "UTC"
+    impact_level: 2
+  - name: options_expiry_monthly
+    date: 2026-05-29
+    time: "08:00"
+    timezone: "UTC"
+    impact_level: 2
+  - name: options_expiry_monthly
+    date: 2026-06-26
+    time: "08:00"
+    timezone: "UTC"
+    impact_level: 3
+    notes: "Q2 季度到期"
+  - name: options_expiry_monthly
+    date: 2026-07-31
+    time: "08:00"
+    timezone: "UTC"
+    impact_level: 2
+  - name: options_expiry_monthly
+    date: 2026-08-28
+    time: "08:00"
+    timezone: "UTC"
+    impact_level: 2
+  - name: options_expiry_monthly
+    date: 2026-09-25
+    time: "08:00"
+    timezone: "UTC"
+    impact_level: 3
+    notes: "Q3 季度到期"
+  - name: options_expiry_monthly
+    date: 2026-10-30
+    time: "08:00"
+    timezone: "UTC"
+    impact_level: 2
+  - name: options_expiry_monthly
+    date: 2026-11-27
+    time: "08:00"
+    timezone: "UTC"
+    impact_level: 2
+  - name: options_expiry_monthly
+    date: 2026-12-25
+    time: "08:00"
+    timezone: "UTC"
+    impact_level: 3
+    notes: >
+      Q4 / 年度到期,影响通常最大。注意 12-25 是圣诞节,
+      Deribit 可能调整到前一周(12-18)或特殊处理;人工核对 deribit.com
+
+
+# ============================================================
+# PART 4 — BTC 减半事件
+# ============================================================
+# 建模 §3.8.4 失真提醒:减半前后 6 个月各指标基准偏移,
+# CyclePosition 置信度自动降一档。运行时代码查 halving_events
+# 判断当前是否在减半窗口(base.yaml → cycle_position_decision
+# 的 halving_window_months_around = 6 个月)。
+halving_events:
+
+  - number: 4
+    date: 2024-04-20
+    height: 840000
+    status: occurred
+    notes: "第 4 次减半(50 BTC → 3.125 BTC)。已发生"
+
+  - number: 5
+    date: TBD_ESTIMATE_2028_APR
+    height: 1050000
+    status: estimated
+    notes: >
+      第 5 次减半。估算日期:2028 年 4 月附近(平均出块 10 分钟推算)。
+      临近时(2027 Q4)人工更新估算。具体日期查 clark.moe/halving 或
+      btcticker.com 等倒计时工具。
+
+
+# ============================================================
+# PART 5 — 文件完整性规则(仅文档)
+# ============================================================
+# 以下是维护和加载本文件的约束,供 event_loader 参考:
+#
+# 1. 加载时校验:
+#    - 每条事件的 timezone 字段必须存在且在 {America/New_York, UTC}
+#    - 美国事件不得使用 UTC timezone;UTC 事件不得使用 America/New_York
+#    - event_type_mapping 覆盖所有 macro_events.name;未覆盖的事件
+#      warning 告警(走 other 兜底)
+#
+# 2. TBD 占位处理:
+#    - date: "TBD_CHECK_FED_SITE" 的条目在当前年度未核对前,
+#      事件触发运行不会被启用(impact_level 保留但 date 不可用)
+#    - UI 层显示"日期待定,请核对官方日程"提示
+#
+# 3. 夏令时转换:
+#    - America/New_York 时区字符串交给 zoneinfo,自动处理 EST/EDT 切换
+#    - 单元测试 tests/timezone_dst_test.py 必须覆盖切换日前后各 3 天

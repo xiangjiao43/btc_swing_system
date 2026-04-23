@@ -20,3 +20,8 @@ dependencies = [
 dev = [
     "pytest>=8.0",
 ]
+
+[tool.pytest.ini_options]
+# 让 pytest 能 import src.* 模块(src 是项目根下的命名空间包)
+pythonpath = ["."]
+testpaths = ["tests"]

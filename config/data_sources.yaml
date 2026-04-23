@@ -61,51 +61,65 @@ defaults:
 
 sources:
 
-  # ---- 1. 币安 Binance(K 线镜像,data.binance.vision)----------------
-  # 只提供 K 线(1h / 4h / 1d / 1w);衍生品走 CoinGlass(旧系统验证过的架构)。
-  # 原因:美国 IP 访问 api.binance.com 返回 HTTP 451;data.binance.vision 是
-  #       Binance 公开数据镜像,美国 IP 可访问,但只覆盖 K 线和历史数据。
-  # §3.6.1 K 线 4 档依赖此源;§3.6.2 衍生品全部改路由到 coinglass。
-  binance:
-    enabled: true
-    name: "Binance Vision (public data mirror)"
-    purpose: "Spot K-lines only (1h / 4h / 1d / 1w)"
-    base_url_env: "BINANCE_BASE_URL"                  # 可选:用户可在 .env 覆盖
-    base_url_default: "https://data.binance.vision"   # 默认公开镜像
-    auth_type: "none"                                  # 公开镜像无需 key
-    auth_method: null
-    api_key_env: null
-    api_key_header_name: null
-    api_key_query_name: null
-    timeout_sec: 10
-    retry:
-      max_attempts: 3
-      backoff_sec: 2
-      backoff_strategy: "exponential"
-      retry_on_status: [408, 418, 429, 500, 502, 503, 504]
-    rate_limit:
-      # CDN 限流宽松;保守取 600/min
-      requests_per_minute: 600
-      on_exceed: "queue"
-    freshness_class: "price"
-    notes: >
-      只抓 K 线,衍生品走 CoinGlass(旧系统验证过的架构)。
-      data.binance.vision 是 Binance 公开数据镜像,美国 IP 可访问。
-      若后续切自建代理或付费镜像,在 .env 设 BINANCE_BASE_URL 覆盖即可。
+  # =======================================================================
+  # 架构说明(Sprint 1.2 v2,2026-04-23)
+  # =======================================================================
+  # Binance 已从数据源中**移除**:
+  #   - api.binance.com / fapi.binance.com:美国 IP 返回 HTTP 451(地域封禁)
+  #   - data.binance.vision:是静态 ZIP/CSV 仓库,不是 REST API
+  # 旧系统验证过的真实架构:
+  #   - BTC K 线:CoinGlass(主数据源)/v4/api/futures/price/history
+  #   - 所有衍生品:CoinGlass(funding / OI / long_short / liquidation / net_position)
+  #   - 链上:Glassnode
+  #   - CoinGlass 和 Glassnode 共享中转站 https://api.alphanode.work
+  #   - 共享鉴权:HTTP header "x-key"(小写),COINGLASS_API_KEY 和
+  #     GLASSNODE_API_KEY 通常填同一个 alphanode 中转站 key
+  # 见 docs/PROJECT_LOG.md 2026-04-23 条目。
+  # =======================================================================
 
-  # ---- 2. Glassnode(链上,走 api.alphanode.work 中转)---------------
+  # ---- 1. CoinGlass(BTC K 线 + 所有衍生品,走 api.alphanode.work)------
+  # §3.6.1(K 线)+ §3.6.2(衍生品)
+  # 合并为单一数据源:原架构下 Binance 承担 K 线 + 部分衍生品、CoinGlass
+  # 补充衍生品;美国 IP 下 Binance 全线不可用,由 CoinGlass 全面承担。
+  coinglass:
+    enabled: true
+    name: "CoinGlass (via api.alphanode.work)"
+    purpose: "BTC klines (primary source) + all derivatives (funding, OI, long_short, liquidation, net_position)"
+    base_url_env: "COINGLASS_BASE_URL"
+    base_url_default: "https://api.alphanode.work"     # 旧系统验证过的统一中转站
+    auth_type: "api_key"
+    auth_method: "header"
+    api_key_env: "COINGLASS_API_KEY"
+    api_key_header_name: "x-key"                        # 旧系统验证过(小写连字符)
+    api_key_query_name: null
+    timeout_sec: 20                                     # 旧系统值
+    retry:
+      max_attempts: 3                                   # 首次 + 2 次重试
+      backoff_sec: 8                                    # 旧系统值
+      backoff_strategy: "fixed"                         # 固定间隔 8s
+      retry_on_status: [408, 429, 500, 502, 503, 504]
+    rate_limit:
+      requests_per_minute: 15                           # 旧系统 RateLimiter 参数
+      on_exceed: "queue"
+    freshness_class: "derivatives"                      # 价格与衍生品混合;细分见 data_catalog.yaml
+    notes: >
+      旧系统验证过的合并数据源:域名 api.alphanode.work,header "x-key"。
+      COINGLASS_API_KEY 和 GLASSNODE_API_KEY 一般可填同一个 alphanode 中转 key。
+      K 线端点:/v4/api/futures/price/history(symbol=BTCUSDT, exchange=Binance)。
+
+  # ---- 2. Glassnode(链上,和 CoinGlass 共享中转站 api.alphanode.work)---
   # §3.6.3:Advanced 档三档分层(MVRV / NUPL / SOPR / Reserve Risk 等)。
   glassnode:
     enabled: true
     name: "Glassnode Advanced (via api.alphanode.work)"
     purpose: "On-chain metrics (MVRV, NUPL, SOPR, Reserve Risk, LTH/STH, ...)"
     base_url_env: "GLASSNODE_BASE_URL"
-    base_url_default: "https://api.alphanode.work"    # 旧系统验证过
+    base_url_default: "https://api.alphanode.work"     # 与 CoinGlass 同域名
     auth_type: "api_key"
-    auth_method: "query"                               # query 参数鉴权
+    auth_method: "header"                               # v2 修正:同 CoinGlass,不用 query
     api_key_env: "GLASSNODE_API_KEY"
-    api_key_header_name: null
-    api_key_query_name: "api_key"                      # ?api_key=<key>
+    api_key_header_name: "x-key"                        # 旧系统统一 header
+    api_key_query_name: null
     timeout_sec: 15
     retry:
       max_attempts: 3
@@ -113,44 +127,13 @@ sources:
       backoff_strategy: "exponential"
       retry_on_status: [408, 429, 500, 502, 503, 504]
     rate_limit:
-      # 中转站侧限流未知;保守 120/min,可依实际额度调整
       requests_per_minute: 120
       on_exceed: "queue"
     freshness_class: "onchain"   # > 48 h 视为 stale(§3.2.3)
     notes: >
-      旧系统验证过:裸域名 api.alphanode.work + query 参数 api_key 鉴权。
+      旧系统验证过:与 CoinGlass 共享中转站 api.alphanode.work + header x-key。
       链上数据多为日级;采集计划 08:15-08:30(北京)事件触发,
       见 base.yaml → runtime.event_driven.types.event_onchain。
-
-  # ---- 3. CoinGlass(所有衍生品,走 coinglass-api.alphanode.work 中转)-----
-  # §3.6.2:跨交易所资金费率、多空比、清算、ETF 资金流。
-  # Sprint 1.2 架构修正:Binance 不再抓衍生品,全部走 CoinGlass
-  # (因美国 IP 无法访问 fapi.binance.com)。
-  coinglass:
-    enabled: true
-    name: "CoinGlass Professional (via coinglass-api.alphanode.work)"
-    purpose: "All derivatives: funding rate, open interest, long/short, basis, put/call, liquidation, ETF flows"
-    base_url_env: "COINGLASS_BASE_URL"
-    base_url_default: "https://coinglass-api.alphanode.work"   # 注意前缀 coinglass-
-    auth_type: "api_key"
-    auth_method: "header"                              # header 鉴权
-    api_key_env: "COINGLASS_API_KEY"
-    api_key_header_name: "coinglass-secret"            # 注意中横线,不是驼峰
-    api_key_query_name: null
-    timeout_sec: 10
-    retry:
-      max_attempts: 3
-      backoff_sec: 2
-      backoff_strategy: "exponential"
-      retry_on_status: [408, 429, 500, 502, 503, 504]
-    rate_limit:
-      requests_per_minute: 120
-      on_exceed: "queue"
-    freshness_class: "derivatives"   # > 6 h 视为 stale
-    notes: >
-      旧系统验证过:域名是 coinglass-api.alphanode.work(带 coinglass- 前缀),
-      不是 api.alphanode.work;鉴权用 header "coinglass-secret"(不是 coinglassSecret
-      驼峰)。Sprint 1.4 落地 CoinGlass collector 时复用此配置。
 
   # ---- 4. Yahoo Finance(宏观,直连)------------------------------
   # §3.6.4:DXY / US10Y / VIX / 美股指数。yfinance 库直连,无 API key。

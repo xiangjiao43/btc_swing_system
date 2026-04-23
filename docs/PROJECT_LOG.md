@@ -5,6 +5,46 @@
 
 ---
 
+## 2026-04-23 — Sprint 1.2 重做:放弃 Binance,统一到 CoinGlass 承担 K 线 + 衍生品
+
+### 背景
+
+Sprint 1.2 及其第一次修正(上一条记录)连续尝试了两条 Binance 路径,都因美国节点的访问限制失败:
+- `api.binance.com` / `fapi.binance.com` → HTTP 451 地域封禁
+- `data.binance.vision` → 实际是静态 ZIP/CSV 数据仓库,不提供 REST API
+
+### 根因与新架构(依据旧系统 `data_fetchers.py` 已验证路径)
+
+阅读用户旧系统代码确认真实架构:
+
+- **BTC K 线主数据源**改为 CoinGlass `/v4/api/futures/price/history`(参数 `symbol=BTCUSDT, exchange=Binance`),通过中转站 `api.alphanode.work` 访问
+- **所有衍生品**(funding rate / open interest / long-short / liquidation / net_position)全部走 CoinGlass `/v4/api/futures/*/history`
+- **链上**走 Glassnode,同样经 `api.alphanode.work` 中转站(与 CoinGlass **共享域名**)
+- **共享鉴权**:HTTP header `x-key`(小写连字符)
+- **共享 API key**:`COINGLASS_API_KEY` 和 `GLASSNODE_API_KEY` 通常填同一个 alphanode 中转站发的 key
+- **限速**:15 req/min(旧系统 RateLimiter 参数)
+- **超时 / 重试**:20s / 首次 + 2 次重试,固定 8s 间隔
+
+### 代码层改动(commit `Sprint 1.2 redo`)
+
+| 文件 | 变更 |
+|---|---|
+| `src/data/collectors/binance.py` | **删除**(Sprint 1.2 及其 fix 版本全部作废) |
+| `scripts/test_binance_collector.py` | **删除** |
+| `src/data/collectors/coinglass.py` | **新建** CoinglassCollector 类;6 个 fetch 方法 + collect_and_save_all |
+| `src/data/collectors/__init__.py` | 去掉 BinanceCollector,暴露 CoinglassCollector |
+| `config/data_sources.yaml` | 删除 `binance` 条目;`coinglass` 改为 `api.alphanode.work` + header `x-key`;`glassnode` 同步改为 header `x-key`(之前 Sprint 1.2 fix 里的 query auth 错了) |
+| `.env.example` | 删除 `BINANCE_BASE_URL`;注明 CoinGlass / Glassnode 两个 key 通常填同一个 alphanode 值 |
+| `scripts/test_coinglass_collector.py` | 新建;抓 4 档 K 线 + 5 衍生品端点 |
+
+### 对后续 Sprint 的影响
+
+- **Sprint 1.3**(Glassnode collector):直接复用本次 `api.alphanode.work + x-key` 配置,不需要再动配置
+- **原计划 Sprint 1.4**(单独 CoinGlass):本次已合并进 Sprint 1.2 v2,该 Sprint 号直接跳过或用于 CoinGlass 扩展端点(如 ETF flows、期权 OI / PCR)
+- **建模文档 §3.6.1 / §3.6.2**:保持不变。文档描述 v1.2 模型层约定,实现层的数据路由属于工程细节
+
+---
+
 ## 2026-04-23 — Sprint 1.2 架构修正:Binance 仅抓 K 线,衍生品改走 CoinGlass
 
 ### 背景

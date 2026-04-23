@@ -196,11 +196,13 @@ layer_4_risk:
     # 注意:hold_only 不参与归并,是 HOLD 状态下的默认 permission,在
     # state_machine 里作为 on_enter 副作用设置,不走归并逻辑。
     # permission 枚举全集在 layers.yaml → layer_3_opportunity.
-    # output_enums.execution_permission(含 hold_only);本处只是严格度排序。
+    # output_enums.execution_permission(7 值,含 hold_only);本处只是严格度排序。
+    # no_chase 的位置:介于 ambush_only 和 cautious_open 之间,语义"不追但不禁"。
     severity_rank:
       - protective
       - watch
       - ambush_only
+      - no_chase
       - cautious_open
       - can_open
 

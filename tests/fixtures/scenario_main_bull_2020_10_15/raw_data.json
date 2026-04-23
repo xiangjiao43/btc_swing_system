@@ -1,0 +1,1519 @@
+{
+  "scenario_label": "Main bull breakout (2020-10-15)",
+  "scenario_reference_date_bjt": "2020-10-15 08:00 BJT",
+  "scenario_reference_timestamp_utc": "2020-10-15T00:00:00Z",
+  "source_note": "Synthetic fixture: K-lines seeded with numpy; derivatives/onchain/macro hand-constructed to reflect scenario semantics; not real historical values (but calibrated to trigger expected evidence outputs).",
+  "klines_1d": {
+    "count": 180,
+    "source_note": "constructed (seeded GBM-like, end-price pinned)",
+    "series": [
+      {
+        "open_time_utc": "2020-04-19T00:00:00Z",
+        "open": 9774.9,
+        "high": 9816.81,
+        "low": 9732.99,
+        "close": 9774.9,
+        "volume_btc": 34477.87
+      },
+      {
+        "open_time_utc": "2020-04-20T00:00:00Z",
+        "open": 9774.9,
+        "high": 9905.08,
+        "low": 9742.41,
+        "close": 9872.59,
+        "volume_btc": 44849.84
+      },
+      {
+        "open_time_utc": "2020-04-21T00:00:00Z",
+        "open": 9872.59,
+        "high": 10032.58,
+        "low": 9481.62,
+        "close": 9641.62,
+        "volume_btc": 27834.0
+      },
+      {
+        "open_time_utc": "2020-04-22T00:00:00Z",
+        "open": 9641.62,
+        "high": 10073.93,
+        "low": 9414.77,
+        "close": 9847.09,
+        "volume_btc": 32873.82
+      },
+      {
+        "open_time_utc": "2020-04-23T00:00:00Z",
+        "open": 9847.09,
+        "high": 10290.45,
+        "low": 9661.49,
+        "close": 10104.86,
+        "volume_btc": 32229.12
+      },
+      {
+        "open_time_utc": "2020-04-24T00:00:00Z",
+        "open": 10104.86,
+        "high": 10343.74,
+        "low": 9407.35,
+        "close": 9646.23,
+        "volume_btc": 49933.38
+      },
+      {
+        "open_time_utc": "2020-04-25T00:00:00Z",
+        "open": 9646.23,
+        "high": 9671.43,
+        "low": 9333.8,
+        "close": 9359.0,
+        "volume_btc": 30378.05
+      },
+      {
+        "open_time_utc": "2020-04-26T00:00:00Z",
+        "open": 9359.0,
+        "high": 9617.12,
+        "low": 9152.7,
+        "close": 9410.82,
+        "volume_btc": 51236.86
+      },
+      {
+        "open_time_utc": "2020-04-27T00:00:00Z",
+        "open": 9410.82,
+        "high": 9608.11,
+        "low": 9161.18,
+        "close": 9358.46,
+        "volume_btc": 34309.71
+      },
+      {
+        "open_time_utc": "2020-04-28T00:00:00Z",
+        "open": 9358.46,
+        "high": 9466.79,
+        "low": 9267.98,
+        "close": 9376.31,
+        "volume_btc": 54154.79
+      },
+      {
+        "open_time_utc": "2020-04-29T00:00:00Z",
+        "open": 9376.31,
+        "high": 9377.02,
+        "low": 9199.14,
+        "close": 9199.85,
+        "volume_btc": 29316.93
+      },
+      {
+        "open_time_utc": "2020-04-30T00:00:00Z",
+        "open": 9199.85,
+        "high": 9473.98,
+        "low": 9152.12,
+        "close": 9426.25,
+        "volume_btc": 31889.68
+      },
+      {
+        "open_time_utc": "2020-05-01T00:00:00Z",
+        "open": 9426.25,
+        "high": 9646.8,
+        "low": 9413.16,
+        "close": 9633.71,
+        "volume_btc": 45329.76
+      },
+      {
+        "open_time_utc": "2020-05-02T00:00:00Z",
+        "open": 9633.71,
+        "high": 9969.55,
+        "low": 9336.27,
+        "close": 9672.1,
+        "volume_btc": 40189.9
+      },
+      {
+        "open_time_utc": "2020-05-03T00:00:00Z",
+        "open": 9672.1,
+        "high": 10097.85,
+        "low": 9545.98,
+        "close": 9971.72,
+        "volume_btc": 42433.5
+      },
+      {
+        "open_time_utc": "2020-05-04T00:00:00Z",
+        "open": 9971.72,
+        "high": 10245.65,
+        "low": 9838.52,
+        "close": 10112.45,
+        "volume_btc": 49123.74
+      },
+      {
+        "open_time_utc": "2020-05-05T00:00:00Z",
+        "open": 10112.45,
+        "high": 10248.74,
+        "low": 9784.28,
+        "close": 9920.57,
+        "volume_btc": 47169.52
+      },
+      {
+        "open_time_utc": "2020-05-06T00:00:00Z",
+        "open": 9920.57,
+        "high": 10040.38,
+        "low": 9915.96,
+        "close": 10035.77,
+        "volume_btc": 28712.61
+      },
+      {
+        "open_time_utc": "2020-05-07T00:00:00Z",
+        "open": 10035.77,
+        "high": 10107.73,
+        "low": 9748.91,
+        "close": 9820.87,
+        "volume_btc": 36927.35
+      },
+      {
+        "open_time_utc": "2020-05-08T00:00:00Z",
+        "open": 9820.87,
+        "high": 10111.77,
+        "low": 9771.41,
+        "close": 10062.32,
+        "volume_btc": 39657.52
+      },
+      {
+        "open_time_utc": "2020-05-09T00:00:00Z",
+        "open": 10062.32,
+        "high": 10154.48,
+        "low": 9981.01,
+        "close": 10073.17,
+        "volume_btc": 53668.7
+      },
+      {
+        "open_time_utc": "2020-05-10T00:00:00Z",
+        "open": 10073.17,
+        "high": 10096.46,
+        "low": 10026.78,
+        "close": 10050.07,
+        "volume_btc": 52744.25
+      },
+      {
+        "open_time_utc": "2020-05-11T00:00:00Z",
+        "open": 10050.07,
+        "high": 10083.33,
+        "low": 9870.19,
+        "close": 9903.45,
+        "volume_btc": 41655.94
+      },
+      {
+        "open_time_utc": "2020-05-12T00:00:00Z",
+        "open": 9903.45,
+        "high": 10261.69,
+        "low": 9876.34,
+        "close": 10234.58,
+        "volume_btc": 28176.92
+      },
+      {
+        "open_time_utc": "2020-05-13T00:00:00Z",
+        "open": 10234.58,
+        "high": 10248.45,
+        "low": 10204.99,
+        "close": 10218.86,
+        "volume_btc": 37573.43
+      },
+      {
+        "open_time_utc": "2020-05-14T00:00:00Z",
+        "open": 10218.86,
+        "high": 10601.53,
+        "low": 9750.9,
+        "close": 10133.57,
+        "volume_btc": 42881.28
+      },
+      {
+        "open_time_utc": "2020-05-15T00:00:00Z",
+        "open": 10133.57,
+        "high": 10262.43,
+        "low": 9939.28,
+        "close": 10068.14,
+        "volume_btc": 49130.83
+      },
+      {
+        "open_time_utc": "2020-05-16T00:00:00Z",
+        "open": 10068.14,
+        "high": 10451.28,
+        "low": 9843.65,
+        "close": 10226.78,
+        "volume_btc": 48542.9
+      },
+      {
+        "open_time_utc": "2020-05-17T00:00:00Z",
+        "open": 10226.78,
+        "high": 10393.65,
+        "low": 10177.81,
+        "close": 10344.68,
+        "volume_btc": 28274.32
+      },
+      {
+        "open_time_utc": "2020-05-18T00:00:00Z",
+        "open": 10344.68,
+        "high": 10590.89,
+        "low": 10230.11,
+        "close": 10476.31,
+        "volume_btc": 48904.51
+      },
+      {
+        "open_time_utc": "2020-05-19T00:00:00Z",
+        "open": 10476.31,
+        "high": 10956.31,
+        "low": 10134.43,
+        "close": 10614.42,
+        "volume_btc": 40923.09
+      },
+      {
+        "open_time_utc": "2020-05-20T00:00:00Z",
+        "open": 10614.42,
+        "high": 11403.17,
+        "low": 10435.55,
+        "close": 11224.3,
+        "volume_btc": 51032.17
+      },
+      {
+        "open_time_utc": "2020-05-21T00:00:00Z",
+        "open": 11224.3,
+        "high": 11593.65,
+        "low": 10767.35,
+        "close": 11136.71,
+        "volume_btc": 37377.15
+      },
+      {
+        "open_time_utc": "2020-05-22T00:00:00Z",
+        "open": 11136.71,
+        "high": 11281.66,
+        "low": 10875.65,
+        "close": 11020.61,
+        "volume_btc": 44557.93
+      },
+      {
+        "open_time_utc": "2020-05-23T00:00:00Z",
+        "open": 11020.61,
+        "high": 11305.99,
+        "low": 10538.43,
+        "close": 10823.81,
+        "volume_btc": 38616.91
+      },
+      {
+        "open_time_utc": "2020-05-24T00:00:00Z",
+        "open": 10823.81,
+        "high": 11369.26,
+        "low": 10471.93,
+        "close": 11017.38,
+        "volume_btc": 32099.87
+      },
+      {
+        "open_time_utc": "2020-05-25T00:00:00Z",
+        "open": 11017.38,
+        "high": 11546.04,
+        "low": 10830.51,
+        "close": 11359.16,
+        "volume_btc": 49497.06
+      },
+      {
+        "open_time_utc": "2020-05-26T00:00:00Z",
+        "open": 11359.16,
+        "high": 11853.89,
+        "low": 10858.5,
+        "close": 11353.23,
+        "volume_btc": 26996.77
+      },
+      {
+        "open_time_utc": "2020-05-27T00:00:00Z",
+        "open": 11353.23,
+        "high": 11414.78,
+        "low": 11081.59,
+        "close": 11143.15,
+        "volume_btc": 29385.2
+      },
+      {
+        "open_time_utc": "2020-05-28T00:00:00Z",
+        "open": 11143.15,
+        "high": 11426.86,
+        "low": 10657.52,
+        "close": 10941.24,
+        "volume_btc": 34310.04
+      },
+      {
+        "open_time_utc": "2020-05-29T00:00:00Z",
+        "open": 10941.24,
+        "high": 11187.56,
+        "low": 10900.23,
+        "close": 11146.55,
+        "volume_btc": 52629.11
+      },
+      {
+        "open_time_utc": "2020-05-30T00:00:00Z",
+        "open": 11146.55,
+        "high": 11456.27,
+        "low": 11072.32,
+        "close": 11382.05,
+        "volume_btc": 33541.6
+      },
+      {
+        "open_time_utc": "2020-05-31T00:00:00Z",
+        "open": 11382.05,
+        "high": 11587.74,
+        "low": 11358.83,
+        "close": 11564.53,
+        "volume_btc": 28464.7
+      },
+      {
+        "open_time_utc": "2020-06-01T00:00:00Z",
+        "open": 11564.53,
+        "high": 11605.25,
+        "low": 11359.47,
+        "close": 11400.2,
+        "volume_btc": 26661.86
+      },
+      {
+        "open_time_utc": "2020-06-02T00:00:00Z",
+        "open": 11400.2,
+        "high": 11533.29,
+        "low": 11360.17,
+        "close": 11493.26,
+        "volume_btc": 26601.46
+      },
+      {
+        "open_time_utc": "2020-06-03T00:00:00Z",
+        "open": 11493.26,
+        "high": 11635.4,
+        "low": 11411.54,
+        "close": 11553.68,
+        "volume_btc": 45421.44
+      },
+      {
+        "open_time_utc": "2020-06-04T00:00:00Z",
+        "open": 11553.68,
+        "high": 11671.22,
+        "low": 11526.53,
+        "close": 11644.08,
+        "volume_btc": 34539.73
+      },
+      {
+        "open_time_utc": "2020-06-05T00:00:00Z",
+        "open": 11644.08,
+        "high": 11937.76,
+        "low": 11634.57,
+        "close": 11928.25,
+        "volume_btc": 51250.15
+      },
+      {
+        "open_time_utc": "2020-06-06T00:00:00Z",
+        "open": 11928.25,
+        "high": 12153.18,
+        "low": 11798.12,
+        "close": 12023.05,
+        "volume_btc": 26304.25
+      },
+      {
+        "open_time_utc": "2020-06-07T00:00:00Z",
+        "open": 12023.05,
+        "high": 12275.22,
+        "low": 12005.16,
+        "close": 12257.34,
+        "volume_btc": 32481.63
+      },
+      {
+        "open_time_utc": "2020-06-08T00:00:00Z",
+        "open": 12257.34,
+        "high": 12597.1,
+        "low": 11966.89,
+        "close": 12306.66,
+        "volume_btc": 37487.87
+      },
+      {
+        "open_time_utc": "2020-06-09T00:00:00Z",
+        "open": 12306.66,
+        "high": 12567.01,
+        "low": 12164.44,
+        "close": 12424.8,
+        "volume_btc": 36208.42
+      },
+      {
+        "open_time_utc": "2020-06-10T00:00:00Z",
+        "open": 12424.8,
+        "high": 12701.4,
+        "low": 12375.24,
+        "close": 12651.84,
+        "volume_btc": 28050.16
+      },
+      {
+        "open_time_utc": "2020-06-11T00:00:00Z",
+        "open": 12651.84,
+        "high": 12870.31,
+        "low": 12009.18,
+        "close": 12227.65,
+        "volume_btc": 26558.86
+      },
+      {
+        "open_time_utc": "2020-06-12T00:00:00Z",
+        "open": 12227.65,
+        "high": 12315.22,
+        "low": 12071.0,
+        "close": 12158.57,
+        "volume_btc": 27973.39
+      },
+      {
+        "open_time_utc": "2020-06-13T00:00:00Z",
+        "open": 12158.57,
+        "high": 12326.13,
+        "low": 11876.86,
+        "close": 12044.42,
+        "volume_btc": 52079.59
+      },
+      {
+        "open_time_utc": "2020-06-14T00:00:00Z",
+        "open": 12044.42,
+        "high": 12242.32,
+        "low": 11683.28,
+        "close": 11881.18,
+        "volume_btc": 49060.78
+      },
+      {
+        "open_time_utc": "2020-06-15T00:00:00Z",
+        "open": 11881.18,
+        "high": 11927.96,
+        "low": 11780.43,
+        "close": 11827.21,
+        "volume_btc": 44274.5
+      },
+      {
+        "open_time_utc": "2020-06-16T00:00:00Z",
+        "open": 11827.21,
+        "high": 12360.13,
+        "low": 11773.28,
+        "close": 12306.19,
+        "volume_btc": 29036.57
+      },
+      {
+        "open_time_utc": "2020-06-17T00:00:00Z",
+        "open": 12306.19,
+        "high": 12351.82,
+        "low": 12025.1,
+        "close": 12070.73,
+        "volume_btc": 40426.69
+      },
+      {
+        "open_time_utc": "2020-06-18T00:00:00Z",
+        "open": 12070.73,
+        "high": 12668.88,
+        "low": 11797.13,
+        "close": 12395.29,
+        "volume_btc": 38883.98
+      },
+      {
+        "open_time_utc": "2020-06-19T00:00:00Z",
+        "open": 12395.29,
+        "high": 12437.61,
+        "low": 11869.97,
+        "close": 11912.29,
+        "volume_btc": 44186.9
+      },
+      {
+        "open_time_utc": "2020-06-20T00:00:00Z",
+        "open": 11912.29,
+        "high": 11964.86,
+        "low": 11787.92,
+        "close": 11840.49,
+        "volume_btc": 29193.05
+      },
+      {
+        "open_time_utc": "2020-06-21T00:00:00Z",
+        "open": 11840.49,
+        "high": 12230.46,
+        "low": 11526.48,
+        "close": 11916.45,
+        "volume_btc": 37506.68
+      },
+      {
+        "open_time_utc": "2020-06-22T00:00:00Z",
+        "open": 11916.45,
+        "high": 12434.59,
+        "low": 11602.4,
+        "close": 12120.54,
+        "volume_btc": 36025.35
+      },
+      {
+        "open_time_utc": "2020-06-23T00:00:00Z",
+        "open": 12120.54,
+        "high": 12526.95,
+        "low": 11960.3,
+        "close": 12366.71,
+        "volume_btc": 34824.87
+      },
+      {
+        "open_time_utc": "2020-06-24T00:00:00Z",
+        "open": 12366.71,
+        "high": 12655.45,
+        "low": 12355.08,
+        "close": 12643.81,
+        "volume_btc": 45572.3
+      },
+      {
+        "open_time_utc": "2020-06-25T00:00:00Z",
+        "open": 12643.81,
+        "high": 12706.84,
+        "low": 12500.23,
+        "close": 12563.25,
+        "volume_btc": 53465.74
+      },
+      {
+        "open_time_utc": "2020-06-26T00:00:00Z",
+        "open": 12563.25,
+        "high": 12672.05,
+        "low": 12339.0,
+        "close": 12447.8,
+        "volume_btc": 39427.31
+      },
+      {
+        "open_time_utc": "2020-06-27T00:00:00Z",
+        "open": 12447.8,
+        "high": 12972.43,
+        "low": 12222.66,
+        "close": 12747.3,
+        "volume_btc": 41063.04
+      },
+      {
+        "open_time_utc": "2020-06-28T00:00:00Z",
+        "open": 12747.3,
+        "high": 13079.93,
+        "low": 12383.38,
+        "close": 12716.02,
+        "volume_btc": 44577.62
+      },
+      {
+        "open_time_utc": "2020-06-29T00:00:00Z",
+        "open": 12716.02,
+        "high": 12869.35,
+        "low": 12192.23,
+        "close": 12345.56,
+        "volume_btc": 40981.67
+      },
+      {
+        "open_time_utc": "2020-06-30T00:00:00Z",
+        "open": 12345.56,
+        "high": 12357.57,
+        "low": 12016.64,
+        "close": 12028.64,
+        "volume_btc": 33644.67
+      },
+      {
+        "open_time_utc": "2020-07-01T00:00:00Z",
+        "open": 12028.64,
+        "high": 12203.54,
+        "low": 11607.78,
+        "close": 11782.68,
+        "volume_btc": 31072.14
+      },
+      {
+        "open_time_utc": "2020-07-02T00:00:00Z",
+        "open": 11782.68,
+        "high": 12098.15,
+        "low": 11642.35,
+        "close": 11957.82,
+        "volume_btc": 50821.57
+      },
+      {
+        "open_time_utc": "2020-07-03T00:00:00Z",
+        "open": 11957.82,
+        "high": 12041.13,
+        "low": 11945.12,
+        "close": 12028.42,
+        "volume_btc": 43431.39
+      },
+      {
+        "open_time_utc": "2020-07-04T00:00:00Z",
+        "open": 12028.42,
+        "high": 12404.52,
+        "low": 11890.27,
+        "close": 12266.36,
+        "volume_btc": 46771.47
+      },
+      {
+        "open_time_utc": "2020-07-05T00:00:00Z",
+        "open": 12266.36,
+        "high": 12399.7,
+        "low": 12030.96,
+        "close": 12164.3,
+        "volume_btc": 53078.19
+      },
+      {
+        "open_time_utc": "2020-07-06T00:00:00Z",
+        "open": 12164.3,
+        "high": 12253.35,
+        "low": 12152.01,
+        "close": 12241.05,
+        "volume_btc": 53766.41
+      },
+      {
+        "open_time_utc": "2020-07-07T00:00:00Z",
+        "open": 12241.05,
+        "high": 12559.85,
+        "low": 12144.16,
+        "close": 12462.96,
+        "volume_btc": 42810.46
+      },
+      {
+        "open_time_utc": "2020-07-08T00:00:00Z",
+        "open": 12462.96,
+        "high": 12581.5,
+        "low": 12277.21,
+        "close": 12395.75,
+        "volume_btc": 48853.45
+      },
+      {
+        "open_time_utc": "2020-07-09T00:00:00Z",
+        "open": 12395.75,
+        "high": 12758.41,
+        "low": 12204.66,
+        "close": 12567.31,
+        "volume_btc": 32601.5
+      },
+      {
+        "open_time_utc": "2020-07-10T00:00:00Z",
+        "open": 12567.31,
+        "high": 12793.41,
+        "low": 12163.75,
+        "close": 12389.85,
+        "volume_btc": 27851.48
+      },
+      {
+        "open_time_utc": "2020-07-11T00:00:00Z",
+        "open": 12389.85,
+        "high": 12447.44,
+        "low": 12248.9,
+        "close": 12306.5,
+        "volume_btc": 41948.52
+      },
+      {
+        "open_time_utc": "2020-07-12T00:00:00Z",
+        "open": 12306.5,
+        "high": 12418.06,
+        "low": 12106.43,
+        "close": 12218.0,
+        "volume_btc": 38979.55
+      },
+      {
+        "open_time_utc": "2020-07-13T00:00:00Z",
+        "open": 12218.0,
+        "high": 12272.26,
+        "low": 11831.48,
+        "close": 11885.75,
+        "volume_btc": 47917.7
+      },
+      {
+        "open_time_utc": "2020-07-14T00:00:00Z",
+        "open": 11885.75,
+        "high": 12134.22,
+        "low": 11810.88,
+        "close": 12059.35,
+        "volume_btc": 39764.6
+      },
+      {
+        "open_time_utc": "2020-07-15T00:00:00Z",
+        "open": 12059.35,
+        "high": 12429.08,
+        "low": 11576.7,
+        "close": 11946.42,
+        "volume_btc": 52937.09
+      },
+      {
+        "open_time_utc": "2020-07-16T00:00:00Z",
+        "open": 11946.42,
+        "high": 12084.15,
+        "low": 11840.25,
+        "close": 11977.98,
+        "volume_btc": 28513.11
+      },
+      {
+        "open_time_utc": "2020-07-17T00:00:00Z",
+        "open": 11977.98,
+        "high": 12420.06,
+        "low": 11708.97,
+        "close": 12151.04,
+        "volume_btc": 44735.9
+      },
+      {
+        "open_time_utc": "2020-07-18T00:00:00Z",
+        "open": 12151.04,
+        "high": 12472.46,
+        "low": 11994.64,
+        "close": 12316.06,
+        "volume_btc": 48229.64
+      },
+      {
+        "open_time_utc": "2020-07-19T00:00:00Z",
+        "open": 12316.06,
+        "high": 12705.03,
+        "low": 12162.85,
+        "close": 12551.82,
+        "volume_btc": 35009.13
+      },
+      {
+        "open_time_utc": "2020-07-20T00:00:00Z",
+        "open": 12551.82,
+        "high": 12595.65,
+        "low": 12506.27,
+        "close": 12550.11,
+        "volume_btc": 47875.96
+      },
+      {
+        "open_time_utc": "2020-07-21T00:00:00Z",
+        "open": 12550.11,
+        "high": 12600.58,
+        "low": 12396.44,
+        "close": 12446.92,
+        "volume_btc": 35925.76
+      },
+      {
+        "open_time_utc": "2020-07-22T00:00:00Z",
+        "open": 12446.92,
+        "high": 12478.62,
+        "low": 12419.36,
+        "close": 12451.07,
+        "volume_btc": 29728.35
+      },
+      {
+        "open_time_utc": "2020-07-23T00:00:00Z",
+        "open": 12451.07,
+        "high": 12519.87,
+        "low": 11895.75,
+        "close": 11964.56,
+        "volume_btc": 53083.82
+      },
+      {
+        "open_time_utc": "2020-07-24T00:00:00Z",
+        "open": 11964.56,
+        "high": 12148.21,
+        "low": 11382.67,
+        "close": 11566.32,
+        "volume_btc": 36499.59
+      },
+      {
+        "open_time_utc": "2020-07-25T00:00:00Z",
+        "open": 11566.32,
+        "high": 11815.56,
+        "low": 10966.92,
+        "close": 11216.17,
+        "volume_btc": 41589.79
+      },
+      {
+        "open_time_utc": "2020-07-26T00:00:00Z",
+        "open": 11216.17,
+        "high": 11351.41,
+        "low": 10830.22,
+        "close": 10965.47,
+        "volume_btc": 48409.04
+      },
+      {
+        "open_time_utc": "2020-07-27T00:00:00Z",
+        "open": 10965.47,
+        "high": 11242.01,
+        "low": 10824.86,
+        "close": 11101.4,
+        "volume_btc": 36290.78
+      },
+      {
+        "open_time_utc": "2020-07-28T00:00:00Z",
+        "open": 11101.4,
+        "high": 11318.25,
+        "low": 10661.35,
+        "close": 10878.2,
+        "volume_btc": 46532.81
+      },
+      {
+        "open_time_utc": "2020-07-29T00:00:00Z",
+        "open": 10878.2,
+        "high": 11014.59,
+        "low": 10664.55,
+        "close": 10800.94,
+        "volume_btc": 28554.36
+      },
+      {
+        "open_time_utc": "2020-07-30T00:00:00Z",
+        "open": 10800.94,
+        "high": 11573.97,
+        "low": 10410.47,
+        "close": 11183.5,
+        "volume_btc": 44112.22
+      },
+      {
+        "open_time_utc": "2020-07-31T00:00:00Z",
+        "open": 11183.5,
+        "high": 11517.39,
+        "low": 10776.26,
+        "close": 11110.15,
+        "volume_btc": 42647.74
+      },
+      {
+        "open_time_utc": "2020-08-01T00:00:00Z",
+        "open": 11110.15,
+        "high": 11421.13,
+        "low": 11032.28,
+        "close": 11343.26,
+        "volume_btc": 25369.08
+      },
+      {
+        "open_time_utc": "2020-08-02T00:00:00Z",
+        "open": 11343.26,
+        "high": 11561.44,
+        "low": 10889.19,
+        "close": 11107.37,
+        "volume_btc": 49761.99
+      },
+      {
+        "open_time_utc": "2020-08-03T00:00:00Z",
+        "open": 11107.37,
+        "high": 11315.33,
+        "low": 10868.26,
+        "close": 11076.21,
+        "volume_btc": 38756.44
+      },
+      {
+        "open_time_utc": "2020-08-04T00:00:00Z",
+        "open": 11076.21,
+        "high": 11205.35,
+        "low": 10712.29,
+        "close": 10841.43,
+        "volume_btc": 34057.82
+      },
+      {
+        "open_time_utc": "2020-08-05T00:00:00Z",
+        "open": 10841.43,
+        "high": 10926.15,
+        "low": 10690.24,
+        "close": 10774.96,
+        "volume_btc": 48438.82
+      },
+      {
+        "open_time_utc": "2020-08-06T00:00:00Z",
+        "open": 10774.96,
+        "high": 11263.07,
+        "low": 10541.24,
+        "close": 11029.34,
+        "volume_btc": 54911.04
+      },
+      {
+        "open_time_utc": "2020-08-07T00:00:00Z",
+        "open": 11029.34,
+        "high": 11037.97,
+        "low": 10579.17,
+        "close": 10587.8,
+        "volume_btc": 33517.25
+      },
+      {
+        "open_time_utc": "2020-08-08T00:00:00Z",
+        "open": 10587.8,
+        "high": 10802.27,
+        "low": 10513.87,
+        "close": 10728.34,
+        "volume_btc": 28192.59
+      },
+      {
+        "open_time_utc": "2020-08-09T00:00:00Z",
+        "open": 10728.34,
+        "high": 10839.86,
+        "low": 10705.91,
+        "close": 10817.43,
+        "volume_btc": 27713.22
+      },
+      {
+        "open_time_utc": "2020-08-10T00:00:00Z",
+        "open": 10817.43,
+        "high": 10854.16,
+        "low": 10646.03,
+        "close": 10682.76,
+        "volume_btc": 25869.99
+      },
+      {
+        "open_time_utc": "2020-08-11T00:00:00Z",
+        "open": 10682.76,
+        "high": 10791.92,
+        "low": 10218.29,
+        "close": 10327.45,
+        "volume_btc": 29290.66
+      },
+      {
+        "open_time_utc": "2020-08-12T00:00:00Z",
+        "open": 10327.45,
+        "high": 10400.8,
+        "low": 10296.85,
+        "close": 10370.19,
+        "volume_btc": 30946.13
+      },
+      {
+        "open_time_utc": "2020-08-13T00:00:00Z",
+        "open": 10370.19,
+        "high": 10430.77,
+        "low": 10197.07,
+        "close": 10257.65,
+        "volume_btc": 44688.07
+      },
+      {
+        "open_time_utc": "2020-08-14T00:00:00Z",
+        "open": 10257.65,
+        "high": 10382.76,
+        "low": 10216.42,
+        "close": 10341.52,
+        "volume_btc": 25162.9
+      },
+      {
+        "open_time_utc": "2020-08-15T00:00:00Z",
+        "open": 10341.52,
+        "high": 10500.32,
+        "low": 10212.48,
+        "close": 10371.27,
+        "volume_btc": 43177.76
+      },
+      {
+        "open_time_utc": "2020-08-16T00:00:00Z",
+        "open": 10371.27,
+        "high": 11030.57,
+        "low": 10160.85,
+        "close": 10820.15,
+        "volume_btc": 32156.58
+      },
+      {
+        "open_time_utc": "2020-08-17T00:00:00Z",
+        "open": 10820.15,
+        "high": 11197.52,
+        "low": 10403.28,
+        "close": 10780.65,
+        "volume_btc": 26716.96
+      },
+      {
+        "open_time_utc": "2020-08-18T00:00:00Z",
+        "open": 10780.65,
+        "high": 10899.05,
+        "low": 10414.36,
+        "close": 10532.77,
+        "volume_btc": 52833.86
+      },
+      {
+        "open_time_utc": "2020-08-19T00:00:00Z",
+        "open": 10532.77,
+        "high": 10636.18,
+        "low": 10501.31,
+        "close": 10604.72,
+        "volume_btc": 45943.62
+      },
+      {
+        "open_time_utc": "2020-08-20T00:00:00Z",
+        "open": 10604.72,
+        "high": 10900.9,
+        "low": 10391.87,
+        "close": 10688.04,
+        "volume_btc": 26204.54
+      },
+      {
+        "open_time_utc": "2020-08-21T00:00:00Z",
+        "open": 10688.04,
+        "high": 11211.13,
+        "low": 10560.12,
+        "close": 11083.21,
+        "volume_btc": 28747.71
+      },
+      {
+        "open_time_utc": "2020-08-22T00:00:00Z",
+        "open": 11083.21,
+        "high": 11360.08,
+        "low": 11066.52,
+        "close": 11343.39,
+        "volume_btc": 47355.64
+      },
+      {
+        "open_time_utc": "2020-08-23T00:00:00Z",
+        "open": 11343.39,
+        "high": 11487.55,
+        "low": 11327.54,
+        "close": 11471.7,
+        "volume_btc": 50533.93
+      },
+      {
+        "open_time_utc": "2020-08-24T00:00:00Z",
+        "open": 11471.7,
+        "high": 12033.19,
+        "low": 11365.36,
+        "close": 11926.85,
+        "volume_btc": 47038.63
+      },
+      {
+        "open_time_utc": "2020-08-25T00:00:00Z",
+        "open": 11926.85,
+        "high": 12081.44,
+        "low": 11449.97,
+        "close": 11604.57,
+        "volume_btc": 33122.76
+      },
+      {
+        "open_time_utc": "2020-08-26T00:00:00Z",
+        "open": 11604.57,
+        "high": 11742.55,
+        "low": 11309.06,
+        "close": 11447.04,
+        "volume_btc": 54406.14
+      },
+      {
+        "open_time_utc": "2020-08-27T00:00:00Z",
+        "open": 11447.04,
+        "high": 11679.48,
+        "low": 10978.54,
+        "close": 11210.97,
+        "volume_btc": 26635.01
+      },
+      {
+        "open_time_utc": "2020-08-28T00:00:00Z",
+        "open": 11210.97,
+        "high": 11384.66,
+        "low": 10954.42,
+        "close": 11128.11,
+        "volume_btc": 26270.52
+      },
+      {
+        "open_time_utc": "2020-08-29T00:00:00Z",
+        "open": 11128.11,
+        "high": 11149.3,
+        "low": 10755.47,
+        "close": 10776.66,
+        "volume_btc": 46287.35
+      },
+      {
+        "open_time_utc": "2020-08-30T00:00:00Z",
+        "open": 10776.66,
+        "high": 11127.47,
+        "low": 10623.85,
+        "close": 10974.65,
+        "volume_btc": 27751.63
+      },
+      {
+        "open_time_utc": "2020-08-31T00:00:00Z",
+        "open": 10974.65,
+        "high": 11062.26,
+        "low": 10851.66,
+        "close": 10939.27,
+        "volume_btc": 54400.82
+      },
+      {
+        "open_time_utc": "2020-09-01T00:00:00Z",
+        "open": 10939.27,
+        "high": 11042.99,
+        "low": 10465.16,
+        "close": 10568.89,
+        "volume_btc": 48522.43
+      },
+      {
+        "open_time_utc": "2020-09-02T00:00:00Z",
+        "open": 10568.89,
+        "high": 10598.21,
+        "low": 10298.61,
+        "close": 10327.92,
+        "volume_btc": 42172.39
+      },
+      {
+        "open_time_utc": "2020-09-03T00:00:00Z",
+        "open": 10327.92,
+        "high": 10490.07,
+        "low": 10271.28,
+        "close": 10433.43,
+        "volume_btc": 53380.73
+      },
+      {
+        "open_time_utc": "2020-09-04T00:00:00Z",
+        "open": 10433.43,
+        "high": 10734.08,
+        "low": 10378.52,
+        "close": 10679.17,
+        "volume_btc": 42340.52
+      },
+      {
+        "open_time_utc": "2020-09-05T00:00:00Z",
+        "open": 10679.17,
+        "high": 11432.05,
+        "low": 10499.04,
+        "close": 11251.92,
+        "volume_btc": 44476.99
+      },
+      {
+        "open_time_utc": "2020-09-06T00:00:00Z",
+        "open": 11251.92,
+        "high": 12333.17,
+        "low": 11049.12,
+        "close": 12130.37,
+        "volume_btc": 29453.17
+      },
+      {
+        "open_time_utc": "2020-09-07T00:00:00Z",
+        "open": 12130.37,
+        "high": 12309.4,
+        "low": 12106.2,
+        "close": 12285.24,
+        "volume_btc": 37121.03
+      },
+      {
+        "open_time_utc": "2020-09-08T00:00:00Z",
+        "open": 12285.24,
+        "high": 12636.8,
+        "low": 11661.4,
+        "close": 12012.96,
+        "volume_btc": 28576.53
+      },
+      {
+        "open_time_utc": "2020-09-09T00:00:00Z",
+        "open": 12012.96,
+        "high": 12024.84,
+        "low": 11404.06,
+        "close": 11415.94,
+        "volume_btc": 33342.27
+      },
+      {
+        "open_time_utc": "2020-09-10T00:00:00Z",
+        "open": 11415.94,
+        "high": 11705.33,
+        "low": 11229.98,
+        "close": 11519.37,
+        "volume_btc": 37837.1
+      },
+      {
+        "open_time_utc": "2020-09-11T00:00:00Z",
+        "open": 11519.37,
+        "high": 11575.89,
+        "low": 11257.38,
+        "close": 11313.91,
+        "volume_btc": 44038.87
+      },
+      {
+        "open_time_utc": "2020-09-12T00:00:00Z",
+        "open": 11313.91,
+        "high": 11366.75,
+        "low": 11170.26,
+        "close": 11223.11,
+        "volume_btc": 37263.49
+      },
+      {
+        "open_time_utc": "2020-09-13T00:00:00Z",
+        "open": 11223.11,
+        "high": 11487.26,
+        "low": 10814.27,
+        "close": 11078.41,
+        "volume_btc": 42649.19
+      },
+      {
+        "open_time_utc": "2020-09-14T00:00:00Z",
+        "open": 11078.41,
+        "high": 11263.88,
+        "low": 10879.74,
+        "close": 11065.2,
+        "volume_btc": 26081.8
+      },
+      {
+        "open_time_utc": "2020-09-15T00:00:00Z",
+        "open": 11065.2,
+        "high": 11440.6,
+        "low": 11015.1,
+        "close": 11390.51,
+        "volume_btc": 39223.98
+      },
+      {
+        "open_time_utc": "2020-09-16T00:00:00Z",
+        "open": 11390.51,
+        "high": 11652.1,
+        "low": 11200.36,
+        "close": 11461.95,
+        "volume_btc": 42173.74
+      },
+      {
+        "open_time_utc": "2020-09-17T00:00:00Z",
+        "open": 11461.95,
+        "high": 11521.64,
+        "low": 11383.49,
+        "close": 11443.17,
+        "volume_btc": 46060.07
+      },
+      {
+        "open_time_utc": "2020-09-18T00:00:00Z",
+        "open": 11443.17,
+        "high": 11490.85,
+        "low": 11128.99,
+        "close": 11176.67,
+        "volume_btc": 44572.99
+      },
+      {
+        "open_time_utc": "2020-09-19T00:00:00Z",
+        "open": 11176.67,
+        "high": 11276.44,
+        "low": 10643.57,
+        "close": 10743.35,
+        "volume_btc": 48622.97
+      },
+      {
+        "open_time_utc": "2020-09-20T00:00:00Z",
+        "open": 10743.35,
+        "high": 10913.12,
+        "low": 10468.48,
+        "close": 10638.25,
+        "volume_btc": 37942.55
+      },
+      {
+        "open_time_utc": "2020-09-21T00:00:00Z",
+        "open": 10638.25,
+        "high": 10649.71,
+        "low": 10637.23,
+        "close": 10648.69,
+        "volume_btc": 35819.72
+      },
+      {
+        "open_time_utc": "2020-09-22T00:00:00Z",
+        "open": 10648.69,
+        "high": 11193.15,
+        "low": 10611.36,
+        "close": 11155.82,
+        "volume_btc": 47101.17
+      },
+      {
+        "open_time_utc": "2020-09-23T00:00:00Z",
+        "open": 11155.82,
+        "high": 11233.68,
+        "low": 11140.42,
+        "close": 11218.28,
+        "volume_btc": 52631.72
+      },
+      {
+        "open_time_utc": "2020-09-24T00:00:00Z",
+        "open": 11218.28,
+        "high": 11533.9,
+        "low": 11208.47,
+        "close": 11524.09,
+        "volume_btc": 40608.25
+      },
+      {
+        "open_time_utc": "2020-09-25T00:00:00Z",
+        "open": 11524.09,
+        "high": 11657.47,
+        "low": 11274.26,
+        "close": 11407.64,
+        "volume_btc": 34433.52
+      },
+      {
+        "open_time_utc": "2020-09-26T00:00:00Z",
+        "open": 11407.64,
+        "high": 11549.43,
+        "low": 10958.66,
+        "close": 11100.45,
+        "volume_btc": 39824.25
+      },
+      {
+        "open_time_utc": "2020-09-27T00:00:00Z",
+        "open": 11100.45,
+        "high": 11200.23,
+        "low": 10761.28,
+        "close": 10861.06,
+        "volume_btc": 27161.77
+      },
+      {
+        "open_time_utc": "2020-09-28T00:00:00Z",
+        "open": 10861.06,
+        "high": 11035.1,
+        "low": 10516.72,
+        "close": 10690.76,
+        "volume_btc": 26667.04
+      },
+      {
+        "open_time_utc": "2020-09-29T00:00:00Z",
+        "open": 10690.76,
+        "high": 11349.82,
+        "low": 10642.23,
+        "close": 11301.3,
+        "volume_btc": 35023.9
+      },
+      {
+        "open_time_utc": "2020-09-30T00:00:00Z",
+        "open": 11301.3,
+        "high": 11352.68,
+        "low": 11046.0,
+        "close": 11097.38,
+        "volume_btc": 34416.8
+      },
+      {
+        "open_time_utc": "2020-10-01T00:00:00Z",
+        "open": 11097.38,
+        "high": 11670.89,
+        "low": 10785.34,
+        "close": 11358.85,
+        "volume_btc": 25440.49
+      },
+      {
+        "open_time_utc": "2020-10-02T00:00:00Z",
+        "open": 11358.85,
+        "high": 11691.25,
+        "low": 10798.78,
+        "close": 11131.18,
+        "volume_btc": 50696.44
+      },
+      {
+        "open_time_utc": "2020-10-03T00:00:00Z",
+        "open": 11131.18,
+        "high": 11653.63,
+        "low": 10897.55,
+        "close": 11420.0,
+        "volume_btc": 29608.39
+      },
+      {
+        "open_time_utc": "2020-10-04T00:00:00Z",
+        "open": 11420.0,
+        "high": 11682.01,
+        "low": 11295.27,
+        "close": 11557.28,
+        "volume_btc": 28590.18
+      },
+      {
+        "open_time_utc": "2020-10-05T00:00:00Z",
+        "open": 11557.28,
+        "high": 12070.39,
+        "low": 11025.81,
+        "close": 11538.92,
+        "volume_btc": 53752.88
+      },
+      {
+        "open_time_utc": "2020-10-06T00:00:00Z",
+        "open": 11538.92,
+        "high": 11973.5,
+        "low": 11119.44,
+        "close": 11554.02,
+        "volume_btc": 48163.15
+      },
+      {
+        "open_time_utc": "2020-10-07T00:00:00Z",
+        "open": 11554.02,
+        "high": 11649.64,
+        "low": 11297.26,
+        "close": 11392.89,
+        "volume_btc": 45629.95
+      },
+      {
+        "open_time_utc": "2020-10-08T00:00:00Z",
+        "open": 11392.89,
+        "high": 11817.86,
+        "low": 11122.51,
+        "close": 11547.48,
+        "volume_btc": 36635.25
+      },
+      {
+        "open_time_utc": "2020-10-09T00:00:00Z",
+        "open": 11547.48,
+        "high": 11564.56,
+        "low": 11426.39,
+        "close": 11443.47,
+        "volume_btc": 25321.83
+      },
+      {
+        "open_time_utc": "2020-10-10T00:00:00Z",
+        "open": 11443.47,
+        "high": 11575.42,
+        "low": 10992.05,
+        "close": 11124.0,
+        "volume_btc": 40752.65
+      },
+      {
+        "open_time_utc": "2020-10-11T00:00:00Z",
+        "open": 11124.0,
+        "high": 11232.26,
+        "low": 10691.05,
+        "close": 10799.32,
+        "volume_btc": 29977.21
+      },
+      {
+        "open_time_utc": "2020-10-12T00:00:00Z",
+        "open": 10799.32,
+        "high": 11017.68,
+        "low": 10652.91,
+        "close": 10871.27,
+        "volume_btc": 54673.99
+      },
+      {
+        "open_time_utc": "2020-10-13T00:00:00Z",
+        "open": 10871.27,
+        "high": 11500.32,
+        "low": 10706.32,
+        "close": 11335.36,
+        "volume_btc": 50172.09
+      },
+      {
+        "open_time_utc": "2020-10-14T00:00:00Z",
+        "open": 11335.36,
+        "high": 11635.86,
+        "low": 11106.8,
+        "close": 11407.3,
+        "volume_btc": 29247.88
+      },
+      {
+        "open_time_utc": "2020-10-15T00:00:00Z",
+        "open": 11407.3,
+        "high": 11647.35,
+        "low": 11159.95,
+        "close": 11400.0,
+        "volume_btc": 36777.18
+      }
+    ]
+  },
+  "derivatives_snapshot": {
+    "funding_rate_current": 0.00012,
+    "funding_rate_7d_mean": 8e-05,
+    "funding_rate_30d_percentile": 55,
+    "funding_rate_zscore_90d": 0.4,
+    "open_interest_usd": 2400000000,
+    "oi_change_24h_pct": 0.02,
+    "oi_mcap_ratio": 0.011,
+    "top_long_short_account_ratio": 1.6,
+    "global_long_short_account_ratio": 1.35,
+    "long_short_ratio_change_24h_pct": 0.04,
+    "basis_annualized_pct": 0.04,
+    "put_call_ratio_oi": 0.78,
+    "liquidation_last_24h_usd": 28000000,
+    "upward_liquidation_cluster_above": false,
+    "source_note": "estimated from 2020Q4 Glassnode/Deribit public snapshots + modeling-consistent construction"
+  },
+  "onchain_snapshot": {
+    "mvrv_z_score": 1.2,
+    "nupl": 0.37,
+    "lth_supply_90d_change_pct": 0.015,
+    "exchange_net_flow_7d_mean_btc": -1800,
+    "btc_drawdown_from_ath_pct": 0.418,
+    "mvrv": 1.8,
+    "realized_price": 6300,
+    "lth_realized_price": 5700,
+    "sth_realized_price": 10200,
+    "sopr": 1.02,
+    "asopr": 1.01,
+    "reserve_risk": 0.0032,
+    "puell_multiple": 1.15,
+    "ath_price_usd_override": 19700,
+    "source_note": "values align with §3.8.4 mid-bull entry / §3.8.1 emerging trend"
+  },
+  "macro_snapshot": {
+    "dxy_current": 93.7,
+    "dxy_20d_change_pct": -0.012,
+    "us10y_current": 0.72,
+    "us10y_30d_change_bp": -5,
+    "vix_current": 27.5,
+    "nasdaq_current": 11840,
+    "nasdaq_20d_change_pct": 0.025,
+    "gold_current": 1900,
+    "btc_nasdaq_corr_60d": 0.35,
+    "btc_gold_corr_60d": 0.22,
+    "source_note": "2020-10 macro: DXY weak, VIX elevated pre-election, tech rallying — mild tailwind"
+  },
+  "events_near_reference_date": [
+    {
+      "name": "US_Presidential_Election_2020",
+      "date": "2020-11-03",
+      "time_et": "00:00",
+      "impact_level": 4,
+      "notes": "19 days out; not yet in 72h window"
+    },
+    {
+      "name": "Options_expiry_monthly",
+      "date": "2020-10-30",
+      "time_utc": "08:00",
+      "impact_level": 2,
+      "notes": "15 days out"
+    }
+  ],
+  "computed_from_klines_hint": {
+    "ath_price_usd_in_window": 19700,
+    "drawdown_from_ath_window_pct": 0.4213
+  }
+}

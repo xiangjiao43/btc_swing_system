@@ -1,0 +1,135 @@
+{
+  "scenario_label": "Main bear breakdown (2022-05-01)",
+  "note": "Pre-Luna stress regime. Expected outputs derived by hand-computing per thresholds.yaml rules against raw_data.json. Ranges used where a single point is ambiguous.",
+
+  "expected_layer_1_regime": {
+    "regime_primary": "trend_down",
+    "regime_primary_alternatives": ["transition_down"],
+    "reasoning": "180d slope strongly negative; MA stacking inverted (MA-20 < MA-60 < MA-120 < MA-200); ADX(1d) ≥ 25 in downward direction; 4H/1D/1W all down-aligned → TruthTrend ≥ 6.",
+    "regime_stability": "actively_shifting",
+    "volatility_level": "elevated",
+    "volatility_percentile_range": [70, 85],
+    "trend_direction": "down",
+    "trend_strength_range": [0.70, 0.85],
+    "structure_coherence_range": [0.65, 0.80],
+    "truth_trend_score_range": [6, 8],
+    "verdict": "trending_down_with_moderate_to_high_confidence"
+  },
+
+  "expected_layer_2_direction": {
+    "stance": "bearish",
+    "reasoning": "LH+LL structure on 1D; price below MA-60 and MA-120; stance_confidence should clear short threshold for early_bear (0.55).",
+    "stance_confidence_range": [0.62, 0.75],
+    "stance_strength": "moderate",
+    "phase": "mid",
+    "phase_reasoning": "Breakdown from distribution to early_bear territory; impulse extension on the downside at ~60-90%",
+    "band_position_confidence_range": [0.55, 0.75],
+    "long_cycle_context": {
+      "cycle_position": "early_bear",
+      "cycle_confidence_range": [0.60, 0.85],
+      "reasoning": "MVRV Z 0.3 ∈ [2, 6] down-trend candidate for early_bear? No — 0.3 is LOW. Actually 0.3 ∈ [-0.5, 2] which maps to mid_bear or early_bull. Given downward trend + ath_drawdown 44.8% > 20% → early_bear aux condition passes. NUPL 0.18 ∈ [-0.25, 0.25] mid_bear candidate, ∈ [0, 0.25] early_bull candidate. LTH -1.8% / 90d ∈ [null, 0] fits multiple. 2-3 candidates produce early_bear when aux_min_ath_drawdown_pct 0.20 is met. Voting may yield early_bear with mid confidence.",
+      "last_stable_cycle_position": "distribution"
+    },
+    "exchange_momentum_score_range": [-4, -2],
+    "exchange_momentum_note": "Net inflow to exchanges (bearish); but §3.9/B5 says SHORT side does NOT consume exchange_momentum for stance_confidence. Still computed for display."
+  },
+
+  "expected_layer_3_opportunity": {
+    "opportunity_grade": "A",
+    "opportunity_grade_alternatives": ["B"],
+    "reasoning": "Short A grade rules: cycle_position ∈ {distribution, early_bear, mid_bear} ✓ (early_bear); stance=bearish ✓; stance_conf ≥ 0.55 ✓; regime ∈ {trend_down, transition_down, range_high} ✓ (trend_down); position near_resistance or above_all_key_levels ✓ (price at ~$38K after breakdown from $45K); crowding ≥ 6 ? Check: funding extreme, OI elevated, PCR high, basis low, liq clusters below. Crowding may be 5-7; if < 6 downgrade to B.",
+    "execution_permission_initial_suggestion": "cautious_open",
+    "execution_permission_initial_reasoning": "L3 suggests can_open but L4 + L5 will tighten via merging.",
+    "entry_confirmation_timeframe": "1h",
+    "entry_confirmation_status": "awaiting_1h_close"
+  },
+
+  "expected_layer_4_risk": {
+    "overall_risk_level": "elevated",
+    "overall_risk_level_alternatives": ["high"],
+    "reasoning": "Funding -0.015% stressed; OI 14.5B large; PCR 1.35 (put heavy = fear); basis collapsed. Multiple risk tags active. event_window: FOMC +3 days inside 72h → EventRisk = high.",
+    "hard_invalidation_levels_hint": [
+      {"basis": "$42,500 prior swing high — if reclaimed, bearish thesis broken", "direction": "short", "priority": "primary", "confirmation_timeframe": "4h"},
+      {"basis": "$45,000 MA-60 reclaim", "direction": "short", "priority": "secondary", "confirmation_timeframe": "4h"}
+    ],
+    "position_cap_final_pct_range": [22, 32],
+    "position_cap_reasoning": "base 70 × risk_elevated 0.7 = 49 × crowding_mild_or_extreme 0.85 = 41.6 × macro_strong_headwind 0.7 = 29.1 × event_high 0.7 = 20.4 → clamped by floor 15 → 20-21; higher bound accounts for risk_moderate interpretation (70 × 0.9 × 0.85 × 0.7 × 0.7 = 26.2)",
+    "crowding_score_range": [5, 7],
+    "crowding_band": "mild_to_extreme",
+    "crowding_direction": "crowded_short",
+    "event_risk_score_range": [8, 12],
+    "event_risk_band": "high",
+    "active_risk_tags_expected": ["funding_extreme", "leverage_stretched", "correlation_break"]
+  },
+
+  "expected_layer_5_macro": {
+    "macro_stance": "risk_off",
+    "macro_stance_alternatives": ["extreme_risk_off"],
+    "reasoning": "DXY +2.8% 20d > +2% trigger; US10Y +45bp 30d > +30bp trigger; VIX 33.4 > 25 elevated; nasdaq -8.7% 20d < -5% trigger. BTC-nasdaq corr 0.81 > 0.7 → all weights × 1.5. Score: (-2 × 1.5) + (-2 × 1.5) + (-2 × 1.5) + (-2 × 1.5) = -12 → clamp to -10.",
+    "macro_trend": "deteriorating",
+    "macro_headwind_score_range": [-10, -8],
+    "macro_headwind_band": "strong_headwind",
+    "extreme_event_detected": false,
+    "extreme_event_reasoning": "BTC daily change ≤ ±15% threshold; pre-Luna stress but no single-day extreme yet.",
+    "adjustment_guidance": {
+      "stance_modifier_expected": "strong_challenge",
+      "position_cap_multiplier_expected_range": [0.6, 0.75],
+      "permission_adjustment_expected": "tighten"
+    }
+  },
+
+  "expected_composite_factors_output": {
+    "truth_trend": {
+      "score_range": [6, 8],
+      "band": "true_trend"
+    },
+    "band_position": {
+      "phase": "mid",
+      "phase_alternatives": ["late"],
+      "confidence_range": [0.55, 0.75]
+    },
+    "cycle_position": {
+      "cycle_position": "early_bear",
+      "cycle_position_alternatives": ["mid_bear"],
+      "cycle_confidence_range": [0.55, 0.80]
+    },
+    "crowding": {
+      "score_range": [5, 7],
+      "direction": "crowded_short",
+      "band": "mild",
+      "band_alternatives": ["extreme"],
+      "position_cap_multiplier_range": [0.7, 0.85]
+    },
+    "macro_headwind": {
+      "score_range": [-10, -8],
+      "band": "strong_headwind",
+      "position_cap_multiplier": 0.7,
+      "correlation_amplified": true
+    },
+    "event_risk": {
+      "score_range": [8, 12],
+      "band": "high",
+      "position_cap_multiplier": 0.7,
+      "permission_adjustment": "ambush_only"
+    }
+  },
+
+  "expected_observation_category": "disciplined",
+  "observation_category_reasoning": "Matches disciplined: L4 overall_risk_level = elevated or high (close to high); L1 volatility elevated (not extreme); stance is bearish (not neutral). If risk_level = elevated, watchful applies; if high, disciplined applies. Expected borderline — most likely disciplined due to event window + macro extreme_headwind.",
+
+  "expected_m26_acceptance_result": {
+    "scenario_type": "main_bear",
+    "m26_requirement": "At least one long_exit OR short signal within the downtrend window",
+    "expected_pass": true,
+    "expected_trigger": "SHORT_PLANNED",
+    "expected_trigger_alternatives": ["LONG_EXIT (if coming from long position)"],
+    "reasoning": "Short A/B grade with bearish stance and cautious_open permission satisfies FLAT → SHORT_PLANNED, OR if entering from prior long position, triggers LONG_EXIT via early_failure rules (hard_invalidation breach + new L4 critical)."
+  },
+
+  "validation_notes": [
+    "position_cap expected to be floored at 15% or just above; verifies M19 hard_floor logic.",
+    "macro_headwind score should saturate at -10 (clamp); verifies correlation amplification.",
+    "event window FOMC+3d is a critical test: EventRisk score should jump to 8+ within 72h window.",
+    "If score comes out < -8, check correlation amplifier implementation (should be × 1.5)."
+  ]
+}

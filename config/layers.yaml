@@ -301,9 +301,10 @@ layer_3_opportunity:
       - B
       - C
       - none
-    execution_permission:                  # permission 枚举全集,含 hold_only
+    execution_permission:                  # permission 枚举全集(与 schemas.yaml 对齐,7 值)
       - can_open
       - cautious_open
+      - no_chase                           # §4.5.5 问题 4:保留计算值,不抬升
       - ambush_only
       - watch
       - protective
@@ -312,10 +313,12 @@ layer_3_opportunity:
   # permission 在归并里的参与性
   # (归并 severity_rank 在 thresholds.yaml → layer_4_risk.
   #  execution_permission_merging.severity_rank;
-  #  hold_only 不参与归并,是 HOLD 状态 on_enter 副作用)
+  #  hold_only 不参与归并,是 HOLD 状态 on_enter 副作用;
+  #  no_chase 参与归并但硬下限不抬升)
   permission_participates_in_merging:
     can_open: true
     cautious_open: true
+    no_chase: true
     ambush_only: true
     watch: true
     protective: true

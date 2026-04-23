@@ -1,0 +1,137 @@
+{
+  "scenario_label": "Ranging / pre-ETF equilibrium (2023-07-01)",
+  "note": "Range-bound market post 2023-03 rally. The 180d window contains both a rally phase (Jan-Mar) and a settling phase (Apr-Jun). Expected regime at reference date is range-bound.",
+
+  "expected_layer_1_regime": {
+    "regime_primary": "range_mid",
+    "regime_primary_alternatives": ["range_high"],
+    "reasoning": "Recent 60d sideways $27k-$31k; ADX(1d) likely < 20 (weak); multi-TF alignment mixed; truth_trend_score ≤ 5.",
+    "regime_stability": "stable",
+    "volatility_level": "low",
+    "volatility_level_alternatives": ["normal"],
+    "volatility_percentile_range": [20, 45],
+    "trend_direction": "flat",
+    "trend_strength_range": [0.25, 0.50],
+    "structure_coherence_range": [0.40, 0.60],
+    "truth_trend_score_range": [2, 5],
+    "truth_trend_band_expected": "no_trend_or_weak_trend",
+    "verdict": "range_bound_stable"
+  },
+
+  "expected_layer_2_direction": {
+    "stance": "neutral",
+    "stance_alternatives": ["bullish"],
+    "reasoning": "Latest swing structure ambiguous; HH+HL from rally but stalling; stance_confidence likely below early_bull threshold 0.55.",
+    "stance_confidence_range": [0.45, 0.58],
+    "stance_strength": "weak",
+    "phase": "unclear",
+    "phase_alternatives": ["late"],
+    "phase_reasoning": "Impulse extension > 100% of initial rally but price not making new highs (indicating consumed momentum or resting).",
+    "band_position_confidence_range": [0.40, 0.60],
+    "long_cycle_context": {
+      "cycle_position": "early_bull",
+      "cycle_position_alternatives": ["accumulation"],
+      "cycle_confidence_range": [0.55, 0.75],
+      "reasoning": "MVRV Z 0.4 ∈ [-0.5, 2] → early_bull candidate (also fits mid_bear direction but price path is UP, so not bear). NUPL 0.22 ∈ [0, 0.25] → early_bull. LTH +0.8% / 90d → early_bull or mid_bull. 2-of-3 agree → early_bull with confidence ~0.6. Aux condition: days_since_last_accumulation ≥ 60 needs verification; if not met, fallback to accumulation.",
+      "last_stable_cycle_position": null
+    },
+    "exchange_momentum_score_range": [1, 3]
+  },
+
+  "expected_layer_3_opportunity": {
+    "opportunity_grade": "none",
+    "opportunity_grade_alternatives": ["C"],
+    "reasoning": "Fails all long_grade_rules because (a) stance is neutral (not bullish) OR stance_confidence < 0.55 threshold; (b) regime is range_mid/range_high not in {trend_up, transition_up}. Fails short rules: stance not bearish. Result: none.",
+    "execution_permission_initial_suggestion": "watch",
+    "execution_permission_initial_reasoning": "none grade → L3 defaults to watch.",
+    "entry_confirmation_timeframe": "1h",
+    "entry_confirmation_status": "not_applicable_no_entry_plan"
+  },
+
+  "expected_layer_4_risk": {
+    "overall_risk_level": "low",
+    "overall_risk_level_alternatives": ["moderate"],
+    "reasoning": "No funding extremes; OI steady; PCR balanced at 0.92; low liquidations; no immediate event window (FOMC minutes +4d, NFP +6d outside 72h bonus zone).",
+    "hard_invalidation_levels_hint": [
+      {"basis": "$28,500 range low", "direction": "long (if long)", "priority": "primary", "confirmation_timeframe": "4h"},
+      {"basis": "$31,500 range high", "direction": "short (if short)", "priority": "primary", "confirmation_timeframe": "4h"}
+    ],
+    "position_cap_final_pct_range": [60, 70],
+    "position_cap_reasoning": "base 70 × risk_low 1.0 = 70 × crowding_normal 1.0 × macro_neutral 1.0 × event_low 1.0 = 70. But permission is 'watch' so hard_floor doesn't need to be applied.",
+    "crowding_score_range": [0, 3],
+    "crowding_band": "normal",
+    "event_risk_score_range": [0, 3],
+    "event_risk_band": "low",
+    "active_risk_tags_expected": []
+  },
+
+  "expected_layer_5_macro": {
+    "macro_stance": "risk_neutral",
+    "macro_stance_alternatives": ["risk_on"],
+    "reasoning": "DXY -0.3% 20d (below -2% trigger);US10Y +18bp 30d (below +30bp trigger); VIX 13.6 < 25; nasdaq +2.6% 20d (below +5% trigger). All scoring items neutral-to-mild. Score expected ~0.",
+    "macro_trend": "stable",
+    "macro_headwind_score_range": [-1, 2],
+    "macro_headwind_band": "neutral_or_tailwind",
+    "extreme_event_detected": false,
+    "adjustment_guidance": {
+      "stance_modifier_expected": "neutral",
+      "position_cap_multiplier_expected": 1.0,
+      "permission_adjustment_expected": "neutral"
+    }
+  },
+
+  "expected_composite_factors_output": {
+    "truth_trend": {
+      "score_range": [2, 5],
+      "band": "no_trend",
+      "band_alternatives": ["weak_trend"]
+    },
+    "band_position": {
+      "phase": "unclear",
+      "phase_alternatives": ["late"],
+      "confidence_range": [0.40, 0.60]
+    },
+    "cycle_position": {
+      "cycle_position": "early_bull",
+      "cycle_position_alternatives": ["accumulation", "unclear"],
+      "cycle_confidence_range": [0.55, 0.75]
+    },
+    "crowding": {
+      "score_range": [0, 3],
+      "direction": "normal",
+      "band": "normal",
+      "position_cap_multiplier": 1.0
+    },
+    "macro_headwind": {
+      "score_range": [-1, 2],
+      "band": "neutral_or_tailwind",
+      "position_cap_multiplier": 1.0,
+      "correlation_amplified": false
+    },
+    "event_risk": {
+      "score_range": [0, 3],
+      "band": "low",
+      "position_cap_multiplier": 1.0,
+      "permission_adjustment": null
+    }
+  },
+
+  "expected_observation_category": "watchful",
+  "observation_category_reasoning": "Not disciplined (regime range_mid is not in {chaos, transition_up, transition_down}; vol low not extreme; stance neutral MATCHES disciplined trigger though, so likely actually 'disciplined'). → REVIEWED: stance=neutral triggers disciplined. If stance is slightly bullish instead, becomes watchful. Ranged scenarios are right at the disciplined/watchful boundary.",
+  "observation_category_note_for_m26": "For M26 scenario 3, the expected outcome is 'prolonged FLAT with ≤ 8 state transitions', which means 'disciplined' or 'watchful' — either is acceptable.",
+
+  "expected_m26_acceptance_result": {
+    "scenario_type": "ranging",
+    "m26_requirement": "Total state transitions in the range window ≤ 8 (system not whipsawed)",
+    "expected_pass": true,
+    "expected_trigger": "FLAT",
+    "expected_trigger_alternatives": ["stay_current_state_no_transition"],
+    "reasoning": "opportunity_grade=none + execution_permission=watch + stance=neutral → system stays FLAT; no PLANNED transition triggers."
+  },
+
+  "validation_notes": [
+    "Critical M26 check: system should NOT be tempted by stance=bullish near ambiguous zones into a LONG_PLANNED transition. If it triggers PLANNED in this scenario, the L2/L3 thresholds are too loose.",
+    "Observation category at disciplined/watchful boundary — any implementation choice is acceptable as long as NOT possibly_suppressed (which requires grade=none + confidence ≥ threshold persisting 7d).",
+    "truth_trend_score low confirms 'no trend' — if implementation reports ≥ 6, indicators are picking up the Jan-Mar rally portion too aggressively and need re-weighting toward recent window."
+  ]
+}

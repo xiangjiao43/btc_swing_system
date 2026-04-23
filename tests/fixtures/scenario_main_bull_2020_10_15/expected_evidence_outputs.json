@@ -1,0 +1,126 @@
+{
+  "scenario_label": "Main bull breakout (2020-10-15)",
+  "note": "Expected outputs derived by hand-computing per thresholds.yaml rules against raw_data.json. Ranges used where a single point is ambiguous.",
+
+  "expected_layer_1_regime": {
+    "regime_primary": "transition_up",
+    "regime_primary_alternatives": ["trend_up"],
+    "reasoning": "180d trend slope positive but recent period shows emerging breakout rather than established trend. ADX(1d) likely 22-28 (at boundary of weak/strong per thresholds.layer_1_regime.adx). MA-20/60/120 stacking upward.",
+    "regime_stability": "slightly_shifting",
+    "volatility_level": "normal",
+    "volatility_percentile_range": [45, 65],
+    "trend_direction": "up",
+    "trend_strength_range": [0.55, 0.75],
+    "structure_coherence_range": [0.6, 0.8],
+    "truth_trend_score_range": [5, 7],
+    "verdict": "transitioning_up_with_moderate_confidence"
+  },
+
+  "expected_layer_2_direction": {
+    "stance": "bullish",
+    "reasoning": "HH+HL structure on 1D; price above MA-60 and MA-120; stance_confidence should clear the early_bull long threshold of 0.55",
+    "stance_confidence_range": [0.60, 0.72],
+    "stance_strength": "moderate",
+    "phase": "early",
+    "phase_reasoning": "impulse extension ratio < 50% (recent breakout from $10.5K base to $11.4K); swing HH+HL pronounced; price not yet far above MA-60",
+    "band_position_confidence_range": [0.55, 0.75],
+    "long_cycle_context": {
+      "cycle_position": "early_bull",
+      "cycle_confidence_range": [0.60, 0.85],
+      "reasoning": "MVRV Z 1.2 ∈ [-0.5, 2] → early_bull candidate; NUPL 0.37 straddles early_bull/mid_bull; LTH 90d +1.5% = stable/accumulating. Voting pool: 2-of-3 agree on early_bull → confidence 0.60-0.85 per cycle_position_decision.voting",
+      "last_stable_cycle_position": null
+    },
+    "exchange_momentum_score_range": [2, 4]
+  },
+
+  "expected_layer_3_opportunity": {
+    "opportunity_grade": "B",
+    "opportunity_grade_alternatives": ["A"],
+    "reasoning": "Matches long_grade_rules.B: regime ∈ {trend_up, transition_up} AND stance=bullish AND conf ≥ early_bull threshold 0.55 AND phase ∈ {early, mid, late} AND position ≠ above_all_key_levels. Upgrade to A is possible if position is confirmed near_support.",
+    "execution_permission_initial_suggestion": "can_open",
+    "entry_confirmation_timeframe": "1h",
+    "entry_confirmation_status": "awaiting_1h_close"
+  },
+
+  "expected_layer_4_risk": {
+    "overall_risk_level": "moderate",
+    "reasoning": "No hard_invalidation breach; funding mild positive (not extreme); OI stable; crowding score ~2-3 (normal).",
+    "hard_invalidation_levels_hint": [
+      {"basis": "recent swing low near $10,400", "direction": "long", "priority": "primary", "confirmation_timeframe": "4h"}
+    ],
+    "position_cap_final_pct_range": [55, 63],
+    "position_cap_reasoning": "base 70 × risk_moderate 0.9 = 63 × crowding_normal 1.0 × macro_neutral 1.0 × event_low 1.0 = 63. Floor 15% not hit.",
+    "crowding_score_range": [2, 3],
+    "crowding_band": "normal",
+    "event_risk_score_range": [0, 2],
+    "event_risk_band": "low",
+    "active_risk_tags": []
+  },
+
+  "expected_layer_5_macro": {
+    "macro_stance": "risk_neutral",
+    "macro_stance_alternatives": ["risk_on"],
+    "reasoning": "DXY -1.2% 20d (below -2% trigger) + VIX 27.5 (above 25 elevated) + nasdaq +2.5% 20d (below +5% trigger). Mixed signals.",
+    "macro_trend": "improving",
+    "macro_headwind_score_range": [-1, 2],
+    "macro_headwind_band": "neutral_or_tailwind",
+    "extreme_event_detected": false,
+    "adjustment_guidance": {
+      "stance_modifier_expected": "neutral",
+      "position_cap_multiplier_expected_range": [0.95, 1.05],
+      "permission_adjustment_expected": "neutral"
+    }
+  },
+
+  "expected_composite_factors_output": {
+    "truth_trend": {
+      "score_range": [5, 7],
+      "band": "true_trend",
+      "band_alternatives": ["weak_trend"]
+    },
+    "band_position": {
+      "phase": "early",
+      "confidence_range": [0.55, 0.75]
+    },
+    "cycle_position": {
+      "cycle_position": "early_bull",
+      "cycle_confidence_range": [0.60, 0.85],
+      "voting_breakdown_expected": {"mvrv_z_candidate": "early_bull", "nupl_candidate": "early_bull_or_mid_bull", "lth_candidate": "early_bull"}
+    },
+    "crowding": {
+      "score_range": [2, 3],
+      "direction": "crowded_long",
+      "band": "normal",
+      "position_cap_multiplier": 1.0
+    },
+    "macro_headwind": {
+      "score_range": [-1, 2],
+      "band": "neutral_or_tailwind",
+      "position_cap_multiplier": 1.0,
+      "correlation_amplified": false
+    },
+    "event_risk": {
+      "score_range": [0, 2],
+      "band": "low",
+      "position_cap_multiplier": 1.0,
+      "permission_adjustment": null
+    }
+  },
+
+  "expected_observation_category": "watchful",
+  "observation_category_reasoning": "Does not match disciplined (regime is not chaos/transition of bearish sense, stance not neutral, cycle not unclear, risk not high/critical). Matches watchful: stance is bullish, opportunity_grade is B (∈ {C, none}? No — B! so actually does NOT match watchful's 'grade ∈ {C, none}' condition).  →  REVIEWED: if grade = B, the observation_classifier rules put this between watchful and possibly_suppressed. However possibly_suppressed requires grade = none + persistence ≥ 7d. Since grade is B (active opportunity), the pipeline does NOT classify as any of the three — this case needs a 4th outcome or rule clarification. Expected: watchful (pragmatic), FLAG for Sprint 1 to verify rule completeness.",
+
+  "expected_m26_acceptance_result": {
+    "scenario_type": "main_bull",
+    "m26_requirement": "At least one A-grade or B-grade long_planned or long_open trigger within the uptrend window",
+    "expected_pass": true,
+    "expected_trigger": "LONG_PLANNED",
+    "reasoning": "Grade B + bullish + can_open satisfies FLAT → LONG_PLANNED transition rules in state_machine.yaml"
+  },
+
+  "validation_notes": [
+    "Ranges used intentionally — exact indicator values depend on full price path which has seeded-random elements.",
+    "All ranges should be satisfied for this scenario to pass M26.",
+    "If computed value falls outside range, either code is buggy OR scenario calibration is off — investigate both."
+  ]
+}

@@ -41,15 +41,16 @@ consistency_notes:
 
   - topic: "execution_permission 值集"
     this_file_has: 7   # can_open, cautious_open, ambush_only, no_chase, hold_only, watch, protective
+    status: resolved   # 批 6 Part A 修复
     conflicts_with:
       - file: config/layers.yaml
         path: layer_3_opportunity.output_enums.execution_permission
-        observed_count: 6                # 缺 no_chase
-        resolution: "以本文件为准,layers.yaml 应补 no_chase"
+        observed_count: 7                # 已补 no_chase
+        resolution: resolved_in_batch_6
       - file: config/thresholds.yaml
         path: layer_4_risk.execution_permission_merging.severity_rank
-        observed_count: 5                # 严格度排序缺 no_chase(hold_only 已按设计移除)
-        resolution: "no_chase 应插入 ambush_only 和 cautious_open 之间"
+        observed_count: 6                # 已插入 no_chase 于 ambush_only 和 cautious_open 之间
+        resolution: resolved_in_batch_6
 
   - topic: "regime_primary 值集"
     this_file_has: 8

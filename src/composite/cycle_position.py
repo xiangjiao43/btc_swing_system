@@ -178,8 +178,10 @@ class CyclePositionFactor(CompositeFactorBase):
             ))
             conf = max(0.0, round(conf - penalty, 4))
 
-        # ---- last_stable 查询(Sprint 1.6 硬编码返回 None)----
-        last_stable: Optional[str] = _lookup_last_stable(state_history_dao)
+        # ---- last_stable 查询:Pipeline 预先注入优先,DAO 回退 ----
+        last_stable: Optional[str] = context.get("cycle_position_last_stable")
+        if last_stable is None:
+            last_stable = _lookup_last_stable(state_history_dao)
 
         return {
             "factor": self.name,

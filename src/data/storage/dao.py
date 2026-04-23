@@ -188,6 +188,33 @@ class BTCKlinesDAO:
             ).fetchone()
         return int(row["n"])
 
+    @staticmethod
+    def get_recent_as_df(
+        conn: sqlite3.Connection,
+        timeframe: TimeFrame,
+        limit: int = 500,
+    ) -> Any:
+        """
+        取最近 limit 根 K 线,返回 pd.DataFrame(index=DatetimeIndex UTC,
+        columns=open/high/low/close/volume_btc/volume_usdt)。Pipeline 专用。
+        """
+        import pandas as pd
+        rows = conn.execute(
+            "SELECT * FROM btc_klines WHERE timeframe = ? "
+            "ORDER BY timestamp DESC LIMIT ?",
+            (timeframe, limit),
+        ).fetchall()
+        if not rows:
+            return pd.DataFrame()
+        # 升序返回
+        data = [dict(r) for r in rows][::-1]
+        df = pd.DataFrame(data)
+        df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
+        df = df.set_index("timestamp")
+        # 只保留需要的列,order 稳定
+        cols = ["open", "high", "low", "close", "volume_btc", "volume_usdt"]
+        return df[[c for c in cols if c in df.columns]]
+
 
 # ============================================================
 # 衍生品 / 链上 / 宏观(长表共用模式)
@@ -275,6 +302,42 @@ class _MetricLongTableDAO:
             f"ORDER BY timestamp ASC"
         )
         return _rows_to_dicts(conn.execute(sql, params).fetchall())
+
+    @classmethod
+    def get_distinct_metric_names(
+        cls, conn: sqlite3.Connection,
+    ) -> list[str]:
+        """返回该表里出现过的所有 metric_name。"""
+        rows = conn.execute(
+            f"SELECT DISTINCT metric_name FROM {cls._table} ORDER BY metric_name"
+        ).fetchall()
+        return [r["metric_name"] for r in rows]
+
+    @classmethod
+    def get_all_metrics(
+        cls,
+        conn: sqlite3.Connection,
+        lookback_days: int = 180,
+    ) -> dict[str, Any]:
+        """
+        返回 {metric_name: pd.Series}(index=DatetimeIndex UTC,升序)。
+        只包含最近 `lookback_days` 天的数据。Pipeline 专用。
+        """
+        import pandas as pd
+        from datetime import datetime, timedelta, timezone
+        cutoff = (
+            datetime.now(timezone.utc) - timedelta(days=lookback_days)
+        ).strftime("%Y-%m-%dT%H:%M:%SZ")
+        out: dict[str, Any] = {}
+        for name in cls.get_distinct_metric_names(conn):
+            rows = cls.get_series(conn, metric_name=name, start=cutoff)
+            if not rows:
+                continue
+            df = pd.DataFrame(rows)
+            df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
+            df = df.set_index("timestamp").sort_index()
+            out[name] = df["metric_value"].astype(float)
+        return out
 
 
 class DerivativesDAO(_MetricLongTableDAO):
@@ -364,6 +427,46 @@ class EventsCalendarDAO:
         ).fetchone()
         return _row_to_dict(row)
 
+    @staticmethod
+    def get_upcoming_within_hours(
+        conn: sqlite3.Connection,
+        hours: float = 48,
+        now_utc: Optional[str] = None,
+    ) -> list[dict[str, Any]]:
+        """
+        返回 now → now+hours 窗口内的事件,按时间升序。
+        每条附加 'hours_to' 字段(相对 now 的小时数)。
+        Pipeline 专用。
+        """
+        from datetime import datetime, timedelta, timezone
+        if now_utc is None:
+            now_dt = datetime.now(timezone.utc)
+        else:
+            s = now_utc.replace("Z", "+00:00")
+            now_dt = datetime.fromisoformat(s) if s else datetime.now(timezone.utc)
+            if now_dt.tzinfo is None:
+                now_dt = now_dt.replace(tzinfo=timezone.utc)
+        end_dt = now_dt + timedelta(hours=hours)
+        start_str = now_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+        end_str = end_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+        rows = EventsCalendarDAO.get_events_in_window(conn, start_str, end_str)
+        for r in rows:
+            try:
+                trig = r.get("utc_trigger_time")
+                if trig:
+                    s2 = trig.replace("Z", "+00:00")
+                    t_dt = datetime.fromisoformat(s2)
+                    if t_dt.tzinfo is None:
+                        t_dt = t_dt.replace(tzinfo=timezone.utc)
+                    r["hours_to"] = (
+                        (t_dt - now_dt).total_seconds() / 3600.0
+                    )
+                else:
+                    r["hours_to"] = None
+            except Exception:
+                r["hours_to"] = None
+        return rows
+
 
 # ============================================================
 # StrategyState 历史归档
@@ -449,6 +552,42 @@ class StrategyStateDAO:
             d["state"] = json.loads(d.pop("state_json"))
             result.append(d)
         return result
+
+    @staticmethod
+    def get_count(conn: sqlite3.Connection) -> int:
+        """历史 StrategyState 条数,用于 cold_start 判定。"""
+        row = conn.execute(
+            "SELECT COUNT(*) AS n FROM strategy_state_history"
+        ).fetchone()
+        return int(row["n"])
+
+    @staticmethod
+    def get_latest_non_unclear_cycle(
+        conn: sqlite3.Connection,
+    ) -> Optional[str]:
+        """
+        倒序扫描 strategy_state_history,找到最近一条 cycle_position.band ≠ 'unclear'
+        的 band 值(例如 'accumulation' / 'distribution' / 'peak' / 'bottom' 等)。
+        无命中时返回 None。Pipeline 用来给 CyclePosition 提供"上次稳定判定"。
+        """
+        sql = """
+            SELECT json_extract(state_json, '$.composite_factors.cycle_position.band') AS band
+            FROM strategy_state_history
+            WHERE json_extract(state_json, '$.composite_factors.cycle_position.band')
+                  IS NOT NULL
+              AND json_extract(state_json, '$.composite_factors.cycle_position.band')
+                  != 'unclear'
+            ORDER BY run_timestamp_utc DESC
+            LIMIT 1
+        """
+        try:
+            row = conn.execute(sql).fetchone()
+        except sqlite3.OperationalError:
+            # 兼容 json_extract 不可用的极端场景(理论上 SQLite 3.38+ 均支持)
+            return None
+        if row is None:
+            return None
+        return row["band"]
 
 
 # ============================================================
@@ -538,6 +677,39 @@ class FallbackLogDAO:
             (fallback_level, since_utc),
         ).fetchone()
         return int(row["n"])
+
+    @staticmethod
+    def log_stage_error(
+        conn: sqlite3.Connection,
+        run_timestamp_utc: str,
+        stage: str,
+        error: BaseException | str,
+        fallback_applied: str,
+        fallback_level: FallbackLevel = "level_1",
+    ) -> int:
+        """
+        Pipeline 阶段出错时的便捷封装:把 stage / error / fallback_applied 写入
+        details。默认 fallback_level='level_1'(单阶段降级),调用方可覆盖。
+        """
+        if isinstance(error, BaseException):
+            error_type = type(error).__name__
+            error_msg = str(error)[:500]
+        else:
+            error_type = "str"
+            error_msg = str(error)[:500]
+        details = {
+            "stage": stage,
+            "error_type": error_type,
+            "error_message": error_msg,
+            "fallback_applied": fallback_applied,
+        }
+        return FallbackLogDAO.insert_event(
+            conn,
+            run_timestamp_utc=run_timestamp_utc,
+            fallback_level=fallback_level,
+            triggered_by=f"pipeline.{stage}",
+            details=details,
+        )
 
     @staticmethod
     def count_consecutive_level_1_ending_at(

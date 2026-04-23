@@ -1,0 +1,1477 @@
+# ============================================================
+# schemas.yaml — 项目全字段唯一真相来源(Single Source of Truth)
+# ============================================================
+# 用途:从建模文档 v1.2 抽取的所有字段契约,作为:
+#   - 后续 Pydantic model(src/schemas/*.py)的生成依据
+#   - 前后端数据交换的契约对照
+#   - AI 输出 validator 的字段白名单
+#   - 数据库 schema 对齐基准
+#
+# 纪律(v1.2):
+#   1) 建模文档是字段定义的最终权威;本文件是"机器可读的副本"。
+#   2) 任何字段新增 / 改名 / 改类型,**必须先改建模文档、再改本文件**。
+#   3) 其他 config 文件(thresholds / state_machine / layers 等)如与本文件
+#      的枚举值不一致,以本文件为准,由那些文件做跟随修正。
+#
+# 字段描述惯例:
+#   type:         string / number / int / bool / list / dict / datetime / enum
+#                 (number 含 float/int;int 用于显式整数)
+#   required:     true / false
+#   description:  中文一句话
+#   enum:         枚举名(→ common_types.enums.<name>)
+#   default:      默认值(可省)
+#   example:      示例值(可省)
+#   notes:        特殊说明(M 编号 / 纪律引用)
+#   range:        [min, max](number 类型适用)
+#   item_type:    list 类型的元素类型(或嵌套结构名)
+#
+# 对应建模章节:§4.1 / §4.2.4-§4.7.2 / §3.8 / §6.2-§6.4 / §7.2 / §8.2-§8.3
+#
+# 创建于:2026-04-23(Sprint 1 前置工作 · 优化一)
+# 建模版本:v1.2
+# ============================================================
+
+
+# ============================================================
+# PART 0 — 跨文件一致性自检
+# ============================================================
+# 本文件与其他 config 文件的枚举值对照。发现不一致时**以本文件为准**,
+# 由其他文件跟随修正。Sprint 1 前需逐项复核。
+consistency_notes:
+
+  - topic: "execution_permission 值集"
+    this_file_has: 7   # can_open, cautious_open, ambush_only, no_chase, hold_only, watch, protective
+    conflicts_with:
+      - file: config/layers.yaml
+        path: layer_3_opportunity.output_enums.execution_permission
+        observed_count: 6                # 缺 no_chase
+        resolution: "以本文件为准,layers.yaml 应补 no_chase"
+      - file: config/thresholds.yaml
+        path: layer_4_risk.execution_permission_merging.severity_rank
+        observed_count: 5                # 严格度排序缺 no_chase(hold_only 已按设计移除)
+        resolution: "no_chase 应插入 ambush_only 和 cautious_open 之间"
+
+  - topic: "regime_primary 值集"
+    this_file_has: 8
+    conflicts_with: []                   # layers.yaml 已一致
+
+  - topic: "action_state 值集"
+    this_file_has: 14
+    conflicts_with: []                   # state_machine.yaml 已一致
+
+  - topic: "run_trigger 值集"
+    this_file_has: 8
+    conflicts_with: []                   # base.yaml 使用 run_trigger_tag 字符串,未集中列举
+
+  - topic: "outcome_type 值集"
+    this_file_has: 11                    # A~J + X
+    conflicts_with: []                   # 建模 §8.3 唯一来源
+
+
+# ============================================================
+# PART 1 — common_types(枚举与基础结构)
+# ============================================================
+common_types:
+
+  # -------- Enums(枚举值集合)--------
+  enums:
+
+    # ---- 通用健康与置信度 ----
+    confidence_tier:
+      values: [high, medium, low, very_low]
+      notes: "§4.1 阈值:high ≥ 0.75 / medium 0.5-0.75 / low 0.3-0.5 / very_low < 0.3"
+
+    health_status:
+      values: [healthy, degraded, insufficient_data, error]
+      notes: "§4.1"
+
+    computation_method:
+      values: [rule_based, ai_assisted, ai_primary, hybrid]
+      notes: "§4.1"
+
+    contribution:
+      values: [supportive, neutral, challenging, blocking]
+      notes: "§4.1,每层对主策略的贡献"
+
+    # ---- Layer 1 ----
+    regime:
+      values: [trend_up, trend_down, range_high, range_mid, range_low, transition_up, transition_down, chaos]
+      notes: "§4.2.4 regime_primary 8 值"
+
+    regime_stability:
+      values: [stable, slightly_shifting, actively_shifting, unstable]
+      notes: "§4.2.4"
+
+    volatility_level:
+      values: [low, normal, elevated, extreme]
+      notes: "§4.2.4;§2.4 extreme 为软否决(position_cap × 0.5)"
+
+    trend_direction:
+      values: [up, down, flat]
+
+    # ---- Layer 2 ----
+    stance:
+      values: [bullish, bearish, neutral]
+      notes: "§4.3.4"
+
+    stance_strength:
+      values: [strong, moderate, weak]
+
+    phase:
+      values: [early, mid, late, exhausted, unclear, n_a]
+      notes: "§4.3.4;波段位置"
+
+    cycle_position:
+      values: [accumulation, early_bull, mid_bull, late_bull, distribution, early_bear, mid_bear, late_bear, unclear]
+      notes: "§3.8.4 九档(M1/M2);unclear 为伪档,投票池空时输出(M17)"
+
+    # ---- Layer 3 ----
+    opportunity_grade:
+      values: [A, B, C, none]
+      notes: "§4.4.4-6;v1 空头只允许 A/B/none(M3+B3);L3 唯一产出(M16),AI / Fallback 不可改"
+
+    execution_permission:
+      values: [can_open, cautious_open, ambush_only, no_chase, hold_only, watch, protective]
+      notes: >
+        §4.5.6 归并规则 + §4.5.5 position_cap 硬下限适用范围;
+        hold_only 不参与归并,由 HOLD 状态 on_enter 设置;
+        no_chase 保留计算值不抬升(§4.5.5 问题 4);
+        严格度排序(最严 → 最宽):protective > watch > ambush_only > no_chase > cautious_open > can_open
+
+    # ---- Layer 4 ----
+    overall_risk_level:
+      values: [low, moderate, elevated, high, critical]
+      notes: "§4.5.7;critical 为软否决(final_permission=protective),允许 position_cap < 15%"
+
+    risk_tag:
+      values:
+        - funding_extreme
+        - oi_spike
+        - crowded_long
+        - crowded_short
+        - liquidity_thin
+        - correlation_break
+        - leverage_stretched
+        - volatility_regime_shift
+        - structural_divergence
+      notes: "§4.5.9"
+
+    hard_invalidation_direction:
+      values: [long, short]
+
+    hard_invalidation_priority:
+      values: [primary, secondary]
+
+    confirmation_timeframe:
+      values: ["1h", "4h"]
+      notes: "§4.4.7 / §4.5.4;入场确认默认 1h,硬失效确认默认 4h"
+
+    # ---- Layer 5 ----
+    macro_stance:
+      values: [risk_on, risk_neutral, risk_off, extreme_risk_off]
+      notes: "§4.6.4;extreme_risk_off 由 extreme_event_detected=true 触发,硬否决 PROTECTION"
+
+    macro_trend:
+      values: [improving, stable, deteriorating, volatile]
+
+    stance_modifier:
+      values: [strong_support, support, neutral, challenge, strong_challenge]
+      notes: "§6.8 L5 adjustment_guidance"
+
+    permission_adjustment:
+      values: [tighten, neutral, loosen]
+      notes: "§6.8"
+
+    # ---- Observation(§4.7)----
+    observation_category:
+      values: [disciplined, watchful, possibly_suppressed, cold_start_warming_up]
+      notes: "§4.7.2 + M28 + M35(冷启动第四标签)"
+
+    # ---- State Machine ----
+    action_state:
+      values:
+        - FLAT
+        - LONG_PLANNED
+        - LONG_OPEN
+        - LONG_HOLD
+        - LONG_TRIM
+        - LONG_EXIT
+        - SHORT_PLANNED
+        - SHORT_OPEN
+        - SHORT_HOLD
+        - SHORT_TRIM
+        - SHORT_EXIT
+        - FLIP_WATCH
+        - PROTECTION
+        - POST_PROTECTION_REASSESS
+      notes: "§5.1 14 状态"
+
+    lifecycle_stage:
+      values: [just_opened, holding, partial_trimmed, preparing_exit, flip_watching]
+      notes: "§7.2 Block 6 stage"
+
+    # ---- 运行时 ----
+    run_mode:
+      values: [live, backtest, replay, dry_run]
+      notes: "§7.2 Block 1"
+
+    run_trigger:
+      values: [scheduled, event_macro, event_onchain, event_funding, event_options, event_price, event_invalidation, manual]
+      notes: "§3.3.3 / M38"
+
+    strategy_flavor:
+      values: [swing]
+      notes: "§7.2 Block 1;v1 固定 swing"
+
+    fallback_level:
+      values: [none, level_1, level_2, level_3]
+      notes: "§6.9 / M33"
+
+    # ---- Data Health ----
+    overall_data_health_status:
+      values: [healthy, degraded, critical]
+      notes: "§7.2 Block 2 overall_status(与 health_status 四档不同)"
+
+    data_source_status:
+      values: [healthy, degraded, stale, missing, error]
+      notes: "§7.2 Block 2 source_statuses.status"
+
+    freshness_class:
+      values: [price, derivatives, macro, onchain, event]
+      notes: "§3.2.3;用于 freshness_thresholds_sec 查表"
+
+    # ---- Lifecycle ----
+    thesis_still_valid:
+      values: [fully_valid, mostly_valid, partially_valid, weakened, invalidated]
+      notes: "§7.2 Block 6;AI 裁决时必须明确评估(六五 System Prompt 纪律 5)"
+
+    direction:
+      values: [long, short]
+
+    # ---- Review ----
+    outcome_type:
+      values:
+        - A_perfect
+        - B_good_suboptimal
+        - C_dir_ok_exec_bad
+        - D_early_exit
+        - E_missed_flip
+        - F_wrong_but_stopped
+        - G_wrong_late_stop
+        - H_round_trip
+        - I_range_as_trend
+        - J_trend_as_range
+        - X_aborted
+      notes: "§8.3 10+1 种"
+
+    failure_mode:
+      values: [data_gap, rule_mismatch, ai_error, validator_reject, manual_override, n_a]
+      notes: "§8.3;本项建模未展开枚举细节,此处为合理拟定(标注在 Triggers)"
+
+    # ---- AI Verdict ----
+    validation_result_status:
+      values: [passed, failed, fallback_applied]
+      notes: "§7.2 Block 9 validation_result"
+
+    alert_severity:
+      values: [info, warning, critical]
+
+    # ---- Event / Impact ----
+    impact_level_enum:
+      values: [1, 2, 3, 4, 5]
+      notes: "event_calendar 显式;冗余元信息,不参与评分"
+
+    event_type:
+      values: [fomc, cpi, nfp, options_expiry_major, other]
+      notes: "thresholds.event_risk_scoring.event_type_weights 的键;event_calendar.yaml event_type_mapping 映射"
+
+
+  # -------- 共享结构(被多处引用的嵌套结构)--------
+  structures:
+
+    # 数据新鲜度字段(M29)
+    data_freshness_item:
+      fields:
+        metric_name: {type: string, required: true, description: "数据点名称(对应 data_catalog 的 source name)"}
+        is_fresh: {type: bool, required: true, description: "true=新鲜;false=stale"}
+        last_update_utc: {type: datetime, required: true, description: "数据的 data_captured_at(UTC)"}
+        age_sec: {type: int, required: true, description: "本次 reference_timestamp 减 last_update 的秒数"}
+        threshold_sec: {type: int, required: true, description: "对应 freshness_class 的 stale 阈值"}
+        freshness_class: {type: enum, enum: freshness_class, required: true}
+        stale_reason: {type: string, required: false, description: "stale 时说明原因;否则为 null"}
+
+    # 硬失效位(§4.5.7 hard_invalidation_levels 每条)
+    hard_invalidation_level:
+      fields:
+        level_id: {type: string, required: true, description: "唯一 ID,trade_plan.stop_loss.linked_to_l4_invalidation_id 引用"}
+        price: {type: number, required: true}
+        direction: {type: enum, enum: hard_invalidation_direction, required: true}
+        basis: {type: string, required: true, description: "结构位 / 关键位 / 波动率边界 等"}
+        priority: {type: enum, enum: hard_invalidation_priority, required: true}
+        confirmation_timeframe: {type: enum, enum: confirmation_timeframe, required: true, default: "4h"}
+
+    # 持仓调整记录(§7.2 Block 6 position_adjustments 每条)
+    position_adjustment:
+      fields:
+        at_bjt: {type: string, required: true}
+        adjustment_type: {type: string, required: true, description: "open / trim / exit / add"}
+        size_pct_of_total: {type: number, required: true}
+        price: {type: number, required: true}
+        reason: {type: string, required: true}
+        related_run_id: {type: string, required: true}
+
+    # 入场区间(§7.2 Block 5 entry_zones 每条)
+    entry_zone:
+      fields:
+        zone_low: {type: number, required: true}
+        zone_high: {type: number, required: true}
+        weight_pct: {type: number, required: true, description: "该档权重(与 thresholds.layer_3_opportunity.position_layering_weights 对齐)"}
+        basis: {type: string, required: true}
+
+    # 止盈档(§7.2 Block 5 take_profit_plan 每条)
+    take_profit_entry:
+      fields:
+        target_price: {type: number, required: true}
+        trim_pct_of_current: {type: number, required: true}
+        basis: {type: string, required: true}
+
+    # 止损结构
+    stop_loss_struct:
+      fields:
+        price: {type: number, required: true, description: "必须在 L4 hard_invalidation_levels 中"}
+        type: {type: string, required: true, description: "hard / trailing / time_based"}
+        invalidation_desc: {type: string, required: true}
+        reasoning: {type: string, required: true}
+        linked_to_l4_invalidation_id: {type: string, required: true, description: "P4 追溯锚点"}
+
+    # 事件窗口(§4.5.7 event_windows 每条)
+    event_window:
+      fields:
+        event_name: {type: string, required: true}
+        event_time_us_east: {type: string, required: true, description: "ET 时间字符串,格式 YYYY-MM-DD HH:MM"}
+        event_time_bjt: {type: string, required: true}
+        event_time_utc: {type: datetime, required: true}
+        dst_active: {type: bool, required: true, description: "M39 夏令时状态标记"}
+        hours_to_event: {type: number, required: true}
+        event_type: {type: enum, enum: event_type, required: true}
+        impact_level: {type: enum, enum: impact_level_enum, required: true}
+
+    # 数据源状态(§7.2 Block 2 source_statuses 每条)
+    data_source_status_entry:
+      fields:
+        name: {type: string, required: true}
+        last_update: {type: datetime, required: true}
+        latency_sec: {type: number, required: true}
+        status: {type: enum, enum: data_source_status, required: true}
+        note: {type: string, required: false}
+
+    # 告警(Block 10 active_alerts 每条)
+    active_alert:
+      fields:
+        alert_type: {type: string, required: true, description: "§8.5 清单中的一项"}
+        severity: {type: enum, enum: alert_severity, required: true}
+        message: {type: string, required: true}
+        raised_at_utc: {type: datetime, required: true}
+        acknowledged: {type: bool, required: true, default: false}
+
+    # 时间框对齐(L1 timeframe_alignment)
+    timeframe_alignment:
+      fields:
+        tf_4h: {type: enum, enum: trend_direction, required: true}
+        tf_1d: {type: enum, enum: trend_direction, required: true}
+        tf_1w: {type: enum, enum: trend_direction, required: true}
+        aligned: {type: bool, required: true}
+
+    # 环境标志(L1 environmental_flags)
+    environmental_flags:
+      fields:
+        is_trending: {type: bool, required: true}
+        is_ranging: {type: bool, required: true}
+        trust_breakouts: {type: bool, required: true}
+        trust_mean_reversion: {type: bool, required: true}
+
+
+# ============================================================
+# PART 2 — EvidenceReport 通用结构(§4.1)
+# ============================================================
+# 五层 EvidenceReport 都继承本结构,扩展 layer_specific。
+evidence_report_base:
+  description: "所有五层证据的基础结构"
+
+  fields:
+    # 基础元信息
+    layer_id:
+      type: int
+      required: true
+      description: "1-5"
+      range: [1, 5]
+
+    layer_name:
+      type: string
+      required: true
+      example: "L1 市场状态"
+
+    generated_at_bjt:
+      type: string
+      required: true
+
+    computation_method:
+      type: enum
+      enum: computation_method
+      required: true
+
+    # 健康状态
+    health_status:
+      type: enum
+      enum: health_status
+      required: true
+
+    degraded_reasons:
+      type: list
+      item_type: string
+      required: false
+      default: []
+
+    data_freshness:
+      type: list
+      item_type: data_freshness_item
+      required: true
+      description: "本层所用每个关键数据点的新鲜度(M29)"
+
+    # 核心结论
+    verdict:
+      type: string
+      required: true
+      description: "人类可读的一句话结论"
+
+    verdict_enum:
+      type: string
+      required: true
+      description: "各层自定枚举值(L1 regime / L2 stance / L3 opportunity_grade / L4 overall_risk_level / L5 macro_stance)"
+
+    confidence:
+      type: number
+      required: true
+      range: [0.0, 1.0]
+
+    confidence_tier:
+      type: enum
+      enum: confidence_tier
+      required: true
+
+    # 证据支撑
+    key_signals:
+      type: list
+      item_type: string
+      required: true
+      description: "支持本层结论的关键信号列表"
+
+    contradicting_signals:
+      type: list
+      item_type: string
+      required: false
+      default: []
+
+    # 对主策略的贡献
+    contribution:
+      type: enum
+      enum: contribution
+      required: true
+
+    contribution_note:
+      type: string
+      required: true
+
+    # 可解释性
+    human_readable_summary:
+      type: string
+      required: true
+      description: "2-3 句"
+
+    detail_reference:
+      type: string
+      required: false
+      description: "证据卡 ID 或文档路径"
+
+    # 生命周期
+    valid_until_bjt:
+      type: string
+      required: false
+
+    trigger_conditions:
+      type: list
+      item_type: string
+      required: false
+      description: "使本结论失效的条件"
+
+    # 层级扩展(各层在 layer_*_specific 里)
+    layer_specific:
+      type: dict
+      required: true
+      description: "见下面各层 schema 的 specific 字段"
+
+
+# ============================================================
+# PART 3 — Layer 1-5 Schemas
+# ============================================================
+
+# -------- Layer 1(§4.2.4)--------
+layer_1_regime_schema:
+  extends: evidence_report_base
+  verdict_enum_source: regime
+  specific_fields:
+
+    regime_primary:
+      type: enum
+      enum: regime
+      required: true
+
+    regime_stability:
+      type: enum
+      enum: regime_stability
+      required: true
+
+    regime_duration_days:
+      type: number
+      required: true
+
+    volatility_level:
+      type: enum
+      enum: volatility_level
+      required: true
+
+    volatility_percentile:
+      type: number
+      required: true
+      range: [0, 100]
+
+    trend_strength:
+      type: number
+      required: true
+      range: [0.0, 1.0]
+
+    trend_direction:
+      type: enum
+      enum: trend_direction
+      required: true
+
+    structure_coherence:
+      type: number
+      required: true
+      range: [0.0, 1.0]
+
+    timeframe_alignment:
+      type: struct
+      struct: timeframe_alignment
+      required: true
+
+    environmental_flags:
+      type: struct
+      struct: environmental_flags
+      required: true
+
+    truth_trend_score:
+      type: number
+      required: true
+      range: [0, 9]
+      notes: "来自 TruthTrend 组合因子,L1 内部使用,不跨层(B1)"
+
+
+# -------- Layer 2(§4.3.4)--------
+layer_2_direction_schema:
+  extends: evidence_report_base
+  verdict_enum_source: stance
+  specific_fields:
+
+    stance:
+      type: enum
+      enum: stance
+      required: true
+
+    stance_confidence:
+      type: number
+      required: true
+      range: [0.0, 1.0]
+      notes: "M18:仅供动态门槛比较的内部量;外部展示用 ai_verdict.confidence_breakdown.overall"
+
+    stance_strength:
+      type: enum
+      enum: stance_strength
+      required: true
+
+    phase:
+      type: enum
+      enum: phase
+      required: true
+
+    phase_evidence:
+      type: string
+      required: true
+
+    structure_features:
+      type: dict
+      required: true
+      description: "{hh_count, hl_count, lh_count, ll_count, latest_structure}"
+
+    key_levels:
+      type: dict
+      required: true
+      description: "{nearest_support, nearest_resistance, major_support, major_resistance, current_position}"
+
+    trend_position:
+      type: dict
+      required: true
+      description: "{estimated_pct_of_move, estimation_basis, reliability}"
+
+    long_cycle_context:
+      type: dict
+      required: true
+      description: "{cycle_position, cycle_confidence, data_basis, last_stable_cycle_position(展示用,不参与决策,M17)}"
+
+    band_position_score:
+      type: number
+      required: true
+      notes: "来自 BandPosition 组合因子,L2 内部使用"
+
+    exchange_momentum_score:
+      type: number
+      required: true
+      range: [-5, 5]
+      notes: "L2 内部修正项(B5);做空侧不参与 stance_confidence 计算"
+
+
+# -------- Layer 3(§4.4.9)--------
+layer_3_opportunity_schema:
+  extends: evidence_report_base
+  verdict_enum_source: opportunity_grade
+  specific_fields:
+
+    opportunity_grade:
+      type: enum
+      enum: opportunity_grade
+      required: true
+      notes: "L3 唯一产出(M16);AI / L4 / L5 / Fallback 均不可修改(三重封闭)"
+
+    opportunity_reason:
+      type: string
+      required: true
+
+    execution_permission:
+      type: enum
+      enum: execution_permission
+      required: true
+      notes: "L3 初步建议,最终归并后写入 main_strategy(§4.5.6)"
+
+    suggested_entry_plan:
+      type: dict
+      required: false
+      description: "struct 或 null"
+
+    risk_reward:
+      type: dict
+      required: true
+      description: "{estimated_target, estimated_stop, rr_ratio, win_rate_estimate}"
+
+    timing_assessment:
+      type: dict
+      required: true
+      description: "{momentum_phase, is_extended, needs_pullback, pullback_depth_estimate}"
+
+    liquidity_context:
+      type: dict
+      required: true
+      description: "{nearby_long_liq, nearby_short_liq, liquidity_imbalance}"
+
+    entry_confirmation_timeframe:
+      type: enum
+      enum: confirmation_timeframe
+      required: true
+      default: "1h"
+
+
+# -------- Layer 4(§4.5.7)--------
+layer_4_risk_schema:
+  extends: evidence_report_base
+  verdict_enum_source: overall_risk_level
+  specific_fields:
+
+    overall_risk_level:
+      type: enum
+      enum: overall_risk_level
+      required: true
+
+    hard_invalidation_levels:
+      type: list
+      item_type: hard_invalidation_level
+      required: true
+      notes: "§4.5.4 P4:唯一权威;trade_plan.stop_loss 是其表层复制"
+
+    active_risk_tags:
+      type: list
+      item_type: risk_tag
+      required: true
+      default: []
+
+    event_windows:
+      type: list
+      item_type: event_window
+      required: true
+      default: []
+
+    worst_case_estimate:
+      type: dict
+      required: true
+      description: "{drawdown_scenario, estimated_drawdown_pct, probability_hint}"
+
+    recommended_position_cap_pct:
+      type: number
+      required: true
+      range: [0, 100]
+
+    position_cap_composition:
+      type: dict
+      required: true
+      notes: "M19 串行合成审计;字段见 strategy_state_schema.block_10_risks.position_cap_composition"
+
+    permission_composition:
+      type: dict
+      required: true
+      notes: "M20 归并审计;每个因子的建议值写入"
+
+    crowding_score:
+      type: number
+      required: true
+      range: [0, 8]
+
+    event_risk_score:
+      type: number
+      required: true
+      range: [0, 20]
+
+
+# -------- Layer 5(§4.6.4)--------
+layer_5_macro_schema:
+  extends: evidence_report_base
+  verdict_enum_source: macro_stance
+  specific_fields:
+
+    macro_stance:
+      type: enum
+      enum: macro_stance
+      required: true
+
+    macro_trend:
+      type: enum
+      enum: macro_trend
+      required: true
+
+    structured_macro:
+      type: dict
+      required: true
+      description: "{DXY, US10Y, VIX, sp500, nasdaq, ...}"
+
+    active_macro_tags:
+      type: list
+      item_type: string
+      required: true
+      default: []
+
+    active_event_summaries:
+      type: list
+      item_type: dict
+      required: true
+      default: []
+      description: "AI 生成,每条含 event_category, severity 1-5, impact_direction, duration, ai_confidence"
+
+    extreme_event_detected:
+      type: bool
+      required: true
+      default: false
+
+    extreme_event_details:
+      type: dict
+      required: false
+      description: "struct 或 null"
+
+    adjustment_guidance:
+      type: dict
+      required: true
+      fields:
+        stance_modifier: {type: enum, enum: stance_modifier, required: true}
+        position_cap_multiplier: {type: number, required: true, range: [0.5, 1.1]}
+        permission_adjustment: {type: enum, enum: permission_adjustment, required: true}
+        note: {type: string, required: true}
+
+    macro_headwind_score:
+      type: number
+      required: true
+      range: [-10, 10]
+
+
+# ============================================================
+# PART 4 — Observation Classifier Output(§4.7.2)
+# ============================================================
+observation_classifier_output_schema:
+  description: "Observation Classifier 的输出;position_in_pipeline = after L5 before AI"
+  fields:
+
+    observation_category:
+      type: enum
+      enum: observation_category
+      required: true
+
+    matched_rule:
+      type: string
+      required: true
+      description: "被命中的规则名(disciplined / watchful / possibly_suppressed / cold_start_warming_up)"
+
+    suppression_consecutive_days:
+      type: number
+      required: false
+      description: "仅当 observation_category = possibly_suppressed 时有值"
+
+    classification_reasons:
+      type: list
+      item_type: string
+      required: true
+      description: "触发的条件清单(按 layers.yaml.observation_classifier.rules 的字段名)"
+
+
+# ============================================================
+# PART 5 — 组合因子 Output Schemas(§3.8,6 个)
+# ============================================================
+
+composite_factors_schemas:
+
+  # -------- TruthTrend(§3.8.1,L1)--------
+  truth_trend_output:
+    single_use_point: l1_regime_and_confidence
+    fields:
+      score:
+        type: number
+        required: true
+        range: [0, 9]
+      band:
+        type: string
+        required: true
+        description: "true_trend / weak_trend / no_trend(按 thresholds.truth_trend_scoring.output_bands)"
+      items_triggered:
+        type: list
+        item_type: string
+        required: true
+        description: "命中的评分项名称列表"
+      regime_switch_first_week:
+        type: bool
+        required: true
+        description: "触发 regime 切换第一周置信度修正"
+      confidence:
+        type: number
+        required: true
+        range: [0.0, 1.0]
+
+  # -------- BandPosition(§3.8.2,L2 phase)--------
+  band_position_output:
+    single_use_point: l2_phase
+    fields:
+      phase:
+        type: enum
+        enum: phase
+        required: true
+      phase_confidence:
+        type: number
+        required: true
+        range: [0.0, 1.0]
+        description: "top_score / theoretical_max_score"
+      impulse_extension_ratio:
+        type: number
+        required: true
+        description: "价格结构项关键输入"
+      scoring_breakdown:
+        type: dict
+        required: true
+        description: "每个评分项对各 phase 的贡献"
+
+  # -------- CyclePosition(§3.8.4,L2 long_cycle_context)--------
+  cycle_position_output:
+    single_use_point: l2_long_cycle_context
+    fields:
+      cycle_position:
+        type: enum
+        enum: cycle_position
+        required: true
+      cycle_confidence:
+        type: number
+        required: true
+        range: [0.0, 1.0]
+      voting_pool:
+        type: list
+        item_type: string
+        required: true
+        description: "通过辅助条件后进入投票的候选档"
+      voting_breakdown:
+        type: dict
+        required: true
+        description: "{mvrv_z_candidate, nupl_candidate, lth_candidate} 三个主指标的候选档"
+      aux_conditions_passed:
+        type: dict
+        required: true
+        description: "每个候选档的辅助条件检查结果(时间/跌幅)"
+      last_stable_cycle_position:
+        type: enum
+        enum: cycle_position
+        required: false
+        notes: "M17:展示 / 复盘用,不参与当前决策"
+      halving_window_active:
+        type: bool
+        required: true
+        description: "是否在减半 ±6 个月窗口内;置信度自动降一档"
+      mvrv_z_stabilizing_check_result:
+        type: bool
+        required: false
+        description: "late_bear 候选时有值;对应 thresholds 的 trend_stabilizing_check_required"
+
+  # -------- Crowding(§3.8.3,L4)--------
+  crowding_output:
+    single_use_point: l4_risk_and_position_cap
+    fields:
+      score:
+        type: number
+        required: true
+        range: [-1, 8]
+        description: "允许负分(上方清算热力 -1)"
+      direction:
+        type: string
+        required: true
+        description: "crowded_long / crowded_short / normal"
+      band:
+        type: string
+        required: true
+        description: "extreme / mild / normal"
+      position_cap_multiplier:
+        type: number
+        required: true
+        description: "映射到 thresholds.layer_4_risk.position_cap_composition.crowding_multipliers"
+      items_triggered:
+        type: list
+        item_type: string
+        required: true
+
+  # -------- MacroHeadwind(§3.8.5,L5)--------
+  macro_headwind_output:
+    single_use_point: l5_adjustment_guidance
+    fields:
+      score:
+        type: number
+        required: true
+        range: [-10, 10]
+      band:
+        type: string
+        required: true
+        description: "strong_headwind / mild_headwind / neutral_or_tailwind"
+      position_cap_multiplier:
+        type: number
+        required: true
+      correlation_amplified:
+        type: bool
+        required: true
+        description: "BTC-纳指相关性 > 0.7 时 × 1.5 加权"
+      items_triggered:
+        type: list
+        item_type: string
+        required: true
+
+  # -------- EventRisk(§3.8.6,L4)--------
+  event_risk_output:
+    single_use_point: l4_position_cap_and_permission
+    fields:
+      score:
+        type: number
+        required: true
+        range: [0, 30]
+      band:
+        type: string
+        required: true
+        description: "high / medium / low"
+      position_cap_multiplier:
+        type: number
+        required: true
+      permission_adjustment:
+        type: string
+        required: false
+        description: "high 时建议 ambush_only;其他时为 null"
+      contributing_events:
+        type: list
+        item_type: dict
+        required: true
+        description: "参与评分的事件及各自贡献分"
+
+
+# ============================================================
+# PART 6 — StrategyState 12 业务块(§7.2)
+# ============================================================
+
+strategy_state_schema:
+  description: "主输出对象,每次运行生成一份;存库 strategy_runs + 归档"
+
+  block_1_meta:
+    fields:
+      schema_version:         {type: string, required: true, example: "v1.2.0"}
+      run_id:                 {type: string, required: true, description: "UUID 或时间戳 ID"}
+      previous_run_id:        {type: string, required: false}
+      generated_at_bjt:       {type: string, required: true}
+      generated_at_utc:       {type: datetime, required: true}
+      reference_timestamp_utc: {type: datetime, required: true, notes: "M29 数据采集完成时间"}
+      system_version:         {type: string, required: true}
+      rules_version:          {type: string, required: true, notes: "M36 独立规则版本号"}
+      run_mode:               {type: enum, enum: run_mode, required: true}
+      run_trigger:            {type: enum, enum: run_trigger, required: true, notes: "M38"}
+      strategy_flavor:        {type: enum, enum: strategy_flavor, required: true, default: swing}
+      cold_start:             {type: bool, required: true, default: false, notes: "M35 运行不足 7 天时 true"}
+      ai_model_actual:        {type: string, required: false, notes: "M37 从中转站响应读"}
+
+  block_2_data_health:
+    fields:
+      overall_status:         {type: enum, enum: overall_data_health_status, required: true}
+      source_statuses:        {type: list, item_type: data_source_status_entry, required: true}
+      degraded_layers:        {type: list, item_type: string, required: true, default: []}
+      stale_data_items:       {type: list, item_type: string, required: true, default: [], notes: "v1.2 新增"}
+
+  block_3_market_snapshot:
+    fields:
+      btc_price_usd:          {type: number, required: true}
+      price_source:           {type: string, required: true, example: "binance"}
+      price_captured_at_bjt:  {type: string, required: true}
+      price_24h_change_pct:   {type: number, required: true}
+      price_7d_change_pct:    {type: number, required: true}
+      ath_price_usd:          {type: number, required: true, notes: "v1.2 新增"}
+      drawdown_from_ath_pct:  {type: number, required: true, notes: "v1.2 新增;CyclePosition 辅助条件用"}
+      volatility_regime:      {type: enum, enum: volatility_level, required: true}
+      market_regime:          {type: enum, enum: regime, required: true, notes: "来自 L1"}
+      market_regime_confidence: {type: number, required: true, range: [0.0, 1.0]}
+
+  block_4_main_strategy:
+    fields:
+      stance:                 {type: enum, enum: stance, required: true}
+      stance_confidence:      {type: number, required: true, range: [0.0, 1.0], notes: "M18 内部量"}
+      action_state:           {type: enum, enum: action_state, required: true}
+      phase:                  {type: enum, enum: phase, required: true}
+      phase_confidence:       {type: number, required: true, range: [0.0, 1.0]}
+      opportunity_grade:      {type: enum, enum: opportunity_grade, required: true, notes: "L3 唯一产出,AI 不可改"}
+      execution_permission:   {type: enum, enum: execution_permission, required: true, notes: "归并后的最终值"}
+      observation_category:   {type: enum, enum: observation_category, required: true, notes: "M28"}
+      holding_guidance:       {type: string, required: false}
+      one_line_summary:       {type: string, required: true}
+      narrative:              {type: string, required: true, description: "3-5 句"}
+
+  block_5_trade_plan:
+    required_when: "execution_permission 允许动手时(can_open / cautious_open / ambush_only / no_chase)"
+    fields:
+      direction:              {type: enum, enum: direction, required: true}
+      total_position_cap_pct: {type: number, required: true, range: [0, 100]}
+      entry_zones:            {type: list, item_type: entry_zone, required: true}
+      stop_loss:              {type: struct, struct: stop_loss_struct, required: true}
+      take_profit_plan:       {type: list, item_type: take_profit_entry, required: true}
+      dynamic_notes:          {type: string, required: false}
+      entry_confirmation_timeframe: {type: enum, enum: confirmation_timeframe, required: true, default: "1h"}
+
+  block_6_lifecycle:
+    required_when: "is_position_state = true(LONG_* / SHORT_* 除 PLANNED 和 EXIT 外)"
+    fields:
+      lifecycle_id:           {type: string, required: true}
+      origin_run_id:          {type: string, required: true}
+      origin_time_bjt:        {type: string, required: true}
+      origin_thesis:          {type: string, required: true, notes: "不可变"}
+      direction:              {type: enum, enum: direction, required: true}
+      stage:                  {type: enum, enum: lifecycle_stage, required: true}
+      average_entry_price:    {type: number, required: true}
+      current_floating_pnl_pct: {type: number, required: true}
+      max_favorable_pct:      {type: number, required: true}
+      max_adverse_pct:        {type: number, required: true}
+      hours_held:             {type: number, required: true}
+      thesis_still_valid:     {type: enum, enum: thesis_still_valid, required: true}
+      thesis_validity_note:   {type: string, required: true}
+      position_adjustments:   {type: list, item_type: position_adjustment, required: true}
+      open_phase_min_time_reached:        {type: bool, required: true}
+      open_phase_pnl_confirmed:           {type: bool, required: true}
+      open_phase_structure_confirmed:     {type: bool, required: true}
+      open_phase_pullback_survived:       {type: bool, required: true}
+      protection_event_summary:           {type: dict, required: false}
+      ai_models_used_in_lifecycle:        {type: list, item_type: string, required: true, default: [], notes: "v1.2 新增"}
+
+  block_7_evidence_summary:
+    description: "五层各自摘要;每层含 verdict, confidence, key_signals, contribution, data_freshness"
+    fields:
+      layer_1:  {type: dict, required: true}
+      layer_2:  {type: dict, required: true}
+      layer_3:  {type: dict, required: true}
+      layer_4:  {type: dict, required: true}
+      layer_5:  {type: dict, required: true}
+    subfield_contract:
+      verdict:          {type: string, required: true}
+      confidence:       {type: number, required: true}
+      confidence_tier:  {type: enum, enum: confidence_tier, required: true}
+      key_signals:      {type: list, item_type: string, required: true}
+      contribution:     {type: enum, enum: contribution, required: true}
+      data_freshness:   {type: list, item_type: data_freshness_item, required: true}
+
+  block_8_evidence_cards:
+    description: "每卡一条;一次运行 ≤ 50 张(M31);card_id 按 {category}_{metric_name}_{bjt_date}"
+    item_fields:
+      card_id:          {type: string, required: true, example: "onchain_mvrv_z_20260421"}
+      category:         {type: string, required: true, description: "price / derivatives / onchain / macro / event"}
+      name:             {type: string, required: true}
+      captured_at_bjt:  {type: string, required: true}
+      current_value:    {type: number, required: true}
+      value_unit:       {type: string, required: true}
+      historical_percentile: {type: number, required: false, range: [0, 100]}
+      interpretation:   {type: string, required: true}
+      analysis:         {type: string, required: true, notes: "完整分析存 DB,AI 输入用摘要版(M31)"}
+      impact_on_strategy: {type: string, required: true}
+      impact_direction: {type: string, required: true, description: "bullish / bearish / neutral"}
+      impact_weight:    {type: number, required: true, range: [0.0, 1.0]}
+      linked_layer:     {type: string, required: true, description: "L1 / L2 / L3 / L4 / L5"}
+      data_fresh:       {type: bool, required: true, notes: "v1.2 新增"}
+
+  block_9_ai_verdict:
+    fields:
+      called_ai:                {type: bool, required: true}
+      model_name:               {type: string, required: false, description: "配置的模型名(ai.yaml)"}
+      ai_model_actual:          {type: string, required: false, notes: "M37 实际调用"}
+      decision_summary:         {type: string, required: true}
+      primary_drivers:          {type: list, item_type: dict, required: true, description: "每条含 summary + evidence_ref(card_id)"}
+      counter_arguments:        {type: list, item_type: string, required: true, default: []}
+      confidence_breakdown:
+        type: dict
+        required: true
+        fields:
+          overall:    {type: number, required: true, range: [0.0, 1.0], notes: "面向外部展示"}
+          direction:  {type: number, required: true, range: [0.0, 1.0]}
+          timing:     {type: number, required: true, range: [0.0, 1.0]}
+          risk:       {type: number, required: true, range: [0.0, 1.0]}
+      what_would_change_mind:   {type: list, item_type: string, required: true, notes: "§6.3 至少 3 条"}
+      state_transition:
+        type: dict
+        required: true
+        fields:
+          from:       {type: enum, enum: action_state, required: true}
+          to:         {type: enum, enum: action_state, required: true}
+          is_change:  {type: bool, required: true}
+          reason:     {type: string, required: true}
+      validation_result:
+        type: dict
+        required: true
+        fields:
+          passed:           {type: bool, required: true}
+          failed_checks:    {type: list, item_type: string, required: true, default: []}
+          fallback_applied: {type: enum, enum: fallback_level, required: true}
+
+  block_10_risks:
+    fields:
+      protection_mode:          {type: bool, required: true, default: false}
+      protection_reason:        {type: string, required: false}
+      upcoming_event_windows:   {type: list, item_type: event_window, required: true, default: []}
+      active_alerts:            {type: list, item_type: active_alert, required: true, default: []}
+      fallback_level:           {type: enum, enum: fallback_level, required: true, default: none}
+      position_cap_composition:
+        type: dict
+        required: true
+        notes: "M19 完整合成过程可审计"
+        fields:
+          base:                           {type: number, required: true, example: 70}
+          after_l4_risk:                  {type: number, required: true}
+          after_l4_crowding:              {type: number, required: true}
+          after_l5_macro:                 {type: number, required: true}
+          after_l4_event:                 {type: number, required: true}
+          after_l1_volatility:            {type: number, required: false, description: "L1 extreme × 0.5 若适用"}
+          hard_floor_applied_to_final:    {type: bool, required: true}
+          final:                          {type: number, required: true}
+      permission_composition:
+        type: dict
+        required: true
+        notes: "M20 每个因子建议值"
+        fields:
+          l4_risk_suggests:               {type: enum, enum: execution_permission, required: true}
+          l4_crowding_suggests:           {type: enum, enum: execution_permission, required: true}
+          l4_event_risk_suggests:         {type: enum, enum: execution_permission, required: true}
+          l5_macro_headwind_suggests:     {type: enum, enum: execution_permission, required: true}
+          before_a_grade_buffer:          {type: enum, enum: execution_permission, required: true}
+          a_grade_buffer_applied:         {type: bool, required: true}
+          final:                          {type: enum, enum: execution_permission, required: true}
+
+  block_11_delta_from_previous:
+    fields:
+      is_first_run:     {type: bool, required: true}
+      state_transitioned: {type: bool, required: true}
+      narrative:        {type: string, required: true}
+      changed_fields:   {type: list, item_type: string, required: true, default: []}
+
+  block_12_extra:
+    fields:
+      notes: {type: string, required: false, description: "可扩展块;运行时可写入临时调试信息"}
+
+
+# ============================================================
+# PART 7 — AIAdjudicatorInput(§6.2)
+# ============================================================
+ai_adjudicator_input_schema:
+  fields:
+    current_state:            {type: enum, enum: action_state, required: true}
+    allowed_transitions:      {type: list, item_type: action_state, required: true}
+    market_snapshot:          {type: dict, required: true, description: "复用 strategy_state.block_3_market_snapshot 字段"}
+    evidence_summary:         {type: dict, required: true, description: "复用 strategy_state.block_7_evidence_summary"}
+    evidence_cards_summary:   {type: list, item_type: dict, required: true, notes: "M31 摘要版(name, current_value, one_line_interpretation)"}
+    observation_category:     {type: enum, enum: observation_category, required: true, notes: "v1.2 新增"}
+    current_lifecycle:        {type: dict, required: false, description: "复用 block_6_lifecycle,无持仓则 null"}
+    recent_runs:              {type: list, item_type: dict, required: true, description: "最近 3-5 次浓缩;每条含 run_id, action_state, one_line_summary"}
+    data_freshness:           {type: list, item_type: data_freshness_item, required: true, notes: "v1.2 新增"}
+    constraints:
+      type: dict
+      required: true
+      fields:
+        must_stay_within_transitions:    {type: bool, required: true, default: true}
+        max_position_cap_pct:            {type: number, required: true, range: [0, 100]}
+        position_cap_composition:        {type: dict, required: true, description: "同 block_10_risks.position_cap_composition"}
+        hard_invalidation_levels:        {type: list, item_type: hard_invalidation_level, required: true}
+        protection_mode_active:          {type: bool, required: true, default: false}
+        flip_watch_effective_min_hours:  {type: number, required: false}
+        flip_watch_effective_max_hours:  {type: number, required: false}
+        active_direction_thresholds:
+          type: dict
+          required: true
+          fields:
+            long:   {type: number, required: true, range: [0.0, 1.0]}
+            short:  {type: number, required: true, range: [0.0, 1.0]}
+        l3_opportunity_grade:            {type: enum, enum: opportunity_grade, required: true, notes: "必须原样引用,不可修改"}
+    required_outputs:         {type: list, item_type: string, required: true, description: "AIAdjudicatorOutput 的字段名清单"}
+
+
+# ============================================================
+# PART 8 — AIAdjudicatorOutput(§6.3)
+# ============================================================
+ai_adjudicator_output_schema:
+  fields:
+    chosen_action_state:      {type: enum, enum: action_state, required: true, notes: "必须在 allowed_transitions 中(程序校验 1)"}
+    stance:                   {type: enum, enum: stance, required: true}
+    stance_confidence:        {type: number, required: true, range: [0.0, 1.0]}
+    phase:                    {type: enum, enum: phase, required: true}
+    phase_confidence:         {type: number, required: true, range: [0.0, 1.0]}
+    opportunity_grade:        {type: enum, enum: opportunity_grade, required: true, notes: "必须等于 L3 输出(程序校验 8)"}
+    execution_permission:     {type: enum, enum: execution_permission, required: true}
+    trade_plan:               {type: dict, required: false, description: "struct 或 null;同 block_5_trade_plan"}
+    thesis_assessment:
+      type: dict
+      required: false
+      description: "持仓中必填;含 thesis_still_valid + 说明"
+      fields:
+        thesis_still_valid:   {type: enum, enum: thesis_still_valid, required: true}
+        note:                 {type: string, required: true}
+    holding_guidance:         {type: string, required: false}
+    narrative:                {type: string, required: true, description: "3-5 句"}
+    one_line_summary:         {type: string, required: true}
+    primary_drivers:
+      type: list
+      required: true
+      item_fields:
+        summary:      {type: string, required: true}
+        evidence_ref: {type: string, required: true, description: "card_id(程序校验 4)"}
+    counter_arguments:        {type: list, item_type: string, required: true, default: []}
+    what_would_change_mind:   {type: list, item_type: string, required: true, notes: "至少 3 条(程序校验 6)"}
+    confidence_breakdown:
+      type: dict
+      required: true
+      fields:
+        overall:    {type: number, required: true, range: [0.0, 1.0], notes: "面向外部展示"}
+        direction:  {type: number, required: true, range: [0.0, 1.0]}
+        timing:     {type: number, required: true, range: [0.0, 1.0]}
+        risk:       {type: number, required: true, range: [0.0, 1.0]}
+    transition_reason:        {type: string, required: true}
+    self_check:
+      type: dict
+      required: true
+      fields:
+        stayed_within_allowed_transitions:  {type: bool, required: true}
+        respects_position_cap:              {type: bool, required: true}
+        all_evidence_refs_valid:            {type: bool, required: true}
+        no_invented_data:                   {type: bool, required: true}
+        opportunity_grade_matches_l3:       {type: bool, required: true, notes: "v1.2 新增"}
+        stop_loss_matches_l4:               {type: bool, required: true, notes: "v1.2 新增"}
+
+
+# ============================================================
+# PART 9 — 程序校验规则(§6.4,9 条)
+# ============================================================
+# 每条校验失败对应 fallback 级别;由 src/decision/validator.py 实现。
+program_validation_rules:
+
+  - rule_id: 1
+    description: "chosen_action_state 必须在 allowed_transitions 中"
+    failure_action: fallback_level_1
+  - rule_id: 2
+    description: "trade_plan 总仓位 ≤ constraints.max_position_cap_pct"
+    failure_action: fallback_level_1
+  - rule_id: 3
+    description: "做多止损低于入场下沿;做空反之"
+    failure_action: fallback_level_1
+  - rule_id: 4
+    description: "primary_drivers.evidence_ref 指向的 card_id 真实存在"
+    failure_action: fallback_level_1
+  - rule_id: 5
+    description: "self_check 任一 false 则拒绝"
+    failure_action: fallback_level_1
+  - rule_id: 6
+    description: "what_would_change_mind 至少 3 条"
+    failure_action: fallback_level_1
+  - rule_id: 7
+    description: "protection_mode_active=true 时,chosen_action_state 必须合法"
+    failure_action: fallback_level_2
+  - rule_id: 8
+    description: "opportunity_grade 必须等于 L3 输出(v1.2 新增)"
+    failure_action: fallback_level_1
+  - rule_id: 9
+    description: "trade_plan.stop_loss 必须在 L4 hard_invalidation_levels 中(v1.2 新增)"
+    failure_action: fallback_level_1
+
+
+# ============================================================
+# PART 10 — Fallback StrategyState 差异(§6.9 / M33)
+# ============================================================
+# Fallback 不改 schema,只改部分字段取值。本块登记"此级别下哪些字段
+# 被强制重写成什么",供 src/decision/adjudicator_fallback.py 实现。
+fallback_state_schema:
+
+  level_1_conservative_hold:
+    description: "保守保持;保留上次 main_strategy 和 trade_plan"
+    overrides:
+      block_1_meta:
+        fallback_level:       level_1
+        # generated_at / run_id 正常更新
+      block_4_main_strategy:
+        narrative:            "template:系统本次使用 Level 1 降级策略,保持上次决策。触发原因:{reason}"
+      block_10_risks:
+        fallback_level:       level_1
+    carried_from_previous_run:
+      - block_4_main_strategy.action_state
+      - block_4_main_strategy.stance
+      - block_4_main_strategy.opportunity_grade
+      - block_5_trade_plan
+      - block_6_lifecycle
+    auto_upgrade_rule: "连续触发 ≥ 5 次自动升级到 level_2(v1.2 新增)"
+
+  level_2_defensive:
+    description: "防御性干预;保持已持仓,取消 PLANNED 挂单"
+    overrides:
+      block_1_meta:
+        fallback_level:       level_2
+      block_4_main_strategy:
+        execution_permission: watch
+        narrative:            "template:系统进入防御模式,原因:{reason}。等待数据恢复或人工介入。"
+      block_5_trade_plan:
+        value:                null        # 清空
+      block_10_risks:
+        fallback_level:       level_2
+    required_actions_on_enter:
+      - cancel_all_planned_orders
+      - tighten_stop_loss_to_nearest_structure
+      - push_alert_critical
+
+  level_3_emergency_protection:
+    description: "紧急保护;强制进入 PROTECTION"
+    overrides:
+      block_1_meta:
+        fallback_level:       level_3
+      block_4_main_strategy:
+        action_state:         PROTECTION
+        narrative:            "template:系统紧急保护,原因:{reason}。所有自动运行已停止,需人工介入。"
+      block_10_risks:
+        fallback_level:       level_3
+        protection_mode:      true
+    required_actions_on_enter:
+      - stop_automated_runs
+      - push_alert_highest_all_channels
+      - ai_handle_residual_positions
+
+
+# ============================================================
+# PART 11 — StrategyLifecycle(§8.2)
+# ============================================================
+lifecycle_schema:
+  description: "生命周期完整记录,存表 lifecycles"
+  fields:
+    lifecycle_id:             {type: string, required: true}
+    direction:                {type: enum, enum: direction, required: true}
+    entry_period:
+      type: dict
+      required: true
+      fields:
+        start_bjt: {type: string, required: true}
+        end_bjt:   {type: string, required: true}
+    exit_period:
+      type: dict
+      required: false
+      fields:
+        start_bjt: {type: string, required: true}
+        end_bjt:   {type: string, required: true}
+    entry_prices:             {type: list, item_type: number, required: true}
+    exit_prices:              {type: list, item_type: number, required: false}
+    max_favorable_excursion:  {type: number, required: true}
+    max_adverse_excursion:    {type: number, required: true}
+    realized_pnl_ratio:       {type: number, required: false}
+    total_runs:               {type: int, required: true}
+    state_transitions:        {type: list, item_type: dict, required: true, description: "每条 {from, to, at_bjt, run_id, reason}"}
+    original_thesis:          {type: string, required: true, notes: "不可变"}
+    final_outcome_type:       {type: enum, enum: outcome_type, required: false, notes: "结束时才有"}
+    ai_models_used:           {type: list, item_type: string, required: true, default: [], notes: "v1.2 新增"}
+    rules_versions_used:      {type: list, item_type: string, required: true, default: [], notes: "v1.2 新增;逗号分隔存 DB"}
+
+
+# ============================================================
+# PART 12 — ReviewReport(§8.3)
+# ============================================================
+review_report_schema:
+  description: "复盘报告;存表 review_reports"
+
+  basic_meta:
+    review_id:                  {type: string, required: true}
+    lifecycle_id:                {type: string, required: true}
+    generated_at_bjt:            {type: string, required: true}
+    generated_by:                {type: string, required: true, description: "rule / ai / manual"}
+    system_version_at_review:    {type: string, required: true}
+    rules_version_at_review:     {type: string, required: true, notes: "v1.2 新增"}
+
+  basic_facts:
+    direction:                   {type: enum, enum: direction, required: true}
+    entry_time_bjt:              {type: string, required: true}
+    exit_time_bjt:               {type: string, required: true}
+    duration_hours:              {type: number, required: true}
+    entry_price_avg:             {type: number, required: true}
+    exit_price_avg:              {type: number, required: true}
+    max_favorable_pct:           {type: number, required: true}
+    max_adverse_pct:             {type: number, required: true}
+    realized_pnl_pct:            {type: number, required: true}
+    total_runs_during_lifecycle: {type: int, required: true}
+
+  outcome:
+    outcome_type:                {type: enum, enum: outcome_type, required: true}
+
+  dimensional_assessment:
+    entry_assessment:            {type: dict, required: true, description: "入场维度评估"}
+    holding_assessment:          {type: dict, required: true, description: "持仓维度"}
+    exit_assessment:             {type: dict, required: true, description: "离场维度"}
+    flip_assessment:             {type: dict, required: false, description: "可选;反手维度"}
+
+  attribution:
+    root_cause_layers:           {type: list, item_type: string, required: true, description: "L1/L2/L3/L4/L5/state_machine/ai"}
+    failure_mode:                {type: enum, enum: failure_mode, required: false}
+
+  improvements:
+    type: list
+    item_fields:
+      target_module:   {type: string, required: true}
+      suggested_change: {type: string, required: true}
+      priority:        {type: string, required: true, description: "high / medium / low"}
+      effort_estimate: {type: string, required: true, description: "hours / days"}
+      confidence:      {type: number, required: true, range: [0.0, 1.0]}
+
+  key_moments_replay:            {type: list, item_type: dict, required: true, description: "关键时刻的 run_id + 观察"}
+  human_review:                  {type: dict, required: false, description: "可选;含 reviewer, comments, at_bjt"}
+  feedback_to_system:            {type: string, required: true, description: "纪律:不自动反哺,仅人工参考(§8.4)"}

@@ -43,6 +43,7 @@ from ._field_extractors import (
     OPEN_INTEREST_VALUE_KEYS,
     TIMESTAMP_KEYS,
     extract_value,
+    safe_float,
 )
 
 
@@ -106,23 +107,36 @@ def _guess_timestamp(row: dict[str, Any]) -> str:
 
 def _normalize_ohlc_row(row: dict[str, Any]) -> dict[str, Any]:
     """
-    把一行 OHLC 响应统一化成 {timestamp, open, high, low, close, volume}。
-    字段名变体:open/o、high/h、low/l、close/c/value、volume/v/vol。
+    把一行 OHLC 响应统一化成 {timestamp, open, high, low, close, volume_usd, volume_btc}。
+
+    CoinGlass 字段约定:
+      - open/high/low/close 值是字符串("78139.7"),safe_float 统一处理
+      - 成交量字段是 "volume_usd"(USDT 计价),**不是** volume / v
+      - volume_btc 用 volume_usd / close 估算(近似值,写入时会带注释)
+    兼容性:仍保留 volume / v / vol 字段变体的兜底(旧端点或新变体)。
     """
 
-    def pick(*keys: str, default: Any = 0) -> Any:
+    def pick(*keys: str) -> Any:
         for k in keys:
-            if k in row and row[k] is not None:
+            if k in row and row[k] is not None and row[k] != "":
                 return row[k]
-        return default
+        return None
+
+    close_val = safe_float(pick("close", "c", "value")) or 0.0
+    volume_usd_raw = pick("volume_usd", "volume_usdt", "quoteAssetVolume",
+                          "volume", "v", "vol")
+    volume_usd = safe_float(volume_usd_raw) or 0.0
+    # volume_btc 估算:USDT 成交额 / 收盘价;close=0 时回退到 0
+    volume_btc = volume_usd / close_val if close_val > 0 else 0.0
 
     return {
-        "timestamp": _guess_timestamp(row),
-        "open":      float(pick("open", "o", default=0)),
-        "high":      float(pick("high", "h", default=0)),
-        "low":       float(pick("low", "l", default=0)),
-        "close":     float(pick("close", "c", "value", default=0)),
-        "volume":    float(pick("volume", "v", "vol", default=0)),
+        "timestamp":  _guess_timestamp(row),
+        "open":       safe_float(pick("open", "o")) or 0.0,
+        "high":       safe_float(pick("high", "h")) or 0.0,
+        "low":        safe_float(pick("low", "l")) or 0.0,
+        "close":      close_val,
+        "volume_usd": volume_usd,
+        "volume_btc": volume_btc,
     }
 
 
@@ -139,13 +153,15 @@ class CoinglassCollector:
     param 变体兜底(旧系统见过的 400 行为)。
     """
 
-    # 所有端点路径
-    _PATH_KLINES        = "/v4/api/futures/price/history"
-    _PATH_FUNDING       = "/v4/api/futures/funding-rate/history"
-    _PATH_OI            = "/v4/api/futures/open-interest/aggregated-history"
-    _PATH_LONG_SHORT    = "/v4/api/futures/global-long-short-account-ratio/history"
-    _PATH_LIQUIDATION   = "/v4/api/futures/liquidation/history"
-    _PATH_NET_POSITION  = "/v4/api/futures/net-position/history"
+    # 所有端点路径(alphanode 中转站不再做 /v4/api/* 自动映射,需用真实路径)
+    # 真实路径 = CoinGlass 开放 API 域名作为 path 前缀
+    _PATH_PREFIX        = "/open-api-v4.coinglass.com/api"
+    _PATH_KLINES        = f"{_PATH_PREFIX}/futures/price/history"
+    _PATH_FUNDING       = f"{_PATH_PREFIX}/futures/funding-rate/history"
+    _PATH_OI            = f"{_PATH_PREFIX}/futures/open-interest/aggregated-history"
+    _PATH_LONG_SHORT    = f"{_PATH_PREFIX}/futures/global-long-short-account-ratio/history"
+    _PATH_LIQUIDATION   = f"{_PATH_PREFIX}/futures/liquidation/history"
+    _PATH_NET_POSITION  = f"{_PATH_PREFIX}/futures/net-position/history"
 
     def __init__(self) -> None:
         cfg = load_source_config("coinglass")
@@ -297,10 +313,24 @@ class CoinglassCollector:
 
     @staticmethod
     def _unwrap_data(body: Any) -> list[dict[str, Any]]:
-        """CoinGlass 响应通常是 {code, msg, data: [...]};兜底多种形态。"""
+        """
+        CoinGlass 响应真实结构(alphanode 中转):
+            {"code": "0", "data": [...]}
+        (无 "msg" 字段;code 是字符串 "0" 而非 int 0;失败时 code ≠ "0")
+
+        成功判据:code == "0" 且 data 字段存在。
+        兜底:若响应是 list(某些端点可能不带 envelope)或其他变体,也尝试返回。
+        """
         if isinstance(body, list):
             return body
         if isinstance(body, dict):
+            code = body.get("code")
+            # code 可能是字符串 "0" 或 int 0;都视为成功
+            if code is not None and str(code) != "0":
+                msg = body.get("msg") or body.get("message") or body.get("error") or ""
+                raise CoinglassCollectorError(
+                    f"CoinGlass API returned code={code!r}: {msg[:200]}"
+                )
             if "data" in body:
                 data = body["data"]
                 if isinstance(data, list):
@@ -309,6 +339,8 @@ class CoinglassCollector:
                     if "list" in data and isinstance(data["list"], list):
                         return data["list"]
                     return [data]
+                if data is None:
+                    return []
             if "list" in body and isinstance(body["list"], list):
                 return body["list"]
         raise CoinglassCollectorError(
@@ -677,14 +709,17 @@ class CoinglassCollector:
             label = f"klines_{interval}"
             try:
                 raw = self.fetch_klines(interval=interval, limit=500)
+                # volume_usd 来自 CoinGlass 响应的 volume_usd 字段(USDT 成交额);
+                # volume_btc 用 volume_usd / close 近似估算(CoinGlass 不直接提供
+                # BTC 基数成交量)。对大多数下游消费(ADX / ATR / VWAP 粗估)够用。
                 klines = [
                     KlineRow(
                         timeframe=interval,                     # type: ignore[arg-type]
                         timestamp=r["timestamp"],
                         open=r["open"], high=r["high"],
                         low=r["low"], close=r["close"],
-                        volume_btc=r["volume"],
-                        volume_usdt=None,
+                        volume_btc=r["volume_btc"],
+                        volume_usdt=r["volume_usd"],
                         fetched_at=fetched_at,
                     )
                     for r in raw

@@ -119,17 +119,32 @@ TIMESTAMP_KEYS: list[str] = ["t", "time", "timestamp", "ts", "createTime", "crea
 # 提取工具
 # ============================================================
 
+def safe_float(v: Any) -> Optional[float]:
+    """
+    稳健 float 转换。
+    - None / "" → None
+    - 可转 float → float
+    - 不可转(如 "abc" / {})→ None
+    CoinGlass 响应中数值常是字符串("78139.7"),这里一次性处理。
+    """
+    if v is None or v == "":
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
 def extract_value(row: dict[str, Any], keys: list[str]) -> Optional[float]:
     """
-    按 keys 顺序尝试提取 row 中的数值字段,返回第一个非 None 且可转 float 的值。
+    按 keys 顺序尝试提取 row 中的数值字段,返回第一个可转 float 的值(含字符串)。
     如果都取不到,返回 None(调用方自行决定是 warning 还是跳过)。
     """
     for k in keys:
-        if k in row and row[k] is not None:
-            try:
-                return float(row[k])
-            except (TypeError, ValueError):
-                continue
+        if k in row:
+            val = safe_float(row[k])
+            if val is not None:
+                return val
     return None
 
 

@@ -24,6 +24,7 @@ test_coinglass_collector.py — CoinGlass 采集人工验证脚本(Sprint 1.2 v2
 from __future__ import annotations
 
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -31,6 +32,14 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
+
+# 最早加载 .env(防御性冗余,collectors __init__ 也会 import)
+from src import _env_loader  # noqa: F401, E402
+
+# Sprint 1.2 Envfix:防止再次看到 9 端点 401/422 才发现 key 未加载
+assert os.getenv("COINGLASS_API_KEY"), (
+    "COINGLASS_API_KEY 未设置。请检查项目根 .env 文件存在且含 COINGLASS_API_KEY。"
+)
 
 logging.basicConfig(
     level=logging.INFO,

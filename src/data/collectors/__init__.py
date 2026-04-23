@@ -10,6 +10,9 @@ src.data.collectors — 外部数据源采集器。
 Binance 已从架构移除(美国 IP 全线不可用);详见 docs/PROJECT_LOG.md。
 """
 
+# 在任何 collector 读 os.getenv 之前自动加载 .env(Sprint 1.2 Envfix)
+from src import _env_loader  # noqa: F401
+
 from .coinglass import CoinglassCollector, CoinglassCollectorError
 
 __all__ = [

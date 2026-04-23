@@ -10,6 +10,7 @@ from .layer1_regime import Layer1Regime
 from .layer2_direction import Layer2Direction
 from .layer3_opportunity import Layer3Opportunity
 from .layer4_risk import Layer4Risk
+from .layer5_macro import Layer5Macro
 
 __all__ = [
     "EvidenceLayerBase",
@@ -19,4 +20,5 @@ __all__ = [
     "Layer2Direction",
     "Layer3Opportunity",
     "Layer4Risk",
+    "Layer5Macro",
 ]

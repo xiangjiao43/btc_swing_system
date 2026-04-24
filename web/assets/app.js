@@ -41,6 +41,13 @@ function app() {
 
         // ================== Dark / Light ==================
         _initDarkMode() {
+            // ?theme=dark / ?theme=light 查询参数优先(供截图 / 预览用)
+            const qs = new URLSearchParams(window.location.search);
+            const q = qs.get('theme');
+            if (q === 'dark' || q === 'light') {
+                this.darkMode = (q === 'dark');
+                return;
+            }
             const saved = localStorage.getItem('btc_strategy_theme');
             if (saved === 'dark' || saved === 'light') {
                 this.darkMode = (saved === 'dark');

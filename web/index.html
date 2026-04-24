@@ -31,9 +31,11 @@
     };
   </script>
 
-  <!-- Alpine.js via CDN -->
+  <!-- app.js 必须在 Alpine 前加载(因为 <html x-data="app()"> 在 Alpine 初始化
+       时立即求值 app,没有 app.js 会拿不到全局函数)。-->
+  <script src="/assets/app.js"></script>
+  <!-- Alpine.js via CDN,defer 保证它在 app.js 之后才扫描 DOM -->
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
-  <script defer src="/assets/app.js"></script>
 </head>
 
 <body class="bg-paper text-ink dark:bg-dark-paper dark:text-dark-ink

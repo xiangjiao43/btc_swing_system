@@ -628,3 +628,49 @@ def test_40_fallback_level_3_triggers_protection(sm: StateMachine):
         previous_record=prev, now_utc=_ts(0),
     )
     assert r["current_state"] == "PROTECTION"
+
+
+# ==================================================================
+# Sprint 1.5b Task B3:cycle_position 字段链路显式验证
+# ==================================================================
+
+def test_41_flip_watch_reads_cycle_position_nested_field(sm: StateMachine):
+    """
+    CyclePositionFactor 输出的 composite_factors.cycle_position.cycle_position
+    必须被 FLIP_WATCH 乘数计算正确读到(不走默认 mult=1.0)。
+
+    用 late_bear × extreme 验证:0.7 × 1.3 = 0.91,
+    eff_min = max(8, 18*0.91) = 16.38
+    eff_max = min(168, 96*0.91) = 87.36
+    """
+    prev = _prev_record("LONG_EXIT", _ts(-1))
+    state = _state(
+        l1_regime="trend_down", l2_stance="bearish",
+        volatility_regime="extreme",
+    )
+    # 显式使用与真实 CyclePositionFactor 相同的嵌套结构
+    state["composite_factors"]["cycle_position"] = {
+        "factor": "cycle_position",
+        "cycle_position": "late_bear",
+        "cycle_confidence": 0.75,
+    }
+    r = sm.compute_next(state, previous_record=prev, now_utc=_ts(0))
+    assert r["current_state"] == "FLIP_WATCH"
+    b = r["flip_watch_bounds"]
+    assert b["multiplier_product"] == pytest.approx(0.91, abs=0.01)
+    assert b["effective_min_hours"] == pytest.approx(16.38, abs=0.02)
+    assert b["effective_max_hours"] == pytest.approx(87.36, abs=0.02)
+
+
+def test_42_flip_watch_legacy_band_field_fallback(sm: StateMachine):
+    """历史版本若只有 `band` 字段,state_machine 仍能回退读到(定义为 fallback)。"""
+    prev = _prev_record("LONG_EXIT", _ts(-1))
+    state = _state(l1_regime="trend_down", l2_stance="bearish")
+    state["composite_factors"]["cycle_position"] = {
+        "factor": "cycle_position",
+        "band": "mid_bull",  # 仅有 band,没有 cycle_position 键
+    }
+    r = sm.compute_next(state, previous_record=prev, now_utc=_ts(0))
+    assert r["current_state"] == "FLIP_WATCH"
+    # mid_bull × 1.3(vol normal 无乘数)= 1.3
+    assert r["flip_watch_bounds"]["multiplier_product"] == pytest.approx(1.3, abs=0.01)

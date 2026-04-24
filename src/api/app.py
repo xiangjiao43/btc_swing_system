@@ -19,10 +19,14 @@ from fastapi import FastAPI
 
 from .routes import alerts as alerts_routes
 from .routes import data as data_routes
+from .routes import evidence as evidence_routes
 from .routes import fallback as fallback_routes
 from .routes import health as health_routes
+from .routes import lifecycle as lifecycle_routes
 from .routes import pipeline as pipeline_routes
+from .routes import review as review_routes
 from .routes import strategy as strategy_routes
+from .routes import system as system_routes
 from .state import AppState
 
 
@@ -60,8 +64,14 @@ def create_app(
     )
     app.state.ctx = state
 
-    app.include_router(health_routes.router, prefix="/api")
+    # Sprint 1.5c §9.10 对齐:system / strategy / evidence / lifecycle / review
+    app.include_router(system_routes.router, prefix="/api")
     app.include_router(strategy_routes.router, prefix="/api")
+    app.include_router(evidence_routes.router, prefix="/api")
+    app.include_router(lifecycle_routes.router, prefix="/api")
+    app.include_router(review_routes.router, prefix="/api")
+    # 老路径 alias(向后兼容旧测试 / 旧前端)
+    app.include_router(health_routes.router, prefix="/api")
     app.include_router(pipeline_routes.router, prefix="/api")
     app.include_router(fallback_routes.router, prefix="/api")
     app.include_router(data_routes.router, prefix="/api")

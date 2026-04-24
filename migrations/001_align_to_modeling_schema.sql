@@ -115,9 +115,12 @@ DROP TABLE IF EXISTS strategy_state_history;
 
 
 -- ----------------------------------------------------------------
--- 6. review_reports(保留同名,schema 已由 schema.sql 重建;旧数据为 0 行,
--- 本 migration 不处理;Sprint 1.15 之后才会产生复盘数据)
+-- 6. review_reports(schema 重建;旧版 PK=run_timestamp_utc,新版 PK=review_id)
 -- ----------------------------------------------------------------
+-- 由于旧版表可能仍存在(schema.sql 的 IF NOT EXISTS 不会替换),需显式 DROP。
+-- Sprint 1.5c 重建前假设旧表为空(review_reports 在 Sprint 1.15 之后才填)。
+DROP TABLE IF EXISTS review_reports;
+-- 新 schema 会由 init_db() / schema.sql 重建,这里不重复声明。
 
 
 -- ----------------------------------------------------------------

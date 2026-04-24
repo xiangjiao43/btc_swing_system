@@ -419,6 +419,13 @@ class StrategyStateBuilder:
             degraded_stages=degraded_stages,
         )
 
+        # === Sprint 2.2 Task C:为五层证据注入 plain_reading 人话解读 ===
+        try:
+            from ..evidence.plain_reading import inject_plain_readings
+            inject_plain_readings(state)
+        except Exception as e:
+            logger.warning("inject_plain_readings failed: %s", e)
+
         # === Stage: Factor Cards(Sprint 2.2 新增,在 adjudicator 之前)===
         # 生成全量数据因子卡;adjudicator 要用 available_card_ids 做 evidence_ref
         # 白名单(§6.4 #4)。

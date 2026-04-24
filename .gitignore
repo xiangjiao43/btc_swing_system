@@ -37,6 +37,7 @@ data/*.db-shm
 logs_*.txt
 *.log
 data/logs/
+data/reviews/
 
 # ---- OS ----
 .DS_Store

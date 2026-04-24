@@ -5,6 +5,19 @@
 
 ---
 
+## 2026-04-24 — Sprint 1 完成
+
+数据层 + 证据层 + 决策层 + 持久层 + HTTP + 调度 + KPI + 复盘全部就位。
+269 passed + 1 skipped,系统可 24/7 自动运行。手工触发、定时执行、查询历史、
+生成复盘、活跃告警均已就绪。Sprint 2 起接入真实账户执行。
+
+里程碑子 Sprint:
+- 1.11 L5 Macro + AI Summary;1.12 StrategyStateBuilder;1.13 State Machine
+- 1.14 AI Adjudicator + Lifecycle FSM;1.15 FastAPI + APScheduler
+- 1.16 KPI Tracker + Review Report(Markdown)+ Fallback 自动升级 + /api/alerts
+
+---
+
 ## 2026-04-23 — Sprint 1.2 重做:放弃 Binance,统一到 CoinGlass 承担 K 线 + 衍生品
 
 ### 背景

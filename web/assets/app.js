@@ -268,6 +268,26 @@ function app() {
                 'cold_start_tick':   'bg-cyan-400',
             }[type] || 'bg-gray-400';
         },
+        timelineNodeTypeLabel(type) {
+            return {
+                'state_enter':       '状态',
+                'position_open':     '开仓',
+                'position_trim':     '减仓',
+                'position_exit':     '离场',
+                'flip':              '切换',
+                'cold_start_tick':   '冷启动',
+            }[type] || type;
+        },
+        timelineNodeBadgeClass(type) {
+            return {
+                'state_enter':       'bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300',
+                'position_open':     'bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300',
+                'position_trim':     'bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300',
+                'position_exit':     'bg-gray-100 text-gray-700 dark:bg-dark-card dark:text-gray-400',
+                'flip':              'bg-purple-50 text-purple-700 dark:bg-purple-950 dark:text-purple-300',
+                'cold_start_tick':   'bg-cyan-50 text-cyan-700 dark:bg-cyan-950 dark:text-cyan-300',
+            }[type] || 'bg-gray-100 text-gray-700';
+        },
 
         // ================== 手风琴 ==================
         toggleLayer(layerId) {

@@ -17,6 +17,7 @@ from typing import Any, Callable, Optional
 
 from fastapi import FastAPI
 
+from .routes import alerts as alerts_routes
 from .routes import data as data_routes
 from .routes import fallback as fallback_routes
 from .routes import health as health_routes
@@ -64,6 +65,7 @@ def create_app(
     app.include_router(pipeline_routes.router, prefix="/api")
     app.include_router(fallback_routes.router, prefix="/api")
     app.include_router(data_routes.router, prefix="/api")
+    app.include_router(alerts_routes.router, prefix="/api")
 
     return app
 

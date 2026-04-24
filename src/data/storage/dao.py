@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable, Literal, Optional
 
 
@@ -766,6 +766,161 @@ class FallbackLogDAO:
             else:
                 break
         return count
+
+    # ------------------------------------------------------------------
+    # Auto-escalation (Sprint 1.16c)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def get_by_stage_frequency(
+        conn: sqlite3.Connection,
+        since_utc: str,
+        limit: int = 10,
+    ) -> list[dict[str, Any]]:
+        """
+        返回 [{'stage': ..., 'count': n, 'level_1': n1, 'level_2': n2,
+        'level_3': n3, 'first_seen': ..., 'last_seen': ...}, ...],
+        按 count 降序。供 alerts / KPI 查询使用。
+        """
+        rows = conn.execute(
+            """
+            SELECT triggered_by,
+                   COUNT(*) AS cnt,
+                   SUM(CASE WHEN fallback_level='level_1' THEN 1 ELSE 0 END) AS c1,
+                   SUM(CASE WHEN fallback_level='level_2' THEN 1 ELSE 0 END) AS c2,
+                   SUM(CASE WHEN fallback_level='level_3' THEN 1 ELSE 0 END) AS c3,
+                   MIN(run_timestamp_utc) AS first_seen,
+                   MAX(run_timestamp_utc) AS last_seen
+              FROM fallback_log
+             WHERE run_timestamp_utc >= ?
+          GROUP BY triggered_by
+          ORDER BY cnt DESC
+             LIMIT ?
+            """,
+            (since_utc, limit),
+        ).fetchall()
+        out: list[dict[str, Any]] = []
+        for r in rows:
+            trig = r["triggered_by"] or ""
+            stage = trig.split(".", 1)[1] if "." in trig else trig
+            out.append({
+                "stage": stage,
+                "triggered_by": trig,
+                "count": int(r["cnt"]),
+                "level_1": int(r["c1"] or 0),
+                "level_2": int(r["c2"] or 0),
+                "level_3": int(r["c3"] or 0),
+                "first_seen": r["first_seen"],
+                "last_seen": r["last_seen"],
+            })
+        return out
+
+    @staticmethod
+    def count_for_triggered_by_since(
+        conn: sqlite3.Connection,
+        triggered_by: str,
+        since_utc: str,
+        fallback_level: Optional[FallbackLevel] = None,
+    ) -> int:
+        """自 since_utc 起,某 triggered_by (可选限定 level) 的次数。"""
+        if fallback_level is None:
+            row = conn.execute(
+                "SELECT COUNT(*) AS n FROM fallback_log "
+                "WHERE triggered_by = ? AND run_timestamp_utc >= ?",
+                (triggered_by, since_utc),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT COUNT(*) AS n FROM fallback_log "
+                "WHERE triggered_by = ? AND fallback_level = ? "
+                "AND run_timestamp_utc >= ?",
+                (triggered_by, fallback_level, since_utc),
+            ).fetchone()
+        return int(row["n"]) if row else 0
+
+    @staticmethod
+    def log_with_escalation(
+        conn: sqlite3.Connection,
+        run_timestamp_utc: str,
+        stage: str,
+        error: BaseException | str,
+        fallback_applied: str,
+        *,
+        base_level: FallbackLevel = "level_1",
+        escalate_to_l2_after: int = 3,
+        escalate_to_l3_after: int = 3,
+        l1_window_minutes: int = 60,
+        l2_window_minutes: int = 240,
+    ) -> tuple[int, FallbackLevel]:
+        """
+        在 log_stage_error 基础上加自动升级:
+          * 同一 stage 在 l1_window_minutes 内已有 ≥ escalate_to_l2_after
+            条 level_1 → 本条升级为 level_2
+          * 同一 stage 在 l2_window_minutes 内已有 ≥ escalate_to_l3_after
+            条 level_2 → 本条升级为 level_3
+
+        返回 (rowcount, actual_level)。
+        """
+        triggered_by = f"pipeline.{stage}"
+        # 时间窗口起点
+        try:
+            ref_dt = datetime.fromisoformat(
+                run_timestamp_utc.replace("Z", "+00:00")
+            )
+        except ValueError:
+            ref_dt = datetime.now(timezone.utc)
+        if ref_dt.tzinfo is None:
+            ref_dt = ref_dt.replace(tzinfo=timezone.utc)
+
+        def _since(delta_min: int) -> str:
+            return (
+                ref_dt - timedelta(minutes=delta_min)
+            ).astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        actual_level: FallbackLevel = base_level
+
+        # 先看 l2 升级
+        if base_level == "level_1":
+            l1_count = FallbackLogDAO.count_for_triggered_by_since(
+                conn, triggered_by=triggered_by,
+                since_utc=_since(l1_window_minutes),
+                fallback_level="level_1",
+            )
+            if l1_count >= escalate_to_l2_after:
+                actual_level = "level_2"
+
+        # 再看 l3 升级(可能从 l1 直接跳到 l3 经过 l2;也可能 base_level 本身是 level_2)
+        if actual_level == "level_2":
+            l2_count = FallbackLogDAO.count_for_triggered_by_since(
+                conn, triggered_by=triggered_by,
+                since_utc=_since(l2_window_minutes),
+                fallback_level="level_2",
+            )
+            if l2_count >= escalate_to_l3_after:
+                actual_level = "level_3"
+
+        # 写入(带 escalation 标记)
+        if isinstance(error, BaseException):
+            error_type = type(error).__name__
+            error_msg = str(error)[:500]
+        else:
+            error_type = "str"
+            error_msg = str(error)[:500]
+        details = {
+            "stage": stage,
+            "error_type": error_type,
+            "error_message": error_msg,
+            "fallback_applied": fallback_applied,
+            "escalated_from": base_level if actual_level != base_level else None,
+        }
+        rowcount = FallbackLogDAO.insert_event(
+            conn,
+            run_timestamp_utc=run_timestamp_utc,
+            fallback_level=actual_level,
+            triggered_by=triggered_by,
+            details=details,
+        )
+        return rowcount, actual_level
 
 
 # ============================================================

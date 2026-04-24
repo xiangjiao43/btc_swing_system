@@ -377,7 +377,7 @@ class StrategyStateBuilder:
                 degraded_stages.append("ai_summary")
             if persist and self.conn is not None:
                 self._safe(
-                    lambda: FallbackLogDAO.log_stage_error(
+                    lambda: FallbackLogDAO.log_with_escalation(
                         self.conn, run_timestamp_utc=run_ts_utc,
                         stage="ai_summary",
                         error=ai_result.get("error") or "ai degraded",
@@ -664,10 +664,10 @@ class StrategyStateBuilder:
             })
             if stage not in degraded_stages:
                 degraded_stages.append(stage)
-            # 写 fallback_log(自身不能再抛)
+            # 写 fallback_log,带自动升级(自身不能再抛)
             if self.conn is not None:
                 try:
-                    FallbackLogDAO.log_stage_error(
+                    FallbackLogDAO.log_with_escalation(
                         self.conn, run_timestamp_utc=run_ts_utc,
                         stage=stage, error=e,
                         fallback_applied="stage_default_returned",

@@ -46,6 +46,8 @@ def _summarize(state: dict[str, Any]) -> dict[str, Any]:
     ctx = state.get("context_summary") or {}
     pm = state.get("pipeline_meta") or {}
     sm = state.get("state_machine") or {}
+    adj = state.get("adjudicator") or {}
+    life = state.get("lifecycle") or {}
     return {
         "run_id": state.get("run_id"),
         "reference_ts": state.get("reference_timestamp_utc"),
@@ -72,6 +74,15 @@ def _summarize(state: dict[str, Any]) -> dict[str, Any]:
         "state_machine.current": sm.get("current_state"),
         "state_machine.transition_reason": sm.get("transition_reason"),
         "state_machine.stable_in_state": sm.get("stable_in_state"),
+        "adjudicator.action": adj.get("action"),
+        "adjudicator.direction": adj.get("direction"),
+        "adjudicator.confidence": adj.get("confidence"),
+        "adjudicator.status": adj.get("status"),
+        "adjudicator.rationale_preview": (adj.get("rationale") or "")[:160],
+        "lifecycle.previous": life.get("previous_lifecycle"),
+        "lifecycle.current": life.get("current_lifecycle"),
+        "lifecycle.triggered_by": life.get("transition_triggered_by"),
+        "lifecycle.conflict_detected": life.get("conflict_detected"),
         "pipeline.degraded_stages": pm.get("degraded_stages"),
         "pipeline.failure_count": len(pm.get("failures") or []),
     }

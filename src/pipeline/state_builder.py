@@ -31,6 +31,7 @@ from typing import Any, Callable, Optional
 
 import yaml
 
+from ..ai.adjudicator import AIAdjudicator
 from ..ai.summary import call_ai_summary
 from ..composite import (
     BandPositionFactor,
@@ -125,6 +126,8 @@ class StrategyStateBuilder:
         "layer_4",
         "layer_5",
         "ai_summary",
+        "adjudicator",
+        "lifecycle_fsm",
         "state_machine",
         "persist_state",
     )
@@ -140,6 +143,8 @@ class StrategyStateBuilder:
         macro_lookback_days: int = 365,
         events_window_hours: float = 72.0,
         state_machine: Any = None,
+        adjudicator: Any = None,
+        lifecycle_fsm: Any = None,
         account_state_provider: Optional[Callable[[], dict[str, Any]]] = None,
     ) -> None:
         """
@@ -166,6 +171,20 @@ class StrategyStateBuilder:
             self._state_machine = StateMachine()
         else:
             self._state_machine = state_machine
+
+        if adjudicator is None:
+            self._adjudicator = AIAdjudicator(
+                openai_client=self._openai_client,
+                rules_version=self.rules_version,
+            )
+        else:
+            self._adjudicator = adjudicator
+
+        if lifecycle_fsm is None:
+            from .lifecycle_fsm import LifecycleFSM
+            self._lifecycle_fsm = LifecycleFSM()
+        else:
+            self._lifecycle_fsm = lifecycle_fsm
 
         self._base_cfg = _load_base_cfg()
 
@@ -368,7 +387,7 @@ class StrategyStateBuilder:
                     degraded_stages=degraded_stages, run_ts_utc=run_ts_utc,
                 )
 
-        # === 组装 state dict ===
+        # === 组装 state dict(初版:无 adjudicator / lifecycle / state_machine)===
         state = self._assemble_state(
             run_id=run_id,
             run_ts_utc=run_ts_utc,
@@ -380,7 +399,7 @@ class StrategyStateBuilder:
             degraded_stages=degraded_stages,
         )
 
-        # === Stage 15: State Machine ===
+        # === 先算 State Machine(Adjudicator 需读 state_machine.current_state)===
         sm_block = self._run_stage(
             "state_machine", failures, degraded_stages, run_ts_utc,
             lambda: self._run_state_machine(state, run_ts_utc),
@@ -390,7 +409,38 @@ class StrategyStateBuilder:
         )
         state["state_machine"] = sm_block
 
-        # === Stage 16: persist ===
+        # === Stage: Adjudicator ===
+        account_state = None
+        if self._account_state_provider is not None:
+            try:
+                account_state = self._account_state_provider()
+            except Exception as e:
+                logger.warning("account_state_provider failed in adjudicator: %s", e)
+        if account_state is not None:
+            state["account_state"] = account_state
+        adjudicator_result = self._run_stage(
+            "adjudicator", failures, degraded_stages, run_ts_utc,
+            lambda: self._adjudicator.decide(state),
+            default=_adjudicator_fallback("adjudicator stage failed"),
+        )
+        state["adjudicator"] = adjudicator_result
+        # adjudicator 返回 degraded_* 也算软失败
+        adj_status = (adjudicator_result or {}).get("status", "")
+        if isinstance(adj_status, str) and adj_status.startswith("degraded"):
+            if "adjudicator" not in degraded_stages:
+                degraded_stages.append("adjudicator")
+
+        # === Stage: Lifecycle FSM ===
+        lifecycle_result = self._run_stage(
+            "lifecycle_fsm", failures, degraded_stages, run_ts_utc,
+            lambda: self._run_lifecycle_fsm(
+                adjudicator_result, run_ts_utc,
+            ),
+            default=_lifecycle_fallback("lifecycle_fsm stage failed"),
+        )
+        state["lifecycle"] = lifecycle_result
+
+        # === Stage: persist ===
         persisted = False
         if persist and self.conn is not None:
             persisted_val = self._run_stage(
@@ -690,6 +740,48 @@ class StrategyStateBuilder:
             conn=self.conn,
         )
 
+    # ------------------------------------------------------------------
+    # Lifecycle FSM stage
+    # ------------------------------------------------------------------
+
+    def _run_lifecycle_fsm(
+        self,
+        adjudicator_result: dict[str, Any],
+        run_ts_utc: str,
+    ) -> dict[str, Any]:
+        """
+        根据 adjudicator.action + 上一条 state.lifecycle.current_lifecycle 计算下一状态。
+        无历史 → 默认从 FLAT 起步。
+        """
+        prev_lifecycle = "FLAT"
+        prev_transition_ts: Optional[str] = None
+        if self.conn is not None:
+            row = StrategyStateDAO.get_latest_state(self.conn)
+            if row is not None:
+                state = row.get("state") or {}
+                life = state.get("lifecycle") or {}
+                prev_lifecycle = life.get("current_lifecycle") or "FLAT"
+                # 上一次进入 prev_lifecycle 的时间(用于 auto timeout)
+                prev_transition_ts = (
+                    life.get("state_entered_at_utc")
+                    or row.get("run_timestamp_utc")
+                )
+        action = (adjudicator_result or {}).get("action") or "watch"
+        result = self._lifecycle_fsm.compute_next(
+            current_lifecycle=prev_lifecycle,
+            adjudicator_action=action,
+            current_timestamp=run_ts_utc,
+            previous_transition_timestamp=prev_transition_ts,
+        )
+        # 若本次发生迁移,记录进入时间;否则沿用上次进入时间
+        entered_at = (
+            run_ts_utc
+            if result["current_lifecycle"] != result["previous_lifecycle"]
+            else (prev_transition_ts or run_ts_utc)
+        )
+        result["state_entered_at_utc"] = entered_at
+        return result
+
 
 # ==================================================================
 # 降级占位符构造
@@ -701,6 +793,40 @@ def _factor_degraded(name: str, reason: str = "stage exception") -> dict[str, An
         "health_status": "error",
         "computation_method": "error",
         "notes": [reason],
+    }
+
+
+def _adjudicator_fallback(reason: str) -> dict[str, Any]:
+    return {
+        "action": "watch",
+        "direction": None,
+        "confidence": 0.3,
+        "rationale": f"adjudicator 阶段失败,保守回退 watch:{reason}",
+        "constraints": {
+            "max_position_size": None,
+            "stop_loss_reference": None,
+            "event_risk_warning": None,
+            "execution_permission_binding": None,
+        },
+        "evidence_gaps": ["adjudicator_stage_failed"],
+        "model_used": None,
+        "tokens_in": 0,
+        "tokens_out": 0,
+        "latency_ms": 0,
+        "status": "degraded_error",
+        "notes": [reason],
+    }
+
+
+def _lifecycle_fallback(reason: str) -> dict[str, Any]:
+    return {
+        "previous_lifecycle": None,
+        "current_lifecycle": "FLAT",
+        "transition_triggered_by": "fallback",
+        "transition_rule": f"lifecycle_fsm 失败,兜底 FLAT:{reason}",
+        "minutes_since_previous": None,
+        "conflict_detected": False,
+        "state_entered_at_utc": _utc_now_iso(),
     }
 
 

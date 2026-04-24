@@ -1,668 +1,113 @@
 # ============================================================
-# state_machine.yaml — 14 状态 + 迁移规则 + 副作用
+# lifecycle_fsm.yaml — Sprint 1.14b 交易生命周期 FSM(14 状态)
 # ============================================================
-# 用途:生命周期状态机的**声明式契约**。
-#       - 列出全部 14 个状态及分组
-#       - 声明合法迁移路径和触发条件
-#       - 声明进入每个状态的副作用(动作名列表)
-#       - 配置 FLIP_WATCH 动态冷却参数(M14)
-#       - 三条核心纪律的显式开关
+# 用途:根据 adjudicator.action + 当前 lifecycle_state,声明式地决定
+#       下一个 lifecycle 状态。与 config/state_machine.yaml(系统运行
+#       状态分类器,14 档)相互独立。
 #
-# 实现位置:src/strategy/state_machine.py 读取本文件,
-#            src/strategy/lifecycle_manager.py 实现 on_enter 动作与
-#            runtime 条件判断函数。
+# 字段语义:
+#   transitions.<state>.<action>        → 显式映射到的目标状态
+#   transitions.<state>._default        → action 不在表中时的兜底
+#   transitions.<state>._auto_after_minutes
+#     + transitions.<state>._auto_target → 进入该状态满 N 分钟后无条件迁移
 #
-# 对应建模文档:§5.1-§5.6。
+# 评估顺序(lifecycle_fsm.py):
+#   1) _auto_after_minutes 若已到期 → 走 _auto_target(优先级最高)
+#   2) 否则按 action 查表 → 找不到走 _default → 没有 _default 保持原状态
 #
-# 迁移条件表达惯例(处理 YAML 可表达边界):
-#   * enumerable_conditions : 可 YAML 表达的离散条件
-#       {regime: [trend_up, transition_up], stance: [bullish], ...}
-#       代码按字典语义求合取,AND 语义。
-#   * runtime_conditions :  必须代码层判断的条件名列表(字符串)
-#       例如 entry_zone_1h_closed / all_positions_closed / thesis_invalidated
-#       每个名字对应 src/strategy/runtime_conditions.py 的同名函数。
+# 不处理执行层(下单 / 撤单)。Sprint 2+ 单独实现。
 #
-# 创建于:2026-04-23(Sprint 1 前置工作 · 优化二第 3 批)
-# 建模版本:v1.2
+# 创建于:2026-04-24(Sprint 1.14b)
+# 建模版本:v1.2(Sprint 1.14 版 FSM)
 # ============================================================
 
+version: '1.0.0'
 
-# -------- 14 状态枚举与元信息 ----------------------------------------
-# 对应 §5.1 状态定义。is_position_state = 系统此时持仓(对头寸管理影响)。
-states:
-
-  FLAT:
-    description: "空仓观望,默认态"
-    category: flat_like
-    is_position_state: false
-    is_terminal: false
-    default_permission: can_open           # 允许 PLANNED 迁移
-
-  LONG_PLANNED:
-    description: "多头计划中,挂单埋伏"
-    category: long_positioned
-    is_position_state: false               # 已规划但未成交
-    is_terminal: false
-    default_permission: cautious_open
-
-  LONG_OPEN:
-    description: "多头已开仓(初期保护期)"
-    category: long_positioned
-    is_position_state: true
-    is_terminal: false
-    default_permission: cautious_open
-
-  LONG_HOLD:
-    description: "多头稳定持有"
-    category: long_positioned
-    is_position_state: true
-    is_terminal: false
-    default_permission: hold_only
-
-  LONG_TRIM:
-    description: "多头分批减仓"
-    category: long_positioned
-    is_position_state: true
-    is_terminal: false
-    default_permission: hold_only
-
-  LONG_EXIT:
-    description: "多头完全离场"
-    category: exit_states
-    is_position_state: false
-    is_terminal: false                     # 可迁 FLIP_WATCH 或 FLAT
-    default_permission: watch
-
-  SHORT_PLANNED:
-    description: "空头计划中,挂单埋伏"
-    category: short_positioned
-    is_position_state: false
-    is_terminal: false
-    default_permission: cautious_open
-
-  SHORT_OPEN:
-    description: "空头已开仓(初期保护期)"
-    category: short_positioned
-    is_position_state: true
-    is_terminal: false
-    default_permission: cautious_open
-
-  SHORT_HOLD:
-    description: "空头稳定持有"
-    category: short_positioned
-    is_position_state: true
-    is_terminal: false
-    default_permission: hold_only
-
-  SHORT_TRIM:
-    description: "空头分批减仓"
-    category: short_positioned
-    is_position_state: true
-    is_terminal: false
-    default_permission: hold_only
-
-  SHORT_EXIT:
-    description: "空头完全离场"
-    category: exit_states
-    is_position_state: false
-    is_terminal: false
-    default_permission: watch
-
-  FLIP_WATCH:
-    description: "反手观察期,只允许进入反向 PLANNED 或回 FLAT"
-    category: flip
-    is_position_state: false
-    is_terminal: false
-    default_permission: watch
-
-  PROTECTION:
-    description: "保护态,极端事件全局入口"
-    category: protection
-    is_position_state: false               # 可能有残留仓位,由 AI 处理
-    is_terminal: false
-    default_permission: protective
-
-  POST_PROTECTION_REASSESS:
-    description: "保护态退出后的重评期,强制 hold_only"
-    category: protection
-    is_position_state: false
-    is_terminal: false
-    default_permission: hold_only
-
-
-# -------- 状态分组(方便代码做集合判断)------------------------------
-categories:
-  flat_like:        [FLAT]
-  long_positioned:  [LONG_PLANNED, LONG_OPEN, LONG_HOLD, LONG_TRIM]
-  short_positioned: [SHORT_PLANNED, SHORT_OPEN, SHORT_HOLD, SHORT_TRIM]
-  exit_states:     [LONG_EXIT, SHORT_EXIT]
-  flip:            [FLIP_WATCH]
-  protection:      [PROTECTION, POST_PROTECTION_REASSESS]
-
-
-# -------- 迁移规则(§5.2)------------------------------------------
-# 每条迁移:
-#   from             当前状态
-#   to               目标状态
-#   trigger_type     auto       = 满足条件即自动迁移
-#                    ai_call    = AI 裁决输出建议后迁移
-#                    event      = 事件触发运行产生的建议
-#   enumerable_conditions  dict,AND 语义,YAML 直接可读
-#   runtime_conditions     list[str],每个名字对应一个
-#                          src/strategy/runtime_conditions.py 中的函数
-#   note                   人类备注
 transitions:
 
-  # ======== FLAT 出口 ========
-  - from: FLAT
-    to: LONG_PLANNED
-    trigger_type: ai_call
-    enumerable_conditions:
-      regime:               [trend_up, transition_up, range_low]
-      stance:               [bullish]
-      stance_confidence_at_or_above_dynamic_threshold: true
-      opportunity_grade:    [A, B]
-      execution_permission: [can_open, cautious_open, ambush_only]
-      l4_overall_risk_not_in: [critical]
-      l5_macro_stance_not_in: [extreme_risk_off]
-    runtime_conditions:
-      - not_in_protection_mode
-    note: "§5.2 FLAT → LONG_PLANNED"
-
-  - from: FLAT
-    to: SHORT_PLANNED
-    trigger_type: ai_call
-    enumerable_conditions:
-      regime:               [trend_down, transition_down, range_high]
-      stance:               [bearish]
-      stance_confidence_at_or_above_dynamic_threshold: true
-      opportunity_grade:    [A, B]              # v1.2 空头只允许 A/B(M3+B3)
-      execution_permission: [can_open, cautious_open, ambush_only]
-      l4_overall_risk_not_in: [critical]
-      l5_macro_stance_not_in: [extreme_risk_off]
-    runtime_conditions:
-      - not_in_protection_mode
-    note: "§5.2 FLAT → SHORT_PLANNED(镜像,v1.2 简化)"
-
-  # ======== LONG_PLANNED 出口 ========
-  - from: LONG_PLANNED
-    to: LONG_OPEN
-    trigger_type: event
-    enumerable_conditions: {}
-    runtime_conditions:
-      - at_least_one_entry_zone_1h_closed_confirmed
-    note: "§5.2 LONG_PLANNED → LONG_OPEN。1H 收盘确认。"
-
-  - from: LONG_PLANNED
-    to: FLAT
-    trigger_type: auto
-    enumerable_conditions: {}
-    runtime_conditions:
-      - planned_expiry_passed
-    note: "挂单过期未成交"
-
-  # ======== LONG_OPEN 出口 ========
-  - from: LONG_OPEN
-    to: LONG_HOLD
-    trigger_type: auto
-    enumerable_conditions: {}
-    runtime_conditions:
-      # §5.2 时间条件 AND(走势条件任一 OR tp1 50%)
-      - open_phase_min_time_reached              # 持仓满 24h
-      - open_phase_any_trend_signal_met          # pnl≥+2% OR 4h_close_survived OR pullback_survived
-    note: "§5.2 时间+走势组合(v1.2);任一走势条件满足即可配合 24h 时间条件推进"
-
-  - from: LONG_OPEN
-    to: LONG_EXIT
-    trigger_type: auto
-    enumerable_conditions: {}
-    runtime_conditions:
-      # §5.2 任一触发
-      - any_of_early_failure_triggers
-      # 具体包含:hard_invalidation_breached_4h, stop_loss_hit,
-      #          stance_flipped_within_12h_confidence_ge_0_7,
-      #          new_l4_critical_risk, thesis_invalidated
-    note: "§5.2 早期失败保护"
-
-  # ======== LONG_HOLD 出口 ========
-  - from: LONG_HOLD
-    to: LONG_TRIM
-    trigger_type: auto
-    enumerable_conditions: {}
-    runtime_conditions:
-      - any_of_trim_triggers
-      # tp_level_reached OR ai_phase_late_conf_ge_0_65 OR
-      # regime_transition_up_to_down_or_range_high OR
-      # thesis_partially_valid OR l5_macro_risk_off_or_worse
-    note: "§5.2 LONG_HOLD → LONG_TRIM"
-
-  - from: LONG_HOLD
-    to: LONG_EXIT
-    trigger_type: auto
-    enumerable_conditions: {}
-    runtime_conditions:
-      - hard_invalidation_breached_4h
-    note: "硬失效一票否决"
-
-  # ======== LONG_TRIM 出口(§5.2 三出口)========
-  - from: LONG_TRIM
-    to: LONG_HOLD
-    trigger_type: auto
-    enumerable_conditions: {}
-    runtime_conditions:
-      - current_trim_completed_and_position_remaining
-    note: "完成当前减仓,剩余继续"
-
-  - from: LONG_TRIM
-    to: LONG_TRIM
-    trigger_type: auto
-    enumerable_conditions: {}
-    runtime_conditions:
-      - next_tp_level_reached
-    note: "下一档止盈"
-
-  - from: LONG_TRIM
-    to: LONG_EXIT
-    trigger_type: auto
-    enumerable_conditions: {}
-    runtime_conditions:
-      - last_tp_level_or_exhaustion_intensified
-    note: "最后一档或衰竭强化"
-
-  # ======== LONG_EXIT 出口 ========
-  - from: LONG_EXIT
-    to: FLIP_WATCH
-    trigger_type: auto
-    enumerable_conditions:
-      regime: [transition_down, trend_down, range_high]
-    runtime_conditions:
-      - all_positions_closed
-      - l2_early_bearish_signal
-    note: "§5.2 LONG_EXIT → FLIP_WATCH;进入时启动 FLIP_WATCH 动态冷却"
-
-  - from: LONG_EXIT
-    to: FLAT
-    trigger_type: auto
-    enumerable_conditions: {}
-    runtime_conditions:
-      - all_positions_closed
-      - no_flip_conditions_met
-    note: "平仓完毕但无反手条件"
-
-  # ======== SHORT 侧镜像(与 LONG 对称,v1.2 空头简化)========
-  - from: SHORT_PLANNED
-    to: SHORT_OPEN
-    trigger_type: event
-    enumerable_conditions: {}
-    runtime_conditions:
-      - at_least_one_entry_zone_1h_closed_confirmed
-    note: "镜像 LONG_PLANNED → LONG_OPEN"
-
-  - from: SHORT_PLANNED
-    to: FLAT
-    trigger_type: auto
-    enumerable_conditions: {}
-    runtime_conditions:
-      - planned_expiry_passed
-    note: "挂单过期未成交"
-
-  - from: SHORT_OPEN
-    to: SHORT_HOLD
-    trigger_type: auto
-    enumerable_conditions: {}
-    runtime_conditions:
-      - open_phase_min_time_reached
-      - open_phase_any_trend_signal_met
-    note: "镜像 LONG_OPEN → LONG_HOLD"
-
-  - from: SHORT_OPEN
-    to: SHORT_EXIT
-    trigger_type: auto
-    enumerable_conditions: {}
-    runtime_conditions:
-      - any_of_early_failure_triggers
-    note: "镜像 LONG_OPEN → LONG_EXIT"
-
-  - from: SHORT_HOLD
-    to: SHORT_TRIM
-    trigger_type: auto
-    enumerable_conditions: {}
-    runtime_conditions:
-      - any_of_trim_triggers
-    note: "镜像 LONG_HOLD → LONG_TRIM"
-
-  - from: SHORT_HOLD
-    to: SHORT_EXIT
-    trigger_type: auto
-    enumerable_conditions: {}
-    runtime_conditions:
-      - hard_invalidation_breached_4h
-    note: "硬失效一票否决"
-
-  - from: SHORT_TRIM
-    to: SHORT_HOLD
-    trigger_type: auto
-    enumerable_conditions: {}
-    runtime_conditions:
-      - current_trim_completed_and_position_remaining
-    note: "完成当前减仓,剩余继续"
-
-  - from: SHORT_TRIM
-    to: SHORT_TRIM
-    trigger_type: auto
-    enumerable_conditions: {}
-    runtime_conditions:
-      - next_tp_level_reached
-    note: "下一档止盈"
-
-  - from: SHORT_TRIM
-    to: SHORT_EXIT
-    trigger_type: auto
-    enumerable_conditions: {}
-    runtime_conditions:
-      - last_tp_level_or_exhaustion_intensified
-    note: "最后一档或衰竭强化"
-
-  - from: SHORT_EXIT
-    to: FLIP_WATCH
-    trigger_type: auto
-    enumerable_conditions:
-      regime: [transition_up, trend_up, range_low]
-    runtime_conditions:
-      - all_positions_closed
-      - l2_early_bullish_signal
-    note: "镜像 LONG_EXIT → FLIP_WATCH"
-
-  - from: SHORT_EXIT
-    to: FLAT
-    trigger_type: auto
-    enumerable_conditions: {}
-    runtime_conditions:
-      - all_positions_closed
-      - no_flip_conditions_met
-    note: "平仓完毕但无反手条件"
-
-  # ======== FLIP_WATCH 出口(§5.2 高门槛)========
-  # FLIP_WATCH 可以从 LONG_EXIT 或 SHORT_EXIT 进入,分别对应不同反手方向。
-  # 代码层根据 lifecycle.previous_direction 选择允许的 to_planned 分支。
-  - from: FLIP_WATCH
-    to: SHORT_PLANNED
-    trigger_type: ai_call
-    enumerable_conditions:
-      stance: [bearish]
-      stance_confidence_at_or_above_dynamic_threshold: true
-      opportunity_grade: [A, B]
-    runtime_conditions:
-      - flip_watch_effective_min_hours_elapsed
-      - previous_long_thesis_invalidated
-      - previous_direction_was_long
-    note: "§5.2 FLIP_WATCH → SHORT_PLANNED,高门槛"
-
-  - from: FLIP_WATCH
-    to: LONG_PLANNED
-    trigger_type: ai_call
-    enumerable_conditions:
-      stance: [bullish]
-      stance_confidence_at_or_above_dynamic_threshold: true
-      opportunity_grade: [A, B]
-    runtime_conditions:
-      - flip_watch_effective_min_hours_elapsed
-      - previous_short_thesis_invalidated
-      - previous_direction_was_short
-    note: "镜像 FLIP_WATCH → LONG_PLANNED"
-
-  - from: FLIP_WATCH
-    to: FLAT
-    trigger_type: auto
-    enumerable_conditions: {}
-    runtime_conditions:
-      - any_of_flip_dissolve_triggers
-      # effective_max_hours_exceeded OR
-      # stance_returned_to_prior_or_neutral OR
-      # regime_returned_to_prior_side
-    note: "§5.2 FLIP_WATCH → FLAT"
-
-  # ======== PROTECTION 进出(§5.2)========
-  # PROTECTION 是全局入口:任何非-protection 状态都能迁入。
-  # 条件用 from: "*" 简写,代码展开为除 protection 类外的所有状态。
-  - from: "*"
-    to: PROTECTION
-    trigger_type: auto
-    enumerable_conditions:
-      l5_extreme_event_detected: true         # 硬否决通道
-    runtime_conditions:
-      - any_of_protection_triggers
-      # l5_extreme_event_detected OR l4_critical_persisted OR
-      # fallback_level_3_triggered OR data_outage_over_threshold
-    note: "§5.2 任何状态 → PROTECTION,程序自动,无需 AI"
-    from_excludes: [PROTECTION, POST_PROTECTION_REASSESS]
-
-  - from: PROTECTION
-    to: POST_PROTECTION_REASSESS
-    trigger_type: auto
-    enumerable_conditions: {}
-    runtime_conditions:
-      - protection_event_ended
-      - data_health_restored
-      - no_new_extreme_risk
-    note: "§5.2 PROTECTION → POST_PROTECTION_REASSESS"
-
-  # ======== POST_PROTECTION_REASSESS 出口(§5.2 六出口)========
-  # 建模文档未展开每条出口的具体判据,由 lifecycle_manager 在代码层决定
-  # (基于残留仓位、方向、盈亏、L2 stance 等)。本处只登记合法白名单
-  # 和全局禁入目标。
-  - from: POST_PROTECTION_REASSESS
-    to: LONG_HOLD
-    trigger_type: auto
-    enumerable_conditions: {}
-    runtime_conditions:
-      - post_protection_decide_returns_long_hold
-    note: "残留多头 + 条件支持继续持"
-
-  - from: POST_PROTECTION_REASSESS
-    to: SHORT_HOLD
-    trigger_type: auto
-    enumerable_conditions: {}
-    runtime_conditions:
-      - post_protection_decide_returns_short_hold
-    note: "残留空头 + 条件支持继续持"
-
-  - from: POST_PROTECTION_REASSESS
-    to: LONG_EXIT
-    trigger_type: auto
-    enumerable_conditions: {}
-    runtime_conditions:
-      - post_protection_decide_returns_long_exit
-    note: "残留多头但不宜继续持"
-
-  - from: POST_PROTECTION_REASSESS
-    to: SHORT_EXIT
-    trigger_type: auto
-    enumerable_conditions: {}
-    runtime_conditions:
-      - post_protection_decide_returns_short_exit
-    note: "残留空头但不宜继续持"
-
-  - from: POST_PROTECTION_REASSESS
-    to: FLIP_WATCH
-    trigger_type: auto
-    enumerable_conditions: {}
-    runtime_conditions:
-      - post_protection_decide_returns_flip_watch
-    note: "已平仓且具备反手观察条件"
-
-  - from: POST_PROTECTION_REASSESS
-    to: FLAT
-    trigger_type: auto
-    enumerable_conditions: {}
-    runtime_conditions:
-      - post_protection_decide_returns_flat
-    note: "已平仓且无反手条件"
-
-
-# -------- 进入副作用(§5.5,on_enter)--------------------------------
-# 声明式动作序列。每个动作名对应
-# src/strategy/on_enter_actions.py 里的同名函数,参数化数字在
-# base.yaml / thresholds.yaml 里取。YAML 不存参数,只存顺序。
-on_enter_effects:
-
+  # ========== FLAT ==========
   FLAT:
-    - archive_current_lifecycle_if_active
-    - reset_position_cap_to_default
-    - cancel_all_pending_orders
-    - log_state_transition
+    open_long:   LONG_PLANNED
+    open_short:  SHORT_PLANNED
+    _default:    FLAT
 
+  # ========== LONG 侧 ==========
   LONG_PLANNED:
-    - create_lifecycle_draft
-    - record_origin_thesis
-    - set_planned_expiry
-    - push_notification_info
-
-  SHORT_PLANNED:
-    - create_lifecycle_draft
-    - record_origin_thesis
-    - set_planned_expiry
-    - push_notification_info
+    open_long:      LONG_OPEN
+    scale_in_long:  LONG_OPEN
+    close_long:     FLAT
+    watch:          LONG_PLANNED
+    pause:          COOLDOWN
+    _default:       LONG_PLANNED
 
   LONG_OPEN:
-    - lifecycle_pending_to_active
-    - record_origin_time
-    - enable_initial_protection_mode
-    - push_notification_info
+    scale_in_long:  LONG_SCALING
+    reduce_long:    LONG_REDUCING
+    close_long:     LONG_CLOSED
+    hold:           LONG_OPEN
+    pause:          COOLDOWN
+    _default:       LONG_OPEN
+
+  LONG_SCALING:
+    scale_in_long:  LONG_SCALING
+    hold:           LONG_OPEN
+    reduce_long:    LONG_REDUCING
+    close_long:     LONG_CLOSED
+    _default:       LONG_SCALING
+
+  LONG_REDUCING:
+    reduce_long:    LONG_REDUCING
+    hold:           LONG_OPEN
+    close_long:     LONG_CLOSED
+    _default:       LONG_REDUCING
+
+  LONG_CLOSED:
+    _auto_after_minutes: 60
+    _auto_target:        FLAT
+
+  # ========== SHORT 侧(对称)==========
+  SHORT_PLANNED:
+    open_short:     SHORT_OPEN
+    scale_in_short: SHORT_OPEN
+    close_short:    FLAT
+    watch:          SHORT_PLANNED
+    pause:          COOLDOWN
+    _default:       SHORT_PLANNED
 
   SHORT_OPEN:
-    - lifecycle_pending_to_active
-    - record_origin_time
-    - enable_initial_protection_mode
-    - push_notification_info
+    scale_in_short: SHORT_SCALING
+    reduce_short:   SHORT_REDUCING
+    close_short:    SHORT_CLOSED
+    hold:           SHORT_OPEN
+    pause:          COOLDOWN
+    _default:       SHORT_OPEN
 
-  LONG_HOLD:
-    - disable_initial_protection_mode
-    - enable_regular_monitoring
-    - init_max_favorable_pct_tracking
-    - init_max_adverse_pct_tracking
+  SHORT_SCALING:
+    scale_in_short: SHORT_SCALING
+    hold:           SHORT_OPEN
+    reduce_short:   SHORT_REDUCING
+    close_short:    SHORT_CLOSED
+    _default:       SHORT_SCALING
 
-  SHORT_HOLD:
-    - disable_initial_protection_mode
-    - enable_regular_monitoring
-    - init_max_favorable_pct_tracking
-    - init_max_adverse_pct_tracking
+  SHORT_REDUCING:
+    reduce_short:   SHORT_REDUCING
+    hold:           SHORT_OPEN
+    close_short:    SHORT_CLOSED
+    _default:       SHORT_REDUCING
 
-  LONG_TRIM:
-    - record_position_adjustment
-    - set_stage_partial_trimmed
-    - update_remaining_stop_loss_take_profit
+  SHORT_CLOSED:
+    _auto_after_minutes: 60
+    _auto_target:        FLAT
 
-  SHORT_TRIM:
-    - record_position_adjustment
-    - set_stage_partial_trimmed
-    - update_remaining_stop_loss_take_profit
+  # ========== 事件驱动终止状态 ==========
+  STOP_TRIGGERED:
+    _auto_after_minutes: 120
+    _auto_target:        FLAT_AFTER_STOP
 
-  LONG_EXIT:
-    - record_position_adjustment
-    - prepare_lifecycle_archival
-    - record_exit_reason
+  FLAT_AFTER_STOP:
+    _auto_after_minutes: 240
+    _auto_target:        FLAT
 
-  SHORT_EXIT:
-    - record_position_adjustment
-    - prepare_lifecycle_archival
-    - record_exit_reason
-
-  FLIP_WATCH:
-    - archive_previous_lifecycle
-    - record_flip_watch_start_time
-    - compute_and_lock_flip_watch_effective_bounds   # 见 flip_watch_cooldown 块
-    - reset_position_cap_to_default
-
-  PROTECTION:
-    - record_protection_entry_time
-    - record_protection_reason
-    - freeze_new_openings
-    - ai_handle_residual_positions
-    - push_notification_critical
-    - request_human_confirmation
-
-  POST_PROTECTION_REASSESS:
-    - record_reassess_entry_time
-    - keep_lifecycle_no_archive
-    - force_permission_hold_only
-
-
-# -------- FLIP_WATCH 动态冷却(§5.3,M14)----------------------------
-flip_watch_cooldown:
-  # 基础值(可配置)
-  base_min_hours: 18
-  base_max_hours: 96
-
-  # 硬界限(不可突破)
-  hard_bounds:
-    min_hours: 8
-    max_hours: 168     # 7 天
-
-  # 动态乘数(v1.2 删除 previous outcome_type 影响)
-  # 多个乘数累乘,最终 effective_min/max 夹到 hard_bounds。
-  multipliers:
-    - when:
-        cycle_position_in: [late_bull, distribution, late_bear, accumulation]
-      multiplier: 0.7
-    - when:
-        cycle_position_in: [mid_bull, mid_bear]
-      multiplier: 1.3
-    - when:
-        volatility_regime: extreme
-      multiplier: 1.3
-    - when:
-        volatility_regime: low
-      multiplier: 0.8
-
-  # 进入 FLIP_WATCH 时计算并锁定,周期内不变(§5.3)
-  freeze_on_entry: true
-
-  # 复盘发现不合理 → 人工决定调参,不自动反哺(§5.3)
-  auto_tuning_enabled: false
-
-
-# -------- 三条核心纪律(§5.4)----------------------------------------
-# 声明式开关。代码层在状态迁移前遍历 enabled: true 的纪律,
-# 对应 src/strategy/discipline_guards.py 的同名函数。违反 → 拒绝迁移。
-disciplines:
-  - name: no_direct_hold_to_opposite_planned
-    enabled: true
-    description: "不允许从 *_HOLD 直接跳到反向 PLANNED,必须经 EXIT → FLIP_WATCH 完整路径"
-
-  - name: flip_watch_cooldown_enforced
-    enabled: true
-    description: "FLIP_WATCH 冷却期强制;1H 信号永远不能单独触发方向切换"
-
-  - name: protection_single_entry_exit_path
-    enabled: true
-    description: "PROTECTION 全局入口,唯一出口经 POST_PROTECTION_REASSESS"
-
-
-# -------- 主判断周期与辅助周期(§5.6)--------------------------------
-# 硬规则:1H 信号永远不能单独改变 stance / phase / regime,
-# 不能单独触发方向切换。函数签名强制限制 1H 数据可访问性(§4.4.8)。
-timeframes:
-  primary:
-    - 4h
-    - 1d
-    - 1w
-  auxiliary:
-    - 1h
-
-  # 允许读取 1H 的模块白名单(§4.4.8)
-  # Linter 规则 + 函数签名 + 数据加载白名单三重强制。
-  auxiliary_whitelist_modules:
-    - src/data/collectors/binance.py
-    - src/evidence/layer3_opportunity.py::entry_confirmation
-    - src/evidence/layer4_risk.py::hard_invalidation_prewarning
-    - src/scheduler/event_listener.py
-    - src/strategy/lifecycle_manager.py::early_failure_protection
-
-  # 禁止读取 1H 的模块(§4.4.8)
-  auxiliary_forbidden_modules:
-    - src/evidence/layer1_regime.py
-    - src/evidence/layer2_direction.py
-    - src/composite/*
-    - src/decision/adjudicator_ai.py
-    - src/decision/adjudicator_fallback.py
+  COOLDOWN:
+    _auto_after_minutes: 60
+    _auto_target:        FLAT

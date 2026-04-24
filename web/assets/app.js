@@ -63,6 +63,26 @@ function app() {
         livePriceStale() {
             return !!(this.livePriceData && this.livePriceData.stale);
         },
+
+        // Sprint 2.3 R4:data_freshness 可能是字符串 'green'/'yellow'/'red',
+        // 也可能是对象 {status, captured_at, age_seconds}。统一抽 status 字段。
+        _freshStatus(v) {
+            if (v == null) return null;
+            if (typeof v === 'string') return v;
+            if (typeof v === 'object') return v.status || null;
+            return null;
+        },
+        freshnessLabel(v) {
+            const s = this._freshStatus(v);
+            return s || '—';
+        },
+        freshnessBadgeClass(v) {
+            const s = this._freshStatus(v);
+            if (s === 'green') return 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300';
+            if (s === 'yellow') return 'bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300';
+            if (s === 'red') return 'bg-rose-50 text-rose-700 dark:bg-rose-950 dark:text-rose-300';
+            return 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400';
+        },
         _initDarkMode() {
             const q = new URLSearchParams(window.location.search).get('theme');
             if (q === 'dark' || q === 'light') { this.darkMode = (q === 'dark'); return; }

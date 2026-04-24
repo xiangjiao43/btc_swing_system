@@ -400,11 +400,12 @@
       </header>
       <ul class="divide-y divide-slate-100 dark:divide-slate-800">
         <template x-for="layer in orderedLayers()" :key="layer.layer_id">
-          <li class="p-4 space-y-2">
+          <!-- Sprint 2.3 R4:外层 space-y-1 + p-3 压缩;所有内部 label 与内容同一行。 -->
+          <li class="p-3 space-y-1">
             <!-- layer header -->
             <div class="flex items-center gap-2 flex-wrap">
               <span class="font-mono font-semibold text-sm" x-text="'L' + layer.layer_id"></span>
-              <span class="font-medium" x-text="layerChineseName(layer.layer_id) + '层'"></span>
+              <span class="font-medium text-[13px]" x-text="layerChineseName(layer.layer_id) + '层'"></span>
               <span class="text-[10px] px-1.5 py-0 rounded"
                     :class="contributionClass(layer.contribution)"
                     x-text="contributionLabel(layer.contribution)"></span>
@@ -412,43 +413,44 @@
                            text-slate-600 dark:text-slate-400"
                     x-text="'健康: ' + (layer.health_status || '—')"></span>
               <span class="text-[10px] px-1.5 py-0 rounded"
-                    :class="layer.data_freshness === 'green'
-                            ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
-                            : layer.data_freshness === 'yellow'
-                            ? 'bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300'
-                            : 'bg-rose-50 text-rose-700 dark:bg-rose-950 dark:text-rose-300'"
-                    x-text="'新鲜度: ' + (layer.data_freshness || '—')"></span>
+                    :class="freshnessBadgeClass(layer.data_freshness)"
+                    x-text="'新鲜度: ' + freshnessLabel(layer.data_freshness)"></span>
               <span class="ml-auto text-[10px] font-mono text-slate-500 tabular-nums"
                     x-text="'置信 ' + (layer.confidence_numeric != null
                             ? (layer.confidence_numeric * 100).toFixed(0) + '%'
                             : '—')"></span>
             </div>
 
-            <!-- 【这层回答】 -->
-            <div class="text-[12px]">
-              <span class="text-[10px] uppercase tracking-wider text-slate-500">【这层回答】</span>
-              <span class="ml-1" x-text="layer.core_question || '—'"></span>
+            <!-- 【这层回答】 inline 小字 -->
+            <div class="text-[11.5px] leading-snug">
+              <span class="text-[10px] text-slate-500 mr-1">【这层回答】</span>
+              <span x-text="layer.core_question || '—'"></span>
             </div>
 
-            <!-- 三支柱 / 四角度 / L3 rule_trace -->
+            <!-- 三支柱 / 四角度 / L3 rule_trace(L5 四列 / 默认三列) -->
             <template x-if="(layer.pillars || []).length > 0">
               <div>
-                <div class="text-[10px] uppercase tracking-wider text-slate-500 mb-1"
+                <div class="text-[10px] text-slate-500 mb-0.5"
                      x-text="layer.layer_id === 4 ? '【分析的三个角度】'
                              : layer.layer_id === 5 ? '【四类分析】'
                              : '【分析的三个支柱】'"></div>
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-2">
+                <div class="grid gap-1.5"
+                     :class="layer.layer_id === 5
+                             ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-4'
+                             : 'grid-cols-1 sm:grid-cols-3'">
                   <template x-for="(p, i) in (layer.pillars || [])" :key="p.id">
-                    <div class="border border-slate-200 dark:border-slate-800 rounded p-2 text-[11.5px]">
-                      <div class="flex items-center justify-between">
-                        <span class="font-medium" x-text="'① ② ③ ④ ⑤'.charAt(i*2) + ' ' + p.name"></span>
-                        <span class="text-[9px] px-1 rounded"
+                    <div class="border border-slate-200 dark:border-slate-800 rounded p-1.5 text-[11px]">
+                      <div class="flex items-center justify-between gap-1">
+                        <span class="font-medium text-[11px] truncate"
+                              :title="p.name"
+                              x-text="'① ② ③ ④ ⑤'.charAt(i*2) + ' ' + p.name"></span>
+                        <span class="text-[9px] px-1 rounded shrink-0"
                               :class="p.status === 'ok'
                                       ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
                                       : 'bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300'"
                               x-text="p.status"></span>
                       </div>
-                      <div class="text-slate-700 dark:text-slate-300 mt-0.5 leading-snug"
+                      <div class="text-slate-700 dark:text-slate-300 mt-0.5 leading-snug text-[10.5px]"
                            x-text="p.interpretation"></div>
                     </div>
                   </template>
@@ -456,23 +458,18 @@
               </div>
             </template>
 
-            <!-- L3 rule_trace -->
+            <!-- L3 rule_trace:2 列等宽,压缩 padding -->
             <template x-if="layer.layer_id === 3 && layer.rule_trace">
-              <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-[11.5px]">
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-[11px]">
                 <div>
-                  <div class="text-[10px] uppercase tracking-wider text-slate-500 mb-1">
-                    【规则匹配】
-                  </div>
-                  <div class="font-mono bg-slate-50 dark:bg-slate-900 p-2 rounded leading-snug"
-                       x-text="layer.rule_trace.matched_rule"></div>
+                  <span class="text-[10px] text-slate-500 mr-1">【规则匹配】</span>
+                  <span class="font-mono" x-text="layer.rule_trace.matched_rule"></span>
                 </div>
                 <div>
-                  <div class="text-[10px] uppercase tracking-wider text-slate-500 mb-1">
-                    【升档条件(什么能让档位往上走)】
-                  </div>
-                  <ul class="space-y-0.5">
+                  <span class="text-[10px] text-slate-500 mr-1">【升档条件】</span>
+                  <ul class="inline-block align-top space-y-0">
                     <template x-for="c in (layer.rule_trace.upgrade_conditions || [])" :key="c">
-                      <li class="flex gap-1"><span class="text-blue-500">→</span>
+                      <li class="leading-snug"><span class="text-blue-500 mr-0.5">→</span>
                         <span x-text="c"></span></li>
                     </template>
                   </ul>
@@ -480,51 +477,48 @@
               </div>
             </template>
 
-            <!-- L4 position_cap chain + permission chain -->
+            <!-- L4 position_cap chain + permission chain(同一 bar 行)-->
             <template x-if="layer.layer_id === 4 && layer.position_cap_chain">
-              <div class="text-[11px] bg-slate-50 dark:bg-slate-900 p-2 rounded font-mono
+              <div class="text-[10.5px] bg-slate-50 dark:bg-slate-900 px-2 py-1 rounded
                           leading-snug overflow-x-auto">
-                <div class="text-[10px] uppercase tracking-wider text-slate-500 mb-0.5 not-mono">
-                  【position_cap 合成链】
-                </div>
-                <span x-text="positionCapChainText(layer.position_cap_chain)"></span>
+                <span class="text-[10px] text-slate-500 mr-1">【position_cap 合成链】</span>
+                <span class="font-mono" x-text="positionCapChainText(layer.position_cap_chain)"></span>
               </div>
             </template>
             <template x-if="layer.layer_id === 4 && layer.permission_chain">
-              <div class="text-[11px] bg-slate-50 dark:bg-slate-900 p-2 rounded
+              <div class="text-[10.5px] bg-slate-50 dark:bg-slate-900 px-2 py-1 rounded
                           leading-snug">
-                <div class="text-[10px] uppercase tracking-wider text-slate-500 mb-0.5">
-                  【permission 归并】
-                </div>
-                <div x-text="permissionChainText(layer.permission_chain)"></div>
+                <span class="text-[10px] text-slate-500 mr-1">【permission 归并】</span>
+                <span x-text="permissionChainText(layer.permission_chain)"></span>
               </div>
             </template>
 
             <!-- L5 adjustment -->
             <template x-if="layer.layer_id === 5 && (layer.completeness_warning || layer.macro_stance)">
               <div class="text-[11px]">
-                <span class="text-[10px] uppercase tracking-wider text-slate-500">【macro_stance】</span>
-                <span class="ml-1 font-mono" x-text="layer.macro_stance || '—'"></span>
+                <span class="text-[10px] text-slate-500 mr-1">【macro_stance】</span>
+                <span class="font-mono" x-text="layer.macro_stance || '—'"></span>
                 <span x-show="layer.completeness_warning"
                       class="ml-3 text-amber-600 dark:text-amber-400"
                       x-text="layer.completeness_warning"></span>
               </div>
             </template>
 
-            <!-- 综合结论 + 给下游的建议 + 人话解读 -->
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-[11.5px]">
+            <!-- 综合结论 + 给下游的建议(同一行 2 列) -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-[11px] leading-snug">
               <div>
-                <span class="text-[10px] uppercase tracking-wider text-slate-500">【综合结论】</span>
-                <span class="ml-1 font-mono" x-text="layer.verdict || '—'"></span>
+                <span class="text-[10px] text-slate-500 mr-1">【综合结论】</span>
+                <span class="font-mono" x-text="layer.verdict || '—'"></span>
               </div>
               <div>
-                <span class="text-[10px] uppercase tracking-wider text-slate-500">【给下游的建议】</span>
-                <span class="ml-1" x-text="layer.downstream_hint || '—'"></span>
+                <span class="text-[10px] text-slate-500 mr-1">【给下游的建议】</span>
+                <span x-text="layer.downstream_hint || '—'"></span>
               </div>
             </div>
-            <div class="text-[12px] text-slate-700 dark:text-slate-300 leading-snug
+            <!-- 人话解读 -->
+            <div class="text-[11.5px] text-slate-700 dark:text-slate-300 leading-snug
                         border-l-2 border-blue-400 dark:border-cyan-500 pl-2">
-              <span class="text-[10px] uppercase tracking-wider text-slate-500 mr-1">【人话解读】</span>
+              <span class="text-[10px] text-slate-500 mr-1">【人话解读】</span>
               <span x-text="layer.plain_reading || '—'"></span>
             </div>
           </li>
@@ -544,13 +538,14 @@
           多个原始因子按规则合成的高阶信号。每个卡展示"由哪些因子组合 / 组合规则 / 当前值解读 / 影响哪一层"。
         </p>
       </header>
-      <div class="p-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+      <!-- Sprint 2.3 R4:2 列 → 3 列。卡内 padding + gap + 文字压缩。 -->
+      <div class="p-3 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
         <template x-for="c in compositeCards()" :key="c.card_id">
-          <article class="border border-slate-200 dark:border-slate-800 rounded-md p-3 space-y-2">
-            <header class="flex items-center justify-between">
-              <h4 class="text-[13px] font-semibold" x-text="c.name"></h4>
-              <div class="flex items-center gap-2">
-                <span class="text-sm font-mono font-bold tabular-nums"
+          <article class="border border-slate-200 dark:border-slate-800 rounded-md p-2 space-y-1.5 min-w-0">
+            <header class="flex items-center justify-between gap-1">
+              <h4 class="text-[12px] font-semibold truncate" :title="c.name" x-text="c.name"></h4>
+              <div class="flex items-center gap-1 shrink-0">
+                <span class="text-[13px] font-mono font-bold tabular-nums"
                       :class="directionClass(c.impact_direction)"
                       x-text="formatFactorValue(c.current_value)"></span>
                 <span class="text-[9px] px-1 rounded bg-slate-100 dark:bg-slate-800
@@ -561,33 +556,33 @@
 
             <!-- 组成 -->
             <div>
-              <div class="stat-label mb-1">由哪些因子组合(权重 / 作用)</div>
-              <ul class="space-y-0.5 text-[11px]">
+              <div class="stat-label mb-0.5">由哪些因子组合</div>
+              <ul class="space-y-0 text-[10.5px]">
                 <template x-for="comp in (compositeComposition(c.card_id) || [])" :key="comp.factor_id">
-                  <li class="flex items-start gap-1.5 leading-tight">
+                  <li class="flex items-start gap-1 leading-tight">
                     <span class="text-slate-400 shrink-0">•</span>
-                    <span class="flex-1" x-text="comp.name"></span>
-                    <span class="font-mono tabular-nums text-slate-600 dark:text-slate-400"
+                    <span class="flex-1 truncate" :title="comp.name" x-text="comp.name"></span>
+                    <span class="font-mono tabular-nums text-slate-600 dark:text-slate-400 shrink-0"
                           x-text="formatFactorValue(comp.value) + (comp.weight ? ' / w=' + comp.weight : '')"></span>
                   </li>
                 </template>
                 <li x-show="(compositeComposition(c.card_id) || []).length === 0"
-                    class="text-[11px] text-slate-400">组成明细未就绪</li>
+                    class="text-[10.5px] text-slate-400">组成明细未就绪</li>
               </ul>
             </div>
 
             <!-- 规则 / 当前值解读 / 影响哪一层 -->
-            <div class="text-[11px] space-y-0.5 leading-snug">
+            <div class="text-[10.5px] space-y-0 leading-snug">
               <div>
-                <span class="text-[9.5px] uppercase tracking-wider text-slate-500">规则</span>
+                <span class="text-[9px] uppercase tracking-wider text-slate-500">规则</span>
                 <span class="ml-1" x-text="compositeRule(c.card_id) || '—'"></span>
               </div>
               <div>
-                <span class="text-[9.5px] uppercase tracking-wider text-slate-500">当前值说明</span>
+                <span class="text-[9px] uppercase tracking-wider text-slate-500">当前值</span>
                 <span class="ml-1" x-text="compositeInterpretation(c.card_id) || c.plain_interpretation || '—'"></span>
               </div>
               <div>
-                <span class="text-[9.5px] uppercase tracking-wider text-slate-500">影响</span>
+                <span class="text-[9px] uppercase tracking-wider text-slate-500">影响</span>
                 <span class="ml-1" x-text="compositeAffects(c.card_id) || c.strategy_impact || '—'"></span>
               </div>
             </div>

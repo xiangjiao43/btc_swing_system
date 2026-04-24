@@ -1,131 +1,61 @@
 # ============================================================
-# state_machine.yaml — Sprint 1.13 系统状态分类器(14 档)
+# state_machine.yaml — Sprint 1.5a 14 档状态机(对齐建模 §5)
 # ============================================================
 #
-# 本文件不是**交易生命周期 FSM**(那个在 lifecycle_fsm.yaml 里,
-# 建模 §5 的 FLAT/LONG_PLANNED/... 图),而是"**系统此刻应处于哪一档
-# 运行状态**"的分类器:每个 pipeline tick 独立求值,按 transition_priority
-# 顺序检查各状态的 enter_conditions,第一个全部满足的即 current_state。
-# neutral_observation 作为兜底永远匹配。
+# 权威蓝本:docs/modeling.md §5.1-§5.6。任何改动必须对齐 modeling.md。
 #
-# 字段抽取:StateMachine 支持从 strategy_state 的两种位置取值(容错):
-#   * 顶层 shortcut:strategy_state['layer_1'] / ['layer_2'] / ...
-#   * Sprint 1.12 嵌套:strategy_state['evidence_reports']['layer_1']
-# 找不到的字段 → 对应条件评估为 false。
+# 与 Sprint 1.13-1.14 的旧 state_machine.yaml / lifecycle_fsm.yaml 完全不同:
+#   * 旧版是"系统运行状态分类器",6 个 CC 自造标签(active_long_execution 等)
+#   * 旧版 lifecycle_fsm.yaml 是 adjudicator.action 驱动的 FSM
+#   * 新版是建模 §5 的"交易生命周期 14 档状态机":
+#       FLAT / LONG_{PLANNED,OPEN,HOLD,TRIM,EXIT} /
+#       SHORT_{PLANNED,OPEN,HOLD,TRIM,EXIT} /
+#       FLIP_WATCH / PROTECTION / POST_PROTECTION_REASSESS
 #
-# Sprint 1.13 新建于:2026-04-23
+# 迁移逻辑在 src/strategy/state_machine.py 内用 Python 实现。
+# 本 YAML 只存"可配置参数":阈值、乘数、冷却硬界限等。
+#
+# Sprint 1.5a 创建于:2026-04-24
 # ============================================================
 
-version: '1.0.0'
+version: "1.5a"
 
-# ---------- 优先级顺序 ----------
-# 保守原则:异常 / 降级 / 暂停类在前,active 执行类在后,
-# neutral_observation 兜底在最后。
-transition_priority:
-  - cold_start_warming_up
-  - degraded_data_mode
-  - stop_triggered
-  - chaos_pause
-  - macro_shock_pause
-  - event_window_freeze
-  - post_execution_cooldown
-  - active_long_execution
-  - active_short_execution
-  - long_protective_hold
-  - short_protective_hold
-  - disciplined_bull_watch
-  - disciplined_bear_watch
-  - neutral_observation
+# ---------- L2 stance_confidence 动态门槛(§4.3.6)----------
+# 当前用静态默认值;未来可接入 Observation Category 做动态调整(§1.8)
+stance_confidence_thresholds:
+  long_min: 0.60
+  short_min: 0.65
 
-# ---------- 每个状态的进入条件 ----------
-states:
+# ---------- FLIP_WATCH 冷却配置(§5.3)----------
+flip_watch:
+  base_min_hours: 18
+  base_max_hours: 96
+  hard_floor_min_hours: 8       # effective_min 下限
+  hard_ceil_max_hours: 168      # effective_max 上限
+  # 动态乘数(v1.2 删除 previous outcome_type 影响)
+  cycle_position_multipliers:
+    late_bull: 0.7
+    distribution: 0.7
+    late_bear: 0.7
+    accumulation: 0.7
+    mid_bull: 1.3
+    mid_bear: 1.3
+  volatility_multipliers:
+    extreme: 1.3
+    low: 0.8
 
-  cold_start_warming_up:
-    enter_conditions:
-      - cold_start_warming_up_eq: true
-    transition_reason_template: "冷启动中,已运行 {runs_completed}/{threshold} 轮"
+# ---------- LONG_OPEN / SHORT_OPEN 早期保护阈值 ----------
+open_phase:
+  min_hours_to_hold: 24          # §5.2 LONG_OPEN → LONG_HOLD 时间条件
+  pnl_confirmed_threshold_pct: 2.0  # +2% 浮盈
+  tp1_distance_pct: 50.0         # take_profit 第一档 50% 距离
+  stance_flip_window_hours: 12   # 开仓后 12h 内 stance 翻转窗口
+  stance_flip_confidence_min: 0.7  # 翻转所需 confidence
 
-  degraded_data_mode:
-    enter_conditions:
-      - stages_failed_count_gte: 3
-    transition_reason_template: "数据降级:{stages_failed_count} 个阶段失败"
+# ---------- POST_PROTECTION_REASSESS 强制持续(§5.2)----------
+post_protection_reassess:
+  min_hold_hours: 4              # 强制持续至少一个 4H 周期
 
-  stop_triggered:
-    enter_conditions:
-      - account_stop_triggered_eq: true
-    transition_reason_template: "止损触发(账户状态上报)"
-
-  chaos_pause:
-    enter_conditions:
-      - l1_regime_eq: chaos
-    transition_reason_template: "混乱期检测:L1 regime=chaos,vol={volatility_regime}"
-
-  macro_shock_pause:
-    enter_conditions:
-      - l5_macro_headwind_in: [strong_headwind]
-      - l5_macro_environment_eq: risk_off
-      - btc_nasdaq_correlation_gte: 0.7
-    transition_reason_template: "宏观冲击:risk_off + 强逆风 + BTC-Nasdaq 相关={btc_nasdaq_correlation}"
-
-  event_window_freeze:
-    enter_conditions:
-      - event_risk_level_in: [high]
-      - event_hours_ahead_lte: 24
-    transition_reason_template: "事件窗口:{nearest_event_name} 在 {event_hours_ahead}h 内"
-
-  # ⚠️ Sprint 1.13 修正:spec 原 YAML 用 previous_state_in + minutes_since_previous_transition
-  # 但意图是"距最近一次 active_* 执行 < 120 分钟"。Pipeline 逐 tick 跑,严格
-  # "immediate previous = active_*" 只会在紧接下一 tick 命中。这里改用
-  # DAO 反查最近一次 active_*_execution 记录,用 minutes_since_last_active_execution
-  # 作为条件字段,更符合实际冷却语义。详见 Sprint 1.13 报告 Trigger。
-  post_execution_cooldown:
-    enter_conditions:
-      - minutes_since_last_active_execution_lt: 120
-    transition_reason_template: "执行后冷却,距上次 active 执行 {minutes_since_last_active_execution} 分钟"
-
-  active_long_execution:
-    enter_conditions:
-      - l2_stance_eq: bullish
-      - l3_grade_in: [A, B]
-      - l3_execution_permission_in: [can_open, cautious_open, ambush_only]
-      - l4_position_cap_gt: 0.02
-    transition_reason_template: "主动做多:Grade={l3_grade},cap={l4_position_cap},perm={l3_execution_permission}"
-
-  active_short_execution:
-    enter_conditions:
-      - l2_stance_eq: bearish
-      - l3_grade_in: [A, B]
-      - l3_execution_permission_in: [can_open, cautious_open, ambush_only]
-      - l4_position_cap_gt: 0.02
-    transition_reason_template: "主动做空:Grade={l3_grade},cap={l4_position_cap},perm={l3_execution_permission}"
-
-  long_protective_hold:
-    enter_conditions:
-      - account_has_long_position_eq: true
-      - l3_execution_permission_in: [no_chase, hold_only, watch, protective]
-    transition_reason_template: "多头保护:已持仓,permission={l3_execution_permission}"
-
-  short_protective_hold:
-    enter_conditions:
-      - account_has_short_position_eq: true
-      - l3_execution_permission_in: [no_chase, hold_only, watch, protective]
-    transition_reason_template: "空头保护:已持仓,permission={l3_execution_permission}"
-
-  disciplined_bull_watch:
-    enter_conditions:
-      - l2_stance_eq: bullish
-      - l3_grade_in: [B, C]
-      - l3_execution_permission_in: [hold_only, watch]
-    transition_reason_template: "多头纪律观察:Grade={l3_grade},等待入场条件"
-
-  disciplined_bear_watch:
-    enter_conditions:
-      - l2_stance_eq: bearish
-      - l3_grade_in: [B, C]
-      - l3_execution_permission_in: [hold_only, watch]
-    transition_reason_template: "空头纪律观察:Grade={l3_grade},等待入场条件"
-
-  neutral_observation:
-    # 兜底,永远 match(空 enter_conditions 视为 always-true)
-    enter_conditions: []
-    transition_reason_template: "中性观察:无明显方向或机会"
+# ---------- AI Phase 判定 LONG_HOLD → LONG_TRIM 的置信度下限(§5.2)----------
+trim_triggers:
+  phase_late_confidence_min: 0.65

@@ -127,7 +127,6 @@ class StrategyStateBuilder:
         "layer_5",
         "ai_summary",
         "adjudicator",
-        "lifecycle_fsm",
         "state_machine",
         "persist_state",
     )
@@ -144,7 +143,6 @@ class StrategyStateBuilder:
         events_window_hours: float = 72.0,
         state_machine: Any = None,
         adjudicator: Any = None,
-        lifecycle_fsm: Any = None,
         account_state_provider: Optional[Callable[[], dict[str, Any]]] = None,
     ) -> None:
         """
@@ -167,7 +165,7 @@ class StrategyStateBuilder:
         self._account_state_provider = account_state_provider
         # 延迟 import 避免循环依赖
         if state_machine is None:
-            from .state_machine import StateMachine
+            from ..strategy.state_machine import StateMachine
             self._state_machine = StateMachine()
         else:
             self._state_machine = state_machine
@@ -179,12 +177,6 @@ class StrategyStateBuilder:
             )
         else:
             self._adjudicator = adjudicator
-
-        if lifecycle_fsm is None:
-            from .lifecycle_fsm import LifecycleFSM
-            self._lifecycle_fsm = LifecycleFSM()
-        else:
-            self._lifecycle_fsm = lifecycle_fsm
 
         self._base_cfg = _load_base_cfg()
 
@@ -399,17 +391,9 @@ class StrategyStateBuilder:
             degraded_stages=degraded_stages,
         )
 
-        # === 先算 State Machine(Adjudicator 需读 state_machine.current_state)===
-        sm_block = self._run_stage(
-            "state_machine", failures, degraded_stages, run_ts_utc,
-            lambda: self._run_state_machine(state, run_ts_utc),
-            default=_state_machine_fallback(
-                "state_machine stage failed", run_ts_utc,
-            ),
-        )
-        state["state_machine"] = sm_block
-
         # === Stage: Adjudicator ===
+        # Sprint 1.5a:adjudicator 先跑,State Machine 在其后,读取 adjudicator
+        # 产出的 trade_plan / thesis_still_valid 等字段(Sprint 1.5b 补齐链路)
         account_state = None
         if self._account_state_provider is not None:
             try:
@@ -430,15 +414,21 @@ class StrategyStateBuilder:
             if "adjudicator" not in degraded_stages:
                 degraded_stages.append("adjudicator")
 
-        # === Stage: Lifecycle FSM ===
-        lifecycle_result = self._run_stage(
-            "lifecycle_fsm", failures, degraded_stages, run_ts_utc,
-            lambda: self._run_lifecycle_fsm(
-                adjudicator_result, run_ts_utc,
+        # === Stage: State Machine(建模 §5 14 档 —— Sprint 1.5a 对齐)===
+        sm_block = self._run_stage(
+            "state_machine", failures, degraded_stages, run_ts_utc,
+            lambda: self._run_state_machine(state, run_ts_utc),
+            default=_state_machine_fallback(
+                "state_machine stage failed", run_ts_utc,
             ),
-            default=_lifecycle_fallback("lifecycle_fsm stage failed"),
         )
-        state["lifecycle"] = lifecycle_result
+        state["state_machine"] = sm_block
+
+        # lifecycle 字段保留占位,Sprint 1.5b 由 lifecycle_manager 写入真实值
+        state["lifecycle"] = {
+            "current_lifecycle": "pending_lifecycle_manager",
+            "managed_by": "sprint_1_5b_pending",
+        }
 
         # === Stage: persist ===
         persisted = False
@@ -723,64 +713,22 @@ class StrategyStateBuilder:
         state: dict[str, Any],
         run_ts_utc: str,
     ) -> dict[str, Any]:
-        """查上一条 state + 调 StateMachine.determine_state。"""
+        """查上一条 state + 调 StateMachine.compute_next(建模 §5 14 档)。"""
         previous_record = None
         if self.conn is not None:
             previous_record = StrategyStateDAO.get_latest_state(self.conn)
-        account_state: Optional[dict[str, Any]] = None
-        if self._account_state_provider is not None:
+        account_state: Optional[dict[str, Any]] = state.get("account_state")
+        if account_state is None and self._account_state_provider is not None:
             try:
                 account_state = self._account_state_provider()
             except Exception as e:
                 logger.warning("account_state_provider failed: %s", e)
-        return self._state_machine.determine_state(
+        return self._state_machine.compute_next(
             state,
             previous_record=previous_record,
             account_state=account_state,
-            conn=self.conn,
+            now_utc=run_ts_utc,
         )
-
-    # ------------------------------------------------------------------
-    # Lifecycle FSM stage
-    # ------------------------------------------------------------------
-
-    def _run_lifecycle_fsm(
-        self,
-        adjudicator_result: dict[str, Any],
-        run_ts_utc: str,
-    ) -> dict[str, Any]:
-        """
-        根据 adjudicator.action + 上一条 state.lifecycle.current_lifecycle 计算下一状态。
-        无历史 → 默认从 FLAT 起步。
-        """
-        prev_lifecycle = "FLAT"
-        prev_transition_ts: Optional[str] = None
-        if self.conn is not None:
-            row = StrategyStateDAO.get_latest_state(self.conn)
-            if row is not None:
-                state = row.get("state") or {}
-                life = state.get("lifecycle") or {}
-                prev_lifecycle = life.get("current_lifecycle") or "FLAT"
-                # 上一次进入 prev_lifecycle 的时间(用于 auto timeout)
-                prev_transition_ts = (
-                    life.get("state_entered_at_utc")
-                    or row.get("run_timestamp_utc")
-                )
-        action = (adjudicator_result or {}).get("action") or "watch"
-        result = self._lifecycle_fsm.compute_next(
-            current_lifecycle=prev_lifecycle,
-            adjudicator_action=action,
-            current_timestamp=run_ts_utc,
-            previous_transition_timestamp=prev_transition_ts,
-        )
-        # 若本次发生迁移,记录进入时间;否则沿用上次进入时间
-        entered_at = (
-            run_ts_utc
-            if result["current_lifecycle"] != result["previous_lifecycle"]
-            else (prev_transition_ts or run_ts_utc)
-        )
-        result["state_entered_at_utc"] = entered_at
-        return result
 
 
 # ==================================================================
@@ -818,33 +766,19 @@ def _adjudicator_fallback(reason: str) -> dict[str, Any]:
     }
 
 
-def _lifecycle_fallback(reason: str) -> dict[str, Any]:
-    return {
-        "previous_lifecycle": None,
-        "current_lifecycle": "FLAT",
-        "transition_triggered_by": "fallback",
-        "transition_rule": f"lifecycle_fsm 失败,兜底 FLAT:{reason}",
-        "minutes_since_previous": None,
-        "conflict_detected": False,
-        "state_entered_at_utc": _utc_now_iso(),
-    }
-
-
 def _state_machine_fallback(reason: str, run_ts_utc: str) -> dict[str, Any]:
-    """state_machine stage 整体失败时的占位(保守回到 neutral_observation)。"""
+    """state_machine stage 整体失败时的占位(保守回到 FLAT)。"""
     return {
         "previous_state": None,
-        "current_state": "neutral_observation",
+        "current_state": "FLAT",
         "transition_reason": f"state_machine degraded: {reason}",
-        "transition_evidence": {
-            "matched_conditions": [],
-            "evaluated_order": [],
-            "state_entered": "neutral_observation",
-            "fields_snapshot": {},
-        },
-        "stable_in_state": False,
-        "minutes_since_previous_transition": None,
+        "matched_conditions": [],
         "state_entered_at_utc": run_ts_utc,
+        "minutes_since_entered": None,
+        "stable_in_state": False,
+        "flip_watch_bounds": None,
+        "on_enter_effects": {"applied": False, "reason": "degraded_fallback"},
+        "disciplines_violated": [],
     }
 
 

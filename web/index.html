@@ -627,41 +627,52 @@
               <span class="text-[10px] text-slate-500" x-text="group.source"></span>
             </header>
 
-            <!-- 统一 2 列等宽网格:主要因子在前(左绿边),次要因子在后(无边)。
-                 所有卡等宽,grid 自动对齐高度,不再有左右栏长短不一的留白。-->
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <!-- Sprint 2.3 R3:2 列 → 3 列,每卡更紧凑。
+                 主要因子在前(左绿边),次要因子在后(无边)。
+                 奇数补虚线占位,明确"本组到此为止"。-->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-2">
               <template x-for="c in group.allOrdered" :key="c.card_id">
-                <article class="border border-slate-200 dark:border-slate-800 rounded p-2 space-y-1"
+                <article class="border border-slate-200 dark:border-slate-800 rounded px-2.5 py-2
+                                space-y-1 min-w-0"
                          :class="c.is_primary ? 'border-l-2 border-l-emerald-500 dark:border-l-emerald-400' : ''"
                          :id="'card-' + c.card_id">
                   <header class="flex items-center gap-1.5">
-                    <h4 class="text-[12px] font-medium flex-1 truncate"
+                    <h4 class="text-[11px] font-medium flex-1 truncate"
+                        :title="c.name + ' (' + (c.name_en || '') + ')'"
                         x-text="c.name"></h4>
-                    <span class="text-[13px] font-mono font-semibold tabular-nums"
+                    <span class="text-[13px] font-mono font-semibold tabular-nums shrink-0"
                           :class="directionClass(c.impact_direction)"
                           x-text="formatFactorValue(c.current_value)
                                   + (c.value_unit ? (' ' + c.value_unit) : '')"></span>
-                    <span class="inline-block w-1.5 h-1.5 rounded-full"
+                    <span class="inline-block w-1.5 h-1.5 rounded-full shrink-0"
                           :class="freshnessColor(c.data_fresh ? 'green' : 'red')"
                           :title="c.captured_at_bjt || '无时间戳'"></span>
                   </header>
-                  <p class="text-[11px] text-slate-600 dark:text-slate-400 leading-snug"
+                  <p class="text-[10.5px] text-slate-600 dark:text-slate-400 leading-snug truncate"
+                     :title="c.plain_interpretation"
                      x-text="c.plain_interpretation"></p>
                   <div class="flex items-center justify-between text-[10px] leading-tight">
                     <span :class="directionClass(c.impact_direction)"
                           x-text="'影响:' + directionLabel(c.impact_direction)
                                   + ' · ' + c.linked_layer"></span>
-                    <span class="font-mono tabular-nums text-slate-500"
+                    <span class="font-mono tabular-nums text-slate-500 truncate ml-2"
                           x-text="c.captured_at_bjt || '—'"></span>
                   </div>
                 </article>
               </template>
-              <!-- 奇数卡时右下补一个"空格 spacer"占位,视觉上表明"这组就这么多",
-                   不是加载失败。只在主流 PC 视角下出现,sm: 断点才起作用。 -->
-              <div x-show="group.allOrdered.length % 2 === 1"
-                   class="hidden sm:block border border-dashed border-slate-200 dark:border-slate-800
-                          rounded p-2 text-[10px] text-slate-400 flex items-center justify-center"
-                   x-text="'本组共 ' + group.allOrdered.length + ' 个因子'"></div>
+              <!-- 奇数补虚线占位:n 个因子在 3 列网格下右边空 (3 - n%3) % 3 格 -->
+              <template x-if="group.allOrdered.length % 3 !== 0">
+                <div class="hidden md:flex border border-dashed border-slate-200 dark:border-slate-800
+                            rounded px-2.5 py-2 text-[10px] text-slate-400
+                            items-center justify-center"
+                     x-text="'本组共 ' + group.allOrdered.length + ' 个因子'"></div>
+              </template>
+              <template x-if="group.allOrdered.length % 3 === 1">
+                <div class="hidden md:flex border border-dashed border-slate-200 dark:border-slate-800
+                            rounded px-2.5 py-2 text-[10px] text-slate-400
+                            items-center justify-center"
+                     x-text="''"></div>
+              </template>
             </div>
           </section>
         </template>

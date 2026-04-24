@@ -14,66 +14,56 @@
       theme: {
         extend: {
           fontFamily: {
-            sans: ['"Inter"', '"Helvetica Neue"', '"PingFang SC"',
-                   '"Microsoft YaHei"', 'system-ui', 'sans-serif'],
+            sans: ['"Inter"', '"PingFang SC"', '"Microsoft YaHei"',
+                   'system-ui', 'sans-serif'],
             mono: ['"JetBrains Mono"', '"SF Mono"', 'Consolas', 'monospace'],
-          },
-          colors: {
-            ink: '#1a1a1a',
-            paper: '#ffffff',
-            'dark-ink': '#e5e5e5',
-            'dark-paper': '#0a0a0a',
-            'dark-card': '#131313',
-            'dark-border': '#2a2a2a',
           },
         },
       },
     };
   </script>
 
-  <!-- app.js 必须在 Alpine 前加载(因为 <html x-data="app()"> 在 Alpine 初始化
-       时立即求值 app,没有 app.js 会拿不到全局函数)。-->
+  <!-- app.js 必须在 Alpine 前加载(Sprint 2.1 已验证)-->
   <script src="/assets/app.js"></script>
-  <!-- Alpine.js via CDN,defer 保证它在 app.js 之后才扫描 DOM -->
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
 </head>
 
-<body class="bg-paper text-ink dark:bg-dark-paper dark:text-dark-ink
-            font-sans antialiased transition-colors duration-150 min-h-screen">
+<body class="bg-white text-slate-900 dark:bg-slate-950 dark:text-slate-100
+            font-sans antialiased transition-colors min-h-screen">
 
   <!-- ============================================================ -->
-  <!-- Top Nav(固定顶栏:logo / 时钟 / dark 切换)                    -->
+  <!-- Sticky Top Nav                                               -->
   <!-- ============================================================ -->
-  <header class="sticky top-0 z-20 border-b border-gray-200 dark:border-dark-border
-                 bg-paper/95 dark:bg-dark-paper/95 backdrop-blur">
-    <div class="max-w-screen-2xl mx-auto px-4 lg:px-6 h-12 flex items-center justify-between">
-      <div class="flex items-center gap-3">
-        <span class="inline-block w-2 h-2 rounded-full bg-blue-500 dark:bg-cyan-400"></span>
-        <span class="text-sm font-semibold tracking-wide">BTC Strategy</span>
-        <span class="hidden sm:inline text-xs text-gray-500 dark:text-gray-400">策略审计台</span>
+  <header class="sticky top-0 z-30 border-b border-slate-200 dark:border-slate-800
+                 bg-white/95 dark:bg-slate-950/95 backdrop-blur">
+    <div class="max-w-screen-2xl mx-auto px-3 lg:px-4 h-10 flex items-center justify-between">
+      <div class="flex items-center gap-2">
+        <span class="inline-block w-1.5 h-1.5 rounded-full bg-blue-600 dark:bg-cyan-400"></span>
+        <span class="text-[13px] font-semibold tracking-tight">BTC Strategy</span>
+        <span class="hidden sm:inline text-[11px] text-slate-500 dark:text-slate-400">策略审计台</span>
       </div>
-      <div class="flex items-center gap-4 text-xs">
-        <span class="font-mono tabular-nums text-gray-700 dark:text-gray-300"
+      <div class="flex items-center gap-3 text-[11px]">
+        <!-- Data source indicator -->
+        <span class="hidden sm:inline font-mono"
+              :class="dataSource === 'api' ? 'text-emerald-600 dark:text-emerald-400'
+                                           : 'text-amber-600 dark:text-amber-400'"
+              x-text="dataSourceLabel"></span>
+        <span class="font-mono tabular-nums text-slate-600 dark:text-slate-400"
               x-text="nowBjt"></span>
-        <button @click="toggleDark()"
-                class="w-8 h-8 rounded-full flex items-center justify-center
-                       hover:bg-gray-100 dark:hover:bg-dark-card transition"
+        <button @click="toggleDark()" class="w-7 h-7 rounded flex items-center justify-center
+                 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
                 :title="darkMode ? '切换到白天' : '切换到夜间'">
-          <svg x-show="!darkMode" xmlns="http://www.w3.org/2000/svg"
-               class="w-4 h-4" viewBox="0 0 24 24" fill="none"
-               stroke="currentColor" stroke-width="2">
+          <svg x-show="!darkMode" xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5"
+               viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
           </svg>
-          <svg x-show="darkMode" xmlns="http://www.w3.org/2000/svg"
-               class="w-4 h-4" viewBox="0 0 24 24" fill="none"
-               stroke="currentColor" stroke-width="2">
-            <circle cx="12" cy="12" r="5" />
-            <line x1="12" y1="1" x2="12" y2="3" />
+          <svg x-show="darkMode" xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5"
+               viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="5" /><line x1="12" y1="1" x2="12" y2="3" />
             <line x1="12" y1="21" x2="12" y2="23" />
             <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
             <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
-            <line x1="1" y1="12" x2="3" y2="12" />
-            <line x1="21" y1="12" x2="23" y2="12" />
+            <line x1="1" y1="12" x2="3" y2="12" /><line x1="21" y1="12" x2="23" y2="12" />
             <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
             <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
           </svg>
@@ -83,176 +73,145 @@
   </header>
 
   <!-- ============================================================ -->
-  <!-- Loading / Error                                               -->
+  <!-- Loading / Error / Mock fallback banner                        -->
   <!-- ============================================================ -->
   <template x-if="loading">
-    <div class="max-w-screen-2xl mx-auto px-4 lg:px-6 py-8 text-sm text-gray-500">
-      加载中…
-    </div>
+    <div class="max-w-screen-2xl mx-auto px-3 lg:px-4 py-6 text-xs text-slate-500">加载中…</div>
   </template>
   <template x-if="error">
-    <div class="max-w-screen-2xl mx-auto px-4 lg:px-6 py-8 text-sm text-red-600">
+    <div class="max-w-screen-2xl mx-auto px-3 lg:px-4 py-6 text-xs text-rose-600">
       加载失败:<span x-text="error"></span>
     </div>
   </template>
-
-  <!-- ============================================================ -->
-  <!-- Protection banner(§9.8:仅必要时显示)                        -->
-  <!-- ============================================================ -->
-  <template x-if="!loading && state && state.main_strategy.action_state === 'PROTECTION'">
+  <template x-if="!loading && state && dataSource === 'mock'">
+    <div class="bg-amber-50 dark:bg-amber-950/40 border-b border-amber-200 dark:border-amber-900/50
+                text-amber-900 dark:text-amber-200 text-[11px] px-3 lg:px-4 py-1.5">
+      <strong>MOCK 数据</strong>:/api/strategy/current 暂不可用,前端回退到 mock JSON(仅供开发预览)。
+    </div>
+  </template>
+  <template x-if="!loading && state && state.main_strategy && state.main_strategy.action_state === 'PROTECTION'">
     <div class="bg-red-50 dark:bg-red-950 border-b border-red-200 dark:border-red-900
-                text-red-800 dark:text-red-200 text-xs px-4 py-2">
+                text-red-900 dark:text-red-200 text-[11px] px-3 lg:px-4 py-1.5">
       <strong>PROTECTION 态激活</strong>:系统检测到极端事件,已冻结开仓。
     </div>
   </template>
 
   <!-- ============================================================ -->
-  <!-- Main 布局(PC 三栏 / 手机单栏)                               -->
+  <!-- MAIN (x-if 确保 state=null 时整块不渲染,避免 Alpine 预求值报错) -->
   <!-- ============================================================ -->
-  <main class="max-w-screen-2xl mx-auto px-4 lg:px-6 py-4 lg:py-6"
-        x-show="!loading && state" x-cloak>
+  <template x-if="!loading && state">
+  <main class="max-w-screen-2xl mx-auto px-3 lg:px-4 py-3 lg:py-4 space-y-3 lg:space-y-4">
 
-    <!-- ========== Section 1:全局状态条(始终显示,顶部通栏)========= -->
-    <section class="mb-4 lg:mb-6">
-      <div class="audit-card p-3 lg:p-4">
-        <!-- 9.3 所有字段一行排布(PC),手机端换行 -->
-        <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-8 gap-3 lg:gap-4 items-center">
-
-          <!-- BTC 价格 -->
-          <div class="col-span-2 md:col-span-1 lg:col-span-2">
-            <div class="text-[10px] uppercase tracking-wider text-gray-500 dark:text-gray-400">BTC 价格</div>
-            <div class="flex items-baseline gap-2">
-              <span class="text-2xl font-mono font-bold tabular-nums"
-                    x-text="formatPrice(state.market_snapshot.btc_price_usd)"></span>
-              <span class="text-xs font-mono tabular-nums"
-                    :class="state.market_snapshot.btc_price_change_24h_pct >= 0
-                             ? 'text-emerald-600 dark:text-emerald-400'
-                             : 'text-rose-600 dark:text-rose-400'"
-                    x-text="formatPct(state.market_snapshot.btc_price_change_24h_pct, true)"></span>
-            </div>
-            <div class="text-[10px] text-gray-500 dark:text-gray-400"
-                 x-text="'更新 ' + state.market_snapshot.btc_price_updated_bjt"></div>
+    <!-- =============== 全局状态条 (§9.3) ============================= -->
+    <section class="audit-card px-3 py-2">
+      <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3 items-center">
+        <!-- BTC 价格 -->
+        <div class="col-span-2 md:col-span-1 lg:col-span-2">
+          <div class="stat-label">BTC 价格</div>
+          <div class="flex items-baseline gap-1.5">
+            <span class="text-xl lg:text-2xl font-mono font-bold tabular-nums"
+                  x-text="formatPrice(state.market_snapshot.btc_price_usd)"></span>
+            <span class="text-[11px] font-mono tabular-nums"
+                  :class="(state.market_snapshot.btc_price_change_24h_pct ?? 0) >= 0
+                           ? 'text-emerald-600 dark:text-emerald-400'
+                           : 'text-rose-600 dark:text-rose-400'"
+                  x-text="formatPct(state.market_snapshot.btc_price_change_24h_pct, true)"></span>
           </div>
-
-          <!-- 当前策略状态(大字、颜色编码 §9.3)-->
-          <div class="col-span-2 md:col-span-1 lg:col-span-1">
-            <div class="text-[10px] uppercase tracking-wider text-gray-500 dark:text-gray-400">状态</div>
-            <span class="inline-block px-2 py-0.5 rounded text-sm font-bold font-mono"
-                  :class="stateColor(state.main_strategy.action_state)"
-                  x-text="state.main_strategy.action_state"></span>
-          </div>
-
-          <!-- 生命周期阶段 -->
-          <div class="col-span-1 lg:col-span-1">
-            <div class="text-[10px] uppercase tracking-wider text-gray-500 dark:text-gray-400">生命周期</div>
-            <div class="text-sm" x-text="state.main_strategy.lifecycle_phase"></div>
-          </div>
-
-          <!-- 机会 / 许可 -->
-          <div class="col-span-1 lg:col-span-1">
-            <div class="text-[10px] uppercase tracking-wider text-gray-500 dark:text-gray-400">机会 / 许可</div>
-            <div class="text-sm font-mono"
-                 x-text="state.main_strategy.opportunity_grade + ' / ' + state.main_strategy.execution_permission"></div>
-          </div>
-
-          <!-- 观察类别(v1.2 新增,color-coded)-->
-          <div class="col-span-1 lg:col-span-1">
-            <div class="text-[10px] uppercase tracking-wider text-gray-500 dark:text-gray-400">观察类别</div>
-            <span class="inline-block px-2 py-0.5 rounded-full text-[11px]"
-                  :class="observationColor(state.main_strategy.observation_category)"
-                  x-text="observationLabel(state.main_strategy.observation_category)"></span>
-          </div>
-
-          <!-- 下次运行倒计时 -->
-          <div class="col-span-1 lg:col-span-1">
-            <div class="text-[10px] uppercase tracking-wider text-gray-500 dark:text-gray-400">下次运行</div>
-            <div class="text-sm font-mono tabular-nums" x-text="countdownLabel"></div>
-          </div>
-
-          <!-- 数据健康 + Fallback 级别 -->
-          <div class="col-span-2 md:col-span-1 lg:col-span-1">
-            <div class="text-[10px] uppercase tracking-wider text-gray-500 dark:text-gray-400">数据 / Fallback</div>
-            <div class="flex items-center gap-2 text-xs">
-              <span class="inline-block w-2 h-2 rounded-full"
-                    :class="healthColor(state.data_health.overall)"></span>
-              <span class="font-mono tabular-nums"
-                    x-text="state.data_health.data_completeness_pct + '%'"></span>
-              <span class="text-gray-400">|</span>
-              <span :class="fallbackLabelClass(state.meta.fallback_level)"
-                    x-text="fallbackLabel(state.meta.fallback_level)"></span>
-            </div>
+          <div class="text-[10px] text-slate-500 dark:text-slate-400"
+               x-text="'更新 ' + (state.market_snapshot.btc_price_updated_bjt || '—')"></div>
+        </div>
+        <!-- 状态 -->
+        <div>
+          <div class="stat-label">状态</div>
+          <span class="inline-block px-1.5 py-0.5 rounded text-[13px] font-bold font-mono"
+                :class="stateColor(state.main_strategy.action_state)"
+                x-text="state.main_strategy.action_state"></span>
+        </div>
+        <!-- 生命周期 -->
+        <div>
+          <div class="stat-label">生命周期</div>
+          <div class="text-[13px]" x-text="state.main_strategy.lifecycle_phase || '—'"></div>
+        </div>
+        <!-- 机会 / 许可 -->
+        <div>
+          <div class="stat-label">机会 / 许可</div>
+          <div class="text-[13px] font-mono"
+               x-text="(state.main_strategy.opportunity_grade || '—') + ' / ' +
+                       (state.main_strategy.execution_permission || '—')"></div>
+        </div>
+        <!-- 观察类别 -->
+        <div>
+          <div class="stat-label">观察类别</div>
+          <span class="inline-block px-1.5 py-0.5 rounded-full text-[10.5px]"
+                :class="observationColor(state.main_strategy.observation_category)"
+                x-text="observationLabel(state.main_strategy.observation_category)"></span>
+        </div>
+        <!-- 倒计时 -->
+        <div>
+          <div class="stat-label">下次运行</div>
+          <div class="text-[13px] font-mono tabular-nums" x-text="countdownLabel"></div>
+        </div>
+        <!-- 数据健康 + Fallback -->
+        <div class="col-span-2 md:col-span-1">
+          <div class="stat-label">数据 / Fallback</div>
+          <div class="flex items-center gap-1.5 text-[11px]">
+            <span class="inline-block w-1.5 h-1.5 rounded-full"
+                  :class="healthColor(state.data_health && state.data_health.overall)"></span>
+            <span class="font-mono tabular-nums"
+                  x-text="(state.data_health && state.data_health.data_completeness_pct != null
+                           ? state.data_health.data_completeness_pct.toFixed(0) + '%'
+                           : '—')"></span>
+            <span class="text-slate-400">|</span>
+            <span :class="fallbackLabelClass(state.meta && state.meta.fallback_level)"
+                  x-text="fallbackLabel(state.meta && state.meta.fallback_level)"></span>
           </div>
         </div>
       </div>
     </section>
 
-    <!-- ========== 三栏主区(PC)/ 单栏(手机)========== -->
-    <div class="grid grid-cols-1 lg:grid-cols-10 gap-4 lg:gap-6">
+    <!-- =============== 主区两栏(PC):左 AI 主卡 30% / 右 数据区 70% ==== -->
+    <div class="grid grid-cols-1 lg:grid-cols-10 gap-3 lg:gap-4">
 
-      <!-- Left (20%):导航 + 全局状态补充(PC only,手机合并到顶栏)-->
-      <aside class="hidden lg:block lg:col-span-2 space-y-4">
-        <div class="audit-card p-4">
-          <h3 class="text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-3">视图</h3>
-          <nav class="space-y-1 text-sm">
-            <a href="#main-strategy" class="block px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-dark-card">AI 策略主卡</a>
-            <a href="#evidence-summary" class="block px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-dark-card">五层证据摘要</a>
-            <a href="#evidence-cards" class="block px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-dark-card">证据卡片</a>
-            <a href="#history" class="block px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-dark-card">历史与复盘</a>
-          </nav>
-        </div>
+      <!-- ============ 左 30%:AI 策略主卡 + 交易计划 + 风险 ============ -->
+      <section class="lg:col-span-3 space-y-3" id="main-strategy">
 
-        <div class="audit-card p-4 text-xs">
-          <h3 class="text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-2">运行元信息</h3>
-          <dl class="space-y-1 font-mono text-[11px]">
-            <div class="flex justify-between"><dt class="text-gray-500">run_id</dt><dd x-text="shortId(state.meta.run_id)"></dd></div>
-            <div class="flex justify-between"><dt class="text-gray-500">生成于</dt><dd x-text="state.meta.generated_at_bjt"></dd></div>
-            <div class="flex justify-between"><dt class="text-gray-500">rules</dt><dd x-text="state.meta.rules_version"></dd></div>
-            <div class="flex justify-between"><dt class="text-gray-500">model</dt><dd x-text="state.meta.ai_model_actual"></dd></div>
-            <div class="flex justify-between"><dt class="text-gray-500">flavor</dt><dd x-text="state.meta.strategy_flavor"></dd></div>
-          </dl>
-        </div>
-      </aside>
-
-      <!-- Middle (50%):AI 策略主卡 + 交易计划 -->
-      <section id="main-strategy" class="lg:col-span-5 space-y-4">
-
-        <!-- AI 策略主卡(§9.4)-->
+        <!-- 主卡 -->
         <article class="audit-card">
-          <!-- 卡片头 -->
-          <header class="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-dark-border">
-            <div class="flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400">
-              <span x-text="state.meta.generated_at_bjt"></span>
-              <span class="text-gray-300 dark:text-gray-600">|</span>
-              <span class="font-mono" x-text="'run ' + shortId(state.meta.run_id)"></span>
+          <header class="flex items-center justify-between px-3 py-2
+                         border-b border-slate-200 dark:border-slate-800">
+            <div class="flex items-center gap-2 text-[10px] text-slate-500 dark:text-slate-400">
+              <span x-text="state.meta && state.meta.generated_at_bjt"></span>
+              <span class="text-slate-300 dark:text-slate-600">|</span>
+              <span class="font-mono"
+                    x-text="'run ' + shortId(state.meta && state.meta.run_id)"></span>
             </div>
-            <span class="text-[11px] px-2 py-0.5 rounded bg-gray-100 dark:bg-dark-card text-gray-600 dark:text-gray-300"
-                  x-text="state.delta_from_previous.summary_tag"></span>
+            <span class="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800
+                         text-slate-600 dark:text-slate-300"
+                  x-text="(state.delta_from_previous && state.delta_from_previous.summary_tag) || '—'"></span>
           </header>
 
-          <div class="p-4 space-y-4">
-            <!-- 一句话结论 -->
+          <div class="p-3 space-y-3">
             <div>
-              <div class="text-xl lg:text-2xl font-semibold leading-snug"
-                   x-text="state.ai_verdict.one_line_summary"></div>
-              <div class="text-sm text-gray-600 dark:text-gray-400 mt-2 leading-relaxed"
-                   x-text="state.ai_verdict.narrative"></div>
+              <div class="text-[17px] font-semibold leading-snug"
+                   x-text="(state.ai_verdict && state.ai_verdict.one_line_summary) || '—'"></div>
+              <div class="text-[12px] text-slate-600 dark:text-slate-400 mt-1.5 leading-snug"
+                   x-text="(state.ai_verdict && state.ai_verdict.narrative) || ''"></div>
             </div>
 
             <!-- 观察类别说明 -->
-            <div class="border-l-4 pl-3 py-2"
+            <div class="border-l-2 pl-2 py-1"
                  :class="observationBorderClass(state.main_strategy.observation_category)">
-              <div class="text-[11px] uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">观察类别</div>
-              <div class="text-sm" x-text="observationExplanation(state.main_strategy.observation_category)"></div>
+              <div class="stat-label">观察类别</div>
+              <div class="text-[12px] leading-snug"
+                   x-text="observationExplanation(state.main_strategy.observation_category)"></div>
             </div>
 
             <!-- 论据亮点 -->
-            <div>
-              <h4 class="text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-2">
-                论据亮点 <span class="text-gray-400">(click to jump to card)</span>
-              </h4>
-              <ul class="space-y-1.5">
-                <template x-for="d in state.ai_verdict.primary_drivers" :key="d.evidence_ref">
-                  <li class="flex items-start gap-2 text-sm">
+            <div x-show="(state.ai_verdict && state.ai_verdict.primary_drivers || []).length > 0">
+              <div class="stat-label mb-1">论据亮点</div>
+              <ul class="space-y-1">
+                <template x-for="d in (state.ai_verdict && state.ai_verdict.primary_drivers) || []">
+                  <li class="flex items-start gap-1.5 text-[12px] leading-snug">
                     <span class="text-emerald-500 mt-0.5">▸</span>
                     <a class="underline decoration-dotted hover:decoration-solid cursor-pointer"
                        @click.prevent="jumpToCard(d.evidence_ref)"
@@ -263,11 +222,11 @@
             </div>
 
             <!-- 反方论点 -->
-            <div x-show="state.ai_verdict.counter_arguments.length > 0">
-              <h4 class="text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-2">反方论点</h4>
-              <ul class="space-y-1.5">
-                <template x-for="c in state.ai_verdict.counter_arguments" :key="c.text">
-                  <li class="flex items-start gap-2 text-sm">
+            <div x-show="(state.ai_verdict && state.ai_verdict.counter_arguments || []).length > 0">
+              <div class="stat-label mb-1">反方论点</div>
+              <ul class="space-y-1">
+                <template x-for="c in (state.ai_verdict && state.ai_verdict.counter_arguments) || []">
+                  <li class="flex items-start gap-1.5 text-[12px] leading-snug">
                     <span class="text-rose-400 mt-0.5">◂</span>
                     <span x-text="c.text"></span>
                   </li>
@@ -276,13 +235,11 @@
             </div>
 
             <!-- What would change mind -->
-            <div>
-              <h4 class="text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-2">
-                什么会改变判断(≥3 条)
-              </h4>
-              <ul class="space-y-1 text-sm font-mono text-[12.5px]">
-                <template x-for="w in state.ai_verdict.what_would_change_mind" :key="w">
-                  <li class="flex items-start gap-2">
+            <div x-show="(state.ai_verdict && state.ai_verdict.what_would_change_mind || []).length > 0">
+              <div class="stat-label mb-1">什么会改变判断</div>
+              <ul class="space-y-0.5 font-mono text-[11.5px] leading-snug">
+                <template x-for="w in (state.ai_verdict && state.ai_verdict.what_would_change_mind) || []">
+                  <li class="flex items-start gap-1.5">
                     <span class="text-blue-500 dark:text-cyan-400">▹</span>
                     <span x-text="w"></span>
                   </li>
@@ -290,280 +247,313 @@
               </ul>
             </div>
 
-            <!-- 交易计划(仅当 trade_plan 存在)-->
-            <template x-if="state.trade_plan">
-              <section class="border-t border-gray-200 dark:border-dark-border pt-4">
-                <h4 class="text-sm font-semibold mb-3">交易计划</h4>
-                <dl class="grid grid-cols-2 gap-3 text-sm">
-                  <div><dt class="text-gray-500 text-xs">方向</dt><dd x-text="state.trade_plan.direction"></dd></div>
-                  <div><dt class="text-gray-500 text-xs">仓位上限</dt><dd x-text="state.trade_plan.max_position_size_pct + '%'"></dd></div>
+            <!-- 交易计划(A/B/C 都显示,confidence_tier 颜色区分)-->
+            <template x-if="(state.adjudicator && state.adjudicator.trade_plan) || state.trade_plan">
+              <section class="border-t border-slate-200 dark:border-slate-800 pt-3">
+                <div class="flex items-center gap-2 mb-2">
+                  <h4 class="text-[13px] font-semibold">交易计划</h4>
+                  <span class="text-[10px] px-1.5 py-0.5 rounded font-mono"
+                        :class="tradePlanTierClass(tp().confidence_tier)"
+                        x-text="tradePlanTierLabel(tp().confidence_tier)"></span>
+                </div>
+                <!-- C 级免责提示 -->
+                <template x-if="tp().confidence_tier === 'low'">
+                  <div class="text-[11px] text-slate-500 dark:text-slate-400
+                              bg-slate-50 dark:bg-slate-900/40 rounded px-2 py-1 mb-2 leading-snug">
+                    <strong>低信心参考</strong>:C 级机会,仓位按 40% 上限,不建议重仓。
+                  </div>
+                </template>
+                <dl class="grid grid-cols-2 gap-2 text-[12px]">
+                  <div><dt class="stat-label">方向</dt>
+                       <dd class="font-mono" x-text="tp().direction || '—'"></dd></div>
+                  <div><dt class="stat-label">最大仓位</dt>
+                       <dd class="font-mono tabular-nums"
+                           x-text="(tp().max_position_size_pct ?? '—') + '%'"></dd></div>
                   <div class="col-span-2">
-                    <dt class="text-gray-500 text-xs">入场区间</dt>
-                    <dd>
-                      <template x-for="z in (state.trade_plan.entry_zones || [])">
-                        <span class="inline-block mr-2 font-mono" x-text="'$' + z.price_low + ' - $' + z.price_high"></span>
+                    <dt class="stat-label">入场区间</dt>
+                    <dd class="space-y-0.5 mt-0.5">
+                      <template x-for="z in (tp().entry_zones || [])">
+                        <div class="font-mono text-[11px]"
+                             x-text="'$' + z.price_low + ' - $' + z.price_high + ' (' + z.allocation_pct + '%)'"></div>
                       </template>
+                      <div x-show="(tp().entry_zones || []).length === 0" class="text-slate-400">—</div>
                     </dd>
                   </div>
-                  <div><dt class="text-gray-500 text-xs">止损</dt><dd class="font-mono text-rose-500" x-text="'$' + (state.trade_plan.stop_loss || '-')"></dd></div>
+                  <div><dt class="stat-label">止损</dt>
+                       <dd class="font-mono text-rose-500 tabular-nums"
+                           x-text="tp().stop_loss != null ? ('$' + tp().stop_loss) : '—'"></dd></div>
                   <div>
-                    <dt class="text-gray-500 text-xs">止盈</dt>
-                    <dd>
-                      <template x-for="t in (state.trade_plan.take_profit_plan || [])">
-                        <span class="inline-block mr-2 font-mono text-emerald-500"
-                              x-text="'$' + t.price + ' × ' + t.size_pct + '%'"></span>
+                    <dt class="stat-label">止盈分批</dt>
+                    <dd class="space-y-0.5 mt-0.5">
+                      <template x-for="t in (tp().take_profit_plan || [])">
+                        <div class="font-mono text-[11px] text-emerald-500"
+                             x-text="'$' + t.price + ' × ' + t.size_pct + '%'"></div>
                       </template>
+                      <div x-show="(tp().take_profit_plan || []).length === 0" class="text-slate-400">—</div>
                     </dd>
+                  </div>
+                  <div class="col-span-2" x-show="tp().dynamic_notes">
+                    <dt class="stat-label">动态管理</dt>
+                    <dd class="text-[11.5px] leading-snug" x-text="tp().dynamic_notes"></dd>
                   </div>
                 </dl>
               </section>
             </template>
 
-            <!-- 现货用户解读说明(§9.4 v1.2 静态文字)-->
-            <div class="text-[11px] text-gray-500 dark:text-gray-500 border-t
-                        border-gray-200 dark:border-dark-border pt-3 leading-relaxed">
-              <strong>现货用户解读</strong>:本策略面向合约波段交易;若用于现货,请将 short 信号解读为清仓,long 信号解读为加仓。
+            <!-- 现货解读 -->
+            <div class="text-[10px] text-slate-500 dark:text-slate-500 border-t
+                        border-slate-200 dark:border-slate-800 pt-2 leading-snug">
+              <strong>现货用户</strong>:本策略面向合约波段;若用于现货,short 信号 = 清仓,long 信号 = 加仓。
             </div>
           </div>
         </article>
 
-        <!-- 风险与失效提示(§9.4,始终显示)-->
-        <article class="audit-card p-4 space-y-3">
-          <h3 class="text-sm font-semibold flex items-center gap-2">
-            <span class="inline-block w-1 h-4 bg-rose-500"></span>
+        <!-- 风险与失效 -->
+        <article class="audit-card p-3 space-y-2">
+          <h3 class="text-[13px] font-semibold flex items-center gap-1.5">
+            <span class="inline-block w-0.5 h-3 bg-rose-500"></span>
             风险与失效提示
           </h3>
-
           <div>
-            <h4 class="text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1.5">硬失效位(§4.5.4 唯一权威)</h4>
-            <ul class="space-y-1 font-mono text-xs">
-              <template x-for="h in state.risks.hard_invalidation_levels" :key="h.price">
-                <li class="flex items-center gap-2">
-                  <span class="px-1.5 py-0.5 rounded text-[10px]"
-                        :class="h.priority === 1 ? 'bg-rose-100 dark:bg-rose-950 text-rose-800 dark:text-rose-300'
-                                                  : 'bg-gray-100 dark:bg-dark-card text-gray-600 dark:text-gray-400'"
+            <div class="stat-label mb-1">硬失效位</div>
+            <ul class="space-y-0.5 font-mono text-[11px]">
+              <template x-for="h in (state.risks && state.risks.hard_invalidation_levels) || []"
+                        :key="h.price">
+                <li class="flex items-center gap-1.5">
+                  <span class="px-1 py-0 rounded text-[9px]"
+                        :class="h.priority === 1
+                                ? 'bg-rose-100 dark:bg-rose-950 text-rose-800 dark:text-rose-300'
+                                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'"
                         x-text="'P' + h.priority"></span>
                   <span x-text="'$' + h.price"></span>
-                  <span class="text-gray-500"
-                        x-text="'(' + h.direction + ' • ' + h.basis + ' • ' + h.confirmation_timeframe + ')'"></span>
+                  <span class="text-slate-500"
+                        x-text="'(' + h.direction + ' • ' + h.basis + ')'"></span>
                 </li>
               </template>
+              <li x-show="((state.risks && state.risks.hard_invalidation_levels) || []).length === 0"
+                  class="text-slate-400 text-[11px]">—</li>
             </ul>
           </div>
-
-          <div x-show="state.risks.active_risk_tags.length > 0">
-            <h4 class="text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1.5">活跃风险标签</h4>
-            <div class="flex flex-wrap gap-1.5">
-              <template x-for="t in state.risks.active_risk_tags" :key="t">
-                <span class="px-2 py-0.5 rounded text-[11px] bg-amber-100 dark:bg-amber-950
-                             text-amber-800 dark:text-amber-300 font-mono"
-                      x-text="t"></span>
+          <div x-show="((state.risks && state.risks.active_risk_tags) || []).length > 0">
+            <div class="stat-label mb-1">活跃风险标签</div>
+            <div class="flex flex-wrap gap-1">
+              <template x-for="t in (state.risks && state.risks.active_risk_tags) || []" :key="t">
+                <span class="px-1.5 py-0 rounded text-[10px]
+                             bg-amber-100 dark:bg-amber-950
+                             text-amber-800 dark:text-amber-300 font-mono" x-text="t"></span>
               </template>
             </div>
           </div>
-
-          <div x-show="state.risks.event_windows.length > 0">
-            <h4 class="text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1.5">事件窗口</h4>
-            <ul class="space-y-1 text-xs">
-              <template x-for="e in state.risks.event_windows" :key="e.event_name">
-                <li class="flex items-center gap-2">
-                  <span class="inline-block w-1.5 h-1.5 rounded-full"
-                        :class="e.in_window ? 'bg-rose-500' : 'bg-gray-400'"></span>
+          <div x-show="((state.risks && state.risks.event_windows) || []).length > 0">
+            <div class="stat-label mb-1">事件窗口</div>
+            <ul class="space-y-0.5 text-[11px]">
+              <template x-for="e in (state.risks && state.risks.event_windows) || []"
+                        :key="e.event_name">
+                <li class="flex items-center gap-1.5">
+                  <span class="inline-block w-1 h-1 rounded-full"
+                        :class="e.in_window ? 'bg-rose-500' : 'bg-slate-400'"></span>
                   <span x-text="e.event_name"></span>
-                  <span class="text-gray-500 font-mono" x-text="e.event_time_bjt"></span>
-                  <span class="text-gray-400" x-text="'(' + e.hours_to + ' 小时)'"></span>
+                  <span class="font-mono text-slate-500 tabular-nums"
+                        x-text="e.hours_to != null ? (e.hours_to.toFixed(0) + 'h') : ''"></span>
                 </li>
               </template>
             </ul>
-          </div>
-
-          <div class="text-xs text-gray-500 dark:text-gray-400 border-t
-                      border-gray-200 dark:border-dark-border pt-2 leading-relaxed"
-               x-show="state.risks.worst_case_estimate">
-            <strong>最坏情形估算</strong>:
-            <span x-text="state.risks.worst_case_estimate.drawdown_scenario"></span> →
-            <span class="font-mono text-rose-500"
-                  x-text="state.risks.worst_case_estimate.estimated_drawdown_pct + '%'"></span>
-            <span class="text-gray-500"
-                  x-text="'(概率 ' + state.risks.worst_case_estimate.probability_hint + ')'"></span>
           </div>
         </article>
       </section>
 
-      <!-- Right (30%):证据摘要(手风琴)+ 运行元信息(手机端展示)-->
-      <aside id="evidence-summary" class="lg:col-span-3 space-y-4">
+      <!-- ============ 右 70%:五层 + 组合因子 + 数据因子 ============ -->
+      <section class="lg:col-span-7 space-y-3">
 
-        <!-- 五层证据摘要手风琴 -->
-        <div class="audit-card">
-          <header class="px-4 py-3 border-b border-gray-200 dark:border-dark-border">
-            <h3 class="text-sm font-semibold">五层证据摘要</h3>
+        <!-- 五层证据摘要(全部平铺) -->
+        <article class="audit-card">
+          <header class="px-3 py-2 border-b border-slate-200 dark:border-slate-800">
+            <h3 class="text-[13px] font-semibold">五层证据摘要</h3>
           </header>
-          <ul class="divide-y divide-gray-100 dark:divide-dark-border">
+          <ul class="divide-y divide-slate-100 dark:divide-slate-800">
             <template x-for="layer in orderedLayers()" :key="layer.layer_id">
-              <li>
-                <button @click="toggleLayer(layer.layer_id)"
-                        class="w-full px-4 py-3 flex items-center justify-between
-                               hover:bg-gray-50 dark:hover:bg-dark-card transition text-left">
-                  <div class="flex-1 min-w-0">
-                    <div class="flex items-center gap-2 text-xs">
-                      <span class="font-semibold font-mono" x-text="'L' + layer.layer_id"></span>
-                      <span class="text-gray-700 dark:text-gray-300" x-text="layerChineseName(layer.layer_id)"></span>
-                      <span class="text-[10px] px-1.5 py-0.5 rounded"
-                            :class="contributionClass(layer.contribution)"
-                            x-text="contributionLabel(layer.contribution)"></span>
-                      <span class="inline-block w-1.5 h-1.5 rounded-full"
-                            :class="freshnessColor(layer.data_freshness)"
-                            :title="'数据新鲜度: ' + layer.data_freshness"></span>
-                    </div>
-                    <div class="mt-1 text-xs text-gray-600 dark:text-gray-400 truncate"
-                         x-text="layer.verdict"></div>
+              <li class="px-3 py-2 space-y-1">
+                <div class="flex items-center gap-2 text-[12px]">
+                  <span class="font-mono font-semibold w-6"
+                        x-text="'L' + layer.layer_id"></span>
+                  <span class="font-medium" x-text="layerChineseName(layer.layer_id)"></span>
+                  <span class="text-[10px] px-1.5 py-0 rounded"
+                        :class="contributionClass(layer.contribution)"
+                        x-text="contributionLabel(layer.contribution)"></span>
+                  <span class="inline-block w-1.5 h-1.5 rounded-full ml-auto"
+                        :class="freshnessColor(layer.data_freshness)"
+                        :title="'数据新鲜度: ' + (layer.data_freshness || '—')"></span>
+                  <span class="font-mono text-slate-500 tabular-nums"
+                        x-text="layer.confidence_numeric != null
+                                 ? (layer.confidence_numeric * 100).toFixed(0) + '%'
+                                 : '—'"></span>
+                </div>
+                <!-- 人话解读(plain_reading)-->
+                <div class="text-[12px] text-slate-700 dark:text-slate-300 leading-snug pl-8"
+                     x-text="layer.plain_reading || layer.verdict || ''"></div>
+                <!-- 支持 / 反向信号(紧凑)-->
+                <div class="pl-8 grid grid-cols-1 md:grid-cols-2 gap-x-3 text-[11px] leading-snug"
+                     x-show="(layer.key_signals || []).length + (layer.contradicting_signals || []).length > 0">
+                  <div x-show="(layer.key_signals || []).length > 0">
+                    <template x-for="s in (layer.key_signals || [])" :key="s">
+                      <div class="flex gap-1">
+                        <span class="text-emerald-500">+</span>
+                        <span class="text-slate-600 dark:text-slate-400" x-text="s"></span>
+                      </div>
+                    </template>
                   </div>
-                  <div class="flex items-center gap-3 ml-2 text-xs">
-                    <span class="font-mono text-gray-500"
-                          x-text="(layer.confidence_numeric * 100).toFixed(0) + '%'"></span>
-                    <svg class="w-3 h-3 text-gray-400 transition-transform"
-                         :class="{ 'rotate-180': layerOpen[layer.layer_id] }"
-                         fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <polyline points="6 9 12 15 18 9" stroke-width="2" />
-                    </svg>
-                  </div>
-                </button>
-                <div x-show="layerOpen[layer.layer_id]" x-collapse
-                     class="px-4 pb-4 text-xs space-y-2 bg-gray-50 dark:bg-dark-card">
-                  <div>
-                    <div class="text-[10px] uppercase text-gray-500 mb-1">判决</div>
-                    <div x-text="layer.verdict"></div>
-                  </div>
-                  <div>
-                    <div class="text-[10px] uppercase text-gray-500 mb-1">支持信号</div>
-                    <ul class="space-y-0.5">
-                      <template x-for="s in layer.key_signals" :key="s">
-                        <li class="flex gap-1.5"><span class="text-emerald-500">+</span><span x-text="s"></span></li>
-                      </template>
-                    </ul>
-                  </div>
-                  <div x-show="layer.contradicting_signals.length > 0">
-                    <div class="text-[10px] uppercase text-gray-500 mb-1">反向信号</div>
-                    <ul class="space-y-0.5">
-                      <template x-for="s in layer.contradicting_signals" :key="s">
-                        <li class="flex gap-1.5"><span class="text-rose-400">−</span><span x-text="s"></span></li>
-                      </template>
-                    </ul>
+                  <div x-show="(layer.contradicting_signals || []).length > 0">
+                    <template x-for="s in (layer.contradicting_signals || [])" :key="s">
+                      <div class="flex gap-1">
+                        <span class="text-rose-400">−</span>
+                        <span class="text-slate-600 dark:text-slate-400" x-text="s"></span>
+                      </div>
+                    </template>
                   </div>
                 </div>
               </li>
             </template>
           </ul>
-        </div>
+        </article>
 
-        <!-- 运行元信息(手机端展示,PC 端在左栏)-->
-        <div class="audit-card p-4 text-xs lg:hidden">
-          <h3 class="text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-2">运行元信息</h3>
-          <dl class="space-y-1 font-mono text-[11px]">
-            <div class="flex justify-between"><dt class="text-gray-500">run_id</dt><dd x-text="shortId(state.meta.run_id)"></dd></div>
-            <div class="flex justify-between"><dt class="text-gray-500">生成于</dt><dd x-text="state.meta.generated_at_bjt"></dd></div>
-            <div class="flex justify-between"><dt class="text-gray-500">rules</dt><dd x-text="state.meta.rules_version"></dd></div>
-            <div class="flex justify-between"><dt class="text-gray-500">model</dt><dd x-text="state.meta.ai_model_actual"></dd></div>
-          </dl>
-        </div>
-      </aside>
-    </div>
-
-    <!-- ========== 通栏底部:证据卡片 tab + 历史时间线 ========== -->
-    <section id="evidence-cards" class="mt-6 lg:mt-8">
-      <div class="audit-card">
-        <!-- tab 条 -->
-        <div class="overflow-x-auto border-b border-gray-200 dark:border-dark-border">
-          <div class="flex min-w-max">
-            <template x-for="cat in categories" :key="cat.key">
-              <button @click="activeCategory = cat.key"
-                      class="px-4 py-2.5 text-sm whitespace-nowrap border-b-2 transition"
-                      :class="activeCategory === cat.key
-                               ? 'border-blue-500 dark:border-cyan-400 text-blue-600 dark:text-cyan-300 font-semibold'
-                               : 'border-transparent text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'">
-                <span x-text="cat.label"></span>
-                <span class="ml-1 text-[10px] text-gray-400"
-                      x-text="'(' + cardsByCategory(cat.key).length + ')'"></span>
-              </button>
+        <!-- 组合因子(6 个横向小卡,平铺)-->
+        <article class="audit-card p-3">
+          <h3 class="text-[13px] font-semibold mb-2">组合因子 · 6 个</h3>
+          <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
+            <template x-for="c in compositeCards()" :key="c.card_id">
+              <div class="border border-slate-200 dark:border-slate-800 rounded-md p-2">
+                <div class="flex items-center justify-between mb-1">
+                  <span class="text-[10px] text-slate-500 dark:text-slate-400"
+                        x-text="c.linked_layer"></span>
+                  <span class="inline-block w-1.5 h-1.5 rounded-full"
+                        :class="freshnessColor(c.data_fresh ? 'green' : 'red')"
+                        :title="c.captured_at_bjt"></span>
+                </div>
+                <div class="text-[12px] font-medium leading-tight" x-text="c.name"></div>
+                <div class="text-sm font-mono font-semibold mt-0.5"
+                     :class="directionClass(c.impact_direction)"
+                     x-text="formatFactorValue(c.current_value)"></div>
+              </div>
             </template>
           </div>
-        </div>
+        </article>
 
-        <!-- 卡片列表 -->
-        <div class="p-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-          <template x-for="card in cardsByCategory(activeCategory)" :key="card.card_id">
-            <article class="border border-gray-200 dark:border-dark-border rounded p-3 space-y-2
-                            hover:shadow-sm dark:hover:border-gray-600 transition"
-                     :id="'card-' + card.card_id">
-              <header class="flex items-center justify-between">
-                <h4 class="text-sm font-semibold" x-text="card.name"></h4>
-                <span class="inline-block w-1.5 h-1.5 rounded-full"
-                      :class="freshnessColor(card.data_fresh)" :title="card.captured_at_bjt"></span>
-              </header>
-              <div class="flex items-baseline gap-2">
-                <span class="text-xl font-mono font-semibold" x-text="card.current_value"></span>
-                <span class="text-xs text-gray-500" x-show="card.history_percentile !== null"
-                      x-text="'分位 ' + card.history_percentile + '%'"></span>
-              </div>
-              <p class="text-sm text-gray-700 dark:text-gray-300" x-text="card.one_line_interpretation"></p>
-              <details class="text-xs text-gray-600 dark:text-gray-400">
-                <summary class="cursor-pointer select-none hover:text-gray-900 dark:hover:text-gray-200">详细分析</summary>
-                <p class="mt-1.5 leading-relaxed" x-text="card.analysis"></p>
-              </details>
-              <div class="flex items-center justify-between text-[11px] pt-1
-                          border-t border-gray-100 dark:border-dark-border">
-                <span :class="directionClass(card.direction)" x-text="'影响: ' + card.direction"></span>
-                <span class="font-mono text-gray-500" x-text="card.captured_at_bjt"></span>
-              </div>
-            </article>
-          </template>
-          <div x-show="cardsByCategory(activeCategory).length === 0"
-               class="col-span-full text-sm text-gray-500 dark:text-gray-400 py-6 text-center">
-            该类别下暂无证据卡片
-          </div>
+        <!-- 数据因子:方案 Z 两栏 (60 / 40) -->
+        <div class="grid grid-cols-1 lg:grid-cols-10 gap-3">
+          <!-- 主裁决因子 60% -->
+          <article class="audit-card lg:col-span-6">
+            <header class="px-3 py-2 border-b border-slate-200 dark:border-slate-800
+                           flex items-center justify-between">
+              <h3 class="text-[13px] font-semibold">主裁决因子 · Primary</h3>
+              <span class="text-[10px] text-slate-500"
+                    x-text="'(' + primaryCards().length + ')'"></span>
+            </header>
+            <div class="p-2 space-y-1.5">
+              <template x-for="c in primaryCards()" :key="c.card_id">
+                <article class="border border-slate-200 dark:border-slate-800 rounded-md p-2
+                                space-y-1" :id="'card-' + c.card_id">
+                  <header class="flex items-center gap-2">
+                    <h4 class="text-[12.5px] font-medium"
+                        x-text="c.name + ' (' + c.name_en + ')'"></h4>
+                    <span class="ml-auto text-base font-mono font-semibold tabular-nums"
+                          :class="directionClass(c.impact_direction)"
+                          x-text="formatFactorValue(c.current_value) + (c.value_unit ? (' ' + c.value_unit) : '')"></span>
+                    <span class="inline-block w-1.5 h-1.5 rounded-full"
+                          :class="freshnessColor(c.data_fresh ? 'green' : 'red')"
+                          :title="c.captured_at_bjt || '无时间戳'"></span>
+                  </header>
+                  <p class="text-[11.5px] text-slate-600 dark:text-slate-400 leading-snug"
+                     x-text="c.plain_interpretation"></p>
+                  <div class="flex items-center justify-between text-[10px]
+                              text-slate-500 dark:text-slate-500 leading-tight">
+                    <span x-text="'影响:' + directionLabel(c.impact_direction) +
+                                  ' / ' + c.linked_layer + ' / 权重 ' +
+                                  (c.impact_weight != null ? c.impact_weight.toFixed(1) : '—')"></span>
+                    <span class="font-mono tabular-nums" x-text="c.captured_at_bjt || '—'"></span>
+                  </div>
+                  <p class="text-[10px] text-slate-500 dark:text-slate-500 leading-snug"
+                     x-text="c.strategy_impact"></p>
+                </article>
+              </template>
+              <div x-show="primaryCards().length === 0"
+                   class="text-[11px] text-slate-500 py-4 text-center">暂无主裁决因子</div>
+            </div>
+          </article>
+
+          <!-- 参考因子 40% -->
+          <article class="audit-card lg:col-span-4">
+            <header class="px-3 py-2 border-b border-slate-200 dark:border-slate-800
+                           flex items-center justify-between">
+              <h3 class="text-[13px] font-semibold">参考因子 · Reference</h3>
+              <span class="text-[10px] text-slate-500"
+                    x-text="'(' + referenceCards().length + ')'"></span>
+            </header>
+            <div class="p-2 space-y-1">
+              <template x-for="c in referenceCards()" :key="c.card_id">
+                <article class="border border-slate-200 dark:border-slate-800 rounded p-1.5"
+                         :id="'card-' + c.card_id">
+                  <div class="flex items-center gap-1.5">
+                    <span class="text-[11px] font-medium flex-1 truncate" x-text="c.name"></span>
+                    <span class="text-[11.5px] font-mono font-semibold tabular-nums"
+                          :class="directionClass(c.impact_direction)"
+                          x-text="formatFactorValue(c.current_value)"></span>
+                    <span class="inline-block w-1 h-1 rounded-full"
+                          :class="freshnessColor(c.data_fresh ? 'green' : 'red')"
+                          :title="c.captured_at_bjt || '无时间戳'"></span>
+                  </div>
+                  <div class="text-[10px] text-slate-500 dark:text-slate-400 leading-snug mt-0.5"
+                       x-text="c.plain_interpretation"></div>
+                </article>
+              </template>
+              <div x-show="referenceCards().length === 0"
+                   class="text-[11px] text-slate-500 py-4 text-center">暂无参考因子</div>
+            </div>
+          </article>
+        </div>
+      </section>
+    </div>
+
+    <!-- =============== 历史与复盘 ================================= -->
+    <section class="audit-card p-3" id="history">
+      <div class="flex items-center justify-between mb-2">
+        <h3 class="text-[13px] font-semibold">历史与复盘</h3>
+        <div class="text-[10px] space-x-2">
+          <a class="underline decoration-dotted text-slate-500 cursor-not-allowed">查看完整历史</a>
+          <a class="underline decoration-dotted text-slate-500 cursor-not-allowed">查看最近复盘报告</a>
         </div>
       </div>
-    </section>
-
-    <!-- ========== 历史与复盘(§9.7)========== -->
-    <section id="history" class="mt-6 lg:mt-8">
-      <div class="audit-card p-4 lg:p-5">
-        <div class="flex items-center justify-between mb-3">
-          <h3 class="text-sm font-semibold">历史与复盘</h3>
-          <div class="text-xs space-x-3">
-            <a class="underline decoration-dotted text-gray-500 cursor-not-allowed">查看完整历史</a>
-            <a class="underline decoration-dotted text-gray-500 cursor-not-allowed">查看最近复盘报告</a>
-          </div>
-        </div>
-        <p class="text-xs text-gray-500 dark:text-gray-400 mb-4">
-          时间线节点为开仓/减仓/止盈/切换/离场。点击进入快照(Sprint 2.2 后开放)。
-        </p>
-        <ol class="relative border-l-2 border-gray-200 dark:border-dark-border pl-4 space-y-3">
-          <template x-for="node in state.extra.history_timeline_preview" :key="node.ts_bjt">
+      <template x-if="(state.extra && state.extra.history_timeline_preview || []).length > 0">
+        <ol class="relative border-l-2 border-slate-200 dark:border-slate-800 pl-3 space-y-2">
+          <template x-for="node in (state.extra && state.extra.history_timeline_preview) || []"
+                    :key="node.ts_bjt">
             <li class="relative">
-              <span class="absolute -left-[22px] top-1.5 w-3 h-3 rounded-full"
+              <span class="absolute -left-[15px] top-1.5 w-2 h-2 rounded-full"
                     :class="timelineNodeColor(node.type)"></span>
-              <div class="flex items-center gap-2 text-[11px] font-mono">
-                <span class="text-gray-500" x-text="node.ts_bjt"></span>
-                <span class="px-1.5 py-0.5 rounded text-[10px]"
+              <div class="flex items-center gap-2 text-[10px] font-mono">
+                <span class="text-slate-500" x-text="node.ts_bjt"></span>
+                <span class="px-1 py-0 rounded text-[9px]"
                       :class="timelineNodeBadgeClass(node.type)"
                       x-text="timelineNodeTypeLabel(node.type)"></span>
               </div>
-              <div class="text-sm mt-0.5" x-text="node.label"></div>
+              <div class="text-[12px]" x-text="node.label"></div>
             </li>
           </template>
         </ol>
-      </div>
+      </template>
+      <div x-show="!(state.extra && state.extra.history_timeline_preview || []).length"
+           class="text-[11px] text-slate-500 py-2">尚无历史时间线(Sprint 1 完成后自动产生)。</div>
     </section>
 
     <!-- Footer -->
-    <footer class="mt-8 pt-4 pb-6 border-t border-gray-200 dark:border-dark-border
-                   text-[11px] text-gray-500 dark:text-gray-500 flex flex-wrap gap-4">
-      <span>Data via CoinGlass / Glassnode / Yahoo Finance / FRED</span>
-      <span>Rules <span x-text="state.meta.rules_version"></span></span>
-      <span>Model <span x-text="state.meta.ai_model_actual"></span></span>
+    <footer class="pt-3 pb-4 border-t border-slate-200 dark:border-slate-800
+                   text-[10px] text-slate-500 dark:text-slate-500 flex flex-wrap gap-3">
+      <span>Data: CoinGlass / Glassnode / Yahoo Finance / FRED</span>
+      <span>Rules <span x-text="state.meta && state.meta.rules_version"></span></span>
+      <span>Model <span x-text="state.meta && state.meta.ai_model_actual"></span></span>
+      <span>Source <span class="font-mono" x-text="dataSource"></span></span>
       <span class="ml-auto">策略审计层 • 非自动交易 • 决策由你</span>
     </footer>
   </main>
+  </template>
 </body>
 </html>

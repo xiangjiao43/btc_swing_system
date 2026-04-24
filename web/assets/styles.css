@@ -1,55 +1,53 @@
 /* =========================================================================
-   styles.css — BTC Strategy 审计台
-   风格参考 bitmiro.com:简洁紧凑、信息密度高、装饰克制。
-   Sprint 2.1(2026-04-24):骨架 v1。
+   styles.css — BTC Strategy 审计台(Sprint 2.2 bitmiro 风格紧凑版)
    ========================================================================= */
 
-/* 隐藏 Alpine 未初始化时闪烁 */
 [x-cloak] { display: none !important; }
 
-/* 字体加载(CDN) */
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
-/* 让 body 过渡色更柔和 */
 html { -webkit-font-smoothing: antialiased; }
 
-/* 统一的"卡片"容器:浅色白底 / 深色近黑底,细边框。 */
+/* -------- 卡片:平面设计,无阴影,细边框 -------- */
 .audit-card {
     background: #ffffff;
-    border: 1px solid #e5e7eb;
+    border: 1px solid #e2e8f0;         /* slate-200 */
     border-radius: 6px;
-    transition: border-color 0.15s;
 }
 .dark .audit-card {
-    background: #131313;
-    border-color: #2a2a2a;
+    background: #0f172a;               /* slate-900 略亮一档 */
+    border-color: #1e293b;             /* slate-800 */
 }
 
-/* 表格式 key-value 里让 <dt><dd> 同行 */
-dl.kv > div {
-    display: flex;
-    justify-content: space-between;
-    gap: 0.5rem;
+/* -------- stat-label:小号 uppercase 标签 -------- */
+.stat-label {
+    font-size: 9.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #64748b;                    /* slate-500 */
+    line-height: 1.2;
 }
+.dark .stat-label { color: #94a3b8; } /* slate-400 */
 
-/* scrollbar 克制样式(Webkit/Chromium) */
-::-webkit-scrollbar { width: 8px; height: 8px; }
+/* -------- scrollbar 克制 -------- */
+::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb {
-    background: #d4d4d8;
-    border-radius: 4px;
-}
-.dark ::-webkit-scrollbar-thumb { background: #2a2a2a; }
-::-webkit-scrollbar-thumb:hover { background: #a1a1aa; }
-.dark ::-webkit-scrollbar-thumb:hover { background: #3f3f46; }
+::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+.dark ::-webkit-scrollbar-thumb { background: #334155; }
+::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+.dark ::-webkit-scrollbar-thumb:hover { background: #475569; }
 
-/* details 样式微调 */
-details > summary { list-style: none; }
+/* -------- details 样式 -------- */
+details > summary { list-style: none; cursor: pointer; }
 details > summary::-webkit-details-marker { display: none; }
-details[open] > summary::after { content: " ▴"; }
-details:not([open]) > summary::after { content: " ▾"; }
+details[open] > summary::after { content: " ▴"; color: #94a3b8; }
+details:not([open]) > summary::after { content: " ▾"; color: #94a3b8; }
 
-/* 手机端轻微收紧 padding */
+/* -------- 手机端更紧凑 -------- */
 @media (max-width: 640px) {
     .audit-card { border-radius: 4px; }
+    .stat-label { font-size: 9px; }
 }
+
+/* -------- jumpToCard 的高亮动画(Tailwind ring 负责样式,这里只加过渡)-------- */
+article[id^="card-"] { transition: box-shadow 0.3s; }

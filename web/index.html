@@ -92,18 +92,26 @@
     <section class="audit-card px-3 py-2">
       <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3 items-center">
         <div class="col-span-2 md:col-span-1 lg:col-span-2">
-          <div class="stat-label">BTC 价格</div>
+          <div class="stat-label flex items-center gap-1.5">
+            <span>BTC 价格</span>
+            <span class="text-[8.5px] normal-case text-slate-400 dark:text-slate-500 tracking-normal">
+              实时 · 每分钟更新
+            </span>
+          </div>
           <div class="flex items-baseline gap-1.5">
             <span class="text-xl lg:text-2xl font-mono font-bold tabular-nums"
-                  x-text="formatPrice(state.market_snapshot.btc_price_usd)"></span>
+                  x-text="formatPrice(livePrice())"></span>
             <span class="text-[11px] font-mono tabular-nums"
-                  :class="(state.market_snapshot.btc_price_change_24h_pct ?? 0) >= 0
+                  :class="(livePrice24hChange() ?? 0) >= 0
                            ? 'text-emerald-600 dark:text-emerald-400'
                            : 'text-rose-600 dark:text-rose-400'"
-                  x-text="formatPct(state.market_snapshot.btc_price_change_24h_pct, true)"></span>
+                  x-text="formatPct(livePrice24hChange(), true)"></span>
           </div>
-          <div class="text-[10px] text-slate-500 dark:text-slate-400"
-               x-text="'更新 ' + (state.market_snapshot.btc_price_updated_bjt || '—')"></div>
+          <div class="text-[10px] text-slate-500 dark:text-slate-400 flex items-center gap-1">
+            <span x-text="'采集 ' + (livePriceCapturedAt() || '—')"></span>
+            <span x-show="livePriceStale()" class="text-amber-600 dark:text-amber-400"
+                  title="价格数据 > 30 分钟">·stale</span>
+          </div>
         </div>
         <div>
           <div class="stat-label">状态</div>
@@ -152,41 +160,34 @@
     <!-- 🎯 区域 1:AI 策略建议                                       -->
     <!-- ============================================================ -->
     <section id="region-1" class="audit-card">
-      <header class="flex items-center justify-between px-4 py-2.5
-                     border-b border-slate-200 dark:border-slate-800">
+      <header class="px-4 py-2.5 border-b border-slate-200 dark:border-slate-800">
         <h2 class="text-base font-semibold flex items-center gap-2">
           <span>🎯</span><span>AI 策略建议</span>
         </h2>
-        <div class="text-[10px] text-slate-500 dark:text-slate-400 font-mono">
-          <span x-text="state.meta && state.meta.generated_at_bjt"></span>
-          <span class="text-slate-300 dark:text-slate-600 mx-1">|</span>
-          <span x-text="'由 ' + (state.meta && state.meta.ai_model_actual || 'rule-based') + ' 生成'"></span>
-        </div>
       </header>
 
-      <div class="p-4 space-y-4">
+      <div class="p-4 space-y-3">
 
-        <!-- ▸ 方向与信心 -->
-        <div>
-          <h3 class="subheading">方向与信心</h3>
-          <div class="grid grid-cols-3 gap-3 mt-1">
-            <div>
-              <div class="stat-label">方向</div>
-              <div class="text-xl font-bold font-mono"
-                   :class="directionHeroClass(strategyDirection())"
-                   x-text="directionHeroLabel(strategyDirection())"></div>
+        <!-- ▸ Row 1:方向 / 机会等级 / 执行许可(三列等宽大字)-->
+        <div class="grid grid-cols-3 gap-3 border-b border-slate-200 dark:border-slate-800 pb-3">
+          <div>
+            <div class="stat-label">方向</div>
+            <div class="text-xl font-bold font-mono mt-0.5"
+                 :class="directionHeroClass(strategyDirection())"
+                 x-text="directionHeroLabel(strategyDirection())"></div>
+          </div>
+          <div>
+            <div class="stat-label">机会等级</div>
+            <div class="flex items-baseline gap-1.5 mt-0.5">
+              <span class="text-xl font-bold font-mono"
+                    x-text="state.main_strategy.opportunity_grade || 'none'"></span>
+              <span class="text-[11px] text-slate-500"
+                    x-text="gradeLabel(state.main_strategy.opportunity_grade)"></span>
             </div>
-            <div>
-              <div class="stat-label">机会等级</div>
-              <div class="flex items-center gap-1.5">
-                <span class="text-xl font-bold font-mono"
-                      x-text="state.main_strategy.opportunity_grade || 'none'"></span>
-                <span class="text-[11px]"
-                      x-text="gradeLabel(state.main_strategy.opportunity_grade)"></span>
-              </div>
-            </div>
-            <div>
-              <div class="stat-label">执行许可</div>
+          </div>
+          <div>
+            <div class="stat-label">执行许可</div>
+            <div class="mt-0.5">
               <span class="inline-block px-1.5 py-0.5 rounded text-[13px] font-mono"
                     :class="permissionClass(state.main_strategy.execution_permission)"
                     x-text="state.main_strategy.execution_permission || 'watch'"></span>
@@ -194,8 +195,8 @@
           </div>
         </div>
 
-        <!-- ▸ 交易计划(A1:结构永远在,none 时字段显示"待条件满足")-->
-        <div>
+        <!-- ▸ Row 2:交易计划 — 一行全宽 4 列(入场 / 止损 / 止盈 / 仓位上限)-->
+        <div class="border-b border-slate-200 dark:border-slate-800 pb-3">
           <h3 class="subheading flex items-center justify-between">
             <span>交易计划</span>
             <span class="text-[10px] font-normal px-1.5 py-0.5 rounded font-mono"
@@ -204,163 +205,180 @@
                           ? tradePlanTierLabel(tp().confidence_tier)
                           : '无 · 待条件满足'"></span>
           </h3>
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-2 mt-1 text-[12px]">
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-1 text-[12px]">
             <div>
               <div class="stat-label">入场区间(分批)</div>
               <template x-if="(tp().entry_zones || []).length > 0">
-                <div class="space-y-0.5">
+                <div class="space-y-0.5 mt-0.5">
                   <template x-for="(z, i) in (tp().entry_zones || [])" :key="i">
-                    <div class="font-mono"
-                         x-text="'第 ' + (i+1) + ' 档: $' + z.price_low + ' - $' + z.price_high
+                    <div class="font-mono leading-tight"
+                         x-text="'#' + (i+1) + ' $' + z.price_low + '-' + z.price_high
                                  + ' (' + z.allocation_pct + '%)'"></div>
                   </template>
                 </div>
               </template>
               <div x-show="!(tp().entry_zones || []).length"
-                   class="text-slate-400">待条件满足</div>
+                   class="text-slate-400 mt-0.5">待条件满足</div>
             </div>
             <div>
               <div class="stat-label">止损</div>
-              <div class="font-mono text-rose-600 dark:text-rose-400"
+              <div class="font-mono text-rose-600 dark:text-rose-400 mt-0.5 leading-tight"
                    x-text="tp().stop_loss != null
-                           ? ('$' + tp().stop_loss + ' · ' + (stopLossBasis() || '4H 收盘确认'))
+                           ? ('$' + tp().stop_loss)
                            : '待条件满足'"></div>
+              <div class="text-[10px] text-slate-500 leading-tight"
+                   x-text="tp().stop_loss != null ? (stopLossBasis() || '4H 收盘确认') : ''"></div>
             </div>
             <div>
               <div class="stat-label">止盈(分批)</div>
               <template x-if="(tp().take_profit_plan || []).length > 0">
-                <div class="space-y-0.5">
+                <div class="space-y-0.5 mt-0.5">
                   <template x-for="(t, i) in (tp().take_profit_plan || [])" :key="i">
-                    <div class="font-mono text-emerald-600 dark:text-emerald-400"
-                         x-text="'TP' + (i+1) + ': $' + t.price + ' × ' + t.size_pct + '%'"></div>
+                    <div class="font-mono text-emerald-600 dark:text-emerald-400 leading-tight"
+                         x-text="'TP' + (i+1) + ' $' + t.price + ' × ' + t.size_pct + '%'"></div>
                   </template>
                 </div>
               </template>
               <div x-show="!(tp().take_profit_plan || []).length"
-                   class="text-slate-400">待条件满足</div>
+                   class="text-slate-400 mt-0.5">待条件满足</div>
             </div>
             <div>
               <div class="stat-label">建议仓位上限</div>
-              <div class="font-mono"
+              <div class="font-mono text-base mt-0.5"
                    x-text="tp().max_position_size_pct != null
                            ? (tp().max_position_size_pct + '%')
                            : '—'"></div>
-              <div class="text-[10px] text-slate-500 mt-0.5" x-text="positionCapExplain()"></div>
+              <div class="text-[10px] text-slate-500 leading-tight"
+                   x-text="positionCapExplain()"></div>
             </div>
           </div>
         </div>
 
-        <!-- ▸ 策略说明(narrative)-->
-        <div>
-          <h3 class="subheading">策略说明</h3>
-          <p class="text-[13px] leading-relaxed mt-1 text-slate-800 dark:text-slate-200"
-             x-text="(state.ai_verdict && state.ai_verdict.narrative)
-                     || strategyFallbackNarrative()"></p>
+        <!-- ▸ Row 3:策略说明 + 核心论据(55 / 45)-->
+        <div class="grid grid-cols-1 md:grid-cols-12 gap-4 border-b
+                    border-slate-200 dark:border-slate-800 pb-3">
+          <!-- 左 55%:策略说明 -->
+          <div class="md:col-span-7">
+            <h3 class="subheading">策略说明</h3>
+            <p class="text-[13px] leading-relaxed mt-1 text-slate-800 dark:text-slate-200"
+               x-text="(state.ai_verdict && state.ai_verdict.narrative)
+                       || strategyFallbackNarrative()"></p>
+          </div>
+          <!-- 右 45%:核心论据(支持 + 反向 堆叠,不拆两栏)-->
+          <div class="md:col-span-5 space-y-2">
+            <div>
+              <h3 class="subheading">支持论据</h3>
+              <ul class="space-y-1 mt-1">
+                <template x-for="d in primaryDriversDisplay()" :key="d.text">
+                  <li class="flex items-start gap-1.5 text-[12px] leading-snug">
+                    <span class="text-emerald-500 mt-0.5 shrink-0">▸</span>
+                    <span>
+                      <span x-text="d.text"></span>
+                      <a x-show="d.evidence_ref" class="ml-1 text-[10px] font-mono text-slate-500
+                                underline decoration-dotted cursor-pointer"
+                         @click.prevent="jumpToCard(d.evidence_ref)"
+                         x-text="d.evidence_ref"></a>
+                    </span>
+                  </li>
+                </template>
+              </ul>
+            </div>
+            <div>
+              <h3 class="subheading">反向论据</h3>
+              <ul class="space-y-1 mt-1">
+                <template x-for="c in counterArgumentsDisplay()" :key="c.text">
+                  <li class="flex items-start gap-1.5 text-[12px] leading-snug">
+                    <span class="text-rose-400 mt-0.5 shrink-0">◂</span>
+                    <span x-text="c.text"></span>
+                  </li>
+                </template>
+              </ul>
+            </div>
+          </div>
         </div>
 
-        <!-- ▸ 核心论据 -->
+        <!-- ▸ Row 4:风险与失效提示 + 什么会改变判断(50 / 50)-->
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <h3 class="subheading">支持论据 (primary_drivers)</h3>
-            <ul class="space-y-1 mt-1">
-              <template x-for="d in primaryDriversDisplay()" :key="d.text">
-                <li class="flex items-start gap-1.5 text-[12px] leading-snug">
-                  <span class="text-emerald-500 mt-0.5 shrink-0">▸</span>
-                  <span>
-                    <span x-text="d.text"></span>
-                    <a x-show="d.evidence_ref" class="ml-1 text-[10px] font-mono text-slate-500
-                              underline decoration-dotted cursor-pointer"
-                       @click.prevent="jumpToCard(d.evidence_ref)"
-                       x-text="d.evidence_ref"></a>
-                  </span>
-                </li>
-              </template>
-            </ul>
-          </div>
-          <div>
-            <h3 class="subheading">反向论据 (counter_arguments)</h3>
-            <ul class="space-y-1 mt-1">
-              <template x-for="c in counterArgumentsDisplay()" :key="c.text">
-                <li class="flex items-start gap-1.5 text-[12px] leading-snug">
-                  <span class="text-rose-400 mt-0.5 shrink-0">◂</span>
-                  <span x-text="c.text"></span>
-                </li>
-              </template>
-            </ul>
-          </div>
-        </div>
-
-        <!-- ▸ 风险与失效提示 -->
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 border-t
-                    border-slate-200 dark:border-slate-800 pt-3">
-          <div>
+          <!-- 左:风险与失效(内部三子块纵向)-->
+          <div class="space-y-2">
             <h3 class="subheading flex items-center gap-1">
               <span class="inline-block w-0.5 h-3 bg-rose-500"></span>
-              硬失效位
+              风险与失效提示
             </h3>
-            <ul class="space-y-0.5 font-mono text-[11.5px] mt-1">
-              <template x-for="h in hardInvalidationLevels()" :key="h.price">
-                <li class="flex items-center gap-1.5">
-                  <span class="px-1 rounded text-[9px]"
-                        :class="h.priority === 1
-                                ? 'bg-rose-100 dark:bg-rose-950 text-rose-800 dark:text-rose-300'
-                                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'"
-                        x-text="'P' + h.priority"></span>
-                  <span x-text="'$' + h.price"></span>
-                  <span class="text-slate-500"
-                        x-text="'(' + (h.basis || '—') + ' · ' + (h.confirmation_timeframe || '4H') + ')'"></span>
-                </li>
-              </template>
-              <li x-show="hardInvalidationLevels().length === 0"
-                  class="text-slate-400">待有方向后自动给出</li>
-            </ul>
-          </div>
-          <div>
-            <h3 class="subheading">未来 72h 事件风险</h3>
-            <ul class="space-y-0.5 text-[11.5px] mt-1">
-              <template x-for="e in eventWindows()" :key="e.event_name">
-                <li class="flex items-center gap-1.5">
-                  <span class="inline-block w-1 h-1 rounded-full"
-                        :class="e.in_window ? 'bg-rose-500' : 'bg-slate-400'"></span>
-                  <span x-text="e.event_name"></span>
-                  <span class="font-mono text-slate-500 tabular-nums"
-                        x-text="e.hours_to != null ? (e.hours_to.toFixed(0) + 'h') : ''"></span>
-                </li>
-              </template>
-              <li x-show="eventWindows().length === 0" class="text-slate-400">72h 内无登记事件</li>
-            </ul>
-          </div>
-          <div>
-            <h3 class="subheading">活跃风险标签</h3>
-            <div class="flex flex-wrap gap-1 mt-1">
-              <template x-for="t in activeRiskTags()" :key="t">
-                <span class="px-1.5 py-0 rounded text-[10.5px]
-                             bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 font-mono"
-                      x-text="t"></span>
-              </template>
-              <span x-show="activeRiskTags().length === 0"
-                    class="text-[11.5px] text-slate-400">无</span>
+            <div>
+              <div class="stat-label">硬失效位</div>
+              <ul class="space-y-0.5 font-mono text-[11.5px] mt-0.5">
+                <template x-for="h in hardInvalidationLevels()" :key="h.price">
+                  <li class="flex items-center gap-1.5">
+                    <span class="px-1 rounded text-[9px]"
+                          :class="h.priority === 1
+                                  ? 'bg-rose-100 dark:bg-rose-950 text-rose-800 dark:text-rose-300'
+                                  : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'"
+                          x-text="'P' + h.priority"></span>
+                    <span x-text="'$' + h.price"></span>
+                    <span class="text-slate-500"
+                          x-text="'(' + (h.basis || '—') + ' · ' + (h.confirmation_timeframe || '4H') + ')'"></span>
+                  </li>
+                </template>
+                <li x-show="hardInvalidationLevels().length === 0"
+                    class="text-slate-400">待有方向后自动给出</li>
+              </ul>
+            </div>
+            <div>
+              <div class="stat-label">未来 72h 事件</div>
+              <ul class="space-y-0.5 text-[11.5px] mt-0.5">
+                <template x-for="e in eventWindows()" :key="e.event_name">
+                  <li class="flex items-center gap-1.5">
+                    <span class="inline-block w-1 h-1 rounded-full"
+                          :class="e.in_window ? 'bg-rose-500' : 'bg-slate-400'"></span>
+                    <span x-text="e.event_name"></span>
+                    <span class="font-mono text-slate-500 tabular-nums"
+                          x-text="e.hours_to != null ? (e.hours_to.toFixed(0) + 'h') : ''"></span>
+                  </li>
+                </template>
+                <li x-show="eventWindows().length === 0" class="text-slate-400">72h 内无登记事件</li>
+              </ul>
+            </div>
+            <div>
+              <div class="stat-label">活跃风险标签</div>
+              <div class="flex flex-wrap gap-1 mt-0.5">
+                <template x-for="t in activeRiskTags()" :key="t">
+                  <span class="px-1.5 py-0 rounded text-[10.5px]
+                               bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 font-mono"
+                        x-text="t"></span>
+                </template>
+                <span x-show="activeRiskTags().length === 0"
+                      class="text-[11.5px] text-slate-400">无</span>
+              </div>
             </div>
           </div>
+
+          <!-- 右:什么会改变判断 -->
+          <div>
+            <h3 class="subheading">什么会改变判断</h3>
+            <ul class="space-y-0.5 font-mono text-[11.5px] mt-1 leading-snug">
+              <template x-for="w in whatWouldChangeMindDisplay()" :key="w">
+                <li class="flex items-start gap-1.5">
+                  <span class="text-blue-500 dark:text-cyan-400 shrink-0">▹</span>
+                  <span x-text="w"></span>
+                </li>
+              </template>
+            </ul>
+          </div>
         </div>
 
-        <!-- ▸ 什么会改变判断 -->
-        <div class="border-t border-slate-200 dark:border-slate-800 pt-3">
-          <h3 class="subheading">什么会改变判断 (what_would_change_mind)</h3>
-          <ul class="space-y-0.5 font-mono text-[11.5px] mt-1 leading-snug">
-            <template x-for="w in whatWouldChangeMindDisplay()" :key="w">
-              <li class="flex items-start gap-1.5">
-                <span class="text-blue-500 dark:text-cyan-400 shrink-0">▹</span>
-                <span x-text="w"></span>
-              </li>
-            </template>
-          </ul>
-        </div>
-
-        <!-- ▸ 现货用户解读(静态)-->
-        <div class="text-[10.5px] text-slate-500 dark:text-slate-500 border-t
+        <!-- ▸ Row 5:现货解读 + 生成时间(一行小字)-->
+        <div class="flex flex-wrap items-center justify-between gap-2 text-[10.5px]
+                    text-slate-500 dark:text-slate-500 border-t
                     border-slate-200 dark:border-slate-800 pt-2 leading-snug">
-          <strong>现货用户</strong>:本策略面向合约波段交易;若用于现货,short = 清仓,long = 加仓。
+          <span>
+            <strong class="text-slate-600 dark:text-slate-400">现货用户</strong>:本策略面向合约波段;若用于现货,short = 清仓,long = 加仓。
+          </span>
+          <span class="font-mono">
+            <span x-text="state.meta && state.meta.generated_at_bjt"></span>
+            <span class="text-slate-300 dark:text-slate-600 mx-1">|</span>
+            <span x-text="'由 ' + (state.meta && state.meta.ai_model_actual || 'rule-based') + ' 生成'"></span>
+          </span>
         </div>
       </div>
     </section>
@@ -601,59 +619,64 @@
                 <span x-text="group.icon"></span>
                 <span x-text="group.label"></span>
                 <span class="text-[10px] font-normal text-slate-500"
-                      x-text="'主要 ' + group.primary.length + ' / 其他 ' + group.secondary.length"></span>
+                      x-text="'主要 ' + group.primary.length + ' / 次要 ' + group.secondary.length"></span>
               </h3>
               <span class="text-[10px] text-slate-500" x-text="group.source"></span>
             </header>
 
-            <!-- 主要因子平铺 -->
-            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-              <template x-for="c in group.primary" :key="c.card_id">
-                <article class="border border-slate-200 dark:border-slate-800 rounded p-2 space-y-1"
-                         :id="'card-' + c.card_id">
-                  <header class="flex items-center gap-1.5">
-                    <h4 class="text-[12px] font-medium flex-1 truncate"
-                        x-text="c.name + ' (' + c.name_en + ')'"></h4>
-                    <span class="text-[13px] font-mono font-semibold tabular-nums"
-                          :class="directionClass(c.impact_direction)"
-                          x-text="formatFactorValue(c.current_value)
-                                  + (c.value_unit ? (' ' + c.value_unit) : '')"></span>
-                    <span class="inline-block w-1.5 h-1.5 rounded-full"
-                          :class="freshnessColor(c.data_fresh ? 'green' : 'red')"
-                          :title="c.captured_at_bjt || '无时间戳'"></span>
-                  </header>
-                  <p class="text-[11px] text-slate-600 dark:text-slate-400 leading-snug"
-                     x-text="c.plain_interpretation"></p>
-                  <div class="flex items-center justify-between text-[10px] leading-tight">
-                    <span :class="directionClass(c.impact_direction)"
-                          x-text="'影响:' + directionLabel(c.impact_direction)
-                                  + ' · ' + c.linked_layer"></span>
-                    <span class="font-mono tabular-nums text-slate-500"
-                          x-text="c.captured_at_bjt || '—'"></span>
-                  </div>
-                </article>
-              </template>
-            </div>
+            <!-- 主要 60% + 次要 40%(默认展开,消除左右留白)-->
+            <div class="grid grid-cols-1 md:grid-cols-12 gap-3">
+              <!-- 左 60%:主要因子 -->
+              <div class="md:col-span-7 grid grid-cols-1 sm:grid-cols-2 gap-2 content-start">
+                <template x-for="c in group.primary" :key="c.card_id">
+                  <article class="border border-slate-200 dark:border-slate-800 rounded p-2 space-y-1"
+                           :id="'card-' + c.card_id">
+                    <header class="flex items-center gap-1.5">
+                      <h4 class="text-[12px] font-medium flex-1 truncate"
+                          x-text="c.name"></h4>
+                      <span class="text-[13px] font-mono font-semibold tabular-nums"
+                            :class="directionClass(c.impact_direction)"
+                            x-text="formatFactorValue(c.current_value)
+                                    + (c.value_unit ? (' ' + c.value_unit) : '')"></span>
+                      <span class="inline-block w-1.5 h-1.5 rounded-full"
+                            :class="freshnessColor(c.data_fresh ? 'green' : 'red')"
+                            :title="c.captured_at_bjt || '无时间戳'"></span>
+                    </header>
+                    <p class="text-[11px] text-slate-600 dark:text-slate-400 leading-snug"
+                       x-text="c.plain_interpretation"></p>
+                    <div class="flex items-center justify-between text-[10px] leading-tight">
+                      <span :class="directionClass(c.impact_direction)"
+                            x-text="'影响:' + directionLabel(c.impact_direction)
+                                    + ' · ' + c.linked_layer"></span>
+                      <span class="font-mono tabular-nums text-slate-500"
+                            x-text="c.captured_at_bjt || '—'"></span>
+                    </div>
+                  </article>
+                </template>
+                <div x-show="group.primary.length === 0" class="text-[11px] text-slate-400">
+                  该组暂无主要因子
+                </div>
+              </div>
 
-            <!-- 次要因子折叠 -->
-            <template x-if="group.secondary.length > 0">
-              <div class="border border-slate-200 dark:border-slate-800 rounded">
-                <button @click="toggleGroup(group.key)"
-                        class="w-full text-left px-2.5 py-1.5 text-[11.5px]
-                               hover:bg-slate-50 dark:hover:bg-slate-900 transition
-                               flex items-center justify-between">
-                  <span x-text="expandedGroups[group.key]
-                                ? '收起次要因子'
-                                : '展开查看其余 ' + group.secondary.length + ' 个'"></span>
-                  <svg class="w-3 h-3 text-slate-400 transition-transform"
-                       :class="{ 'rotate-180': expandedGroups[group.key] }"
-                       fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <polyline points="6 9 12 15 18 9" stroke-width="2" />
-                  </svg>
-                </button>
-                <div x-show="expandedGroups[group.key]" x-collapse
-                     class="p-2 grid grid-cols-2 lg:grid-cols-4 gap-1.5
-                            bg-slate-50/60 dark:bg-slate-900/30">
+              <!-- 右 40%:次要因子(默认展开紧凑列表)-->
+              <div class="md:col-span-5">
+                <div class="flex items-center justify-between mb-1.5">
+                  <span class="stat-label">次要因子</span>
+                  <button x-show="group.secondary.length > 0"
+                          @click="toggleGroup(group.key)"
+                          class="text-[10px] text-slate-500 hover:text-slate-700
+                                 dark:hover:text-slate-300 flex items-center gap-1">
+                    <span x-text="expandedGroups[group.key] === false
+                                  ? '展开 ' + group.secondary.length + ' 个' : '收起'"></span>
+                    <svg class="w-2.5 h-2.5 transition-transform"
+                         :class="{ 'rotate-180': expandedGroups[group.key] !== false }"
+                         fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <polyline points="6 9 12 15 18 9" stroke-width="2" />
+                    </svg>
+                  </button>
+                </div>
+                <div x-show="group.secondary.length > 0 && expandedGroups[group.key] !== false"
+                     class="grid grid-cols-1 gap-1">
                   <template x-for="c in group.secondary" :key="c.card_id">
                     <article class="border border-slate-200 dark:border-slate-800 rounded p-1.5
                                     bg-white dark:bg-slate-950" :id="'card-' + c.card_id">
@@ -672,8 +695,10 @@
                     </article>
                   </template>
                 </div>
+                <div x-show="group.secondary.length === 0"
+                     class="text-[10.5px] text-slate-400">该组无次要因子</div>
               </div>
-            </template>
+            </div>
           </section>
         </template>
       </div>

@@ -18,12 +18,50 @@ function app() {
         // 折叠状态(Region 4 每个 group 独立)
         expandedGroups: {},
 
+        // Sprint 2.3 tuning:独立顶栏价格(每分钟刷一次)
+        livePriceData: null,
+        _priceTimer: null,
+
         // ============== 初始化 ==============
         async init() {
             this._initDarkMode();
             this._startClock();
             await this._loadState();
             this._connectSSE();
+            // 顶栏 BTC 价格每分钟刷一次(零 AI 消耗,只碰 /api/market/btc-price)
+            await this._refreshLivePrice();
+            this._priceTimer = setInterval(() => this._refreshLivePrice(), 60000);
+        },
+
+        async _refreshLivePrice() {
+            try {
+                const r = await fetch('/api/market/btc-price', { cache: 'no-cache' });
+                if (r.ok) this.livePriceData = await r.json();
+            } catch (e) { /* 静默失败 */ }
+        },
+        livePrice() {
+            if (this.livePriceData && this.livePriceData.price != null) {
+                return this.livePriceData.price;
+            }
+            return this.state && this.state.market_snapshot
+                ? this.state.market_snapshot.btc_price_usd : null;
+        },
+        livePrice24hChange() {
+            if (this.livePriceData && this.livePriceData.price_24h_change_pct != null) {
+                return this.livePriceData.price_24h_change_pct;
+            }
+            return this.state && this.state.market_snapshot
+                ? this.state.market_snapshot.btc_price_change_24h_pct : null;
+        },
+        livePriceCapturedAt() {
+            if (this.livePriceData && this.livePriceData.captured_at_bjt) {
+                return this.livePriceData.captured_at_bjt;
+            }
+            return this.state && this.state.market_snapshot
+                ? this.state.market_snapshot.btc_price_updated_bjt : null;
+        },
+        livePriceStale() {
+            return !!(this.livePriceData && this.livePriceData.stale);
         },
         _initDarkMode() {
             const q = new URLSearchParams(window.location.search).get('theme');
@@ -310,7 +348,25 @@ function app() {
             return [1, 2, 3, 4, 5].map(i => es['layer_' + i]).filter(Boolean);
         },
         compositeCards() {
-            return (this.state && this.state.factor_cards || []).filter(c => c.tier === 'composite');
+            // Sprint 2.3 tuning:按对策略建议的影响程度重排
+            const all = (this.state && this.state.factor_cards || [])
+                .filter(c => c.tier === 'composite');
+            const order = [
+                'cycle_position',    // 决定动态门槛 + stance
+                'truth_trend',       // L1 regime 主导
+                'band_position',     // L2 phase 决定
+                'crowding',          // L4 position_cap 主要乘数
+                'macro_headwind',    // L5 → L4 乘数
+                'event_risk',        // L4 事件乘数
+            ];
+            const idxOf = (c) => {
+                // card_id 形如 composite_cycle_position_20260424
+                const m = (c.card_id || '').match(/^composite_([a-z_]+)_\d{8}$/);
+                const key = m ? m[1] : '';
+                const i = order.indexOf(key);
+                return i === -1 ? 99 : i;
+            };
+            return [...all].sort((a, b) => idxOf(a) - idxOf(b));
         },
         // 6 composite 因子 composition 等字段目前在 composite_factors[key] 上
         _composite_raw(card_id) {
@@ -335,14 +391,14 @@ function app() {
             return r && r.affects_layer || '';
         },
 
-        // 区域 4 分组
+        // 区域 4 分组(Sprint 2.3 tuning:顺序改为价格→衍生→链上→宏观→事件)
         factorGroups() {
             const cards = ((this.state && this.state.factor_cards) || [])
                 .filter(c => c.tier !== 'composite');
             const specs = [
-                { key: 'onchain',        label: '链上数据',  icon: '⛓️', source: 'Glassnode' },
-                { key: 'derivatives',    label: '衍生品',    icon: '📈', source: 'CoinGlass / Binance' },
                 { key: 'price_technical',label: '价格技术',  icon: '🕯️', source: 'Binance klines' },
+                { key: 'derivatives',    label: '衍生品',    icon: '📈', source: 'CoinGlass / Binance' },
+                { key: 'onchain',        label: '链上数据',  icon: '⛓️', source: 'Glassnode' },
                 { key: 'macro',          label: '宏观',      icon: '🌍', source: 'Yahoo / FRED' },
                 { key: 'events',         label: '事件日历',  icon: '📅', source: 'Manual calendar' },
             ];

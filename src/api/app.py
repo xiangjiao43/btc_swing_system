@@ -25,6 +25,7 @@ from .routes import evidence as evidence_routes
 from .routes import fallback as fallback_routes
 from .routes import health as health_routes
 from .routes import lifecycle as lifecycle_routes
+from .routes import market as market_routes
 from .routes import pipeline as pipeline_routes
 from .routes import review as review_routes
 from .routes import strategy as strategy_routes
@@ -75,6 +76,8 @@ def create_app(
     app.include_router(evidence_routes.router, prefix="/api")
     app.include_router(lifecycle_routes.router, prefix="/api")
     app.include_router(review_routes.router, prefix="/api")
+    # Sprint 2.3 tuning:轻量行情路由,供前端每分钟刷顶栏价格
+    app.include_router(market_routes.router, prefix="/api")
     # 老路径 alias(向后兼容旧测试 / 旧前端)
     app.include_router(health_routes.router, prefix="/api")
     app.include_router(pipeline_routes.router, prefix="/api")

@@ -6,6 +6,10 @@ src/pipeline/lifecycle_fsm.py(action 驱动 FSM)推翻,替换为对齐建模 §5
 的统一 14 档 StateMachine。
 """
 
+from .observation_classifier import ObservationResult, classify
 from .state_machine import StateMachine, StateMachineResult, VALID_STATES
 
-__all__ = ["StateMachine", "StateMachineResult", "VALID_STATES"]
+__all__ = [
+    "StateMachine", "StateMachineResult", "VALID_STATES",
+    "ObservationResult", "classify",
+]

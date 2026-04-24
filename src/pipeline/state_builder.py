@@ -125,6 +125,7 @@ class StrategyStateBuilder:
         "layer_3",
         "layer_4",
         "layer_5",
+        "observation_classifier",
         "ai_summary",
         "adjudicator",
         "state_machine",
@@ -345,6 +346,28 @@ class StrategyStateBuilder:
             default=_layer_error_report(5, "macro", "Layer5 failed"),
         )
         context["layer_5_output"] = layer_5_output
+
+        # === Stage: Observation Classifier(建模 §4.7,在 L3 之后 / 裁决之前)===
+        # 先拼一个半成品 state 供 classifier 读取,真实 state 在后面 _assemble_state
+        _pre_state_for_observation = {
+            "evidence_reports": {
+                "layer_1": layer_1_output,
+                "layer_2": layer_2_output,
+                "layer_3": layer_3_output,
+                "layer_4": layer_4_output,
+                "layer_5": layer_5_output,
+            },
+            "composite_factors": composite_factors,
+            "cold_start": context.get("cold_start") or {},
+            # state_machine 还没算,先空着;classifier 读 None 归位 watchful 路径
+            "state_machine": {},
+        }
+        observation_result = self._run_stage(
+            "observation_classifier", failures, degraded_stages, run_ts_utc,
+            lambda: self._run_observation_classifier(_pre_state_for_observation),
+            default=_observation_fallback(run_ts_utc),
+        )
+        context["observation_output"] = observation_result
 
         # === Stage 14: AI summary ===
         ai_input = {
@@ -616,6 +639,9 @@ class StrategyStateBuilder:
                 "error": ai_result.get("error"),
             },
 
+            # --- Observation(§4.7,只读,不进决策路径)---
+            "observation": context.get("observation_output") or {},
+
             # --- Pipeline 自省元信息 ---
             "pipeline_meta": {
                 "failures": failures,
@@ -708,6 +734,20 @@ class StrategyStateBuilder:
     # State Machine stage
     # ------------------------------------------------------------------
 
+    def _run_observation_classifier(
+        self,
+        pre_state: dict[str, Any],
+    ) -> dict[str, Any]:
+        """§4.7 Observation Classifier。只读 state 片段 + 可选历史记录。"""
+        from ..strategy.observation_classifier import classify
+        previous_records: Optional[list[dict[str, Any]]] = None
+        if self.conn is not None:
+            # 取最近 200 次(覆盖 14 天 warning + 30 天 critical 阈值所需 streak)
+            previous_records = StrategyStateDAO.get_recent_states(
+                self.conn, limit=200,
+            )
+        return classify(pre_state, previous_records=previous_records)
+
     def _run_state_machine(
         self,
         state: dict[str, Any],
@@ -763,6 +803,21 @@ def _adjudicator_fallback(reason: str) -> dict[str, Any]:
         "latency_ms": 0,
         "status": "degraded_error",
         "notes": [reason],
+    }
+
+
+def _observation_fallback(run_ts_utc: str) -> dict[str, Any]:
+    """observation_classifier stage 整体失败时的占位(保守归到 watchful)。"""
+    return {
+        "observation_category": "watchful",
+        "suppressed_base_satisfied": False,
+        "streak_runs": 0,
+        "alert_level": None,
+        "reason": "observation_classifier degraded fallback",
+        "signals": {},
+        "discipline_note": (
+            "observation_category 只读:禁止进入任何决策路径。"
+        ),
     }
 
 

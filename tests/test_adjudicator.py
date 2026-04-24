@@ -36,6 +36,9 @@ def _mock_ai_response(
     model: str = "claude-sonnet-4-5-20250929",
     tokens_in: int = 120,
     tokens_out: int = 80,
+    opportunity_grade: str = None,
+    trade_plan: dict = None,
+    narrative: str = None,
 ) -> MagicMock:
     """anthropic messages.create 返回形态:
        resp.content = [TextBlock(text=...)], resp.usage.input_tokens,
@@ -43,13 +46,24 @@ def _mock_ai_response(
     if raw_override is not None:
         content = raw_override
     else:
-        content = json.dumps({
+        payload = {
             "action": action,
             "direction": direction,
             "confidence": confidence,
             "rationale": rationale,
+            "narrative": narrative or rationale,
+            "one_line_summary": rationale[:60],
             "evidence_gaps": evidence_gaps or [],
-        }, ensure_ascii=False)
+            "primary_drivers": [],
+            "counter_arguments": [],
+            "what_would_change_mind": ["条件 A", "条件 B", "条件 C"],
+            "transition_reason": "mock transition",
+        }
+        if opportunity_grade is not None:
+            payload["opportunity_grade"] = opportunity_grade
+        if trade_plan is not None:
+            payload["trade_plan"] = trade_plan
+        content = json.dumps(payload, ensure_ascii=False)
     r = MagicMock()
     r.model = model
     # anthropic content block
@@ -115,6 +129,14 @@ def _state(
                 "stop_loss_reference": {"price": 45000},
                 "risk_reward_ratio": 2.2,
                 "overall_risk_level": l4_risk,
+                "hard_invalidation_levels": [
+                    {"price": 45000, "direction": "below",
+                     "basis": "structural_hl", "priority": 1,
+                     "confirmation_timeframe": "4H"},
+                    {"price": 44000, "direction": "below",
+                     "basis": "stop_atr", "priority": 2,
+                     "confirmation_timeframe": "4H"},
+                ],
                 "health_status": "healthy",
             },
             "layer_5": {
@@ -394,3 +416,168 @@ class TestOutputShape:
             "event_risk_warning", "execution_permission_binding",
         ):
             assert c in out["constraints"]
+
+
+# ==================================================================
+# Sprint 2.2:A/B/C 都产出 trade_plan + confidence_tier
+# ==================================================================
+
+class TestTradePlanAcrossGrades:
+    """grade ∈ {A, B, C} → AI 产出 trade_plan + confidence_tier;
+       grade = none → trade_plan = null。"""
+
+    @staticmethod
+    def _trade_plan_payload(size_pct: float = 10.0) -> dict:
+        return {
+            "direction": "long",
+            "confidence_tier": "high",  # 会被后端按 grade 覆盖
+            "max_position_size_pct": size_pct,
+            "entry_zones": [
+                {"price_low": 79000, "price_high": 80000, "allocation_pct": 50},
+                {"price_low": 77500, "price_high": 78500, "allocation_pct": 50},
+            ],
+            "stop_loss": 45000,  # 必须在 hard_invalidation_levels 里
+            "take_profit_plan": [
+                {"price": 85000, "size_pct": 50},
+                {"price": 90000, "size_pct": 50},
+            ],
+            "dynamic_notes": "回踩 MA20 加仓",
+        }
+
+    def test_grade_A_produces_high_tier_trade_plan(self):
+        client = MagicMock()
+        client.messages.create.return_value = _mock_ai_response(
+            action="open_long", direction="long", confidence=0.75,
+            opportunity_grade="A",
+            trade_plan=self._trade_plan_payload(size_pct=14.0),
+        )
+        adj = AIAdjudicator(openai_client=client)
+        state = _state(
+            l3_grade="A", l3_permission="can_open",
+            l2_stance="bullish", sm_state="FLAT",
+            l4_cap=0.15,
+        )
+        out = adj.decide(state)
+        assert out["opportunity_grade"] == "A"
+        assert out["trade_plan"] is not None
+        assert out["trade_plan"]["confidence_tier"] == "high"
+        # A 级 cap 上限 = 15% × 1.0 = 15%
+        assert out["trade_plan"]["max_position_size_pct"] <= 15.0 + 0.01
+        assert out["trade_plan"]["stop_loss"] == 45000
+        assert out["confidence_breakdown"]["trade_plan_confidence_tier"] == "high"
+
+    def test_grade_B_produces_medium_tier_trade_plan(self):
+        client = MagicMock()
+        client.messages.create.return_value = _mock_ai_response(
+            action="open_long", direction="long", confidence=0.6,
+            opportunity_grade="B",
+            trade_plan=self._trade_plan_payload(size_pct=8.0),
+        )
+        adj = AIAdjudicator(openai_client=client)
+        state = _state(
+            l3_grade="B", l3_permission="cautious_open",
+            l2_stance="bullish", sm_state="FLAT",
+            l4_cap=0.15,
+        )
+        out = adj.decide(state)
+        assert out["opportunity_grade"] == "B"
+        assert out["trade_plan"] is not None
+        assert out["trade_plan"]["confidence_tier"] == "medium"
+        # B 级 cap 上限 = 15% × 0.7 = 10.5%
+        assert out["trade_plan"]["max_position_size_pct"] <= 10.5 + 0.01
+
+    def test_grade_C_produces_low_tier_trade_plan(self):
+        """Sprint 2.2 关键改动:C 也必须给 trade_plan,信心档 low。"""
+        client = MagicMock()
+        client.messages.create.return_value = _mock_ai_response(
+            action="open_long", direction="long", confidence=0.45,
+            opportunity_grade="C",
+            trade_plan=self._trade_plan_payload(size_pct=5.0),
+        )
+        adj = AIAdjudicator(openai_client=client)
+        state = _state(
+            l3_grade="C", l3_permission="cautious_open",
+            l2_stance="bullish", sm_state="FLAT",
+            l4_cap=0.15,
+        )
+        out = adj.decide(state)
+        assert out["opportunity_grade"] == "C"
+        assert out["trade_plan"] is not None, (
+            "C 级也必须有 trade_plan(Sprint 2.2 新规则)"
+        )
+        assert out["trade_plan"]["confidence_tier"] == "low"
+        # C 级 cap 上限 = 15% × 0.4 = 6%
+        assert out["trade_plan"]["max_position_size_pct"] <= 6.0 + 0.01
+
+    def test_grade_C_exceeding_cap_gets_clamped(self):
+        """AI 给 C 级但 size=14%(超 6% 上限)→ 后端强制 clamp 到 6%。"""
+        client = MagicMock()
+        client.messages.create.return_value = _mock_ai_response(
+            action="open_long", direction="long", confidence=0.45,
+            opportunity_grade="C",
+            trade_plan=self._trade_plan_payload(size_pct=14.0),
+        )
+        adj = AIAdjudicator(openai_client=client)
+        state = _state(
+            l3_grade="C", l3_permission="cautious_open",
+            l2_stance="bullish", sm_state="FLAT",
+            l4_cap=0.15,
+        )
+        out = adj.decide(state)
+        assert out["trade_plan"] is not None
+        assert out["trade_plan"]["max_position_size_pct"] <= 6.0 + 0.01
+        assert "trade_plan_size_clamped_to_grade_ceiling" in out["notes"]
+
+    def test_grade_none_rejects_trade_plan(self):
+        """grade=none 时 AI 就算给了 trade_plan,也会被 adjudicator 置为 null。
+           此场景走硬约束(L3 grade none → watch rule path),AI 不调用,
+           trade_plan 自然为 null。"""
+        client = MagicMock()
+        adj = AIAdjudicator(openai_client=client)
+        state = _state(
+            l3_grade="none", l3_permission="watch",
+            l2_stance="neutral", sm_state="FLAT",
+        )
+        out = adj.decide(state)
+        assert out["opportunity_grade"] == "none"
+        assert out["trade_plan"] is None
+        assert out["confidence_breakdown"]["trade_plan_confidence_tier"] == "none"
+
+    def test_trade_plan_stop_loss_snaps_to_hard_invalidation(self):
+        """AI 返回的 stop_loss 若偏离 L4.hard_invalidation_levels,
+           snap 到最近合法价位。"""
+        client = MagicMock()
+        plan = self._trade_plan_payload()
+        plan["stop_loss"] = 43500  # 非法,应该 snap 到 44000(priority=2)
+        client.messages.create.return_value = _mock_ai_response(
+            action="open_long", direction="long", confidence=0.7,
+            opportunity_grade="A",
+            trade_plan=plan,
+        )
+        adj = AIAdjudicator(openai_client=client)
+        state = _state(
+            l3_grade="A", l3_permission="can_open",
+            l2_stance="bullish", sm_state="FLAT",
+        )
+        out = adj.decide(state)
+        assert out["trade_plan"]["stop_loss"] in (44000, 45000)
+        assert any("snapped_to_l4" in n or "defaulted_to_l4" in n
+                   for n in out["notes"])
+
+    def test_ai_grade_not_matching_l3_is_overridden(self):
+        """§6.4 #8:opportunity_grade 必须 = L3,不一致时 override。"""
+        client = MagicMock()
+        client.messages.create.return_value = _mock_ai_response(
+            action="open_long", direction="long", confidence=0.8,
+            opportunity_grade="A",  # AI 自己说 A
+            trade_plan=self._trade_plan_payload(),
+        )
+        adj = AIAdjudicator(openai_client=client)
+        state = _state(
+            l3_grade="B",  # L3 判档是 B
+            l3_permission="cautious_open",
+            l2_stance="bullish", sm_state="FLAT",
+        )
+        out = adj.decide(state)
+        assert out["opportunity_grade"] == "B"
+        assert "ai_grade_overridden_to_l3" in out["notes"]

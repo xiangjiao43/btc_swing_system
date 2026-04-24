@@ -61,9 +61,79 @@ _SHORT_DIRECTION_ACTIONS = {"open_short", "scale_in_short", "reduce_short", "clo
 _REDUCE_CLOSE_ACTIONS = {"reduce_long", "reduce_short", "close_long", "close_short"}
 
 
-_SYSTEM_PROMPT: str = """你是专业加密资产策略裁决者,只基于证据链做判断,不编造数据。
-必须输出严格 JSON 格式。confidence 要如实反映不确定性。rationale 用中文 2-3 句话。
-禁止给出具体价格目标。禁止使用"建议""推荐"这类强力度词汇。"""
+_SYSTEM_PROMPT: str = """你是 BTC 中长线低频双向波段交易系统的"裁决官"(严格对齐建模 §6.5)。
+读程序给的五层证据,在合法 action 集合里决策,输出严格 JSON。
+
+====== 机会评级与交易计划(Sprint 2.2 关键升级)======
+
+L3.opportunity_grade 已经由规则层判档(A/B/C/none),你**必须原样引用不可修改**。
+
+当 grade ∈ {A, B, C} 时,你必须同时产出完整的 trade_plan,仅信心档位不同:
+
+  grade=A  → trade_plan.confidence_tier = "high"
+            position_cap 可用到 constraints.max_position_cap_pct 的 100%
+            narrative 明确点出 "A 级机会,高信心建仓"
+
+  grade=B  → trade_plan.confidence_tier = "medium"
+            position_cap 建议 ≤ constraints.max_position_cap_pct × 0.7
+            narrative 明确点出 "B 级机会,中等信心,分批入场"
+
+  grade=C  → trade_plan.confidence_tier = "low"
+            position_cap 建议 ≤ constraints.max_position_cap_pct × 0.4
+            入场区间更保守(深回撤才进)
+            narrative 明确点出 "C 级机会,低信心参考,不建议重仓"
+            what_would_change_mind 至少 1 条是"什么条件会把 C 升到 B"
+
+  grade=none → trade_plan = null
+              narrative 解释为什么不给策略(例如证据不足/时机不对/冷启动期)
+
+====== 十条纪律 ======
+
+1. action 必须在 allowed_transitions 列表里。
+2. primary_drivers 的 evidence_ref 必须在 evidence_cards 里真实存在。
+3. trade_plan 总仓位 ≤ constraints.max_position_cap_pct。
+4. 做多 stop_loss < 入场下沿,做空反之;stop_loss 必须选自 constraints.hard_invalidation_levels。
+5. 持仓中必须对 thesis_still_valid 明确评估(无持仓时可为 null)。
+6. what_would_change_mind 至少 3 条,必须可客观判断(不要"市场变化"这类模糊词)。
+7. 证据冲突或不足时保守(保持当前或 FLAT),不得强行给高置信度。
+8. 输出严格 JSON,首字符 `{`,尾字符 `}`。不要 markdown code block,不要说明文字。
+9. 前面各层已经收紧过 permission 和 position_cap,你不要在此基础上再独立降档(会双重收紧)。
+   过度保守和过度激进同样不可接受,严格按证据走。
+10. observation_category 和 opportunity_grade 是只读上下文,不是你自我调节的依据。
+    A/B/C/none 严格按 L3 判档,信心档也严格按 A=high / B=medium / C=low。
+
+====== 输出 JSON 形态(严格)======
+
+{
+  "action": "<allowed_transitions 中的一个>",
+  "direction": "long" | "short" | null,
+  "confidence": 0.0-1.0,
+  "rationale": "中文 2-3 句话",
+  "narrative": "中文 3-5 句,主叙事",
+  "one_line_summary": "中文一句话结论",
+  "opportunity_grade": "<必须等于 L3 输出>",
+  "trade_plan": null 或 {
+    "direction": "long" | "short",
+    "confidence_tier": "high" | "medium" | "low",
+    "max_position_size_pct": <数值>,
+    "entry_zones": [{"price_low": <数值>, "price_high": <数值>, "allocation_pct": <数值>}, ...],
+    "stop_loss": <数值,必须在 hard_invalidation_levels 价位中>,
+    "take_profit_plan": [{"price": <数值>, "size_pct": <数值>}, ...],
+    "dynamic_notes": "中文"
+  },
+  "primary_drivers": [{"evidence_ref": "<card_id>", "text": "<中文>"}, ...],
+  "counter_arguments": [{"text": "<中文>"}, ...],
+  "what_would_change_mind": ["<客观条件 1>", "<客观条件 2>", "<客观条件 3>", ...],
+  "confidence_breakdown": {
+    "overall": 0.0-1.0,
+    "evidence_agreement": 0.0-1.0,
+    "historical_precedent": 0.0-1.0,
+    "data_quality": 0.0-1.0,
+    "trade_plan_confidence_tier": "high" | "medium" | "low" | "none"
+  },
+  "transition_reason": "<中文,说明状态迁移原因>",
+  "evidence_gaps": ["<缺失或低质量证据点>", ...]
+}"""
 
 
 # ============================================================
@@ -396,11 +466,56 @@ class AIAdjudicator:
             _collect_evidence_gaps(facts) + [str(x) for x in ai_gaps][:8]
         ))
 
+        # Sprint 2.2:把 trade_plan 和相关 §6.3 字段透传到输出
+        trade_plan = _validate_trade_plan(
+            ai_output.get("trade_plan"), facts, notes,
+        )
+        l3_grade = facts.get("l3_grade") or "none"
+        # 程序校验规则 §6.4 #8:opportunity_grade 必须等于 L3
+        ai_grade = ai_output.get("opportunity_grade")
+        if ai_grade and ai_grade != l3_grade:
+            notes.append("ai_grade_overridden_to_l3")
+        final_grade = l3_grade
+
+        # Grade 与 trade_plan 自洽检查(Sprint 2.2 硬约束)
+        if final_grade in {"A", "B", "C"} and trade_plan is None:
+            notes.append("trade_plan_missing_for_actionable_grade")
+        if final_grade == "none" and trade_plan is not None:
+            trade_plan = None
+            notes.append("trade_plan_dropped_for_none_grade")
+
+        confidence_breakdown = ai_output.get("confidence_breakdown") or {}
+        if not isinstance(confidence_breakdown, dict):
+            confidence_breakdown = {}
+        # 无论 AI 报什么,我们按 grade 钉死 trade_plan_confidence_tier
+        confidence_breakdown["trade_plan_confidence_tier"] = _tier_for_grade(final_grade)
+
+        what_would_change = ai_output.get("what_would_change_mind") or []
+        if not isinstance(what_would_change, list):
+            what_would_change = []
+
+        primary_drivers = ai_output.get("primary_drivers") or []
+        if not isinstance(primary_drivers, list):
+            primary_drivers = []
+
+        counter_arguments = ai_output.get("counter_arguments") or []
+        if not isinstance(counter_arguments, list):
+            counter_arguments = []
+
         return {
             "action": action,
             "direction": direction,
             "confidence": confidence,
             "rationale": rationale,
+            "narrative": str(ai_output.get("narrative") or rationale)[:1200],
+            "one_line_summary": str(ai_output.get("one_line_summary") or "")[:200],
+            "opportunity_grade": final_grade,
+            "trade_plan": trade_plan,
+            "primary_drivers": primary_drivers[:6],
+            "counter_arguments": counter_arguments[:6],
+            "what_would_change_mind": [str(w) for w in what_would_change][:6],
+            "confidence_breakdown": confidence_breakdown,
+            "transition_reason": str(ai_output.get("transition_reason") or "")[:400],
             "constraints": constraints,
             "evidence_gaps": merged_gaps,
             "model_used": model_used,
@@ -457,6 +572,13 @@ def _extract_facts(strategy_state: dict[str, Any]) -> dict[str, Any]:
     account = strategy_state.get("account_state") or {}
     lifecycle = strategy_state.get("lifecycle") or {}
     pipeline_meta = strategy_state.get("pipeline_meta") or {}
+    observation = strategy_state.get("observation") or {}
+    # Sprint 2.2:evidence_cards / factor_cards 的 id 列表,
+    # 给 AI 做 primary_drivers.evidence_ref 白名单
+    factor_cards = strategy_state.get("factor_cards") or strategy_state.get("evidence_cards") or []
+    available_card_ids = [
+        c.get("card_id") for c in factor_cards if isinstance(c, dict) and c.get("card_id")
+    ]
 
     return {
         "l1_regime": l1.get("regime") or l1.get("regime_primary"),
@@ -491,6 +613,8 @@ def _extract_facts(strategy_state: dict[str, Any]) -> dict[str, Any]:
             (strategy_state.get("context_summary") or {}).get("status")
         ),
         "fallback_level": pipeline_meta.get("fallback_level"),
+        "observation_category": observation.get("observation_category"),
+        "available_card_ids": available_card_ids,
     }
 
 
@@ -581,9 +705,9 @@ def _allowed_actions_for_facts(facts: dict[str, Any]) -> list[str]:
     grade = facts.get("l3_grade")
 
     if sm == "FLAT":
-        # 在 FLAT,裁决官主要是决定是否进入 PLANNED;但 action 层面
-        # open_* 视为"建议开仓触发进入 PLANNED",和 watch/hold 一起暴露
-        if stance == "bullish" and grade in {"A", "B"} and perm in {
+        # Sprint 2.2:A/B/C 都应出现 open_*(空头建模只允许 A/B/none,无 C);
+        # 前面各层已经收紧 permission 和 position_cap,此处不再二次限档。
+        if stance == "bullish" and grade in {"A", "B", "C"} and perm in {
             "can_open", "cautious_open", "ambush_only",
         }:
             base = ["open_long", "hold", "watch"]
@@ -664,9 +788,15 @@ def _build_user_prompt(
     facts: dict[str, Any],
     allowed_actions: list[str],
 ) -> str:
+    l4_cap = facts.get("l4_position_cap") or 0.0
+    max_cap_pct = round(float(l4_cap) * 100, 2) if l4_cap else 0.0
+    hard_invalidation = facts.get("l4_hard_invalidation_levels") or []
+    evidence_cards = facts.get("available_card_ids") or []
+
     lines = [
         "=== 证据链关键字段 ===",
-        f"L1 Regime: regime={facts.get('l1_regime')}, vol={facts.get('l1_volatility')}",
+        f"L1 Regime: regime={facts.get('l1_regime')}, vol={facts.get('l1_volatility')}, "
+        f"stability={facts.get('l1_regime_stability')}",
         (
             f"L2 Direction: stance={facts.get('l2_stance')}, "
             f"confidence={facts.get('l2_stance_confidence')}, "
@@ -683,26 +813,30 @@ def _build_user_prompt(
             f"rr={facts.get('l4_risk_reward_ratio')}"
         ),
         (
-            f"L5 Macro: env={facts.get('l5_env')}, "
+            f"L5 Macro: stance={facts.get('l5_macro_stance')}, "
             f"headwind={facts.get('l5_headwind')}, "
             f"data_completeness={facts.get('l5_data_completeness')}%, "
-            f"health={facts.get('l5_health')}"
+            f"extreme_event={facts.get('l5_extreme_event_detected')}"
         ),
         f"State Machine: {facts.get('state_machine_current')}",
         f"Lifecycle: {facts.get('lifecycle_current')}",
+        f"Observation: {facts.get('observation_category')}",
+        "",
+        "=== 系统约束(必须遵守)===",
+        f"max_position_cap_pct: {max_cap_pct}",
+        "hard_invalidation_levels(stop_loss 必须从这里选):",
+        json.dumps(hard_invalidation, ensure_ascii=False),
+        "",
+        "=== 可引用的 evidence_card_id(primary_drivers.evidence_ref 必须在此列表)===",
+        json.dumps(evidence_cards[:80], ensure_ascii=False),
         "",
         "=== 允许的 action(chosen_action_state 必须在此集合内)===",
         json.dumps(allowed_actions, ensure_ascii=False),
         "",
-        "=== 输出 JSON 格式(严格)===",
-        "{",
-        '  "action": "<上面允许集合中的一个>",',
-        '  "direction": "long|short|null",',
-        '  "confidence": 0.0-1.0,',
-        '  "rationale": "中文 1-2 段描述",',
-        '  "evidence_gaps": ["缺失或低质量的证据点"]',
-        "}",
-        "只输出 JSON,无其他文本。",
+        "=== 输出规范 ===",
+        "严格按 system prompt 描述的 JSON schema 输出。",
+        "grade ∈ {A, B, C} 必须同时产出完整 trade_plan(带 confidence_tier);grade=none 则 trade_plan=null。",
+        "只输出 JSON,首字符 {,尾字符 }。",
     ]
     return "\n".join(lines)
 
@@ -805,6 +939,15 @@ def _build_rule_output(
         "direction": direction if direction is not None else _infer_direction(action),
         "confidence": max(0.0, min(1.0, float(confidence))),
         "rationale": rationale,
+        "narrative": rationale,
+        "one_line_summary": rationale[:80],
+        "opportunity_grade": "none",
+        "trade_plan": None,
+        "primary_drivers": [],
+        "counter_arguments": [],
+        "what_would_change_mind": [],
+        "confidence_breakdown": {"trade_plan_confidence_tier": "none"},
+        "transition_reason": "",
         "constraints": constraints,
         "evidence_gaps": list(evidence_gaps),
         "model_used": model_name,
@@ -813,6 +956,135 @@ def _build_rule_output(
         "latency_ms": int(latency_ms),
         "status": status,
         "notes": list(notes or []),
+    }
+
+
+_GRADE_TO_TIER: dict[str, str] = {
+    "A": "high",
+    "B": "medium",
+    "C": "low",
+    "none": "none",
+}
+
+_GRADE_CAP_MULTIPLIER: dict[str, float] = {
+    "A": 1.0,
+    "B": 0.7,
+    "C": 0.4,
+}
+
+
+def _tier_for_grade(grade: Optional[str]) -> str:
+    return _GRADE_TO_TIER.get(grade or "none", "none")
+
+
+def _validate_trade_plan(
+    raw: Any,
+    facts: dict[str, Any],
+    notes: list[str],
+) -> Optional[dict[str, Any]]:
+    """把 AI 返回的 trade_plan 走一遍程序校验 + 自动 clamp。
+
+    - 不存在或非 dict → None
+    - direction 必须 long/short 且与 facts.l2_stance 一致(若有)
+    - max_position_size_pct 不得超过 L4.position_cap × grade 乘数
+    - stop_loss 必须在 hard_invalidation_levels 的价位列表里(§6.4 #9)
+    """
+    if not isinstance(raw, dict):
+        return None
+
+    grade = facts.get("l3_grade") or "none"
+    # grade=none 不返回 trade_plan
+    if grade not in {"A", "B", "C"}:
+        return None
+
+    direction = raw.get("direction")
+    if direction not in {"long", "short"}:
+        stance = facts.get("l2_stance")
+        if stance in {"bullish"}:
+            direction = "long"
+        elif stance in {"bearish"}:
+            direction = "short"
+        else:
+            notes.append("trade_plan_direction_unresolved")
+            return None
+
+    # cap clamp
+    l4_cap = facts.get("l4_position_cap")
+    max_cap_pct = float(l4_cap or 0.0) * 100.0
+    cap_ceiling = max_cap_pct * _GRADE_CAP_MULTIPLIER.get(grade, 0.0)
+    raw_size = raw.get("max_position_size_pct")
+    try:
+        size_pct = float(raw_size) if raw_size is not None else cap_ceiling
+    except (TypeError, ValueError):
+        size_pct = cap_ceiling
+    if size_pct > cap_ceiling + 0.01:
+        notes.append("trade_plan_size_clamped_to_grade_ceiling")
+    size_pct = max(0.0, min(size_pct, cap_ceiling))
+
+    # stop_loss 校验(§6.4 #9):必须在 hard_invalidation_levels 里
+    hard_levels = facts.get("l4_hard_invalidation_levels") or []
+    valid_stops = [
+        float(h.get("price"))
+        for h in hard_levels
+        if isinstance(h, dict) and h.get("price") is not None
+    ]
+    stop_loss = raw.get("stop_loss")
+    try:
+        stop_loss_num = float(stop_loss) if stop_loss is not None else None
+    except (TypeError, ValueError):
+        stop_loss_num = None
+    if stop_loss_num is None and valid_stops:
+        stop_loss_num = valid_stops[0]  # 默认取 priority=1
+        notes.append("trade_plan_stop_loss_defaulted_to_l4_priority_1")
+    elif stop_loss_num is not None and valid_stops:
+        # 找最接近 AI 值的 L4 价位
+        closest = min(valid_stops, key=lambda p: abs(p - stop_loss_num))
+        if abs(closest - stop_loss_num) > 0.01:
+            stop_loss_num = closest
+            notes.append("trade_plan_stop_loss_snapped_to_l4")
+
+    entry_zones_raw = raw.get("entry_zones") or []
+    entry_zones: list[dict[str, Any]] = []
+    if isinstance(entry_zones_raw, list):
+        for z in entry_zones_raw[:4]:
+            if not isinstance(z, dict):
+                continue
+            try:
+                low = float(z.get("price_low"))
+                high = float(z.get("price_high"))
+                alloc = float(z.get("allocation_pct", 0.0))
+            except (TypeError, ValueError):
+                continue
+            entry_zones.append({
+                "price_low": round(low, 2),
+                "price_high": round(high, 2),
+                "allocation_pct": round(alloc, 2),
+            })
+
+    tp_raw = raw.get("take_profit_plan") or []
+    tp_plan: list[dict[str, Any]] = []
+    if isinstance(tp_raw, list):
+        for t in tp_raw[:5]:
+            if not isinstance(t, dict):
+                continue
+            try:
+                price = float(t.get("price"))
+                size = float(t.get("size_pct", 0.0))
+            except (TypeError, ValueError):
+                continue
+            tp_plan.append({
+                "price": round(price, 2),
+                "size_pct": round(size, 2),
+            })
+
+    return {
+        "direction": direction,
+        "confidence_tier": _tier_for_grade(grade),
+        "max_position_size_pct": round(size_pct, 2),
+        "entry_zones": entry_zones,
+        "stop_loss": round(stop_loss_num, 2) if stop_loss_num is not None else None,
+        "take_profit_plan": tp_plan,
+        "dynamic_notes": str(raw.get("dynamic_notes") or "")[:400],
     }
 
 

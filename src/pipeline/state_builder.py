@@ -73,6 +73,75 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _derive_market_snapshot(klines_1d: Any) -> dict[str, Any]:
+    """Sprint 2.2 hotfix:从 1D K 线派生 market_snapshot。
+
+    用 context.klines_1d(BTCKlinesDAO.get_recent_as_df 已按 open_time_utc
+    升序返回的 DataFrame,close 字段是当日收盘价)。
+    冷启动/数据缺失 → btc_price_usd=null + status='missing'。
+    """
+    from zoneinfo import ZoneInfo
+    _BJT = ZoneInfo("Asia/Shanghai")
+
+    empty = {
+        "btc_price_usd": None,
+        "btc_price_change_24h_pct": None,
+        "btc_price_change_7d_pct": None,
+        "btc_price_updated_bjt": None,
+        "price_captured_at_utc": None,
+        "price_source": "binance_kline_1d_close_via_coinglass",
+        "status": "missing",
+    }
+    try:
+        import pandas as pd
+    except Exception:
+        return empty
+    if klines_1d is None or not isinstance(klines_1d, pd.DataFrame) or klines_1d.empty:
+        return empty
+
+    try:
+        closes = klines_1d["close"].dropna().astype(float)
+        if closes.empty:
+            return empty
+        current = float(closes.iloc[-1])
+
+        change_24h = None
+        if len(closes) >= 2:
+            prev = float(closes.iloc[-2])
+            if prev > 0:
+                change_24h = (current / prev - 1.0) * 100.0
+
+        change_7d = None
+        if len(closes) >= 8:
+            seven_ago = float(closes.iloc[-8])
+            if seven_ago > 0:
+                change_7d = (current / seven_ago - 1.0) * 100.0
+
+        ts_utc = klines_1d.index[-1]
+        try:
+            iso_utc = ts_utc.strftime("%Y-%m-%dT%H:%M:%SZ")
+            bjt = ts_utc.tz_convert(_BJT).strftime("%Y-%m-%d %H:%M (BJT)")
+        except Exception:
+            iso_utc = None
+            bjt = None
+
+        return {
+            "btc_price_usd": round(current, 2),
+            "btc_price_change_24h_pct": (
+                round(change_24h, 2) if change_24h is not None else None
+            ),
+            "btc_price_change_7d_pct": (
+                round(change_7d, 2) if change_7d is not None else None
+            ),
+            "btc_price_updated_bjt": bjt,
+            "price_captured_at_utc": iso_utc,
+            "price_source": "binance_kline_1d_close_via_coinglass",
+            "status": "ok",
+        }
+    except Exception:
+        return empty
+
+
 def _load_base_cfg() -> dict[str, Any]:
     try:
         with open(_BASE_YAML, "r", encoding="utf-8") as f:
@@ -627,6 +696,7 @@ class StrategyStateBuilder:
         state_key / transition_reason 等留到 1.13。
         """
         cold_start = context.get("cold_start") or {}
+        market_snapshot = _derive_market_snapshot(context.get("klines_1d"))
         return {
             # --- identity ---
             "run_id": run_id,
@@ -638,6 +708,9 @@ class StrategyStateBuilder:
 
             # --- cold start ---
             "cold_start": cold_start,
+
+            # --- market snapshot(Sprint 2.2 hotfix:真实 BTC 价格从 1D K 线派生)---
+            "market_snapshot": market_snapshot,
 
             # --- evidence 五层 ---
             "evidence_reports": {
@@ -673,6 +746,13 @@ class StrategyStateBuilder:
                     len(self._STAGES) - len(degraded_stages)
                 ),
             },
+
+            # --- Sprint 2.2 hotfix:价格缺失时 data_health 标记 missing ---
+            "data_health": (
+                {"price_status": "missing"}
+                if market_snapshot.get("status") == "missing"
+                else {"price_status": "ok"}
+            ),
         }
 
     # ------------------------------------------------------------------

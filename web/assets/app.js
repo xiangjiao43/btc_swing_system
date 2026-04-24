@@ -406,7 +406,9 @@ function app() {
                 const group = cards.filter(c => c.group === s.key);
                 const primary = group.filter(c => c.is_primary);
                 const secondary = group.filter(c => !c.is_primary);
-                return { ...s, primary, secondary };
+                // Sprint 2.3 R2:2 列等宽网格,主要在前(绿左边框),次要在后
+                const allOrdered = [...primary, ...secondary];
+                return { ...s, primary, secondary, allOrdered };
             }).filter(g => g.primary.length + g.secondary.length > 0);
         },
         toggleGroup(key) {

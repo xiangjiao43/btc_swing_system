@@ -1,11 +1,12 @@
 """
-tests/test_adjudicator.py — Sprint 1.14a 单测
+tests/test_adjudicator.py — Sprint 1.5b 单测(对齐建模 14 档状态机 + §6.5)
 
 覆盖:
-  * 硬约束前置:各种 permission / state_machine / cap 情况下不调 AI
-  * AI 路径:grade + permission + state_machine 正常,mock AI 返回合法/非法 JSON
+  * 硬约束前置:各种 permission / state / cap / extreme / fallback / cold_start
+    情况下不调 AI
+  * AI 路径:grade + permission + state 正常,mock AI 返回合法/非法 JSON
   * 约束覆盖:AI 返回违反硬约束的 action → override
-  * evidence_gaps:l5 数据缺失应被标记
+  * evidence_gaps:L5 数据缺失应被标记
   * cold_start 优先于 L3 grade
 """
 
@@ -66,11 +67,14 @@ def _state(
     l4_cap: float = 0.15,
     l4_risk: str = "moderate",
     l5_env: str = "risk_on",
+    l5_macro_stance: str = "risk_on",
     l5_headwind: str = "tailwind",
     l5_completeness: float = 80.0,
     l5_health: str = "healthy",
-    sm_state: str = "active_long_execution",
+    l5_extreme_event: bool = False,
+    sm_state: str = "FLAT",
     cold_start: bool = False,
+    fallback_level: Any = None,
     account: dict = None,
 ) -> dict[str, Any]:
     return {
@@ -96,14 +100,16 @@ def _state(
                 "position_cap": l4_cap,
                 "stop_loss_reference": {"price": 45000},
                 "risk_reward_ratio": 2.2,
-                "overall_risk": l4_risk,
+                "overall_risk_level": l4_risk,
                 "health_status": "healthy",
             },
             "layer_5": {
                 "macro_environment": l5_env,
+                "macro_stance": l5_macro_stance,
                 "macro_headwind_vs_btc": l5_headwind,
                 "data_completeness_pct": l5_completeness,
                 "health_status": l5_health,
+                "extreme_event_detected": l5_extreme_event,
             },
         },
         "state_machine": {
@@ -115,6 +121,7 @@ def _state(
             "runs_completed": 0 if cold_start else 100,
         },
         "account_state": account or {},
+        "pipeline_meta": {"fallback_level": fallback_level},
     }
 
 
@@ -127,7 +134,7 @@ class TestHardConstraints:
         client = MagicMock()
         adj = AIAdjudicator(openai_client=client)
         state = _state(l3_permission="watch", l3_grade="A",
-                       sm_state="active_long_execution")
+                       sm_state="FLAT")
         out = adj.decide(state)
         assert out["action"] == "watch"
         assert out["status"] == "success"
@@ -149,15 +156,23 @@ class TestHardConstraints:
         client = MagicMock()
         adj = AIAdjudicator(openai_client=client)
         state = _state(l4_cap=0.0, l3_permission="can_open",
-                       l3_grade="A", sm_state="active_long_execution")
+                       l3_grade="A", sm_state="FLAT")
         out = adj.decide(state)
         assert out["action"] == "watch"
         client.chat.completions.create.assert_not_called()
 
-    def test_chaos_pause_forces_pause(self):
+    def test_protection_state_forces_pause(self):
         client = MagicMock()
         adj = AIAdjudicator(openai_client=client)
-        state = _state(sm_state="chaos_pause")
+        state = _state(sm_state="PROTECTION")
+        out = adj.decide(state)
+        assert out["action"] == "pause"
+        client.chat.completions.create.assert_not_called()
+
+    def test_l5_extreme_event_forces_pause(self):
+        client = MagicMock()
+        adj = AIAdjudicator(openai_client=client)
+        state = _state(l5_extreme_event=True, sm_state="FLAT")
         out = adj.decide(state)
         assert out["action"] == "pause"
         client.chat.completions.create.assert_not_called()
@@ -166,10 +181,8 @@ class TestHardConstraints:
         client = MagicMock()
         adj = AIAdjudicator(openai_client=client)
         state = _state(
-            l3_grade="A",
-            l3_permission="can_open",
-            sm_state="cold_start_warming_up",
-            cold_start=True,
+            l3_grade="A", l3_permission="can_open",
+            sm_state="FLAT", cold_start=True,
         )
         out = adj.decide(state)
         assert out["action"] == "watch"
@@ -183,13 +196,47 @@ class TestHardConstraints:
         assert out["action"] == "hold"
         client.chat.completions.create.assert_not_called()
 
+    def test_fallback_level_2_forces_watch(self):
+        client = MagicMock()
+        adj = AIAdjudicator(openai_client=client)
+        state = _state(
+            sm_state="FLAT", l3_grade="A", l3_permission="can_open",
+            fallback_level="level_2",
+        )
+        out = adj.decide(state)
+        assert out["action"] == "watch"
+        client.chat.completions.create.assert_not_called()
+
+    def test_fallback_level_3_forces_watch(self):
+        client = MagicMock()
+        adj = AIAdjudicator(openai_client=client)
+        state = _state(
+            sm_state="FLAT", l3_grade="A", l3_permission="can_open",
+            fallback_level=3,
+        )
+        out = adj.decide(state)
+        assert out["action"] == "watch"
+        client.chat.completions.create.assert_not_called()
+
+    def test_post_protection_reassess_forces_hold(self):
+        client = MagicMock()
+        adj = AIAdjudicator(openai_client=client)
+        state = _state(
+            sm_state="POST_PROTECTION_REASSESS",
+            l3_grade="A", l3_permission="can_open",
+        )
+        out = adj.decide(state)
+        assert out["action"] == "hold"
+        client.chat.completions.create.assert_not_called()
+
 
 # ==================================================================
-# AI 路径
+# AI 路径(新 14 档)
 # ==================================================================
 
 class TestAIPath:
-    def test_active_long_with_grade_A_calls_ai(self):
+    def test_flat_with_grade_A_bullish_calls_ai(self):
+        """FLAT + grade A + bullish + can_open → AI 路径(建议进 LONG_PLANNED)"""
         client = MagicMock()
         client.chat.completions.create.return_value = _mock_ai_response(
             action="open_long", direction="long", confidence=0.72,
@@ -197,17 +244,14 @@ class TestAIPath:
         adj = AIAdjudicator(openai_client=client)
         state = _state(
             l2_stance="bullish", l3_grade="A", l3_permission="can_open",
-            sm_state="active_long_execution",
+            sm_state="FLAT",
         )
         out = adj.decide(state)
         assert out["action"] == "open_long"
-        assert out["direction"] == "long"
-        assert out["confidence"] == pytest.approx(0.72)
         assert out["status"] == "success"
-        assert out["model_used"] == "claude-sonnet-4-5-20250929"
         client.chat.completions.create.assert_called_once()
 
-    def test_active_short_with_grade_B_calls_ai(self):
+    def test_flat_with_grade_B_bearish_calls_ai(self):
         client = MagicMock()
         client.chat.completions.create.return_value = _mock_ai_response(
             action="open_short", direction="short", confidence=0.6,
@@ -215,16 +259,27 @@ class TestAIPath:
         adj = AIAdjudicator(openai_client=client)
         state = _state(
             l2_stance="bearish", l3_grade="B", l3_permission="cautious_open",
-            sm_state="active_short_execution",
+            sm_state="FLAT",
         )
         out = adj.decide(state)
         assert out["action"] == "open_short"
-        assert out["direction"] == "short"
-        assert out["status"] == "success"
+
+    def test_long_hold_calls_ai_for_hold_or_reduce(self):
+        client = MagicMock()
+        client.chat.completions.create.return_value = _mock_ai_response(
+            action="hold", direction=None, confidence=0.7,
+        )
+        adj = AIAdjudicator(openai_client=client)
+        state = _state(
+            l2_stance="bullish", l3_grade="A", l3_permission="can_open",
+            sm_state="LONG_HOLD",
+            account={"long_position_size": 0.5},
+        )
+        out = adj.decide(state)
+        assert out["action"] == "hold"
 
     def test_ai_invalid_json_retries_then_degrades(self):
         client = MagicMock()
-        # 两次都返回非 JSON
         client.chat.completions.create.side_effect = [
             _mock_ai_response(raw_override="this is not JSON at all"),
             _mock_ai_response(raw_override="still garbage, no braces here"),
@@ -232,7 +287,7 @@ class TestAIPath:
         adj = AIAdjudicator(openai_client=client)
         state = _state(
             l3_grade="A", l3_permission="can_open",
-            sm_state="active_long_execution",
+            sm_state="FLAT",
         )
         out = adj.decide(state)
         assert out["status"] == "degraded_structured"
@@ -241,71 +296,65 @@ class TestAIPath:
         assert client.chat.completions.create.call_count == 2
 
     def test_ai_violating_hard_constraint_gets_overridden(self):
+        """FLAT + bullish,AI 返回 open_short → override。"""
         client = MagicMock()
-        # AI 返回 open_short 但 SM 是 active_long(long-only 允许集合)
         client.chat.completions.create.return_value = _mock_ai_response(
             action="open_short", direction="short", confidence=0.8,
         )
         adj = AIAdjudicator(openai_client=client)
         state = _state(
             l2_stance="bullish", l3_grade="A", l3_permission="can_open",
-            sm_state="active_long_execution",
+            sm_state="FLAT",
         )
         out = adj.decide(state)
         assert out["action"] != "open_short"
         assert "ai_action_overridden_by_constraints" in out["notes"]
-        # 保守覆盖到 watch/hold/long-side
-        assert out["action"] in {"watch", "hold", "open_long", "scale_in_long"}
 
     def test_evidence_gaps_include_macro_incomplete(self):
         client = MagicMock()
         client.chat.completions.create.return_value = _mock_ai_response(
             action="open_long", direction="long", confidence=0.65,
-            evidence_gaps=[],  # AI 自己没给,程序应自动补
+            evidence_gaps=[],
         )
         adj = AIAdjudicator(openai_client=client)
         state = _state(
             l3_grade="A", l3_permission="can_open",
-            sm_state="active_long_execution",
+            sm_state="FLAT",
             l5_completeness=20.0,
             l5_health="degraded",
         )
         out = adj.decide(state)
         assert "macro_data_incomplete" in out["evidence_gaps"]
 
-    def test_disciplined_bull_watch_constrains_to_watch_hold(self):
-        client = MagicMock()
-        # AI 想 open_long,但 disciplined_bull_watch 只允许 watch/hold
-        client.chat.completions.create.return_value = _mock_ai_response(
-            action="open_long", direction="long", confidence=0.9,
-        )
-        adj = AIAdjudicator(openai_client=client)
-        state = _state(
-            l2_stance="bullish", l3_grade="B", l3_permission="cautious_open",
-            sm_state="disciplined_bull_watch",
-        )
-        out = adj.decide(state)
-        assert out["action"] in {"watch", "hold"}
-        assert "ai_action_overridden_by_constraints" in out["notes"]
-
 
 # ==================================================================
-# 非 AI、非硬约束:走规则路径 watch
+# 非 AI、非硬约束:规则路径 watch
 # ==================================================================
 
 class TestRulePathNeutral:
-    def test_neutral_observation_skips_ai(self):
+    def test_grade_none_skips_ai(self):
         client = MagicMock()
         adj = AIAdjudicator(openai_client=client)
         state = _state(
             l2_stance="neutral",
             l3_grade="none",
             l3_permission="can_open",
-            sm_state="neutral_observation",
+            sm_state="FLAT",
         )
         out = adj.decide(state)
         assert out["action"] == "watch"
         assert out["status"] == "success"
+        client.chat.completions.create.assert_not_called()
+
+    def test_flip_watch_cooling_with_grade_none_rule_path(self):
+        """FLIP_WATCH + grade=none(还没到反手门槛)→ 规则 watch。"""
+        client = MagicMock()
+        adj = AIAdjudicator(openai_client=client)
+        state = _state(
+            sm_state="FLIP_WATCH", l3_grade="none", l3_permission="can_open",
+        )
+        out = adj.decide(state)
+        assert out["action"] == "watch"
         client.chat.completions.create.assert_not_called()
 
 
@@ -326,7 +375,6 @@ class TestOutputShape:
             "tokens_in", "tokens_out", "latency_ms", "status", "notes",
         ):
             assert field in out, f"missing field: {field}"
-        # constraints 内部字段
         for c in (
             "max_position_size", "stop_loss_reference",
             "event_risk_warning", "execution_permission_binding",

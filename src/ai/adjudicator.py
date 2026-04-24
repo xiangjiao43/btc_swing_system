@@ -136,28 +136,65 @@ class AIAdjudicator:
         """
         返回 None = 未触发硬约束;否则返回 {action, rationale, ...}。
 
-        优先级:State Machine 异常档 > cold_start > L3.watch/protective/hold_only >
-                  L4.cap=0。多个触发时按此顺序取最先命中。
+        建模 §6.5 硬约束对齐 Sprint 1.5a 的 14 档状态机。
+
+        优先级(顺序命中第一个):
+          1. L5 extreme_event_detected 或 state=PROTECTION → pause
+          2. cold_start 期 → watch
+          3. fallback_level ∈ {level_2, level_3} → watch
+          4. state=POST_PROTECTION_REASSESS → hold(不允许新开)
+          5. L3.execution_permission = watch → watch
+          6. L3.execution_permission = protective → reduce_*/close_*/hold
+          7. L3.execution_permission = hold_only → hold
+          8. L4.position_cap = 0 → watch
         """
         sm_state = facts.get("state_machine_current")
-        if sm_state in {"chaos_pause", "event_window_freeze",
-                        "degraded_data_mode", "macro_shock_pause"}:
+        l5_extreme = facts.get("l5_extreme_event_detected")
+        fallback_level = facts.get("fallback_level")
+        cold_start = facts.get("cold_start_warming_up")
+
+        # ---- 1. 极端事件 / PROTECTION:强制 pause ----
+        if l5_extreme is True:
             return {
                 "action": "pause",
-                "rationale": f"硬约束:系统处于 {sm_state},强制暂停。",
-                "confidence": 0.8,
+                "rationale": "硬约束:L5 extreme_event_detected=true,强制暂停。",
+                "confidence": 0.9,
             }
-        if sm_state == "cold_start_warming_up":
+        if sm_state == "PROTECTION":
+            return {
+                "action": "pause",
+                "rationale": "硬约束:状态机=PROTECTION,暂停所有新开仓。",
+                "confidence": 0.9,
+            }
+
+        # ---- 2. 冷启动:强制 watch ----
+        if cold_start is True:
             return {
                 "action": "watch",
                 "rationale": "硬约束:冷启动未完成,暂不参与开仓。",
                 "confidence": 0.7,
             }
-        if sm_state == "stop_triggered":
+
+        # ---- 3. Fallback 降级:强制 watch ----
+        if _is_fallback_level_degraded(fallback_level):
             return {
-                "action": "pause",
-                "rationale": "硬约束:账户已触发止损,暂停所有新开仓。",
-                "confidence": 0.9,
+                "action": "watch",
+                "rationale": (
+                    f"硬约束:fallback_level={fallback_level},"
+                    "数据降级中保守观察。"
+                ),
+                "confidence": 0.6,
+            }
+
+        # ---- 4. POST_PROTECTION_REASSESS:不允许新开 ----
+        if sm_state == "POST_PROTECTION_REASSESS":
+            return {
+                "action": "hold",
+                "rationale": (
+                    "硬约束:POST_PROTECTION_REASSESS 期间不允许新开仓,"
+                    "仅允许 hold / reduce_* / close_*。"
+                ),
+                "confidence": 0.7,
             }
 
         perm = facts.get("l3_permission")
@@ -428,9 +465,11 @@ def _extract_facts(strategy_state: dict[str, Any]) -> dict[str, Any]:
     cold_start = strategy_state.get("cold_start") or {}
     account = strategy_state.get("account_state") or {}
     lifecycle = strategy_state.get("lifecycle") or {}
+    pipeline_meta = strategy_state.get("pipeline_meta") or {}
 
     return {
         "l1_regime": l1.get("regime") or l1.get("regime_primary"),
+        "l1_regime_stability": l1.get("regime_stability"),
         "l1_volatility": l1.get("volatility_regime") or l1.get("volatility_level"),
         "l2_stance": l2.get("stance"),
         "l2_stance_confidence": l2.get("stance_confidence"),
@@ -441,11 +480,16 @@ def _extract_facts(strategy_state: dict[str, Any]) -> dict[str, Any]:
         "l4_position_cap": l4.get("position_cap"),
         "l4_stop_loss_reference": l4.get("stop_loss_reference"),
         "l4_risk_reward_ratio": l4.get("risk_reward_ratio"),
-        "l4_overall_risk": l4.get("overall_risk"),
+        "l4_overall_risk": (
+            l4.get("overall_risk_level") or l4.get("overall_risk")
+        ),
+        "l4_hard_invalidation_levels": l4.get("hard_invalidation_levels") or [],
         "l5_env": l5.get("macro_environment"),
+        "l5_macro_stance": l5.get("macro_stance") or l5.get("macro_environment"),
         "l5_headwind": l5.get("macro_headwind_vs_btc"),
         "l5_data_completeness": l5.get("data_completeness_pct"),
         "l5_health": l5.get("health_status"),
+        "l5_extreme_event_detected": bool(l5.get("extreme_event_detected", False)),
         "state_machine_current": sm.get("current_state"),
         "state_machine_previous": sm.get("previous_state"),
         "cold_start_warming_up": bool(cold_start.get("warming_up")),
@@ -455,7 +499,20 @@ def _extract_facts(strategy_state: dict[str, Any]) -> dict[str, Any]:
         "context_summary_status": (
             (strategy_state.get("context_summary") or {}).get("status")
         ),
+        "fallback_level": pipeline_meta.get("fallback_level"),
     }
+
+
+def _is_fallback_level_degraded(level: Any) -> bool:
+    """fallback_level ∈ {level_2, level_3, 2, 3} 都视作"数据降级"。"""
+    if level is None:
+        return False
+    if isinstance(level, str):
+        return level.lower() in {"level_2", "level_3", "l2", "l3"}
+    try:
+        return int(level) >= 2
+    except (TypeError, ValueError):
+        return False
 
 
 def _collect_evidence_gaps(facts: dict[str, Any]) -> list[str]:
@@ -492,58 +549,84 @@ def _build_constraints(facts: dict[str, Any]) -> dict[str, Any]:
 
 def _allowed_actions_for_facts(facts: dict[str, Any]) -> list[str]:
     """
-    根据 hard-constraint 规则推演当前允许的 action 集合。
+    根据 hard-constraint 规则推演当前允许的 action 集合(对齐建模 §5.1 14 档)。
     用于 AI 路径时把允许集合注入 prompt,也用于 AI 输出校验。
     """
     sm = facts.get("state_machine_current")
     perm = facts.get("l3_permission")
     cap = facts.get("l4_position_cap")
 
-    # 异常档
-    if sm in {"chaos_pause", "event_window_freeze",
-              "degraded_data_mode", "macro_shock_pause", "stop_triggered"}:
+    # ---- 硬路径 ----
+    if facts.get("l5_extreme_event_detected") or sm == "PROTECTION":
         return ["pause"]
-    if sm == "cold_start_warming_up":
+    if facts.get("cold_start_warming_up"):
         return ["watch"]
+    if _is_fallback_level_degraded(facts.get("fallback_level")):
+        return ["watch", "pause"]
+    if sm == "POST_PROTECTION_REASSESS":
+        # §5.2:允许 HOLD / EXIT / FLAT / FLIP_WATCH,禁止 PLANNED
+        base = ["hold", "watch"]
+        if facts.get("account_has_long"):
+            base.extend(["reduce_long", "close_long"])
+        if facts.get("account_has_short"):
+            base.extend(["reduce_short", "close_short"])
+        return base
     if perm == "watch":
         return ["watch", "pause"]
     if perm == "hold_only":
-        return ["hold", "watch"]
+        base = ["hold", "watch"]
+        if facts.get("account_has_long"):
+            base.extend(["reduce_long", "close_long"])
+        if facts.get("account_has_short"):
+            base.extend(["reduce_short", "close_short"])
+        return base
     if perm == "protective":
         return ["reduce_long", "reduce_short", "close_long", "close_short", "hold"]
     if cap is not None and float(cap) <= 0.0:
         return ["watch", "hold"]
 
-    # 正常路径:State Machine 优先决定允许集(sm 对 action 集合的约束强于 stance)
+    # ---- State Machine 主导(14 档新名)----
     stance = facts.get("l2_stance")
     grade = facts.get("l3_grade")
 
-    if sm == "active_long_execution":
-        base = ["open_long", "scale_in_long", "hold", "watch"]
-    elif sm == "active_short_execution":
-        base = ["open_short", "scale_in_short", "hold", "watch"]
-    elif sm == "disciplined_bull_watch":
-        base = ["watch", "hold"]
-    elif sm == "disciplined_bear_watch":
-        base = ["watch", "hold"]
-    elif sm == "long_protective_hold":
+    if sm == "FLAT":
+        # 在 FLAT,裁决官主要是决定是否进入 PLANNED;但 action 层面
+        # open_* 视为"建议开仓触发进入 PLANNED",和 watch/hold 一起暴露
+        if stance == "bullish" and grade in {"A", "B"} and perm in {
+            "can_open", "cautious_open", "ambush_only",
+        }:
+            base = ["open_long", "hold", "watch"]
+        elif stance == "bearish" and grade in {"A", "B"} and perm in {
+            "can_open", "cautious_open", "ambush_only",
+        }:
+            base = ["open_short", "hold", "watch"]
+        else:
+            base = ["watch", "hold"]
+    elif sm in {"LONG_PLANNED"}:
+        base = ["open_long", "scale_in_long", "hold", "watch", "close_long"]
+    elif sm in {"SHORT_PLANNED"}:
+        base = ["open_short", "scale_in_short", "hold", "watch", "close_short"]
+    elif sm == "LONG_OPEN":
+        base = ["hold", "watch", "scale_in_long", "reduce_long", "close_long"]
+    elif sm == "SHORT_OPEN":
+        base = ["hold", "watch", "scale_in_short", "reduce_short", "close_short"]
+    elif sm == "LONG_HOLD":
+        base = ["hold", "reduce_long", "close_long", "watch"]
+    elif sm == "SHORT_HOLD":
+        base = ["hold", "reduce_short", "close_short", "watch"]
+    elif sm == "LONG_TRIM":
         base = ["reduce_long", "close_long", "hold", "watch"]
-    elif sm == "short_protective_hold":
+    elif sm == "SHORT_TRIM":
         base = ["reduce_short", "close_short", "hold", "watch"]
-    elif sm == "post_execution_cooldown":
+    elif sm in {"LONG_EXIT", "SHORT_EXIT"}:
+        base = ["close_long", "close_short", "hold", "watch"]
+    elif sm == "FLIP_WATCH":
+        # 冷却期不能单独决定方向切换;允许 hold / watch,持仓已平应为 0
         base = ["hold", "watch"]
-    elif stance == "bullish" and grade in {"A", "B"} and perm in {
-        "can_open", "cautious_open", "ambush_only",
-    }:
-        base = ["open_long", "scale_in_long", "hold", "watch"]
-    elif stance == "bearish" and grade in {"A", "B"} and perm in {
-        "can_open", "cautious_open", "ambush_only",
-    }:
-        base = ["open_short", "scale_in_short", "hold", "watch"]
     else:
         base = ["hold", "watch"]
 
-    # 有持仓时加上 reduce/close
+    # 有持仓时加上 reduce/close(防御性)
     if facts.get("account_has_long"):
         for a in ("reduce_long", "close_long"):
             if a not in base:
@@ -558,11 +641,14 @@ def _allowed_actions_for_facts(facts: dict[str, Any]) -> list[str]:
 
 def _should_call_ai(facts: dict[str, Any]) -> bool:
     """
-    AI 路径的触发条件(所有条件同时满足):
+    AI 路径的触发条件(对齐建模 §5.1 14 档 + §6.5)。所有同时满足:
       * L3.grade ∈ {A, B, C}
       * L3.execution_permission ∈ {can_open, cautious_open, ambush_only, no_chase}
-      * State Machine ∈ {active_long_execution, active_short_execution,
-                         disciplined_bull_watch, disciplined_bear_watch}
+      * State Machine ∈ {FLAT, LONG_PLANNED, LONG_OPEN, LONG_HOLD, LONG_TRIM,
+                         SHORT_PLANNED, SHORT_OPEN, SHORT_HOLD, SHORT_TRIM,
+                         FLIP_WATCH}
+      * 非硬约束命中(PROTECTION / POST_PROTECTION_REASSESS / cold_start /
+        fallback_degraded / extreme_event 均由硬约束前置拦截)
     """
     grade = facts.get("l3_grade")
     perm = facts.get("l3_permission")
@@ -571,8 +657,10 @@ def _should_call_ai(facts: dict[str, Any]) -> bool:
         grade in {"A", "B", "C"}
         and perm in {"can_open", "cautious_open", "ambush_only", "no_chase"}
         and sm in {
-            "active_long_execution", "active_short_execution",
-            "disciplined_bull_watch", "disciplined_bear_watch",
+            "FLAT",
+            "LONG_PLANNED", "LONG_OPEN", "LONG_HOLD", "LONG_TRIM",
+            "SHORT_PLANNED", "SHORT_OPEN", "SHORT_HOLD", "SHORT_TRIM",
+            "FLIP_WATCH",
         }
     )
 

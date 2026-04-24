@@ -32,6 +32,7 @@ data/*.db
 data/*.db-journal
 data/*.db-wal
 data/*.db-shm
+data/*.db.bak*
 
 # ---- Runtime logs (scripts/test_*.py via tee) ----
 logs_*.txt

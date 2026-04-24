@@ -65,16 +65,31 @@ function app() {
         },
 
         // Sprint 2.3 R4:data_freshness 可能是字符串 'green'/'yellow'/'red',
-        // 也可能是对象 {status, captured_at, age_seconds}。统一抽 status 字段。
+        // 也可能是对象 {status, captured_at, age_seconds}。统一抽 status 字段 + age。
         _freshStatus(v) {
             if (v == null) return null;
             if (typeof v === 'string') return v;
             if (typeof v === 'object') return v.status || null;
             return null;
         },
+        _freshAgeSec(v) {
+            if (v && typeof v === 'object' && typeof v.age_seconds === 'number') {
+                return v.age_seconds;
+            }
+            return null;
+        },
+        formatAge(sec) {
+            if (sec == null || !isFinite(sec)) return '';
+            if (sec < 60) return 'just now';
+            if (sec < 3600) return Math.floor(sec / 60) + 'min ago';
+            if (sec < 86400) return Math.floor(sec / 3600) + 'h ago';
+            return Math.floor(sec / 86400) + 'd ago';
+        },
         freshnessLabel(v) {
             const s = this._freshStatus(v);
-            return s || '—';
+            const age = this.formatAge(this._freshAgeSec(v));
+            if (!s) return '—';
+            return age ? `${s} · ${age}` : s;
         },
         freshnessBadgeClass(v) {
             const s = this._freshStatus(v);

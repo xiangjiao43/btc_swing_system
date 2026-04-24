@@ -157,9 +157,12 @@
     </section>
 
     <!-- ============================================================ -->
-    <!-- 🎯 区域 1:AI 策略建议                                       -->
+    <!-- 🎯 核心建议与高阶信号:区域 1(60% 左)+ 区域 3(40% 右)     -->
+    <!-- Sprint 2.3 R4:lg:grid-cols-5 · 3/2 分栏;手机端自然上下堆叠。-->
     <!-- ============================================================ -->
-    <section id="region-1" class="audit-card">
+    <div class="grid grid-cols-1 lg:grid-cols-5 gap-4 items-start">
+
+    <section id="region-1" class="audit-card lg:col-span-3">
       <header class="px-4 py-2.5 border-b border-slate-200 dark:border-slate-800">
         <h2 class="text-base font-semibold flex items-center gap-2">
           <span>🎯</span><span>AI 策略建议</span>
@@ -386,6 +389,73 @@
       </div>
     </section>
 
+    <!-- 右侧 40%:组合因子紧凑版(2 列 × 3 行)-->
+    <section id="region-3" class="audit-card lg:col-span-2">
+      <header class="px-4 py-2.5 border-b border-slate-200 dark:border-slate-800">
+        <h2 class="text-base font-semibold flex items-center gap-2">
+          <span>🔢</span><span>组合因子</span>
+          <span class="text-[11px] font-normal text-slate-500 ml-1">6 个</span>
+        </h2>
+        <p class="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+          高阶信号:每卡展示 "组成因子 + 影响层"。
+        </p>
+      </header>
+      <!-- 紧凑网格:2 × 3 -->
+      <div class="p-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+        <template x-for="c in compositeCards()" :key="c.card_id">
+          <article class="border border-slate-200 dark:border-slate-800 rounded-md
+                          p-2.5 space-y-1.5 min-w-0">
+            <!-- 标题行:名称 + 档位/值 + linked_layer -->
+            <header class="flex items-center justify-between gap-1">
+              <h4 class="text-[12.5px] font-semibold truncate"
+                  :title="c.name" x-text="c.name"></h4>
+              <div class="flex items-center gap-1 shrink-0">
+                <span class="text-[12.5px] font-mono font-bold tabular-nums"
+                      :class="directionClass(c.impact_direction)"
+                      x-text="formatFactorValue(c.current_value)"></span>
+                <span class="text-[9px] px-1 rounded bg-slate-100 dark:bg-slate-800
+                             text-slate-600 dark:text-slate-400"
+                      x-text="c.linked_layer"></span>
+              </div>
+            </header>
+
+            <!-- 细分割线 -->
+            <div class="border-t border-slate-100 dark:border-slate-800"></div>
+
+            <!-- 组成 4 项 -->
+            <ul class="space-y-0 text-[11px] leading-tight">
+              <template x-for="comp in (compositeComposition(c.card_id) || []).slice(0, 4)"
+                        :key="comp.factor_id">
+                <li class="flex items-start gap-1">
+                  <span class="text-slate-400 shrink-0">•</span>
+                  <span class="flex-1 truncate" :title="comp.name" x-text="comp.name"></span>
+                  <span class="font-mono tabular-nums text-slate-600 dark:text-slate-400 shrink-0"
+                        x-text="formatFactorValue(comp.value)"></span>
+                </li>
+              </template>
+              <li x-show="(compositeComposition(c.card_id) || []).length === 0"
+                  class="text-slate-400">组成明细未就绪</li>
+            </ul>
+
+            <!-- 细分割线 -->
+            <div class="border-t border-slate-100 dark:border-slate-800"></div>
+
+            <!-- 影响一行 -->
+            <div class="text-[10px] text-slate-500 dark:text-slate-400 leading-snug truncate"
+                 :title="compositeAffects(c.card_id) || c.strategy_impact || ''"
+                 x-text="'影响:' + (compositeAffects(c.card_id) || c.strategy_impact || '—')">
+            </div>
+          </article>
+        </template>
+        <div x-show="compositeCards().length === 0"
+             class="col-span-full text-[11px] text-slate-500 py-4 text-center">
+          暂无组合因子(冷启动期或 pipeline 失败)
+        </div>
+      </div>
+    </section>
+
+    </div> <!-- /grid 核心建议与高阶信号 -->
+
     <!-- ============================================================ -->
     <!-- 📊 区域 2:五层证据链(讲述式)                              -->
     <!-- ============================================================ -->
@@ -524,75 +594,6 @@
           </li>
         </template>
       </ul>
-    </section>
-
-    <!-- ============================================================ -->
-    <!-- 🔢 区域 3:组合因子(6 个,讲述式)                           -->
-    <!-- ============================================================ -->
-    <section id="region-3" class="audit-card">
-      <header class="px-4 py-2.5 border-b border-slate-200 dark:border-slate-800">
-        <h2 class="text-base font-semibold flex items-center gap-2">
-          <span>🔢</span><span>组合因子 · 6 个</span>
-        </h2>
-        <p class="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-          多个原始因子按规则合成的高阶信号。每个卡展示"由哪些因子组合 / 组合规则 / 当前值解读 / 影响哪一层"。
-        </p>
-      </header>
-      <!-- Sprint 2.3 R4:2 列 → 3 列。卡内 padding + gap + 文字压缩。 -->
-      <div class="p-3 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
-        <template x-for="c in compositeCards()" :key="c.card_id">
-          <article class="border border-slate-200 dark:border-slate-800 rounded-md p-2 space-y-1.5 min-w-0">
-            <header class="flex items-center justify-between gap-1">
-              <h4 class="text-[12px] font-semibold truncate" :title="c.name" x-text="c.name"></h4>
-              <div class="flex items-center gap-1 shrink-0">
-                <span class="text-[13px] font-mono font-bold tabular-nums"
-                      :class="directionClass(c.impact_direction)"
-                      x-text="formatFactorValue(c.current_value)"></span>
-                <span class="text-[9px] px-1 rounded bg-slate-100 dark:bg-slate-800
-                             text-slate-600 dark:text-slate-400"
-                      x-text="c.linked_layer"></span>
-              </div>
-            </header>
-
-            <!-- 组成 -->
-            <div>
-              <div class="stat-label mb-0.5">由哪些因子组合</div>
-              <ul class="space-y-0 text-[10.5px]">
-                <template x-for="comp in (compositeComposition(c.card_id) || [])" :key="comp.factor_id">
-                  <li class="flex items-start gap-1 leading-tight">
-                    <span class="text-slate-400 shrink-0">•</span>
-                    <span class="flex-1 truncate" :title="comp.name" x-text="comp.name"></span>
-                    <span class="font-mono tabular-nums text-slate-600 dark:text-slate-400 shrink-0"
-                          x-text="formatFactorValue(comp.value) + (comp.weight ? ' / w=' + comp.weight : '')"></span>
-                  </li>
-                </template>
-                <li x-show="(compositeComposition(c.card_id) || []).length === 0"
-                    class="text-[10.5px] text-slate-400">组成明细未就绪</li>
-              </ul>
-            </div>
-
-            <!-- 规则 / 当前值解读 / 影响哪一层 -->
-            <div class="text-[10.5px] space-y-0 leading-snug">
-              <div>
-                <span class="text-[9px] uppercase tracking-wider text-slate-500">规则</span>
-                <span class="ml-1" x-text="compositeRule(c.card_id) || '—'"></span>
-              </div>
-              <div>
-                <span class="text-[9px] uppercase tracking-wider text-slate-500">当前值</span>
-                <span class="ml-1" x-text="compositeInterpretation(c.card_id) || c.plain_interpretation || '—'"></span>
-              </div>
-              <div>
-                <span class="text-[9px] uppercase tracking-wider text-slate-500">影响</span>
-                <span class="ml-1" x-text="compositeAffects(c.card_id) || c.strategy_impact || '—'"></span>
-              </div>
-            </div>
-          </article>
-        </template>
-        <div x-show="compositeCards().length === 0"
-             class="col-span-full text-[11px] text-slate-500 py-4 text-center">
-          暂无组合因子(冷启动期或 pipeline 失败)
-        </div>
-      </div>
     </section>
 
     <!-- ============================================================ -->

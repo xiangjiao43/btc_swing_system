@@ -1,0 +1,46 @@
+# ============================================================
+# scheduler.yaml — APScheduler 任务配置(Sprint 1.15b)
+# ============================================================
+# 每个 job 声明:
+#   enabled:             true/false。关掉即不注册到 scheduler。
+#   interval:            '4h' / '1h' / '30m' 等 interval trigger;或
+#                        cron 字段(day, hour, minute)用 cron trigger。
+#   misfire_grace_time:  错过触发时间后仍允许补跑的秒数。
+#   coalesce:            多个错过的触发是否合并成一次。
+#   max_instances:       同一 job 并发上限(默认 1)。
+#
+# job 列表:
+#   pipeline_run         主 pipeline,每 4 小时
+#   data_collection      数据采集任务(骨架,默认 disabled)
+#   cleanup              过期数据清理(骨架,默认 disabled)
+# ============================================================
+
+timezone: 'UTC'
+
+jobs:
+  pipeline_run:
+    enabled: true
+    interval: '4h'
+    misfire_grace_time: 600        # 10 分钟
+    coalesce: true
+    max_instances: 1
+    description: 'Pipeline 主循环,每 4 小时执行一次 StrategyStateBuilder.run()'
+
+  data_collection:
+    enabled: false
+    interval: '1h'
+    misfire_grace_time: 300
+    coalesce: true
+    max_instances: 1
+    description: '数据采集(Binance / Glassnode / CoinGlass / macro / events);骨架默认关闭'
+
+  cleanup:
+    enabled: false
+    # 每天 UTC 03:00 跑一次
+    cron:
+      hour: 3
+      minute: 0
+    misfire_grace_time: 1800       # 30 分钟
+    coalesce: true
+    max_instances: 1
+    description: '过期降级日志 / 旧 history 清理;骨架默认关闭'

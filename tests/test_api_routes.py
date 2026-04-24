@@ -238,7 +238,7 @@ def test_data_summary(client: TestClient, db_path: Path):
     assert r.status_code == 200
     body = r.json()
     sources = {s["name"]: s for s in body["sources"]}
-    assert "strategy_state_history" in sources
-    assert sources["strategy_state_history"]["row_count"] == 1
-    assert sources["strategy_state_history"]["latest_timestamp_utc"] \
+    assert "strategy_runs" in sources
+    assert sources["strategy_runs"]["row_count"] == 1
+    assert sources["strategy_runs"]["latest_timestamp_utc"] \
         == "2026-04-24T10:00:00Z"

@@ -156,15 +156,16 @@ class KPICollector:
         cutoff = self._window_start(lookback_days)
         try:
             rows = self.conn.execute(
-                "SELECT run_timestamp_utc, run_id, run_trigger, "
-                "rules_version, ai_model_actual, state_json "
-                "FROM strategy_state_history "
-                "WHERE run_timestamp_utc >= ? "
-                "ORDER BY run_timestamp_utc ASC",
+                "SELECT reference_timestamp_utc AS run_timestamp_utc, "
+                "run_id, run_trigger, rules_version, ai_model_actual, "
+                "full_state_json AS state_json "
+                "FROM strategy_runs "
+                "WHERE reference_timestamp_utc >= ? "
+                "ORDER BY reference_timestamp_utc ASC",
                 (cutoff,),
             ).fetchall()
         except sqlite3.OperationalError as e:
-            logger.warning("strategy_state_history not readable: %s", e)
+            logger.warning("strategy_runs not readable: %s", e)
             return []
         out: list[dict[str, Any]] = []
         for r in rows:
@@ -182,15 +183,16 @@ class KPICollector:
         cutoff = self._window_start(lookback_days)
         try:
             rows = self.conn.execute(
-                "SELECT id, run_timestamp_utc, fallback_level, "
-                "triggered_by, details, created_at "
-                "FROM fallback_log "
-                "WHERE run_timestamp_utc >= ? "
-                "ORDER BY run_timestamp_utc ASC",
+                "SELECT id, triggered_at_utc AS run_timestamp_utc, "
+                "fallback_level, reason AS triggered_by, "
+                "resolution_note AS details, triggered_at_utc AS created_at "
+                "FROM fallback_events "
+                "WHERE triggered_at_utc >= ? "
+                "ORDER BY triggered_at_utc ASC",
                 (cutoff,),
             ).fetchall()
         except sqlite3.OperationalError as e:
-            logger.warning("fallback_log not readable: %s", e)
+            logger.warning("fallback_events not readable: %s", e)
             return []
         out: list[dict[str, Any]] = []
         for r in rows:

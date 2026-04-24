@@ -126,10 +126,10 @@ def _check_collector_streaks(
     for stage in collector_stages:
         triggered_by = f"pipeline.{stage}"
         row = conn.execute(
-            "SELECT COUNT(*) AS n, MIN(run_timestamp_utc) AS first_seen, "
-            "MAX(run_timestamp_utc) AS last_seen "
-            "FROM fallback_log "
-            "WHERE triggered_by = ? AND run_timestamp_utc >= ?",
+            "SELECT COUNT(*) AS n, MIN(triggered_at_utc) AS first_seen, "
+            "MAX(triggered_at_utc) AS last_seen "
+            "FROM fallback_events "
+            "WHERE reason = ? AND triggered_at_utc >= ?",
             (triggered_by, since_utc),
         ).fetchone()
         if not row:
@@ -165,13 +165,13 @@ def _check_collector_mass_failure(
     triggered_by_list = [f"pipeline.{s}" for s in collector_stages]
     rows = conn.execute(
         f"""
-        SELECT triggered_by, COUNT(*) AS n,
-               MIN(run_timestamp_utc) AS first_seen,
-               MAX(run_timestamp_utc) AS last_seen
-          FROM fallback_log
-         WHERE triggered_by IN ({placeholders})
-           AND run_timestamp_utc >= ?
-      GROUP BY triggered_by
+        SELECT reason AS triggered_by, COUNT(*) AS n,
+               MIN(triggered_at_utc) AS first_seen,
+               MAX(triggered_at_utc) AS last_seen
+          FROM fallback_events
+         WHERE reason IN ({placeholders})
+           AND triggered_at_utc >= ?
+      GROUP BY reason
         """,
         tuple(triggered_by_list) + (cutoff,),
     ).fetchall()
@@ -263,11 +263,13 @@ def check_alerts(
     since_dt = now - timedelta(hours=lookback_hours)
     since_iso = _iso(since_dt)
 
-    # strategy_state_history 最近 N 条
+    # strategy_runs 最近 N 条(Sprint 1.5c C4 对齐 §10.4)
     try:
         rows = conn.execute(
-            "SELECT run_timestamp_utc, state_json FROM strategy_state_history "
-            "WHERE run_timestamp_utc >= ? ORDER BY run_timestamp_utc ASC",
+            "SELECT reference_timestamp_utc AS run_timestamp_utc, "
+            "full_state_json AS state_json FROM strategy_runs "
+            "WHERE reference_timestamp_utc >= ? "
+            "ORDER BY reference_timestamp_utc ASC",
             (since_iso,),
         ).fetchall()
         state_rows: list[dict[str, Any]] = []

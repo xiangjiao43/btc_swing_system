@@ -11,15 +11,19 @@ router = APIRouter(prefix="/data", tags=["data"])
 
 
 _TABLES: tuple[tuple[str, str, str], ...] = (
-    # (display name, table, timestamp column)
-    ("btc_klines", "btc_klines", "timestamp"),
-    ("derivatives_snapshot", "derivatives_snapshot", "timestamp"),
-    ("onchain_snapshot", "onchain_snapshot", "timestamp"),
-    ("macro_snapshot", "macro_snapshot", "timestamp"),
+    # (display name, table, timestamp column) — Sprint 1.5c 对齐建模 §10.4
+    ("price_candles", "price_candles", "open_time_utc"),
+    ("derivatives_snapshots", "derivatives_snapshots", "captured_at_utc"),
+    ("onchain_metrics", "onchain_metrics", "captured_at_utc"),
+    ("macro_metrics", "macro_metrics", "captured_at_utc"),
     ("events_calendar", "events_calendar", "utc_trigger_time"),
-    ("strategy_state_history", "strategy_state_history", "run_timestamp_utc"),
-    ("fallback_log", "fallback_log", "run_timestamp_utc"),
-    ("run_metadata", "run_metadata", "run_timestamp_utc"),
+    ("strategy_runs", "strategy_runs", "reference_timestamp_utc"),
+    ("fallback_events", "fallback_events", "triggered_at_utc"),
+    ("lifecycles", "lifecycles", "entry_time_utc"),
+    ("alerts", "alerts", "raised_at_utc"),
+    ("kpi_snapshots", "kpi_snapshots", "captured_at_utc"),
+    ("evidence_card_history", "evidence_card_history", "captured_at_utc"),
+    ("review_reports", "review_reports", "generated_at_utc"),
 )
 
 

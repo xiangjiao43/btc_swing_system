@@ -130,7 +130,7 @@ def _seed_prior_state(conn, *, cycle_band: str = "late_bear",
 
 
 def _count_fallback_log(conn) -> int:
-    row = conn.execute("SELECT COUNT(*) AS n FROM fallback_log").fetchone()
+    row = conn.execute("SELECT COUNT(*) AS n FROM fallback_events").fetchone()
     return int(row["n"])
 
 
@@ -265,7 +265,7 @@ class TestAIDegradedLogged:
         assert cs["summary_text"] is None
         # FallbackLog 里应有 pipeline.ai_summary 记录
         rows = conn.execute(
-            "SELECT triggered_by FROM fallback_log"
+            "SELECT reason AS triggered_by FROM fallback_events"
         ).fetchall()
         triggers = [r["triggered_by"] for r in rows]
         assert any("ai_summary" in t for t in triggers)
@@ -316,8 +316,8 @@ class TestPersistenceRoundTrip:
             conn, ai_caller=_ai_ok(),
         ).run()
         row = conn.execute(
-            "SELECT state_json FROM strategy_state_history "
-            "WHERE run_timestamp_utc = ?",
+            "SELECT full_state_json AS state_json FROM strategy_runs "
+            "WHERE reference_timestamp_utc = ?",
             (result.run_timestamp_utc,),
         ).fetchone()
         parsed = json.loads(row["state_json"])
@@ -423,8 +423,10 @@ class TestFallbackLogDetailsShape:
         )
         conn.commit()
         row = conn.execute(
-            "SELECT * FROM fallback_log WHERE "
-            "triggered_by = 'pipeline.composite.truth_trend'"
+            "SELECT id, triggered_at_utc, fallback_level, "
+            "reason AS triggered_by, resolution_note AS details "
+            "FROM fallback_events WHERE reason = "
+            "'pipeline.composite.truth_trend'"
         ).fetchone()
         assert row is not None
         assert row["fallback_level"] == "level_1"

@@ -24,14 +24,20 @@ def list_fallback(
     try:
         if stage:
             rows = conn.execute(
-                "SELECT * FROM fallback_log WHERE triggered_by LIKE ? "
-                "ORDER BY run_timestamp_utc DESC LIMIT ?",
+                "SELECT id, triggered_at_utc AS run_timestamp_utc, "
+                "fallback_level, reason AS triggered_by, "
+                "resolution_note AS details, triggered_at_utc AS created_at "
+                "FROM fallback_events WHERE reason LIKE ? "
+                "ORDER BY triggered_at_utc DESC LIMIT ?",
                 (f"%{stage}%", limit),
             ).fetchall()
         else:
             rows = conn.execute(
-                "SELECT * FROM fallback_log "
-                "ORDER BY run_timestamp_utc DESC LIMIT ?",
+                "SELECT id, triggered_at_utc AS run_timestamp_utc, "
+                "fallback_level, reason AS triggered_by, "
+                "resolution_note AS details, triggered_at_utc AS created_at "
+                "FROM fallback_events "
+                "ORDER BY triggered_at_utc DESC LIMIT ?",
                 (limit,),
             ).fetchall()
     finally:

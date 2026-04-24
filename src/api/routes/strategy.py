@@ -58,12 +58,13 @@ def list_history(
     conn = ctx.conn_factory()
     try:
         total_row = conn.execute(
-            "SELECT COUNT(*) AS n FROM strategy_state_history"
+            "SELECT COUNT(*) AS n FROM strategy_runs"
         ).fetchone()
         total = int(total_row["n"]) if total_row else 0
         rows = conn.execute(
-            "SELECT * FROM strategy_state_history "
-            "ORDER BY run_timestamp_utc DESC LIMIT ? OFFSET ?",
+            "SELECT * FROM strategy_runs "
+            "ORDER BY reference_timestamp_utc DESC, generated_at_utc DESC "
+            "LIMIT ? OFFSET ?",
             (limit, offset),
         ).fetchall()
     finally:
@@ -75,7 +76,9 @@ def list_history(
     items: list[StrategyStateRow] = []
     for r in rows:
         d = dict(r)
-        d["state"] = json.loads(d.pop("state_json"))
+        d["state"] = json.loads(d.pop("full_state_json"))
+        d["run_timestamp_utc"] = d.get("reference_timestamp_utc") or d.get("generated_at_utc")
+        d.setdefault("created_at", d.get("generated_at_utc"))
         items.append(_row_to_model(d))
     return HistoryPage(total=total, limit=limit, offset=offset, items=items)
 
@@ -86,7 +89,7 @@ def get_one_history(request: Request, run_id: str) -> StrategyStateRow:
     conn = ctx.conn_factory()
     try:
         row = conn.execute(
-            "SELECT * FROM strategy_state_history WHERE run_id = ?",
+            "SELECT * FROM strategy_runs WHERE run_id = ?",
             (run_id,),
         ).fetchone()
     finally:
@@ -100,5 +103,7 @@ def get_one_history(request: Request, run_id: str) -> StrategyStateRow:
             detail=f"run_id {run_id} not found",
         )
     d = dict(row)
-    d["state"] = json.loads(d.pop("state_json"))
+    d["state"] = json.loads(d.pop("full_state_json"))
+    d["run_timestamp_utc"] = d.get("reference_timestamp_utc") or d.get("generated_at_utc")
+    d.setdefault("created_at", d.get("generated_at_utc"))
     return _row_to_model(d)

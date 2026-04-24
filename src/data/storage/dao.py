@@ -1,11 +1,18 @@
 """
 dao.py — Data Access Objects
 
-对 9 张表的 CRUD 统一封装。所有 DAO 方法:
-  - 第一个位置参数都是 sqlite3.Connection(便于事务 / 测试注入)
+Sprint 1.5c 对齐建模 §10.4 的 11 张表:
+  strategy_runs, lifecycles, evidence_card_history, review_reports, alerts,
+  fallback_events, kpi_snapshots, price_candles, derivatives_snapshots,
+  onchain_metrics, macro_metrics(+ events_calendar 仍保留)
+
+DAO 类名保持 Sprint 1 的命名(BTCKlinesDAO / StrategyStateDAO / 等),
+但内部 SQL 已切到新表名 + 新列名;dataclass 字段名暂时保留做向后兼容。
+
+所有 DAO 方法:
+  - 第一个位置参数都是 sqlite3.Connection
   - 只执行单个逻辑操作,不隐式 commit;调用方决定 commit 时机
-  - 所有参数与返回值带类型标注(Python 3.12 风格)
-  - 新增数据用 upsert 语义(INSERT … ON CONFLICT DO UPDATE)
+  - 新增数据用 upsert 语义
 """
 
 from __future__ import annotations
@@ -102,37 +109,48 @@ class EventRow:
 # BTC K 线
 # ============================================================
 
+_DEFAULT_SYMBOL: str = "BTCUSDT"
+
+
 class BTCKlinesDAO:
-    """btc_klines 表的 DAO。"""
+    """price_candles 表的 DAO(建模 §10.4,替代 Sprint 1 的 btc_klines)。
+
+    Sprint 1.5c:symbol 固定 'BTCUSDT',timestamp → open_time_utc,
+    volume_btc → volume;为了保持 Sprint 1 的 KlineRow 字段兼容,
+    upsert 时忽略 volume_usdt / fetched_at;读取时 volume 同时映射到
+    timestamp + volume_btc 别名供老代码沿用。
+    """
 
     @staticmethod
     def upsert_klines(conn: sqlite3.Connection, klines: list[KlineRow]) -> int:
-        """
-        批量 upsert K 线。重复 (timeframe, timestamp) 时覆盖 OHLCV + volume + fetched_at。
-
-        Returns:
-            受影响行数(insert + update 合计,由 sqlite3 rowcount 给出)。
-        """
         sql = """
-            INSERT INTO btc_klines
-                (timeframe, timestamp, open, high, low, close, volume_btc, volume_usdt, fetched_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(timeframe, timestamp) DO UPDATE SET
+            INSERT INTO price_candles
+                (symbol, timeframe, open_time_utc, open, high, low, close, volume)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(symbol, timeframe, open_time_utc) DO UPDATE SET
                 open = excluded.open,
                 high = excluded.high,
                 low = excluded.low,
                 close = excluded.close,
-                volume_btc = excluded.volume_btc,
-                volume_usdt = excluded.volume_usdt,
-                fetched_at = excluded.fetched_at
+                volume = excluded.volume
         """
         rows = [
-            (k.timeframe, k.timestamp, k.open, k.high, k.low, k.close,
-             k.volume_btc, k.volume_usdt, k.fetched_at)
+            (_DEFAULT_SYMBOL, k.timeframe, k.timestamp,
+             k.open, k.high, k.low, k.close, k.volume_btc)
             for k in klines
         ]
         cur = conn.executemany(sql, rows)
         return cur.rowcount
+
+    @staticmethod
+    def _map_row(r: dict[str, Any]) -> dict[str, Any]:
+        """把 price_candles 行映射回 Sprint 1 字段名,使老代码无感。"""
+        out = dict(r)
+        if "open_time_utc" in out and "timestamp" not in out:
+            out["timestamp"] = out["open_time_utc"]
+        if "volume" in out and "volume_btc" not in out:
+            out["volume_btc"] = out["volume"]
+        return out
 
     @staticmethod
     def get_klines(
@@ -142,49 +160,51 @@ class BTCKlinesDAO:
         end: Optional[str] = None,
         limit: Optional[int] = None,
     ) -> list[dict[str, Any]]:
-        """
-        按 timeframe + 时间区间查 K 线。
-        start / end 为 ISO 8601 UTC 字符串(闭区间);None 表示不限。
-        返回按 timestamp 升序。
-        """
-        clauses = ["timeframe = ?"]
-        params: list[Any] = [timeframe]
+        clauses = ["symbol = ?", "timeframe = ?"]
+        params: list[Any] = [_DEFAULT_SYMBOL, timeframe]
         if start is not None:
-            clauses.append("timestamp >= ?")
+            clauses.append("open_time_utc >= ?")
             params.append(start)
         if end is not None:
-            clauses.append("timestamp <= ?")
+            clauses.append("open_time_utc <= ?")
             params.append(end)
         sql = f"""
-            SELECT * FROM btc_klines
+            SELECT * FROM price_candles
             WHERE {' AND '.join(clauses)}
-            ORDER BY timestamp ASC
+            ORDER BY open_time_utc ASC
         """
         if limit is not None:
             sql += " LIMIT ?"
             params.append(limit)
-        return _rows_to_dicts(conn.execute(sql, params).fetchall())
+        rows = conn.execute(sql, params).fetchall()
+        return [BTCKlinesDAO._map_row(dict(r)) for r in rows]
 
     @staticmethod
     def get_latest_kline(
         conn: sqlite3.Connection, timeframe: TimeFrame
     ) -> Optional[dict[str, Any]]:
-        """返回最新一根 K 线,无数据时返回 None。"""
         row = conn.execute(
-            "SELECT * FROM btc_klines WHERE timeframe = ? "
-            "ORDER BY timestamp DESC LIMIT 1",
-            (timeframe,),
+            "SELECT * FROM price_candles "
+            "WHERE symbol = ? AND timeframe = ? "
+            "ORDER BY open_time_utc DESC LIMIT 1",
+            (_DEFAULT_SYMBOL, timeframe),
         ).fetchone()
-        return _row_to_dict(row)
+        if row is None:
+            return None
+        return BTCKlinesDAO._map_row(dict(row))
 
     @staticmethod
     def count(conn: sqlite3.Connection, timeframe: Optional[TimeFrame] = None) -> int:
         if timeframe is None:
-            row = conn.execute("SELECT COUNT(*) AS n FROM btc_klines").fetchone()
+            row = conn.execute(
+                "SELECT COUNT(*) AS n FROM price_candles WHERE symbol = ?",
+                (_DEFAULT_SYMBOL,),
+            ).fetchone()
         else:
             row = conn.execute(
-                "SELECT COUNT(*) AS n FROM btc_klines WHERE timeframe = ?",
-                (timeframe,),
+                "SELECT COUNT(*) AS n FROM price_candles "
+                "WHERE symbol = ? AND timeframe = ?",
+                (_DEFAULT_SYMBOL, timeframe),
             ).fetchone()
         return int(row["n"])
 
@@ -194,91 +214,101 @@ class BTCKlinesDAO:
         timeframe: TimeFrame,
         limit: int = 500,
     ) -> Any:
-        """
-        取最近 limit 根 K 线,返回 pd.DataFrame(index=DatetimeIndex UTC,
-        columns=open/high/low/close/volume_btc/volume_usdt)。Pipeline 专用。
-        """
+        """取最近 limit 根,返回 DataFrame(index=DatetimeIndex UTC,
+        columns=open/high/low/close/volume_btc)。Pipeline 专用。"""
         import pandas as pd
         rows = conn.execute(
-            "SELECT * FROM btc_klines WHERE timeframe = ? "
-            "ORDER BY timestamp DESC LIMIT ?",
-            (timeframe, limit),
+            "SELECT * FROM price_candles "
+            "WHERE symbol = ? AND timeframe = ? "
+            "ORDER BY open_time_utc DESC LIMIT ?",
+            (_DEFAULT_SYMBOL, timeframe, limit),
         ).fetchall()
         if not rows:
             return pd.DataFrame()
-        # 升序返回
-        data = [dict(r) for r in rows][::-1]
+        data = [BTCKlinesDAO._map_row(dict(r)) for r in rows][::-1]
         df = pd.DataFrame(data)
         df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
         df = df.set_index("timestamp")
-        # 只保留需要的列,order 稳定
-        cols = ["open", "high", "low", "close", "volume_btc", "volume_usdt"]
+        cols = ["open", "high", "low", "close", "volume_btc"]
         return df[[c for c in cols if c in df.columns]]
 
 
 # ============================================================
-# 衍生品 / 链上 / 宏观(长表共用模式)
+# 链上 / 宏观(§10.4 长表):onchain_metrics / macro_metrics
 # ============================================================
+# 统一字段:(metric_name, captured_at_utc, value, source)
+# 为了保持老代码无感,读取时把这些映射回 (timestamp, metric_value, source)。
+
 
 class _MetricLongTableDAO:
-    """
-    三个长表(derivatives_snapshot / onchain_snapshot / macro_snapshot)的共用逻辑。
-    子类指定 _table、_has_source。
-    """
+    """onchain_metrics / macro_metrics 共用逻辑(§10.4 长表)。"""
 
     _table: str = ""
     _has_source: bool = False
-
-    @classmethod
-    def _cols(cls) -> list[str]:
-        cols = ["timestamp", "metric_name", "metric_value"]
-        if cls._has_source:
-            cols.append("source")
-        cols.append("fetched_at")
-        return cols
+    _default_source: Optional[str] = None
 
     @classmethod
     def upsert_batch(cls, conn: sqlite3.Connection, rows: list[Any]) -> int:
-        cols = cls._cols()
-        placeholders = ", ".join(["?"] * len(cols))
-        col_list = ", ".join(cols)
-        updates = ", ".join(
-            f"{c} = excluded.{c}" for c in cols if c not in ("timestamp", "metric_name")
-        )
-        sql = f"""
-            INSERT INTO {cls._table} ({col_list})
-            VALUES ({placeholders})
-            ON CONFLICT(timestamp, metric_name) DO UPDATE SET {updates}
-        """
-        values = []
-        for r in rows:
-            d = asdict(r)
-            values.append(tuple(d[c] for c in cols))
+        # 新 schema:(metric_name, captured_at_utc, value, source)
+        if cls._has_source:
+            sql = f"""
+                INSERT INTO {cls._table}
+                    (metric_name, captured_at_utc, value, source)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(metric_name, captured_at_utc) DO UPDATE SET
+                    value = excluded.value,
+                    source = excluded.source
+            """
+            values = [
+                (r.metric_name, r.timestamp, r.metric_value,
+                 getattr(r, "source", cls._default_source))
+                for r in rows
+            ]
+        else:
+            sql = f"""
+                INSERT INTO {cls._table}
+                    (metric_name, captured_at_utc, value)
+                VALUES (?, ?, ?)
+                ON CONFLICT(metric_name, captured_at_utc) DO UPDATE SET
+                    value = excluded.value
+            """
+            values = [
+                (r.metric_name, r.timestamp, r.metric_value)
+                for r in rows
+            ]
         cur = conn.executemany(sql, values)
         return cur.rowcount
+
+    @classmethod
+    def _map_row(cls, r: dict[str, Any]) -> dict[str, Any]:
+        """把新字段映射回老代码期待的 timestamp / metric_value。"""
+        out = dict(r)
+        if "captured_at_utc" in out and "timestamp" not in out:
+            out["timestamp"] = out["captured_at_utc"]
+        if "value" in out and "metric_value" not in out:
+            out["metric_value"] = out["value"]
+        return out
 
     @classmethod
     def get_at(
         cls, conn: sqlite3.Connection, timestamp: str
     ) -> list[dict[str, Any]]:
-        """返回某时刻的所有指标。"""
         rows = conn.execute(
-            f"SELECT * FROM {cls._table} WHERE timestamp = ? ORDER BY metric_name",
+            f"SELECT * FROM {cls._table} WHERE captured_at_utc = ? ORDER BY metric_name",
             (timestamp,),
         ).fetchall()
-        return _rows_to_dicts(rows)
+        return [cls._map_row(dict(r)) for r in rows]
 
     @classmethod
     def get_latest(
         cls, conn: sqlite3.Connection, metric_name: str
     ) -> Optional[dict[str, Any]]:
-        """返回指定指标的最新值。"""
         row = conn.execute(
             f"SELECT * FROM {cls._table} WHERE metric_name = ? "
-            f"ORDER BY timestamp DESC LIMIT 1",
+            f"ORDER BY captured_at_utc DESC LIMIT 1",
             (metric_name,),
         ).fetchone()
-        return _row_to_dict(row)
+        return cls._map_row(dict(row)) if row else None
 
     @classmethod
     def get_series(
@@ -288,26 +318,25 @@ class _MetricLongTableDAO:
         start: Optional[str] = None,
         end: Optional[str] = None,
     ) -> list[dict[str, Any]]:
-        """返回指标的时间序列(升序)。"""
         clauses = ["metric_name = ?"]
         params: list[Any] = [metric_name]
         if start is not None:
-            clauses.append("timestamp >= ?")
+            clauses.append("captured_at_utc >= ?")
             params.append(start)
         if end is not None:
-            clauses.append("timestamp <= ?")
+            clauses.append("captured_at_utc <= ?")
             params.append(end)
         sql = (
             f"SELECT * FROM {cls._table} WHERE {' AND '.join(clauses)} "
-            f"ORDER BY timestamp ASC"
+            f"ORDER BY captured_at_utc ASC"
         )
-        return _rows_to_dicts(conn.execute(sql, params).fetchall())
+        rows = conn.execute(sql, params).fetchall()
+        return [cls._map_row(dict(r)) for r in rows]
 
     @classmethod
     def get_distinct_metric_names(
         cls, conn: sqlite3.Connection,
     ) -> list[str]:
-        """返回该表里出现过的所有 metric_name。"""
         rows = conn.execute(
             f"SELECT DISTINCT metric_name FROM {cls._table} ORDER BY metric_name"
         ).fetchall()
@@ -319,10 +348,6 @@ class _MetricLongTableDAO:
         conn: sqlite3.Connection,
         lookback_days: int = 180,
     ) -> dict[str, Any]:
-        """
-        返回 {metric_name: pd.Series}(index=DatetimeIndex UTC,升序)。
-        只包含最近 `lookback_days` 天的数据。Pipeline 专用。
-        """
         import pandas as pd
         from datetime import datetime, timedelta, timezone
         cutoff = (
@@ -340,22 +365,226 @@ class _MetricLongTableDAO:
         return out
 
 
-class DerivativesDAO(_MetricLongTableDAO):
-    """derivatives_snapshot 表。"""
-    _table = "derivatives_snapshot"
-    _has_source = False
-
-
 class OnchainDAO(_MetricLongTableDAO):
-    """onchain_snapshot 表。"""
-    _table = "onchain_snapshot"
+    _table = "onchain_metrics"
     _has_source = True
+    _default_source = "glassnode"
 
 
 class MacroDAO(_MetricLongTableDAO):
-    """macro_snapshot 表。"""
-    _table = "macro_snapshot"
+    _table = "macro_metrics"
     _has_source = True
+    _default_source = "yahoo_finance"
+
+
+# ============================================================
+# 衍生品(§10.4 宽表 derivatives_snapshots)
+# ============================================================
+# §10.4 规定宽表:每个 captured_at_utc 一行,主字段 funding_rate /
+# open_interest / long_short_ratio 为独立列,其他 metrics 入 full_data_json。
+# 为了保持 Sprint 1 的 DerivativeMetric 长式 API 可继续使用,我们:
+#  * upsert_batch:把同 timestamp 的多条 metric 聚合成 1 行宽表
+#  * get_series / get_latest / get_at:把宽表反向展开为长式 dict
+_DERIVATIVES_WIDE_COLUMNS: tuple[str, ...] = (
+    "funding_rate", "open_interest", "long_short_ratio",
+)
+
+_DERIVATIVES_LSR_ALIASES: tuple[str, ...] = (
+    "long_short_ratio", "long_short_ratio_top", "long_short_ratio_global",
+)
+
+
+class DerivativesDAO:
+    """derivatives_snapshots 表 DAO(建模 §10.4 宽表)。"""
+
+    @staticmethod
+    def upsert_batch(conn: sqlite3.Connection, rows: list[Any]) -> int:
+        """把 DerivativeMetric 长式行聚合成宽表 upsert。"""
+        # 按 timestamp 分桶
+        buckets: dict[str, dict[str, Any]] = {}
+        for r in rows:
+            ts = r.timestamp
+            name = r.metric_name
+            val = r.metric_value
+            b = buckets.setdefault(ts, {})
+            # 主字段名归一:long_short_ratio_*  →  long_short_ratio
+            if name in _DERIVATIVES_LSR_ALIASES:
+                b.setdefault("long_short_ratio", val)
+                b.setdefault("_extras", {})[name] = val
+            elif name in _DERIVATIVES_WIDE_COLUMNS:
+                b[name] = val
+            else:
+                b.setdefault("_extras", {})[name] = val
+
+        sql = """
+            INSERT INTO derivatives_snapshots
+                (captured_at_utc, funding_rate, open_interest,
+                 long_short_ratio, full_data_json)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(captured_at_utc) DO UPDATE SET
+                funding_rate = COALESCE(excluded.funding_rate, derivatives_snapshots.funding_rate),
+                open_interest = COALESCE(excluded.open_interest, derivatives_snapshots.open_interest),
+                long_short_ratio = COALESCE(excluded.long_short_ratio, derivatives_snapshots.long_short_ratio),
+                full_data_json = COALESCE(excluded.full_data_json, derivatives_snapshots.full_data_json)
+        """
+        values = []
+        for ts, b in buckets.items():
+            extras = b.get("_extras") or {}
+            full_data = json.dumps(extras, ensure_ascii=False) if extras else None
+            values.append((
+                ts,
+                b.get("funding_rate"),
+                b.get("open_interest"),
+                b.get("long_short_ratio"),
+                full_data,
+            ))
+        cur = conn.executemany(sql, values)
+        return cur.rowcount
+
+    @staticmethod
+    def _explode_row(row: dict[str, Any]) -> list[dict[str, Any]]:
+        """把宽表一行反向展开为长式 dict 列表(供 get_* 老调用)。"""
+        ts = row.get("captured_at_utc")
+        out: list[dict[str, Any]] = []
+        for col in _DERIVATIVES_WIDE_COLUMNS:
+            v = row.get(col)
+            if v is not None:
+                out.append({
+                    "timestamp": ts,
+                    "captured_at_utc": ts,
+                    "metric_name": col,
+                    "metric_value": v,
+                    "value": v,
+                })
+        extras_json = row.get("full_data_json")
+        if extras_json:
+            try:
+                extras = json.loads(extras_json)
+                for k, v in (extras or {}).items():
+                    if v is None:
+                        continue
+                    out.append({
+                        "timestamp": ts,
+                        "captured_at_utc": ts,
+                        "metric_name": k,
+                        "metric_value": v,
+                        "value": v,
+                    })
+            except (TypeError, ValueError):
+                pass
+        return out
+
+    @staticmethod
+    def get_at(
+        conn: sqlite3.Connection, timestamp: str,
+    ) -> list[dict[str, Any]]:
+        row = conn.execute(
+            "SELECT * FROM derivatives_snapshots WHERE captured_at_utc = ?",
+            (timestamp,),
+        ).fetchone()
+        if row is None:
+            return []
+        return DerivativesDAO._explode_row(dict(row))
+
+    @staticmethod
+    def get_latest(
+        conn: sqlite3.Connection, metric_name: str,
+    ) -> Optional[dict[str, Any]]:
+        rows = conn.execute(
+            "SELECT * FROM derivatives_snapshots "
+            "ORDER BY captured_at_utc DESC LIMIT 200",
+        ).fetchall()
+        for raw in rows:
+            exploded = DerivativesDAO._explode_row(dict(raw))
+            for e in exploded:
+                if e["metric_name"] == metric_name:
+                    return e
+        return None
+
+    @staticmethod
+    def get_series(
+        conn: sqlite3.Connection,
+        metric_name: str,
+        start: Optional[str] = None,
+        end: Optional[str] = None,
+    ) -> list[dict[str, Any]]:
+        clauses = []
+        params: list[Any] = []
+        if start is not None:
+            clauses.append("captured_at_utc >= ?")
+            params.append(start)
+        if end is not None:
+            clauses.append("captured_at_utc <= ?")
+            params.append(end)
+        where_clause = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        sql = (
+            f"SELECT * FROM derivatives_snapshots {where_clause} "
+            "ORDER BY captured_at_utc ASC"
+        )
+        rows = conn.execute(sql, params).fetchall()
+        out: list[dict[str, Any]] = []
+        for raw in rows:
+            for e in DerivativesDAO._explode_row(dict(raw)):
+                if e["metric_name"] == metric_name:
+                    out.append(e)
+        return out
+
+    @staticmethod
+    def get_distinct_metric_names(
+        conn: sqlite3.Connection,
+    ) -> list[str]:
+        names: set[str] = set()
+        rows = conn.execute(
+            "SELECT funding_rate, open_interest, long_short_ratio, full_data_json "
+            "FROM derivatives_snapshots"
+        ).fetchall()
+        for raw in rows:
+            d = dict(raw)
+            for col in _DERIVATIVES_WIDE_COLUMNS:
+                if d.get(col) is not None:
+                    names.add(col)
+            if d.get("full_data_json"):
+                try:
+                    extras = json.loads(d["full_data_json"])
+                    for k in (extras or {}).keys():
+                        names.add(k)
+                except (TypeError, ValueError):
+                    pass
+        return sorted(names)
+
+    @staticmethod
+    def get_all_metrics(
+        conn: sqlite3.Connection,
+        lookback_days: int = 180,
+    ) -> dict[str, Any]:
+        import pandas as pd
+        from datetime import datetime, timedelta, timezone
+        cutoff = (
+            datetime.now(timezone.utc) - timedelta(days=lookback_days)
+        ).strftime("%Y-%m-%dT%H:%M:%SZ")
+        rows = conn.execute(
+            "SELECT * FROM derivatives_snapshots "
+            "WHERE captured_at_utc >= ? ORDER BY captured_at_utc ASC",
+            (cutoff,),
+        ).fetchall()
+        series_map: dict[str, list[tuple[str, float]]] = {}
+        for raw in rows:
+            for e in DerivativesDAO._explode_row(dict(raw)):
+                val = e.get("value")
+                if val is None:
+                    continue
+                series_map.setdefault(e["metric_name"], []).append(
+                    (e["timestamp"], float(val)),
+                )
+        out: dict[str, Any] = {}
+        for name, pairs in series_map.items():
+            if not pairs:
+                continue
+            df = pd.DataFrame(pairs, columns=["timestamp", "metric_value"])
+            df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
+            df = df.set_index("timestamp").sort_index()
+            out[name] = df["metric_value"].astype(float)
+        return out
 
 
 # ============================================================
@@ -472,8 +701,32 @@ class EventsCalendarDAO:
 # StrategyState 历史归档
 # ============================================================
 
+def _map_strategy_run_to_legacy(row: dict[str, Any]) -> dict[str, Any]:
+    """把 strategy_runs 新 schema 映射回 Sprint 1 老 schema 字段,避免调用方大改。
+
+    老字段                       ← 新 schema 字段
+    run_timestamp_utc            ← reference_timestamp_utc(失败回退 generated_at_utc)
+    state_json(已解析为 state)  ← full_state_json
+    created_at                   ← generated_at_utc
+    其他 run_id / run_trigger / rules_version / ai_model_actual 直接沿用。
+    """
+    d = dict(row)
+    raw_json = d.pop("full_state_json", None) or d.pop("state_json", None)
+    d["state"] = json.loads(raw_json) if raw_json else {}
+    if "run_timestamp_utc" not in d:
+        d["run_timestamp_utc"] = (
+            d.get("reference_timestamp_utc") or d.get("generated_at_utc")
+        )
+    d.setdefault("created_at", d.get("generated_at_utc"))
+    return d
+
+
 class StrategyStateDAO:
-    """strategy_state_history 表 DAO。"""
+    """strategy_runs 表 DAO(建模 §10.4,替代 Sprint 1 的 strategy_state_history)。
+
+    API 保持不变(insert_state / get_state / get_latest_state / ...),
+    但 SQL 内部操作的是 strategy_runs 表;v1.2 新字段从 state dict 抽取。
+    """
 
     @staticmethod
     def insert_state(
@@ -485,25 +738,70 @@ class StrategyStateDAO:
         ai_model_actual: Optional[str],
         state: dict[str, Any],
     ) -> int:
-        """插入一条 StrategyState。state 是 12 业务块 dict,会被 json.dumps。"""
+        """插入一条 strategy_run。run_timestamp_utc 保留为参数名
+        (对齐老调用);内部写入 reference_timestamp_utc + generated_at_utc。"""
+        evidence = state.get("evidence_reports") or {}
+        composite = state.get("composite_factors") or {}
+        sm = state.get("state_machine") or {}
+        observation = state.get("observation") or {}
+        cold_start = state.get("cold_start") or {}
+        pipeline_meta = state.get("pipeline_meta") or {}
+        adjudicator = state.get("adjudicator") or {}
+
+        l2 = evidence.get("layer_2") or {}
+        market_snapshot = state.get("market_snapshot") or {}
+
+        action_state = sm.get("current_state") or "FLAT"
+        stance = l2.get("stance")
+        btc_price_usd = market_snapshot.get("btc_price_usd")
+        state_transitioned = 0 if sm.get("stable_in_state") else 1
+        fallback_level = pipeline_meta.get("fallback_level")
+        strategy_flavor = (state.get("meta") or {}).get("strategy_flavor", "swing")
+        observation_category = observation.get("observation_category")
+        cold_start_flag = 1 if cold_start.get("warming_up") else 0
+
+        generated_at_utc = state.get("generated_at_utc") or _utc_now_iso()
+        generated_at_bjt = state.get("generated_at_bjt") or generated_at_utc
+
         sql = """
-            INSERT INTO strategy_state_history
-                (run_timestamp_utc, run_id, run_trigger, rules_version,
-                 ai_model_actual, state_json, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(run_timestamp_utc) DO UPDATE SET
-                run_id = excluded.run_id,
+            INSERT INTO strategy_runs
+                (run_id, generated_at_utc, generated_at_bjt,
+                 reference_timestamp_utc, previous_run_id,
+                 action_state, stance, btc_price_usd,
+                 state_transitioned, run_trigger, run_mode,
+                 fallback_level, system_version, rules_version,
+                 strategy_flavor, observation_category,
+                 cold_start, ai_model_actual, full_state_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(run_id) DO UPDATE SET
+                generated_at_utc = excluded.generated_at_utc,
+                generated_at_bjt = excluded.generated_at_bjt,
+                reference_timestamp_utc = excluded.reference_timestamp_utc,
+                action_state = excluded.action_state,
+                stance = excluded.stance,
+                btc_price_usd = excluded.btc_price_usd,
+                state_transitioned = excluded.state_transitioned,
                 run_trigger = excluded.run_trigger,
+                fallback_level = excluded.fallback_level,
                 rules_version = excluded.rules_version,
+                strategy_flavor = excluded.strategy_flavor,
+                observation_category = excluded.observation_category,
+                cold_start = excluded.cold_start,
                 ai_model_actual = excluded.ai_model_actual,
-                state_json = excluded.state_json,
-                created_at = excluded.created_at
+                full_state_json = excluded.full_state_json
         """
         cur = conn.execute(
             sql,
-            (run_timestamp_utc, run_id, run_trigger, rules_version,
-             ai_model_actual, json.dumps(state, ensure_ascii=False),
-             _utc_now_iso()),
+            (
+                run_id, generated_at_utc, generated_at_bjt,
+                run_timestamp_utc, None,
+                action_state, stance, btc_price_usd,
+                state_transitioned, run_trigger, None,
+                fallback_level, None, rules_version,
+                strategy_flavor, observation_category,
+                cold_start_flag, ai_model_actual,
+                json.dumps(state, ensure_ascii=False),
+            ),
         )
         return cur.rowcount
 
@@ -511,53 +809,44 @@ class StrategyStateDAO:
     def get_state(
         conn: sqlite3.Connection, run_timestamp_utc: str
     ) -> Optional[dict[str, Any]]:
-        """获取一次运行的 StrategyState(state_json 自动解析为 dict)。"""
+        """根据 reference_timestamp_utc(或 run_id)获取一条 strategy_run。"""
         row = conn.execute(
-            "SELECT * FROM strategy_state_history WHERE run_timestamp_utc = ?",
+            "SELECT * FROM strategy_runs WHERE reference_timestamp_utc = ? "
+            "ORDER BY generated_at_utc DESC LIMIT 1",
             (run_timestamp_utc,),
         ).fetchone()
         if row is None:
             return None
-        d = dict(row)
-        d["state"] = json.loads(d.pop("state_json"))
-        return d
+        return _map_strategy_run_to_legacy(dict(row))
 
     @staticmethod
     def get_latest_state(
         conn: sqlite3.Connection,
     ) -> Optional[dict[str, Any]]:
         row = conn.execute(
-            "SELECT * FROM strategy_state_history "
-            "ORDER BY run_timestamp_utc DESC LIMIT 1"
+            "SELECT * FROM strategy_runs "
+            "ORDER BY reference_timestamp_utc DESC, generated_at_utc DESC LIMIT 1"
         ).fetchone()
         if row is None:
             return None
-        d = dict(row)
-        d["state"] = json.loads(d.pop("state_json"))
-        return d
+        return _map_strategy_run_to_legacy(dict(row))
 
     @staticmethod
     def get_recent_states(
         conn: sqlite3.Connection, limit: int = 5
     ) -> list[dict[str, Any]]:
-        """获取最近 N 次运行的 StrategyState;用于 AI 输入的 recent_runs 浓缩。"""
         rows = conn.execute(
-            "SELECT * FROM strategy_state_history "
-            "ORDER BY run_timestamp_utc DESC LIMIT ?",
+            "SELECT * FROM strategy_runs "
+            "ORDER BY reference_timestamp_utc DESC, generated_at_utc DESC LIMIT ?",
             (limit,),
         ).fetchall()
-        result = []
-        for r in rows:
-            d = dict(r)
-            d["state"] = json.loads(d.pop("state_json"))
-            result.append(d)
-        return result
+        return [_map_strategy_run_to_legacy(dict(r)) for r in rows]
 
     @staticmethod
     def get_count(conn: sqlite3.Connection) -> int:
-        """历史 StrategyState 条数,用于 cold_start 判定。"""
+        """历史 run 条数,用于 cold_start 判定。"""
         row = conn.execute(
-            "SELECT COUNT(*) AS n FROM strategy_state_history"
+            "SELECT COUNT(*) AS n FROM strategy_runs"
         ).fetchone()
         return int(row["n"])
 
@@ -566,61 +855,48 @@ class StrategyStateDAO:
         conn: sqlite3.Connection,
         state_names: list[str],
     ) -> Optional[dict[str, Any]]:
-        """
-        返回最近一条 state_machine.current_state ∈ state_names 的记录。
-        无命中返回 None。Sprint 1.13 用于 post_execution_cooldown 计算
-        "距最近一次 active_* 执行多少分钟"。
-
-        state_json 里字段路径:
-          $.state_machine.current_state
-        """
+        """返回最近一条 action_state ∈ state_names 的 run。"""
         if not state_names:
             return None
         placeholders = ",".join(["?"] * len(state_names))
-        sql = f"""
-            SELECT * FROM strategy_state_history
-            WHERE json_extract(state_json, '$.state_machine.current_state')
-                  IN ({placeholders})
-            ORDER BY run_timestamp_utc DESC
-            LIMIT 1
-        """
-        try:
-            row = conn.execute(sql, tuple(state_names)).fetchone()
-        except sqlite3.OperationalError:
-            return None
+        sql = (
+            f"SELECT * FROM strategy_runs WHERE action_state IN ({placeholders}) "
+            f"ORDER BY reference_timestamp_utc DESC LIMIT 1"
+        )
+        row = conn.execute(sql, tuple(state_names)).fetchone()
         if row is None:
             return None
-        d = dict(row)
-        d["state"] = json.loads(d.pop("state_json"))
-        return d
+        return _map_strategy_run_to_legacy(dict(row))
 
     @staticmethod
     def get_latest_non_unclear_cycle(
         conn: sqlite3.Connection,
     ) -> Optional[str]:
-        """
-        倒序扫描 strategy_state_history,找到最近一条 cycle_position.band ≠ 'unclear'
-        的 band 值(例如 'accumulation' / 'distribution' / 'peak' / 'bottom' 等)。
-        无命中时返回 None。Pipeline 用来给 CyclePosition 提供"上次稳定判定"。
-        """
+        """倒序扫 strategy_runs,从 full_state_json 提取 cycle_position。"""
         sql = """
-            SELECT json_extract(state_json, '$.composite_factors.cycle_position.band') AS band
-            FROM strategy_state_history
-            WHERE json_extract(state_json, '$.composite_factors.cycle_position.band')
-                  IS NOT NULL
-              AND json_extract(state_json, '$.composite_factors.cycle_position.band')
-                  != 'unclear'
-            ORDER BY run_timestamp_utc DESC
+            SELECT COALESCE(
+                json_extract(full_state_json, '$.composite_factors.cycle_position.cycle_position'),
+                json_extract(full_state_json, '$.composite_factors.cycle_position.band')
+            ) AS cp
+            FROM strategy_runs
+            WHERE COALESCE(
+                json_extract(full_state_json, '$.composite_factors.cycle_position.cycle_position'),
+                json_extract(full_state_json, '$.composite_factors.cycle_position.band')
+            ) IS NOT NULL
+              AND COALESCE(
+                json_extract(full_state_json, '$.composite_factors.cycle_position.cycle_position'),
+                json_extract(full_state_json, '$.composite_factors.cycle_position.band')
+            ) != 'unclear'
+            ORDER BY reference_timestamp_utc DESC
             LIMIT 1
         """
         try:
             row = conn.execute(sql).fetchone()
         except sqlite3.OperationalError:
-            # 兼容 json_extract 不可用的极端场景(理论上 SQLite 3.38+ 均支持)
             return None
         if row is None:
             return None
-        return row["band"]
+        return row["cp"]
 
 
 # ============================================================
@@ -628,7 +904,7 @@ class StrategyStateDAO:
 # ============================================================
 
 class ReviewReportsDAO:
-    """review_reports 表 DAO。"""
+    """review_reports 表 DAO(§10.4:PK=review_id,v1.2 新增 rules_version_at_review)。"""
 
     @staticmethod
     def insert_report(
@@ -637,21 +913,32 @@ class ReviewReportsDAO:
         lifecycle_id: str,
         outcome_type: Optional[str],
         report: dict[str, Any],
+        *,
+        review_id: Optional[str] = None,
+        rules_version_at_review: Optional[str] = None,
     ) -> int:
+        """插入一条复盘。review_id 可选(缺省用 lifecycle_id + reference 时间戳拼)。
+        run_timestamp_utc 保留为参数名,写入 generated_at_utc。
+        """
+        if review_id is None:
+            review_id = f"{lifecycle_id}_{run_timestamp_utc}"
         sql = """
             INSERT INTO review_reports
-                (run_timestamp_utc, lifecycle_id, outcome_type, report_json, created_at)
-            VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT(run_timestamp_utc) DO UPDATE SET
+                (review_id, lifecycle_id, generated_at_utc, outcome_type,
+                 rules_version_at_review, full_report_json)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(review_id) DO UPDATE SET
                 lifecycle_id = excluded.lifecycle_id,
+                generated_at_utc = excluded.generated_at_utc,
                 outcome_type = excluded.outcome_type,
-                report_json = excluded.report_json,
-                created_at = excluded.created_at
+                rules_version_at_review = excluded.rules_version_at_review,
+                full_report_json = excluded.full_report_json
         """
         cur = conn.execute(
             sql,
-            (run_timestamp_utc, lifecycle_id, outcome_type,
-             json.dumps(report, ensure_ascii=False), _utc_now_iso()),
+            (review_id, lifecycle_id, run_timestamp_utc, outcome_type,
+             rules_version_at_review,
+             json.dumps(report, ensure_ascii=False)),
         )
         return cur.rowcount
 
@@ -661,13 +948,16 @@ class ReviewReportsDAO:
     ) -> list[dict[str, Any]]:
         rows = conn.execute(
             "SELECT * FROM review_reports WHERE lifecycle_id = ? "
-            "ORDER BY run_timestamp_utc ASC",
+            "ORDER BY generated_at_utc ASC",
             (lifecycle_id,),
         ).fetchall()
         result = []
         for r in rows:
             d = dict(r)
-            d["report"] = json.loads(d.pop("report_json"))
+            raw = d.pop("full_report_json", None)
+            d["report"] = json.loads(raw) if raw else {}
+            # 向后兼容:老代码读 run_timestamp_utc
+            d["run_timestamp_utc"] = d.get("generated_at_utc")
             result.append(d)
         return result
 
@@ -677,7 +967,13 @@ class ReviewReportsDAO:
 # ============================================================
 
 class FallbackLogDAO:
-    """fallback_log 表 DAO。"""
+    """fallback_events 表 DAO(§10.4,替代 fallback_log)。
+
+    字段映射(对老调用保持 API 兼容):
+      run_timestamp_utc  →  triggered_at_utc
+      triggered_by       →  reason(字符串,形如 'pipeline.<stage>')
+      details(JSON)     →  resolution_note(JSON 字符串)
+    """
 
     @staticmethod
     def insert_event(
@@ -689,11 +985,10 @@ class FallbackLogDAO:
     ) -> int:
         details_json = json.dumps(details, ensure_ascii=False) if details else None
         cur = conn.execute(
-            "INSERT INTO fallback_log "
-            "(run_timestamp_utc, fallback_level, triggered_by, details, created_at) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (run_timestamp_utc, fallback_level, triggered_by, details_json,
-             _utc_now_iso()),
+            "INSERT INTO fallback_events "
+            "(triggered_at_utc, fallback_level, reason, resolution_note) "
+            "VALUES (?, ?, ?, ?)",
+            (run_timestamp_utc, fallback_level, triggered_by, details_json),
         )
         return cur.rowcount
 
@@ -703,10 +998,9 @@ class FallbackLogDAO:
         fallback_level: FallbackLevel,
         since_utc: str,
     ) -> int:
-        """自 since_utc 起,某档 Fallback 触发次数;M33 auto_upgrade 判定用。"""
         row = conn.execute(
-            "SELECT COUNT(*) AS n FROM fallback_log "
-            "WHERE fallback_level = ? AND run_timestamp_utc >= ?",
+            "SELECT COUNT(*) AS n FROM fallback_events "
+            "WHERE fallback_level = ? AND triggered_at_utc >= ?",
             (fallback_level, since_utc),
         ).fetchone()
         return int(row["n"])
@@ -749,15 +1043,11 @@ class FallbackLogDAO:
         conn: sqlite3.Connection,
         run_timestamp_utc: str,
     ) -> int:
-        """
-        从 run_timestamp_utc 倒序扫 fallback_log,统计连续 level_1 的次数。
-        碰到非 level_1 或无记录即停止。用于 "Level 1 连续触发 ≥ 5 次升级"。
-        """
         count = 0
         rows = conn.execute(
-            "SELECT fallback_level FROM fallback_log "
-            "WHERE run_timestamp_utc <= ? "
-            "ORDER BY run_timestamp_utc DESC",
+            "SELECT fallback_level FROM fallback_events "
+            "WHERE triggered_at_utc <= ? "
+            "ORDER BY triggered_at_utc DESC",
             (run_timestamp_utc,),
         ).fetchall()
         for r in rows:
@@ -777,23 +1067,18 @@ class FallbackLogDAO:
         since_utc: str,
         limit: int = 10,
     ) -> list[dict[str, Any]]:
-        """
-        返回 [{'stage': ..., 'count': n, 'level_1': n1, 'level_2': n2,
-        'level_3': n3, 'first_seen': ..., 'last_seen': ...}, ...],
-        按 count 降序。供 alerts / KPI 查询使用。
-        """
         rows = conn.execute(
             """
-            SELECT triggered_by,
+            SELECT reason AS triggered_by,
                    COUNT(*) AS cnt,
                    SUM(CASE WHEN fallback_level='level_1' THEN 1 ELSE 0 END) AS c1,
                    SUM(CASE WHEN fallback_level='level_2' THEN 1 ELSE 0 END) AS c2,
                    SUM(CASE WHEN fallback_level='level_3' THEN 1 ELSE 0 END) AS c3,
-                   MIN(run_timestamp_utc) AS first_seen,
-                   MAX(run_timestamp_utc) AS last_seen
-              FROM fallback_log
-             WHERE run_timestamp_utc >= ?
-          GROUP BY triggered_by
+                   MIN(triggered_at_utc) AS first_seen,
+                   MAX(triggered_at_utc) AS last_seen
+              FROM fallback_events
+             WHERE triggered_at_utc >= ?
+          GROUP BY reason
           ORDER BY cnt DESC
              LIMIT ?
             """,
@@ -822,18 +1107,17 @@ class FallbackLogDAO:
         since_utc: str,
         fallback_level: Optional[FallbackLevel] = None,
     ) -> int:
-        """自 since_utc 起,某 triggered_by (可选限定 level) 的次数。"""
         if fallback_level is None:
             row = conn.execute(
-                "SELECT COUNT(*) AS n FROM fallback_log "
-                "WHERE triggered_by = ? AND run_timestamp_utc >= ?",
+                "SELECT COUNT(*) AS n FROM fallback_events "
+                "WHERE reason = ? AND triggered_at_utc >= ?",
                 (triggered_by, since_utc),
             ).fetchone()
         else:
             row = conn.execute(
-                "SELECT COUNT(*) AS n FROM fallback_log "
-                "WHERE triggered_by = ? AND fallback_level = ? "
-                "AND run_timestamp_utc >= ?",
+                "SELECT COUNT(*) AS n FROM fallback_events "
+                "WHERE reason = ? AND fallback_level = ? "
+                "AND triggered_at_utc >= ?",
                 (triggered_by, fallback_level, since_utc),
             ).fetchone()
         return int(row["n"]) if row else 0
@@ -924,11 +1208,15 @@ class FallbackLogDAO:
 
 
 # ============================================================
-# 运行元数据
+# 运行元数据(Sprint 1.5c:run_metadata 表已删除,信息折入 strategy_runs)
 # ============================================================
+# RunMetadataDAO 保留为空壳(兼容老调用),start_run / finish_run 变成 no-op。
+# 真正的运行元数据通过 strategy_runs 的 run_trigger / fallback_level / stance
+# 等字段表达。pipeline 失败还会写一条 fallback_events。
+
 
 class RunMetadataDAO:
-    """run_metadata 表 DAO。"""
+    """已废弃(Sprint 1.5c 对齐建模 §10.4)。保留 no-op 方法以兼容老调用。"""
 
     @staticmethod
     def start_run(
@@ -937,13 +1225,7 @@ class RunMetadataDAO:
         run_timestamp_utc: str,
         run_trigger: str,
     ) -> int:
-        cur = conn.execute(
-            "INSERT INTO run_metadata "
-            "(run_id, run_timestamp_utc, run_trigger, status, started_at) "
-            "VALUES (?, ?, ?, 'started', ?)",
-            (run_id, run_timestamp_utc, run_trigger, _utc_now_iso()),
-        )
-        return cur.rowcount
+        return 0
 
     @staticmethod
     def finish_run(
@@ -952,20 +1234,14 @@ class RunMetadataDAO:
         status: RunStatus,
         notes: Optional[str] = None,
     ) -> int:
-        cur = conn.execute(
-            "UPDATE run_metadata SET "
-            "status = ?, finished_at = ?, notes = COALESCE(?, notes) "
-            "WHERE run_id = ?",
-            (status, _utc_now_iso(), notes, run_id),
-        )
-        return cur.rowcount
+        return 0
 
     @staticmethod
     def get_run(
         conn: sqlite3.Connection, run_id: str
     ) -> Optional[dict[str, Any]]:
         row = conn.execute(
-            "SELECT * FROM run_metadata WHERE run_id = ?", (run_id,)
+            "SELECT * FROM strategy_runs WHERE run_id = ?", (run_id,)
         ).fetchone()
         return _row_to_dict(row)
 
@@ -974,8 +1250,8 @@ class RunMetadataDAO:
         conn: sqlite3.Connection, limit: int = 10
     ) -> list[dict[str, Any]]:
         rows = conn.execute(
-            "SELECT * FROM run_metadata "
-            "ORDER BY run_timestamp_utc DESC LIMIT ?",
+            "SELECT * FROM strategy_runs "
+            "ORDER BY generated_at_utc DESC LIMIT ?",
             (limit,),
         ).fetchall()
         return _rows_to_dicts(rows)

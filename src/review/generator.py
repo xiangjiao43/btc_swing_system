@@ -140,8 +140,10 @@ class ReviewReportGenerator:
         cutoff = _iso(self._now - timedelta(days=lookback_days))
         try:
             rows = self.conn.execute(
-                "SELECT run_timestamp_utc, state_json FROM strategy_state_history "
-                "WHERE run_timestamp_utc >= ? ORDER BY run_timestamp_utc ASC",
+                "SELECT reference_timestamp_utc AS run_timestamp_utc, "
+                "full_state_json AS state_json FROM strategy_runs "
+                "WHERE reference_timestamp_utc >= ? "
+                "ORDER BY reference_timestamp_utc ASC",
                 (cutoff,),
             ).fetchall()
         except sqlite3.OperationalError:

@@ -1,0 +1,353 @@
+"""
+scripts/backfill_data.py — Sprint 1.5c C7:冷启动 180 天历史回填(建模 §8.10)。
+
+v0.1 启动前必须运行一次,把过去 180 天的行情 / 衍生品 / 链上 / 宏观数据
+拉齐入库(price_candles / derivatives_snapshots / onchain_metrics /
+macro_metrics)。之后 scheduled 运行只增量拉最近一根。
+
+用法:
+    uv run python scripts/backfill_data.py              # 默认 180 天
+    uv run python scripts/backfill_data.py --days 30    # 快速测试
+    uv run python scripts/backfill_data.py --dry-run    # 不写库
+    uv run python scripts/backfill_data.py --only price # 只回填价格
+
+幂等:upsert 语义,已有数据会被覆盖但不重复计数。已有记录跳过则只记 count。
+日志:每个数据源的 fetched / upserted / elapsed_ms。
+"""
+
+from __future__ import annotations
+
+import argparse
+import logging
+import sys
+import time
+from pathlib import Path
+from typing import Any, Callable, Optional
+
+# 保证直接 python 运行也能 import src.*
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from src import _env_loader  # noqa: F401
+from src.data.storage.connection import get_connection, init_db
+from src.data.storage.dao import (
+    BTCKlinesDAO, DerivativeMetric, DerivativesDAO,
+    KlineRow, MacroDAO, MacroMetric, OnchainDAO, OnchainMetric,
+)
+
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
+logger = logging.getLogger("backfill")
+
+
+_ALL_CATEGORIES: tuple[str, ...] = (
+    "price", "derivatives", "onchain", "macro",
+)
+
+
+# ============================================================
+# Helpers
+# ============================================================
+
+def _elapsed_ms(start: float) -> int:
+    return int((time.time() - start) * 1000)
+
+
+def _log_stage(name: str, fetched: int, upserted: int, ms: int) -> None:
+    logger.info(
+        "[%s] fetched=%d upserted=%d elapsed_ms=%d",
+        name, fetched, upserted, ms,
+    )
+
+
+def _safe(fn: Callable[[], Any], name: str) -> Any:
+    """包装调用,失败只打日志不抛。"""
+    try:
+        return fn()
+    except Exception as e:
+        logger.error("[%s] failed: %s: %s", name, type(e).__name__, e)
+        return None
+
+
+# ============================================================
+# Price candles(CoinGlass)
+# ============================================================
+
+def backfill_price(conn, *, days: int, dry_run: bool) -> None:
+    from src.data.collectors.coinglass import CoinglassCollector
+    try:
+        coll = CoinglassCollector()
+    except Exception as e:
+        logger.error("[price] cannot init CoinGlass collector: %s", e)
+        return
+
+    # 每个 timeframe 拉 N 根:days → bars
+    horizons: dict[str, int] = {
+        "1h": min(days * 24, 2000),
+        "4h": min(days * 6, 1000),
+        "1d": days,
+        "1w": max(1, days // 7),
+    }
+    for tf, limit in horizons.items():
+        start = time.time()
+        rows = _safe(
+            lambda: coll.fetch_klines(interval=tf, limit=limit),
+            f"price.{tf}",
+        ) or []
+        if not rows:
+            _log_stage(f"price.{tf}", 0, 0, _elapsed_ms(start))
+            continue
+        klines = [
+            KlineRow(
+                timeframe=tf, timestamp=r["timestamp"],
+                open=r["open"], high=r["high"], low=r["low"], close=r["close"],
+                volume_btc=r.get("volume", 0.0) or 0.0,
+            )
+            for r in rows
+        ]
+        if dry_run:
+            _log_stage(f"price.{tf}", len(rows), 0, _elapsed_ms(start))
+            continue
+        upserted = BTCKlinesDAO.upsert_klines(conn, klines)
+        conn.commit()
+        _log_stage(f"price.{tf}", len(rows), upserted, _elapsed_ms(start))
+
+
+# ============================================================
+# Derivatives(CoinGlass)
+# ============================================================
+
+def backfill_derivatives(conn, *, days: int, dry_run: bool) -> None:
+    from src.data.collectors.coinglass import CoinglassCollector
+    try:
+        coll = CoinglassCollector()
+    except Exception as e:
+        logger.error("[derivatives] cannot init CoinGlass collector: %s", e)
+        return
+
+    # 用 1d 粒度,够 180 天
+    limit = min(days, 500)
+    fetches: dict[str, Callable[[], list[dict[str, Any]]]] = {
+        "funding_rate": lambda: coll.fetch_funding_rate_history(
+            interval="1d", limit=limit,
+        ),
+        "long_short_ratio": lambda: coll.fetch_long_short_ratio_history(
+            interval="1d", limit=limit,
+        ),
+    }
+    for name, fn in fetches.items():
+        start = time.time()
+        rows = _safe(fn, f"derivatives.{name}") or []
+        if not rows:
+            _log_stage(f"derivatives.{name}", 0, 0, _elapsed_ms(start))
+            continue
+        metrics = [
+            DerivativeMetric(
+                timestamp=r["timestamp"],
+                metric_name=r.get("metric_name", name),
+                metric_value=r.get("metric_value"),
+            )
+            for r in rows
+        ]
+        if dry_run:
+            _log_stage(f"derivatives.{name}", len(rows), 0, _elapsed_ms(start))
+            continue
+        upserted = DerivativesDAO.upsert_batch(conn, metrics)
+        conn.commit()
+        _log_stage(f"derivatives.{name}", len(rows), upserted, _elapsed_ms(start))
+
+
+# ============================================================
+# Onchain(Glassnode)
+# ============================================================
+
+def backfill_onchain(conn, *, days: int, dry_run: bool) -> None:
+    from datetime import datetime, timedelta, timezone
+    try:
+        from src.data.collectors.glassnode import GlassnodeCollector
+        coll = GlassnodeCollector()
+    except Exception as e:
+        logger.error("[onchain] cannot init Glassnode collector: %s", e)
+        return
+
+    until = datetime.now(timezone.utc)
+    since = until - timedelta(days=days)
+
+    fetches: dict[str, Callable[[], list[dict[str, Any]]]] = {
+        "mvrv_z_score": lambda: coll.fetch_mvrv_z_score(since=since, until=until),
+        "nupl": lambda: coll.fetch_nupl(since=since, until=until),
+        "lth_supply": lambda: coll.fetch_lth_supply(since=since, until=until),
+        "exchange_net_flow": lambda: coll.fetch_exchange_net_flow(
+            since=since, until=until,
+        ),
+        "mvrv": lambda: coll.fetch_mvrv(since=since, until=until),
+        "realized_price": lambda: coll.fetch_realized_price(since=since, until=until),
+        "sopr": lambda: coll.fetch_sopr(since=since, until=until),
+        "reserve_risk": lambda: coll.fetch_reserve_risk(since=since, until=until),
+        "puell_multiple": lambda: coll.fetch_puell_multiple(since=since, until=until),
+    }
+    for name, fn in fetches.items():
+        start = time.time()
+        rows = _safe(fn, f"onchain.{name}") or []
+        if not rows:
+            _log_stage(f"onchain.{name}", 0, 0, _elapsed_ms(start))
+            continue
+        metrics = [
+            OnchainMetric(
+                timestamp=r["timestamp"],
+                metric_name=r.get("metric_name", name),
+                metric_value=r.get("metric_value"),
+                source=r.get("source", "glassnode_primary"),
+            )
+            for r in rows
+        ]
+        if dry_run:
+            _log_stage(f"onchain.{name}", len(rows), 0, _elapsed_ms(start))
+            continue
+        upserted = OnchainDAO.upsert_batch(conn, metrics)
+        conn.commit()
+        _log_stage(f"onchain.{name}", len(rows), upserted, _elapsed_ms(start))
+
+
+# ============================================================
+# Macro(Yahoo Finance + FRED)
+# ============================================================
+
+def backfill_macro(conn, *, days: int, dry_run: bool) -> None:
+    try:
+        from src.data.collectors.yahoo_finance import YahooFinanceCollector
+        yf = YahooFinanceCollector()
+    except Exception as e:
+        logger.error("[macro.yahoo] cannot init collector: %s", e)
+        yf = None
+
+    try:
+        from src.data.collectors.fred import FREDCollector
+        fred = FREDCollector()
+    except Exception as e:
+        logger.error("[macro.fred] cannot init collector: %s", e)
+        fred = None
+
+    period = f"{max(1, days)}d"
+    yahoo_series: dict[str, Callable[[], list[dict[str, Any]]]] = {}
+    if yf is not None:
+        # YahooFinanceCollector API 通常是 fetch_series(symbol, period, interval)
+        # 不同实现函数名不同,这里只用 hasattr 判断逐个尝试
+        for sym, metric in (
+            ("DX-Y.NYB", "dxy"),
+            ("^GSPC", "sp500"),
+            ("^IXIC", "nasdaq"),
+            ("^VIX", "vix"),
+            ("^TNX", "us10y"),
+        ):
+            if hasattr(yf, "fetch_series"):
+                yahoo_series[metric] = lambda s=sym, m=metric: yf.fetch_series(
+                    symbol=s, period=period, interval="1d",
+                )
+            elif hasattr(yf, "fetch"):
+                yahoo_series[metric] = lambda s=sym: yf.fetch(
+                    symbol=s, period=period,
+                )
+    for name, fn in yahoo_series.items():
+        start = time.time()
+        rows = _safe(fn, f"macro.{name}") or []
+        if not rows:
+            _log_stage(f"macro.{name}", 0, 0, _elapsed_ms(start))
+            continue
+        metrics = [
+            MacroMetric(
+                timestamp=r["timestamp"],
+                metric_name=r.get("metric_name", name),
+                metric_value=r.get("metric_value"),
+                source="yahoo_finance",
+            )
+            for r in rows
+        ]
+        if dry_run:
+            _log_stage(f"macro.{name}", len(rows), 0, _elapsed_ms(start))
+            continue
+        upserted = MacroDAO.upsert_batch(conn, metrics)
+        conn.commit()
+        _log_stage(f"macro.{name}", len(rows), upserted, _elapsed_ms(start))
+
+    # FRED: 基础几个
+    if fred is not None:
+        fred_series = {}
+        if hasattr(fred, "fetch_series"):
+            for fid, metric in (
+                ("DFF", "fed_funds_rate"),
+                ("DGS10", "us10y_fred"),
+                ("VIXCLS", "vix_fred"),
+            ):
+                fred_series[metric] = lambda i=fid, m=metric: fred.fetch_series(
+                    series_id=i, limit=days,
+                )
+        for name, fn in fred_series.items():
+            start = time.time()
+            rows = _safe(fn, f"macro.fred.{name}") or []
+            if not rows:
+                _log_stage(f"macro.fred.{name}", 0, 0, _elapsed_ms(start))
+                continue
+            metrics = [
+                MacroMetric(
+                    timestamp=r["timestamp"],
+                    metric_name=r.get("metric_name", name),
+                    metric_value=r.get("metric_value"),
+                    source="fred",
+                )
+                for r in rows
+            ]
+            if dry_run:
+                _log_stage(f"macro.fred.{name}", len(rows), 0, _elapsed_ms(start))
+                continue
+            upserted = MacroDAO.upsert_batch(conn, metrics)
+            conn.commit()
+            _log_stage(f"macro.fred.{name}", len(rows), upserted, _elapsed_ms(start))
+
+
+# ============================================================
+# main
+# ============================================================
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Backfill historical data")
+    parser.add_argument("--days", type=int, default=180,
+                        help="Number of days to back-fill (default 180)")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="Fetch but don't write DB")
+    parser.add_argument("--only", choices=_ALL_CATEGORIES + ("all",),
+                        default="all",
+                        help="Limit to a single category")
+    args = parser.parse_args()
+
+    init_db(verbose=False)
+    conn = get_connection()
+    try:
+        total_start = time.time()
+        logger.info("=== Backfill starting (days=%d, dry_run=%s, only=%s) ===",
+                    args.days, args.dry_run, args.only)
+
+        if args.only in ("all", "price"):
+            backfill_price(conn, days=args.days, dry_run=args.dry_run)
+        if args.only in ("all", "derivatives"):
+            backfill_derivatives(conn, days=args.days, dry_run=args.dry_run)
+        if args.only in ("all", "onchain"):
+            backfill_onchain(conn, days=args.days, dry_run=args.dry_run)
+        if args.only in ("all", "macro"):
+            backfill_macro(conn, days=args.days, dry_run=args.dry_run)
+
+        logger.info("=== Backfill done (total %d ms) ===",
+                    _elapsed_ms(total_start))
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

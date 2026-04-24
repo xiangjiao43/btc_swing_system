@@ -127,6 +127,7 @@ class StrategyStateBuilder:
         "layer_5",
         "observation_classifier",
         "ai_summary",
+        "factor_cards",
         "adjudicator",
         "state_machine",
         "persist_state",
@@ -417,6 +418,16 @@ class StrategyStateBuilder:
             failures=failures,
             degraded_stages=degraded_stages,
         )
+
+        # === Stage: Factor Cards(Sprint 2.2 新增,在 adjudicator 之前)===
+        # 生成全量数据因子卡;adjudicator 要用 available_card_ids 做 evidence_ref
+        # 白名单(§6.4 #4)。
+        factor_cards = self._run_stage(
+            "factor_cards", failures, degraded_stages, run_ts_utc,
+            lambda: self._emit_factor_cards(state, context),
+            default=[],
+        )
+        state["factor_cards"] = factor_cards
 
         # === Stage: Adjudicator ===
         # Sprint 1.5a:adjudicator 先跑,State Machine 在其后,读取 adjudicator
@@ -737,6 +748,15 @@ class StrategyStateBuilder:
     # ------------------------------------------------------------------
     # State Machine stage
     # ------------------------------------------------------------------
+
+    def _emit_factor_cards(
+        self,
+        state: dict[str, Any],
+        context: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Sprint 2.2:从 composite + collectors 产出 factor cards 列表。"""
+        from ..strategy.factor_card_emitter import emit_factor_cards
+        return emit_factor_cards(state, context)
 
     def _read_previous_state_machine_state(self) -> str:
         """Sprint 1.5c C1:从 DB 最近一条 strategy_state 读 state_machine.current_state。

@@ -26,11 +26,14 @@ from src.ai.summary import (
 def _mock_response(text: str = "段 1...\n\n段 2...\n\n段 3...",
                    model: str = "claude-sonnet-4-5-20250929",
                    tokens_in: int = 120, tokens_out: int = 180) -> MagicMock:
+    """anthropic 风格:resp.content = [TextBlock(text=...)],
+       resp.usage.input_tokens / output_tokens,resp.model。"""
     r = MagicMock()
     r.model = model
-    r.choices = [MagicMock()]
-    r.choices[0].message.content = text
-    r.usage = MagicMock(prompt_tokens=tokens_in, completion_tokens=tokens_out)
+    block = MagicMock()
+    block.text = text
+    r.content = [block]
+    r.usage = MagicMock(input_tokens=tokens_in, output_tokens=tokens_out)
     return r
 
 
@@ -119,7 +122,7 @@ class TestCallAISuccess:
     def test_normal_response(self):
         """Mock 正常响应 → status='success',summary_text 返回。"""
         mock_client = MagicMock()
-        mock_client.chat.completions.create.return_value = _mock_response(
+        mock_client.messages.create.return_value = _mock_response(
             text="段 1:市场上升。\n\n段 2:A 级机会。\n\n段 3:宏观顺风。",
             tokens_in=150, tokens_out=90,
         )
@@ -133,28 +136,30 @@ class TestCallAISuccess:
         assert result["model_used"] == "claude-sonnet-4-5-20250929"
         assert result["error"] is None
         # 验证 create 被调了(仅 1 次,无重试)
-        assert mock_client.chat.completions.create.call_count == 1
+        assert mock_client.messages.create.call_count == 1
 
     def test_model_override(self):
         mock_client = MagicMock()
-        mock_client.chat.completions.create.return_value = _mock_response(
+        mock_client.messages.create.return_value = _mock_response(
             model="claude-sonnet-4-5-20250929"
         )
         call_ai_summary(_mock_evidence(), openai_client=mock_client,
                         model="my-custom-model")
         # 验证 model 参数传入
-        call_args = mock_client.chat.completions.create.call_args
+        call_args = mock_client.messages.create.call_args
         assert call_args.kwargs["model"] == "my-custom-model"
 
     def test_system_prompt_override(self):
+        """Sprint 1.5c C6:anthropic 把 system 作为独立 kwarg,不再是 messages[0]。"""
         mock_client = MagicMock()
-        mock_client.chat.completions.create.return_value = _mock_response()
+        mock_client.messages.create.return_value = _mock_response()
         call_ai_summary(_mock_evidence(), system_prompt="custom sys",
                         openai_client=mock_client)
-        call_args = mock_client.chat.completions.create.call_args
+        call_args = mock_client.messages.create.call_args
+        # anthropic 风格:system 是 kwarg,messages[0] 才是 user
+        assert call_args.kwargs["system"] == "custom sys"
         messages = call_args.kwargs["messages"]
-        assert messages[0]["role"] == "system"
-        assert messages[0]["content"] == "custom sys"
+        assert messages[0]["role"] == "user"
 
 
 # ==================================================================
@@ -166,7 +171,7 @@ class TestCallAIRetry:
     def test_all_attempts_fail_returns_degraded(self, mock_sleep):
         """3 次尝试全部失败 → status='degraded_error',不抛异常。"""
         mock_client = MagicMock()
-        mock_client.chat.completions.create.side_effect = RuntimeError("API fail")
+        mock_client.messages.create.side_effect = RuntimeError("API fail")
 
         result = call_ai_summary(_mock_evidence(), openai_client=mock_client)
 
@@ -174,20 +179,20 @@ class TestCallAIRetry:
         assert result["summary_text"] is None
         assert "API fail" in (result["error"] or "")
         # 共 3 次尝试(初始 + 2 次重试)
-        assert mock_client.chat.completions.create.call_count == 3
+        assert mock_client.messages.create.call_count == 3
 
     @patch("src.ai.summary.time.sleep", return_value=None)
     def test_first_fails_second_succeeds(self, mock_sleep):
         """第一次失败,第二次成功 → status='success',调用 2 次。"""
         mock_client = MagicMock()
-        mock_client.chat.completions.create.side_effect = [
+        mock_client.messages.create.side_effect = [
             RuntimeError("flaky"),
             _mock_response(text="recovered segment"),
         ]
         result = call_ai_summary(_mock_evidence(), openai_client=mock_client)
         assert result["status"] == "success"
         assert "recovered" in result["summary_text"]
-        assert mock_client.chat.completions.create.call_count == 2
+        assert mock_client.messages.create.call_count == 2
 
     @patch("src.ai.summary.time.sleep", return_value=None)
     def test_timeout_marked_as_degraded_timeout(self, mock_sleep):
@@ -197,7 +202,7 @@ class TestCallAIRetry:
             pass
 
         mock_client = MagicMock()
-        mock_client.chat.completions.create.side_effect = APITimeoutError("timed out")
+        mock_client.messages.create.side_effect = APITimeoutError("timed out")
 
         result = call_ai_summary(_mock_evidence(), openai_client=mock_client)
         assert result["status"] == "degraded_timeout"

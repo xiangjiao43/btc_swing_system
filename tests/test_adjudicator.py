@@ -37,6 +37,9 @@ def _mock_ai_response(
     tokens_in: int = 120,
     tokens_out: int = 80,
 ) -> MagicMock:
+    """anthropic messages.create 返回形态:
+       resp.content = [TextBlock(text=...)], resp.usage.input_tokens,
+       resp.usage.output_tokens, resp.model。"""
     if raw_override is not None:
         content = raw_override
     else:
@@ -49,10 +52,21 @@ def _mock_ai_response(
         }, ensure_ascii=False)
     r = MagicMock()
     r.model = model
-    r.choices = [MagicMock()]
-    r.choices[0].message.content = content
-    r.usage = MagicMock(prompt_tokens=tokens_in, completion_tokens=tokens_out)
+    # anthropic content block
+    block = MagicMock()
+    block.text = content
+    r.content = [block]
+    # anthropic usage
+    r.usage = MagicMock(input_tokens=tokens_in, output_tokens=tokens_out)
     return r
+
+
+def _attach_ai(client: MagicMock, response=None, side_effect=None) -> None:
+    """把 mock response / side_effect 挂到 client.messages.create(anthropic 路径)。"""
+    if side_effect is not None:
+        client.messages.create.side_effect = side_effect
+    else:
+        client.messages.create.return_value = response
 
 
 def _state(
@@ -138,7 +152,7 @@ class TestHardConstraints:
         out = adj.decide(state)
         assert out["action"] == "watch"
         assert out["status"] == "success"
-        client.chat.completions.create.assert_not_called()
+        client.messages.create.assert_not_called()
 
     def test_l3_protective_with_long_position_reduces(self):
         client = MagicMock()
@@ -150,7 +164,7 @@ class TestHardConstraints:
         out = adj.decide(state)
         assert out["action"] == "reduce_long"
         assert out["direction"] == "long"
-        client.chat.completions.create.assert_not_called()
+        client.messages.create.assert_not_called()
 
     def test_l4_cap_zero_forces_watch(self):
         client = MagicMock()
@@ -159,7 +173,7 @@ class TestHardConstraints:
                        l3_grade="A", sm_state="FLAT")
         out = adj.decide(state)
         assert out["action"] == "watch"
-        client.chat.completions.create.assert_not_called()
+        client.messages.create.assert_not_called()
 
     def test_protection_state_forces_pause(self):
         client = MagicMock()
@@ -167,7 +181,7 @@ class TestHardConstraints:
         state = _state(sm_state="PROTECTION")
         out = adj.decide(state)
         assert out["action"] == "pause"
-        client.chat.completions.create.assert_not_called()
+        client.messages.create.assert_not_called()
 
     def test_l5_extreme_event_forces_pause(self):
         client = MagicMock()
@@ -175,7 +189,7 @@ class TestHardConstraints:
         state = _state(l5_extreme_event=True, sm_state="FLAT")
         out = adj.decide(state)
         assert out["action"] == "pause"
-        client.chat.completions.create.assert_not_called()
+        client.messages.create.assert_not_called()
 
     def test_cold_start_forces_watch_even_with_grade_A(self):
         client = MagicMock()
@@ -186,7 +200,7 @@ class TestHardConstraints:
         )
         out = adj.decide(state)
         assert out["action"] == "watch"
-        client.chat.completions.create.assert_not_called()
+        client.messages.create.assert_not_called()
 
     def test_hold_only_forces_hold(self):
         client = MagicMock()
@@ -194,7 +208,7 @@ class TestHardConstraints:
         state = _state(l3_permission="hold_only", l3_grade="A")
         out = adj.decide(state)
         assert out["action"] == "hold"
-        client.chat.completions.create.assert_not_called()
+        client.messages.create.assert_not_called()
 
     def test_fallback_level_2_forces_watch(self):
         client = MagicMock()
@@ -205,7 +219,7 @@ class TestHardConstraints:
         )
         out = adj.decide(state)
         assert out["action"] == "watch"
-        client.chat.completions.create.assert_not_called()
+        client.messages.create.assert_not_called()
 
     def test_fallback_level_3_forces_watch(self):
         client = MagicMock()
@@ -216,7 +230,7 @@ class TestHardConstraints:
         )
         out = adj.decide(state)
         assert out["action"] == "watch"
-        client.chat.completions.create.assert_not_called()
+        client.messages.create.assert_not_called()
 
     def test_post_protection_reassess_forces_hold(self):
         client = MagicMock()
@@ -227,7 +241,7 @@ class TestHardConstraints:
         )
         out = adj.decide(state)
         assert out["action"] == "hold"
-        client.chat.completions.create.assert_not_called()
+        client.messages.create.assert_not_called()
 
 
 # ==================================================================
@@ -238,7 +252,7 @@ class TestAIPath:
     def test_flat_with_grade_A_bullish_calls_ai(self):
         """FLAT + grade A + bullish + can_open → AI 路径(建议进 LONG_PLANNED)"""
         client = MagicMock()
-        client.chat.completions.create.return_value = _mock_ai_response(
+        client.messages.create.return_value = _mock_ai_response(
             action="open_long", direction="long", confidence=0.72,
         )
         adj = AIAdjudicator(openai_client=client)
@@ -249,11 +263,11 @@ class TestAIPath:
         out = adj.decide(state)
         assert out["action"] == "open_long"
         assert out["status"] == "success"
-        client.chat.completions.create.assert_called_once()
+        client.messages.create.assert_called_once()
 
     def test_flat_with_grade_B_bearish_calls_ai(self):
         client = MagicMock()
-        client.chat.completions.create.return_value = _mock_ai_response(
+        client.messages.create.return_value = _mock_ai_response(
             action="open_short", direction="short", confidence=0.6,
         )
         adj = AIAdjudicator(openai_client=client)
@@ -266,7 +280,7 @@ class TestAIPath:
 
     def test_long_hold_calls_ai_for_hold_or_reduce(self):
         client = MagicMock()
-        client.chat.completions.create.return_value = _mock_ai_response(
+        client.messages.create.return_value = _mock_ai_response(
             action="hold", direction=None, confidence=0.7,
         )
         adj = AIAdjudicator(openai_client=client)
@@ -280,7 +294,7 @@ class TestAIPath:
 
     def test_ai_invalid_json_retries_then_degrades(self):
         client = MagicMock()
-        client.chat.completions.create.side_effect = [
+        client.messages.create.side_effect = [
             _mock_ai_response(raw_override="this is not JSON at all"),
             _mock_ai_response(raw_override="still garbage, no braces here"),
         ]
@@ -293,12 +307,12 @@ class TestAIPath:
         assert out["status"] == "degraded_structured"
         assert out["action"] == "watch"
         assert "ai_parse_failed" in out["notes"]
-        assert client.chat.completions.create.call_count == 2
+        assert client.messages.create.call_count == 2
 
     def test_ai_violating_hard_constraint_gets_overridden(self):
         """FLAT + bullish,AI 返回 open_short → override。"""
         client = MagicMock()
-        client.chat.completions.create.return_value = _mock_ai_response(
+        client.messages.create.return_value = _mock_ai_response(
             action="open_short", direction="short", confidence=0.8,
         )
         adj = AIAdjudicator(openai_client=client)
@@ -312,7 +326,7 @@ class TestAIPath:
 
     def test_evidence_gaps_include_macro_incomplete(self):
         client = MagicMock()
-        client.chat.completions.create.return_value = _mock_ai_response(
+        client.messages.create.return_value = _mock_ai_response(
             action="open_long", direction="long", confidence=0.65,
             evidence_gaps=[],
         )
@@ -344,7 +358,7 @@ class TestRulePathNeutral:
         out = adj.decide(state)
         assert out["action"] == "watch"
         assert out["status"] == "success"
-        client.chat.completions.create.assert_not_called()
+        client.messages.create.assert_not_called()
 
     def test_flip_watch_cooling_with_grade_none_rule_path(self):
         """FLIP_WATCH + grade=none(还没到反手门槛)→ 规则 watch。"""
@@ -355,7 +369,7 @@ class TestRulePathNeutral:
         )
         out = adj.decide(state)
         assert out["action"] == "watch"
-        client.chat.completions.create.assert_not_called()
+        client.messages.create.assert_not_called()
 
 
 # ==================================================================
@@ -365,7 +379,7 @@ class TestRulePathNeutral:
 class TestOutputShape:
     def test_output_has_all_required_fields(self):
         client = MagicMock()
-        client.chat.completions.create.return_value = _mock_ai_response()
+        client.messages.create.return_value = _mock_ai_response()
         adj = AIAdjudicator(openai_client=client)
         state = _state()
         out = adj.decide(state)

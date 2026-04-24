@@ -29,10 +29,12 @@ import os
 import time
 from typing import Any, Optional
 
-try:
-    from openai import OpenAI
-except ImportError:  # pragma: no cover
-    OpenAI = None  # type: ignore[assignment]
+# Sprint 1.5c C6:改用 anthropic SDK(建模 §10.1)
+from .client import (
+    build_anthropic_client, extract_text as _client_extract_text,
+    extract_usage as _client_extract_usage,
+    extract_model as _client_extract_model,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -280,12 +282,11 @@ class AIAdjudicator:
         ):
             start_ts = time.time()
             try:
-                resp = client.chat.completions.create(
+                # Sprint 1.5c C6:anthropic messages.create 是唯一路径
+                resp = client.messages.create(
                     model=model,
-                    messages=[
-                        {"role": "system", "content": _SYSTEM_PROMPT},
-                        {"role": "user", "content": user_prompt},
-                    ],
+                    system=_SYSTEM_PROMPT,
+                    messages=[{"role": "user", "content": user_prompt}],
                     max_tokens=_MAX_TOKENS,
                     temperature=temperature,
                 )
@@ -316,7 +317,7 @@ class AIAdjudicator:
                 ai_output=parsed,
                 facts=facts,
                 constraints=constraints,
-                model_used=getattr(resp, "model", model),
+                model_used=_client_extract_model(resp, model),
                 tokens_in=total_tokens_in,
                 tokens_out=total_tokens_out,
                 latency_ms=total_latency_ms,
@@ -423,21 +424,10 @@ class AIAdjudicator:
         )
 
     def _get_client(self) -> Any:
+        """Sprint 1.5c C6:统一走 anthropic SDK;测试注入的 mock 依然支持。"""
         if self._openai_client is not None:
             return self._openai_client
-        if OpenAI is None:
-            return None
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            return None
-        base_url = os.getenv("OPENAI_API_BASE")
-        try:
-            return OpenAI(
-                base_url=base_url, api_key=api_key, timeout=_DEFAULT_TIMEOUT_SEC,
-            )
-        except Exception as e:  # pragma: no cover
-            logger.warning("build OpenAI client failed: %s", e)
-            return None
+        return build_anthropic_client(timeout=_DEFAULT_TIMEOUT_SEC)
 
 
 # ============================================================
@@ -744,6 +734,19 @@ def _parse_json_loose(text: Optional[str]) -> Optional[dict[str, Any]]:
 
 
 def _extract_text(resp: Any) -> Optional[str]:
+    """同时兼容 anthropic(resp.content[0].text)和 openai(resp.choices[0].message.content)
+    的响应形态,供 Sprint 1.5c 切换 SDK 后的双路径使用。"""
+    # anthropic 风格优先
+    try:
+        content = getattr(resp, "content", None)
+        if content:
+            # anthropic 真实响应:content=[TextBlock(text=...)]
+            if hasattr(content[0], "text"):
+                return str(content[0].text)
+            # mock 测试里 content[0].text 可能返回 Mock;若 resp.choices 存在再降级
+    except (AttributeError, IndexError, TypeError):
+        pass
+    # openai 老风格(MagicMock 测试)
     try:
         return str(resp.choices[0].message.content)
     except (AttributeError, IndexError):
@@ -751,8 +754,29 @@ def _extract_text(resp: Any) -> Optional[str]:
 
 
 def _usage(resp: Any, key: str) -> int:
+    """兼容 anthropic(input_tokens / output_tokens)和 openai
+    (prompt_tokens / completion_tokens)。"""
     try:
-        return int(getattr(resp.usage, key, 0))
+        usage = getattr(resp, "usage", None)
+        if usage is None:
+            return 0
+        # 优先按传入 key 精确取
+        val = getattr(usage, key, None)
+        if val is not None:
+            try:
+                return int(val)
+            except (TypeError, ValueError):
+                pass
+        # 别名:prompt_tokens ↔ input_tokens;completion_tokens ↔ output_tokens
+        if key in ("prompt_tokens", "input_tokens"):
+            alt = getattr(usage, "input_tokens", None) or \
+                  getattr(usage, "prompt_tokens", None)
+            return int(alt or 0)
+        if key in ("completion_tokens", "output_tokens"):
+            alt = getattr(usage, "output_tokens", None) or \
+                  getattr(usage, "completion_tokens", None)
+            return int(alt or 0)
+        return 0
     except Exception:
         return 0
 

@@ -214,20 +214,12 @@ class ReviewReportGenerator:
 # ============================================================
 
 def _default_ai_narrative(kpi: dict[str, Any]) -> Optional[str]:
-    try:
-        from openai import OpenAI
-    except ImportError:
+    # Sprint 1.5c C6:切换到 anthropic SDK
+    from ..ai.client import build_anthropic_client, effective_model, extract_text
+    client = build_anthropic_client(timeout=30.0)
+    if client is None:
         return None
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        return None
-    base_url = os.getenv("OPENAI_API_BASE")
-    model = (
-        os.getenv("OPENAI_REVIEW_MODEL")
-        or os.getenv("OPENAI_MODEL")
-        or "claude-sonnet-4-5-20250929"
-    )
-    client = OpenAI(base_url=base_url, api_key=api_key, timeout=30.0)
+    model = effective_model(os.getenv("OPENAI_REVIEW_MODEL"))
 
     exe = kpi.get("execution") or {}
     dec = kpi.get("decision") or {}
@@ -259,16 +251,14 @@ def _default_ai_narrative(kpi: dict[str, Any]) -> Optional[str]:
         + "\n请给出 3-5 句中性观察。"
     )
     try:
-        resp = client.chat.completions.create(
+        resp = client.messages.create(
             model=model,
-            messages=[
-                {"role": "system", "content": sys_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
+            system=sys_prompt,
+            messages=[{"role": "user", "content": user_prompt}],
             temperature=0.3,
             max_tokens=400,
         )
-        return str(resp.choices[0].message.content).strip() or None
+        return extract_text(resp).strip() or None
     except Exception as e:
         logger.warning("default ai narrative failed: %s", e)
         return None

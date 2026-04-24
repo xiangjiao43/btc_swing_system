@@ -18,11 +18,11 @@ import os
 import time
 from typing import Any, Optional
 
-# 延迟 import openai,便于 mock patch
-try:
-    from openai import OpenAI
-except ImportError:  # pragma: no cover
-    OpenAI = None   # type: ignore[assignment]
+# Sprint 1.5c C6:改用 anthropic SDK(建模 §10.1 / §10.2)
+from .client import (
+    build_anthropic_client, effective_model, extract_text, extract_usage,
+    extract_model as _extract_model, DEFAULT_MODEL as _CLIENT_DEFAULT_MODEL,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -195,32 +195,20 @@ def call_ai_summary(
     """
     # 1. 构造 client(可注入)
     if openai_client is None:
-        if OpenAI is None:
+        client = build_anthropic_client()
+        if client is None:
             return {
                 "summary_text": None,
                 "model_used": model or _DEFAULT_MODEL,
                 "tokens_in": 0, "tokens_out": 0, "latency_ms": 0,
                 "status": "degraded_error",
-                "error": "openai SDK not installed",
+                "error": "anthropic SDK not configured (missing SDK or OPENAI_API_KEY)",
             }
-        base_url = os.getenv("OPENAI_API_BASE")
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            return {
-                "summary_text": None,
-                "model_used": model or _DEFAULT_MODEL,
-                "tokens_in": 0, "tokens_out": 0, "latency_ms": 0,
-                "status": "degraded_error",
-                "error": "OPENAI_API_KEY not set in environment",
-            }
-        client = OpenAI(
-            base_url=base_url, api_key=api_key,
-            timeout=_DEFAULT_TIMEOUT_SEC,
-        )
     else:
+        # 测试注入的 mock 也能兼容(直接传 messages.create 可调用对象)
         client = openai_client
 
-    effective_model = model or os.getenv("OPENAI_MODEL") or _DEFAULT_MODEL
+    eff_model = effective_model(model)
     user_prompt = build_evidence_summary_prompt(evidence_reports)
     sys_prompt = system_prompt or _DEFAULT_SYSTEM_PROMPT
 
@@ -229,21 +217,20 @@ def call_ai_summary(
     for attempt in range(_MAX_RETRIES + 1):
         start_ts = time.time()
         try:
-            resp = client.chat.completions.create(
-                model=effective_model,
-                messages=[
-                    {"role": "system", "content": sys_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
+            resp = client.messages.create(
+                model=eff_model,
+                system=sys_prompt,
+                messages=[{"role": "user", "content": user_prompt}],
                 max_tokens=max_tokens,
                 temperature=temperature,
             )
             latency_ms = int((time.time() - start_ts) * 1000)
             return {
-                "summary_text": _extract_text(resp),
-                "model_used": getattr(resp, "model", effective_model),
-                "tokens_in": _usage(resp, "prompt_tokens"),
-                "tokens_out": _usage(resp, "completion_tokens"),
+                "summary_text": extract_text(resp),
+                # v1.2 M37:写入 response.model 作为 ai_model_actual
+                "model_used": _extract_model(resp, eff_model),
+                "tokens_in": extract_usage(resp, "input_tokens"),
+                "tokens_out": extract_usage(resp, "output_tokens"),
                 "latency_ms": latency_ms,
                 "status": "success",
                 "error": None,
@@ -263,27 +250,8 @@ def call_ai_summary(
     status = "degraded_timeout" if "timeout" in err_name.lower() else "degraded_error"
     return {
         "summary_text": None,
-        "model_used": effective_model,
+        "model_used": eff_model,
         "tokens_in": 0, "tokens_out": 0, "latency_ms": 0,
         "status": status,
         "error": err_str[:300],
     }
-
-
-# ============================================================
-# 辅助:对 response 的字段提取(兼容 mock)
-# ============================================================
-
-def _extract_text(resp: Any) -> str:
-    try:
-        return str(resp.choices[0].message.content)
-    except (AttributeError, IndexError) as e:
-        logger.warning("Failed to extract content from response: %s", e)
-        return ""
-
-
-def _usage(resp: Any, key: str) -> int:
-    try:
-        return int(getattr(resp.usage, key, 0))
-    except Exception:
-        return 0

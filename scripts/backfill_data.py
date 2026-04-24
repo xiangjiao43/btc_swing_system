@@ -164,7 +164,6 @@ def backfill_derivatives(conn, *, days: int, dry_run: bool) -> None:
 # ============================================================
 
 def backfill_onchain(conn, *, days: int, dry_run: bool) -> None:
-    from datetime import datetime, timedelta, timezone
     try:
         from src.data.collectors.glassnode import GlassnodeCollector
         coll = GlassnodeCollector()
@@ -172,21 +171,18 @@ def backfill_onchain(conn, *, days: int, dry_run: bool) -> None:
         logger.error("[onchain] cannot init Glassnode collector: %s", e)
         return
 
-    until = datetime.now(timezone.utc)
-    since = until - timedelta(days=days)
-
+    # Sprint 2.4:GlassnodeCollector 公共方法都接受 since_days: int,
+    # 不再接 since/until datetime。统一走 since_days=days。
     fetches: dict[str, Callable[[], list[dict[str, Any]]]] = {
-        "mvrv_z_score": lambda: coll.fetch_mvrv_z_score(since=since, until=until),
-        "nupl": lambda: coll.fetch_nupl(since=since, until=until),
-        "lth_supply": lambda: coll.fetch_lth_supply(since=since, until=until),
-        "exchange_net_flow": lambda: coll.fetch_exchange_net_flow(
-            since=since, until=until,
-        ),
-        "mvrv": lambda: coll.fetch_mvrv(since=since, until=until),
-        "realized_price": lambda: coll.fetch_realized_price(since=since, until=until),
-        "sopr": lambda: coll.fetch_sopr(since=since, until=until),
-        "reserve_risk": lambda: coll.fetch_reserve_risk(since=since, until=until),
-        "puell_multiple": lambda: coll.fetch_puell_multiple(since=since, until=until),
+        "mvrv_z_score": lambda: coll.fetch_mvrv_z_score(since_days=days),
+        "nupl": lambda: coll.fetch_nupl(since_days=days),
+        "lth_supply": lambda: coll.fetch_lth_supply(since_days=days),
+        "exchange_net_flow": lambda: coll.fetch_exchange_net_flow(since_days=days),
+        "mvrv": lambda: coll.fetch_mvrv(since_days=days),
+        "realized_price": lambda: coll.fetch_realized_price(since_days=days),
+        "sopr": lambda: coll.fetch_sopr(since_days=days),
+        "reserve_risk": lambda: coll.fetch_reserve_risk(since_days=days),
+        "puell_multiple": lambda: coll.fetch_puell_multiple(since_days=days),
     }
     for name, fn in fetches.items():
         start = time.time()

@@ -1,5 +1,5 @@
 """
-api/app.py — FastAPI app factory (Sprint 1.15a)
+api/app.py — FastAPI app factory (Sprint 1.15a / 2.4)
 
 独立 app 工厂:`create_app()` 用于测试(可注入 conn_factory),
 模块级 `app` 供 uvicorn 启动时使用。
@@ -7,11 +7,17 @@ api/app.py — FastAPI app factory (Sprint 1.15a)
 依赖注入:
   * get_db() 默认用 src.data.storage.connection.get_connection,
     测试时 override 即可指向 in-memory DB。
+
+Sprint 2.4 新增:
+  * startup 事件启动 APScheduler(BackgroundScheduler,读 config/scheduler.yaml)
+  * shutdown 事件优雅停止;SCHEDULER_ENABLED=false 可关
+  * 启动 log 打印 next_run_time(pipeline_run)
 """
 
 from __future__ import annotations
 
 import logging
+import os
 import time
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -35,10 +41,16 @@ from .state import AppState
 
 logger = logging.getLogger(__name__)
 
-VERSION: str = "1.15.0"
+VERSION: str = "2.4.0"
 
 _PROJECT_ROOT: Path = Path(__file__).resolve().parent.parent.parent
 _WEB_DIR: Path = _PROJECT_ROOT / "web"
+
+
+def _scheduler_enabled_from_env() -> bool:
+    """默认开启;SCHEDULER_ENABLED=false / 0 / no / off 可关。"""
+    raw = os.environ.get("SCHEDULER_ENABLED", "true").strip().lower()
+    return raw not in ("0", "false", "no", "off")
 
 
 def create_app(
@@ -84,6 +96,46 @@ def create_app(
     app.include_router(fallback_routes.router, prefix="/api")
     app.include_router(data_routes.router, prefix="/api")
     app.include_router(alerts_routes.router, prefix="/api")
+
+    # Sprint 2.4:APScheduler 嵌入 lifecycle
+    # 只在 SCHEDULER_ENABLED(默认 true)时启动;shutdown 时优雅停止。
+    @app.on_event("startup")
+    def _start_scheduler() -> None:
+        if not _scheduler_enabled_from_env():
+            logger.info("[Scheduler] disabled via SCHEDULER_ENABLED env var")
+            app.state.scheduler = None
+            return
+        try:
+            from ..scheduler import build_scheduler
+            scheduler = build_scheduler(blocking=False)
+            scheduler.start()
+            app.state.scheduler = scheduler
+            # 打印每个 job 的 next_run_time(BJT)
+            for job in scheduler.get_jobs():
+                nxt = job.next_run_time
+                if nxt is not None:
+                    from datetime import timezone, timedelta
+                    bjt = nxt.astimezone(timezone(timedelta(hours=8)))
+                    logger.info(
+                        "[Scheduler] job=%s next run at %s BJT",
+                        job.id, bjt.strftime("%Y-%m-%d %H:%M"),
+                    )
+                else:
+                    logger.warning("[Scheduler] job=%s has no next_run_time", job.id)
+        except Exception as e:
+            logger.exception("[Scheduler] startup failed: %s", e)
+            app.state.scheduler = None
+
+    @app.on_event("shutdown")
+    def _stop_scheduler() -> None:
+        sched = getattr(app.state, "scheduler", None)
+        if sched is None:
+            return
+        try:
+            sched.shutdown(wait=False)
+            logger.info("[Scheduler] stopped")
+        except Exception as e:
+            logger.warning("[Scheduler] shutdown error: %s", e)
 
     # Sprint 2.1 §9 前端:web/ 目录作为 StaticFiles 挂在根路径 /
     # 必须放在所有 /api/* 路由之后(StaticFiles 会接管 404 fallback)。

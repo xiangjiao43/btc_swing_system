@@ -161,16 +161,27 @@ def _make_card(
     strategy_impact: str = "",
     impact_direction: str = "neutral",
     impact_weight: float = 0.5,
+    expected_range: str = "",
 ) -> dict[str, Any]:
-    """构造 factor card dict。data_fresh 自动从 captured_at_bjt 推,也可显式给。"""
+    """构造 factor card dict。data_fresh 自动从 captured_at_bjt 推,也可显式给。
+
+    Sprint 2.3 新增字段:
+      * group         ∈ {onchain / derivatives / price_technical / macro / events}
+                       前端区域 4 分组用(从 category 自动映射)
+      * is_primary    bool,等同 tier == 'primary'(给前端区分"平铺/折叠")
+      * expected_range: 冷启动期告诉用户"这个因子正常什么区间"
+    """
     if current_value is None and not plain_interpretation:
         plain_interpretation = "数据不足(冷启动期或数据源失败)"
     if data_fresh is None:
         data_fresh = _is_fresh(captured_at_bjt) if current_value is not None else False
+    group = _category_to_group(category)
     return {
         "card_id": card_id,
         "category": category,
+        "group": group,
         "tier": tier,
+        "is_primary": tier == "primary",
         "name": name,
         "name_en": name_en,
         "current_value": current_value,
@@ -182,9 +193,25 @@ def _make_card(
         "strategy_impact": strategy_impact,
         "impact_direction": impact_direction,
         "impact_weight": impact_weight,
+        "expected_range": expected_range,
         "linked_layer": linked_layer,
         "source": source,
     }
+
+
+_CATEGORY_TO_GROUP: dict[str, str] = {
+    "onchain":         "onchain",
+    "derivatives":     "derivatives",
+    "liquidity":       "derivatives",      # 流动性归衍生品区
+    "price_structure": "price_technical",
+    "macro":           "macro",
+    "events":          "events",
+    "risk_tags":       "derivatives",
+}
+
+
+def _category_to_group(category: str) -> str:
+    return _CATEGORY_TO_GROUP.get(category, category)
 
 
 # ============================================================

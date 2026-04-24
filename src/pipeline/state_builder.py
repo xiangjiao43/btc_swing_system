@@ -495,6 +495,20 @@ class StrategyStateBuilder:
         except Exception as e:
             logger.warning("inject_plain_readings failed: %s", e)
 
+        # === Sprint 2.3 Task A:为五层注入 pillars / core_question / downstream_hint ===
+        try:
+            from ..evidence.pillars import inject_pillars
+            inject_pillars(state)
+        except Exception as e:
+            logger.warning("inject_pillars failed: %s", e)
+
+        # === Sprint 2.3 Task A:为 6 组合因子注入 composition / 规则描述 ===
+        try:
+            from ..strategy.composite_composition import inject_composite_composition
+            inject_composite_composition(state, context)
+        except Exception as e:
+            logger.warning("inject_composite_composition failed: %s", e)
+
         # === Stage: Factor Cards(Sprint 2.2 新增,在 adjudicator 之前)===
         # 生成全量数据因子卡;adjudicator 要用 available_card_ids 做 evidence_ref
         # 白名单(§6.4 #4)。

@@ -137,9 +137,13 @@ class Layer4Risk(EvidenceLayerBase):
             l1.get("volatility_regime") or l1.get("volatility_level") or "normal"
         )
         l5_extreme = bool(l5.get("extreme_event_detected", False))
+        # Sprint 1.5c C1:从上次运行的 state_machine.current_state 读"前一次态"
+        # (近似当前态;首次运行/冷启动默认 FLAT)。Adjudicator 再做一次前置拦截作为双保险。
         state_machine_state = (
-            context.get("state_machine_hint")
+            context.get("previous_state_machine_state")
+            or context.get("state_machine_hint")
             or (context.get("state_machine_output") or {}).get("current_state")
+            or "FLAT"
         )
 
         # -------- composite 分数(§4.5.5 / §4.5.6 的原料)--------
@@ -205,8 +209,11 @@ class Layer4Risk(EvidenceLayerBase):
             stop_loss_ref = _compute_stop_loss(
                 klines_1d, stance, vol_regime, stop_cfg,
             )
+        # Sprint 1.5c C2:§4.5.2 角度一(结构性失效位)+ stop_loss 兜底合并成 list
         hard_invalidation_levels = _build_hard_invalidation_levels(
-            stop_loss_ref=stop_loss_ref, stance=stance,
+            klines_1d=klines_1d,
+            stop_loss_ref=stop_loss_ref,
+            stance=stance,
         )
 
         # -------- Risk-Reward --------
@@ -573,24 +580,97 @@ def _min_strict(a: str, b: str) -> str:
 
 def _build_hard_invalidation_levels(
     *,
+    klines_1d: Optional["pd.DataFrame"],
     stop_loss_ref: Optional[dict[str, Any]],
     stance: str,
 ) -> list[dict[str, Any]]:
     """
-    建模 §4.5.7 hard_invalidation_levels 每条:
+    建模 §4.5.4:hard_invalidation_levels 是 **list**,每条含
       { price, direction, basis, priority, confirmation_timeframe }
-    v1:直接把 stop_loss_reference 升格为单一 hard_invalidation_level;
-    Sprint 1.5c+ 再接入更精细的结构性失效位。
+
+    Sprint 1.5c C2:
+      * priority=1 结构性失效位(§4.5.2 角度一)
+          - 多头失效位 = 最近主要 Higher Low(HL)下方:价格跌破则多头结构失效
+          - 空头失效位 = 最近主要 Lower High(LH)上方:价格突破则空头结构失效
+      * priority=2 stop_loss_reference 兜底(ATR / swing 取最严)
+
+    neutral / 数据不足 → 返回空 list(AI 裁决 trade_plan.stop_loss 则无处可选,
+    program validator 会拒绝并走 Fallback Level 1)。
     """
-    if stop_loss_ref is None or stance not in {"bullish", "bearish"}:
-        return []
-    return [{
-        "price": stop_loss_ref.get("price"),
-        "direction": "below" if stance == "bullish" else "above",
-        "basis": stop_loss_ref.get("method_used", "atr"),
-        "priority": 1,
-        "confirmation_timeframe": "4H",
-    }]
+    levels: list[dict[str, Any]] = []
+    if stance not in {"bullish", "bearish"}:
+        return levels
+
+    # ---- priority=1 结构性失效位 ----
+    structural = _find_structural_invalidation(klines_1d, stance)
+    if structural is not None:
+        levels.append({
+            "price": structural["price"],
+            "direction": "below" if stance == "bullish" else "above",
+            "basis": f"structural_{structural['kind']}",
+            "priority": 1,
+            "confirmation_timeframe": "4H",
+        })
+
+    # ---- priority=2 stop_loss 兜底 ----
+    if stop_loss_ref is not None and stop_loss_ref.get("price"):
+        levels.append({
+            "price": stop_loss_ref.get("price"),
+            "direction": "below" if stance == "bullish" else "above",
+            "basis": f"stop_{stop_loss_ref.get('method_used', 'atr')}",
+            "priority": 2,
+            "confirmation_timeframe": "4H",
+        })
+
+    return levels
+
+
+def _find_structural_invalidation(
+    klines_1d: Optional["pd.DataFrame"],
+    stance: str,
+) -> Optional[dict[str, Any]]:
+    """
+    在最近 60 根 1D 上找结构性失效位(§4.5.2):
+      bullish 方向:最近一个 Higher Low(HL)= 最近的 swing_low,
+                   且其价格 > 前一个 swing_low
+      bearish 方向:最近一个 Lower High(LH)= 最近的 swing_high,
+                   且其价格 < 前一个 swing_high
+
+    找不到(结构不明确或数据不足)→ 返回 None。
+    """
+    if klines_1d is None or not isinstance(klines_1d, pd.DataFrame) \
+            or len(klines_1d) < 20:
+        return None
+
+    recent = klines_1d.tail(60)
+    events = swing_points(recent["high"], recent["low"], lookback=5)
+    if len(events) < 2:
+        return None
+
+    if stance == "bullish":
+        lows = [e for e in events if e["type"] == "low"]
+        if len(lows) < 2:
+            return None
+        latest = lows[-1]
+        prior = lows[-2]
+        # 只在 Higher Low(高点更高)时认为结构成立
+        if float(latest["price"]) > float(prior["price"]):
+            return {
+                "price": round(float(latest["price"]), 4),
+                "kind": "hl",
+            }
+    elif stance == "bearish":
+        highs = [e for e in events if e["type"] == "high"]
+        if len(highs) < 2:
+            return None
+        latest = highs[-1]
+        prior = highs[-2]
+        if float(latest["price"]) < float(prior["price"]):
+            return {
+                "price": round(float(latest["price"]), 4),
+                "kind": "lh",
+            }
+    return None
 
 
 # ============================================================

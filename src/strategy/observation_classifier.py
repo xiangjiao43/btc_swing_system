@@ -40,6 +40,8 @@ from typing import Any, Optional
 import yaml
 from pathlib import Path
 
+from ..utils.cold_start import is_cold_start, DEFAULT_COLD_START_RUNS
+
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +50,7 @@ logger = logging.getLogger(__name__)
 # 常量
 # ============================================================
 
-_COLD_START_DEFAULT_RUNS: int = 42        # 建模 §4.7.5:运行 < 7 天(42 次)
+_COLD_START_DEFAULT_RUNS: int = DEFAULT_COLD_START_RUNS  # 建模 §4.7.5(来自 src.utils.cold_start)
 _POSSIBLY_SUPPRESSED_STREAK_RUNS: int = 42  # §4.7.3:连续 ≥ 7 天(42 次)
 _WARNING_STREAK_RUNS: int = 84            # §4.7.5:≥ 14 天
 _CRITICAL_STREAK_RUNS: int = 180          # §4.7.5:≥ 30 天
@@ -190,10 +192,7 @@ def classify(
     if disciplined_triggers:
         category = "disciplined"
         reason = "disciplined(任一触发):" + "; ".join(disciplined_triggers)
-    elif (
-        signals["cold_start_warming_up"]
-        or signals["runs_completed"] < _COLD_START_DEFAULT_RUNS
-    ):
+    elif is_cold_start(strategy_state, threshold_runs=_COLD_START_DEFAULT_RUNS):
         # 冷启动期若未满足 disciplined 硬触发,用 cold_start_warming_up 临时标签
         category = "cold_start_warming_up"
         reason = (

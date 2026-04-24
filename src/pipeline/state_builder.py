@@ -332,6 +332,10 @@ class StrategyStateBuilder:
         context["layer_3_output"] = layer_3_output
 
         # === Stage 12: L4 ===
+        # Sprint 1.5c C1:把上一次运行的 state_machine.current_state 作为"前一次态"
+        # 传给 L4,用于 A 级缓冲 PROTECTION 例外判定(L4 在 state_machine 之前跑,
+        # 读不到本次的 current_state;用前一次态近似)。
+        context["previous_state_machine_state"] = self._read_previous_state_machine_state()
         layer_4_output = self._run_stage(
             "layer_4", failures, degraded_stages, run_ts_utc,
             lambda: Layer4Risk().compute(context, self.rules_version),
@@ -733,6 +737,24 @@ class StrategyStateBuilder:
     # ------------------------------------------------------------------
     # State Machine stage
     # ------------------------------------------------------------------
+
+    def _read_previous_state_machine_state(self) -> str:
+        """Sprint 1.5c C1:从 DB 最近一条 strategy_state 读 state_machine.current_state。
+
+        冷启动 / 首次运行 / 失败 → 默认 "FLAT"(建模 §5.1 默认态)。
+        """
+        if self.conn is None:
+            return "FLAT"
+        try:
+            row = StrategyStateDAO.get_latest_state(self.conn)
+            if not row:
+                return "FLAT"
+            state = row.get("state") or {}
+            sm = state.get("state_machine") or {}
+            return sm.get("current_state") or "FLAT"
+        except Exception as e:
+            logger.warning("read previous state_machine failed: %s", e)
+            return "FLAT"
 
     def _run_observation_classifier(
         self,

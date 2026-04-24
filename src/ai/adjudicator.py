@@ -90,7 +90,7 @@ class AIAdjudicator:
         """
         入口。根据 state 决定 action。绝不抛异常。
         """
-        # 1. 抽字段
+        # 1. 抽字段(cold_start 判定统一走 src.utils.cold_start)
         facts = _extract_facts(strategy_state)
         constraints = _build_constraints(facts)
 
@@ -461,8 +461,9 @@ def _extract_facts(strategy_state: dict[str, Any]) -> dict[str, Any]:
     l4 = _get_layer(strategy_state, "layer_4")
     l5 = _get_layer(strategy_state, "layer_5")
 
+    from ..utils.cold_start import is_cold_start
+
     sm = strategy_state.get("state_machine") or {}
-    cold_start = strategy_state.get("cold_start") or {}
     account = strategy_state.get("account_state") or {}
     lifecycle = strategy_state.get("lifecycle") or {}
     pipeline_meta = strategy_state.get("pipeline_meta") or {}
@@ -492,7 +493,7 @@ def _extract_facts(strategy_state: dict[str, Any]) -> dict[str, Any]:
         "l5_extreme_event_detected": bool(l5.get("extreme_event_detected", False)),
         "state_machine_current": sm.get("current_state"),
         "state_machine_previous": sm.get("previous_state"),
-        "cold_start_warming_up": bool(cold_start.get("warming_up")),
+        "cold_start_warming_up": is_cold_start(strategy_state),
         "account_has_long": bool((account.get("long_position_size") or 0) > 0),
         "account_has_short": bool((account.get("short_position_size") or 0) > 0),
         "lifecycle_current": lifecycle.get("current_lifecycle"),

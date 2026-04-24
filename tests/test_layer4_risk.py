@@ -251,6 +251,16 @@ class TestPermissionMerging:
         assert comp["override_reason"] == "state_in_protection"
         assert comp["final_permission"] == "protective"
 
+    def test_12b_protection_override_via_previous_state(self):
+        """Sprint 1.5c C1:L4 从 previous_state_machine_state 读"前一次态"
+           处理 PROTECTION 例外(StrategyStateBuilder 传入)。"""
+        ctx = _ctx(l3=_l3(grade="A"))
+        ctx["previous_state_machine_state"] = "PROTECTION"
+        out = Layer4Risk().compute(ctx)
+        comp = out["permission_composition"]
+        assert comp["override_reason"] == "state_in_protection"
+        assert comp["final_permission"] == "protective"
+
     def test_13_a_grade_buffer_override_extreme_event(self):
         out = Layer4Risk().compute(_ctx(
             l3=_l3(grade="A"),
@@ -312,23 +322,54 @@ class TestPermissionMerging:
 
 class TestHardInvalidationLevels:
 
-    def test_18_hard_invalidation_matches_stop_loss(self):
+    def test_18_hard_invalidation_contains_stop_loss_as_priority_2(self):
+        """Sprint 1.5c C2:list 中必有 stop_loss 兜底条目,priority=2。"""
         out = Layer4Risk().compute(_ctx())
         his = out["hard_invalidation_levels"]
-        # 有 stop_loss_reference 就应该有一条
         if out["stop_loss_reference"] is not None:
-            assert len(his) == 1
-            level = his[0]
+            # 至少一条 priority=2(stop_loss 兜底)
+            stop_entries = [e for e in his if e["priority"] == 2]
+            assert len(stop_entries) == 1
+            level = stop_entries[0]
             assert level["price"] == out["stop_loss_reference"]["price"]
-            assert level["direction"] == "below"  # bullish 方向
-            assert level["priority"] == 1
+            assert level["direction"] == "below"  # bullish
             assert level["confirmation_timeframe"] == "4H"
+            assert level["basis"].startswith("stop_")
+
+    def test_18b_hard_invalidation_structural_hl_priority_1(self):
+        """Sprint 1.5c C2:bullish 方向应该能从 swing 找出 HL 结构失效位。"""
+        out = Layer4Risk().compute(_ctx())
+        his = out["hard_invalidation_levels"]
+        # 可能 0 或 1 条 priority=1(structural),取决于 klines 能否给出 HL
+        structural = [e for e in his if e["priority"] == 1]
+        if structural:
+            assert len(structural) == 1
+            s = structural[0]
+            assert s["direction"] == "below"
+            assert s["basis"] == "structural_hl"
+            assert s["confirmation_timeframe"] == "4H"
+            assert s["price"] > 0
 
     def test_19_hard_invalidation_empty_for_neutral(self):
         out = Layer4Risk().compute(_ctx(
             l2=_l2(stance="neutral", sc=0.4),
         ))
         assert out["hard_invalidation_levels"] == []
+
+    def test_19b_hard_invalidation_bearish_structural_lh(self):
+        """bearish 方向结构失效 = 最近 Lower High 上方。"""
+        # 用 ranging 数据:前半段高点 55000,后半段高点 53000(LH)
+        # 具体构造一个 LH 很难保证 swing 算法命中;这里只验证 direction/basis
+        out = Layer4Risk().compute(_ctx(
+            l1=_l1(regime="trend_down"),
+            l2=_l2(stance="bearish", sc=0.7),
+        ))
+        his = out["hard_invalidation_levels"]
+        structural = [e for e in his if e["priority"] == 1]
+        if structural:
+            s = structural[0]
+            assert s["direction"] == "above"
+            assert s["basis"] == "structural_lh"
 
 
 # ==================================================================

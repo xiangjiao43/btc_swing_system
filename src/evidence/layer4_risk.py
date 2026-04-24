@@ -1,19 +1,26 @@
 """
-layer4_risk.py — L4 风险证据层(建模 §4.5 + §M17)
+layer4_risk.py — L4 风险证据层(建模 §4.5)
 
-输出:
-  * position_cap            该笔交易的仓位上限(绝对百分比,如 0.08 = 8% 净值)
-  * position_cap_breakdown  base_cap 和每个衰减因子的审计
-  * stop_loss_reference     建议止损价格 + 距离 + 方法(atr / swing / combined)
-  * risk_reward_ratio       target1 / stop 的比值
-  * rr_pass_level           full / reduced / fail
-  * scale_in_plan           加仓分层(按 grade)
-  * risk_permission         L3.execution_permission 与 L4 内部评估的 stricter merge
+Sprint 1.5b 重写:按建模 §4.5.5 五步串行合成 position_cap + §4.5.6
+execution_permission 归并(含 A 级缓冲 + 4 例外)。
+Sprint 1.10 的"grade_to_base_cap + per_trade_decay 多因素衰减"作废。
 
-核心原则:
-  1. L4 与 L3 串联取更严(L3=watch → L4 不能升到 can_open)
-  2. position_cap 多因素乘法衰减,不加法
-  3. stop_loss 必须有参考,否则 risk_permission=watch
+输出字段(§4.5.7):
+  * overall_risk_level        low / moderate / elevated / high / critical
+  * position_cap              最终仓位上限(分数,0.0-1.0)
+  * position_cap_composition  5 步审计
+  * execution_permission      归并后的最终权限(保留字段名 risk_permission 兼容)
+  * permission_composition    各来源建议 + 归并过程审计
+  * stop_loss_reference       Sprint 1.10 逻辑保留(供 trade_plan 参考)
+  * risk_reward_ratio / rr_pass_level
+  * scale_in_plan             分层加仓计划(按 grade)
+  * hard_invalidation_levels  §4.5.4 唯一权威(Sprint 1.5b v1:暂等于 stop_loss_reference 升格)
+
+核心纪律:
+  1. observation_category 只读,不进本层任何判定
+  2. hard_floor 15% 仅在 final_permission ∈ {can_open, cautious_open, ambush_only}
+     时生效,critical 时可低于 15%
+  3. A 级缓冲 4 例外:PROTECTION / extreme_event / critical / chaos 硬压
 """
 
 from __future__ import annotations
@@ -25,11 +32,74 @@ import pandas as pd
 
 from ..indicators.structure import swing_points
 from ..indicators.volatility import atr
-from ..utils.permission import get_permission_order, merge_permissions
+from ..utils.permission import merge_permissions
 from ._base import EvidenceLayerBase
 
 
 logger = logging.getLogger(__name__)
+
+
+# ============================================================
+# 5 步合成:默认阈值(可被 thresholds.yaml 覆盖)
+# ============================================================
+
+_DEFAULT_BASE_CAP_PCT: float = 70.0   # §4.5.8 初始值
+_DEFAULT_HARD_FLOOR_PCT: float = 15.0
+
+# step 2:L4.overall_risk_level → cap 乘数
+_RISK_LEVEL_MULTIPLIERS: dict[str, float] = {
+    "low": 1.0, "moderate": 0.9, "elevated": 0.7, "high": 0.5, "critical": 0.3,
+}
+
+# step 2:L4.overall_risk_level → permission 建议
+_RISK_LEVEL_PERMISSION: dict[str, str] = {
+    "low": "can_open", "moderate": "cautious_open", "elevated": "ambush_only",
+    "high": "watch", "critical": "protective",
+}
+
+# step 3:L4.crowding score 区间 → cap 乘数(score 0-8)
+_CROWDING_BANDS: list[tuple[tuple[int, int], float]] = [
+    ((6, 99), 0.70),
+    ((4, 5),  0.85),
+    ((0, 3),  1.00),
+]
+
+# step 3:crowding 建议
+_CROWDING_PERMISSION_BANDS: list[tuple[tuple[int, int], str]] = [
+    ((6, 99), "cautious_open"),
+    ((0, 5),  "can_open"),
+]
+
+# step 4:L5.MacroHeadwind score 区间(-10..+10)→ cap 乘数
+_MACRO_BANDS: list[tuple[tuple[int, int], float]] = [
+    ((-99, -5), 0.70),
+    ((-4, -2),  0.85),
+    ((-1, 99),  1.00),
+]
+
+_MACRO_PERMISSION_BANDS: list[tuple[tuple[int, int], str]] = [
+    ((-99, -5), "ambush_only"),
+    ((-4, -2),  "cautious_open"),
+    ((-1, 99),  "can_open"),
+]
+
+# step 5:L4.EventRisk score 区间(0-15+)→ cap 乘数
+_EVENT_BANDS: list[tuple[tuple[int, int], float]] = [
+    ((8, 999), 0.70),
+    ((4, 7),   0.85),
+    ((0, 3),   1.00),
+]
+
+_EVENT_PERMISSION_BANDS: list[tuple[tuple[int, int], str]] = [
+    ((8, 999), "ambush_only"),
+    ((4, 7),   "cautious_open"),
+    ((0, 3),   "can_open"),
+]
+
+# A 级缓冲的下限
+_A_GRADE_BUFFER_FLOOR: str = "cautious_open"
+_A_GRADE_REGIME_STABLE: frozenset[str] = frozenset({"trend_up", "trend_down"})
+_A_GRADE_STABILITY_OK: frozenset[str] = frozenset({"stable", "slightly_shifting"})
 
 
 # ============================================================
@@ -45,278 +115,536 @@ class Layer4Risk(EvidenceLayerBase):
         l1: dict[str, Any] = context.get("layer_1_output") or {}
         l2: dict[str, Any] = context.get("layer_2_output") or {}
         l3: dict[str, Any] = context.get("layer_3_output") or {}
+        l5: dict[str, Any] = context.get("layer_5_output") or {}
         composites: dict[str, Any] = context.get("composite_factors") or {}
         klines_1d: Optional[pd.DataFrame] = context.get("klines_1d")
 
-        # ---- 读阈值 ----
-        grade_to_base = self.scoring_config.get("grade_to_base_cap", {}) or {}
-        decay = self.scoring_config.get("per_trade_decay", {}) or {}
-        cap_min = float(self.scoring_config.get("position_cap_min", 0.015))
+        cap_cfg = self.scoring_config.get("position_cap_composition") or {}
+        base_cap_pct = float(cap_cfg.get("base_position_cap_pct", _DEFAULT_BASE_CAP_PCT))
+        hard_floor_pct = float(cap_cfg.get("hard_floor_pct", _DEFAULT_HARD_FLOOR_PCT))
+
         stop_cfg = self.scoring_config.get("stop_loss", {}) or {}
         rr_cfg = self.scoring_config.get("risk_reward", {}) or {}
         scale_plans = self.scoring_config.get("scale_in_plans", {}) or {}
-        strictness = get_permission_order()
 
-        # ---- 基础字段提取 ----
-        grade = l3.get("opportunity_grade", l3.get("grade", "none"))
+        # -------- 基础字段 --------
+        grade = l3.get("opportunity_grade") or l3.get("grade") or "none"
         stance = l2.get("stance", "neutral")
-        stance_confidence = float(l2.get("stance_confidence", 0.0))
+        l3_permission = l3.get("execution_permission", "watch")
+        regime = l1.get("regime") or l1.get("regime_primary") or "unclear"
+        regime_stability = l1.get("regime_stability") or "stable"
         vol_regime = (
             l1.get("volatility_regime") or l1.get("volatility_level") or "normal"
         )
-        l3_permission = l3.get("execution_permission", "watch")
-        anti_patterns = l3.get("anti_pattern_flags") or []
+        l5_extreme = bool(l5.get("extreme_event_detected", False))
+        state_machine_state = (
+            context.get("state_machine_hint")
+            or (context.get("state_machine_output") or {}).get("current_state")
+        )
 
-        crowd_band = (composites.get("crowding") or {}).get("band", "normal")
-        er_band = (composites.get("event_risk") or {}).get("band", "low")
-        bp_phase = (composites.get("band_position") or {}).get("phase", "unclear")
+        # -------- composite 分数(§4.5.5 / §4.5.6 的原料)--------
+        crowding = composites.get("crowding") or {}
+        event_risk = composites.get("event_risk") or {}
+        macro_headwind = composites.get("macro_headwind") or {}
+
+        crowding_score = _safe_int(crowding.get("score"))
+        event_risk_score = _safe_number(event_risk.get("score"))
+        macro_headwind_score = _safe_number(macro_headwind.get("score"))
+
+        # -------- §4.5.7 overall_risk_level(规则层派生)--------
+        overall_risk_level = _derive_overall_risk_level(
+            vol_regime=vol_regime,
+            crowding_score=crowding_score,
+            event_risk_score=event_risk_score,
+            macro_headwind_score=macro_headwind_score,
+            l5_extreme=l5_extreme,
+        )
+
+        # -------- §4.5.5 Position Cap 5 步串行合成 --------
+        (
+            final_cap_pct, cap_composition,
+        ) = _compose_position_cap(
+            base_pct=base_cap_pct,
+            overall_risk_level=overall_risk_level,
+            crowding_score=crowding_score,
+            macro_headwind_score=macro_headwind_score,
+            event_risk_score=event_risk_score,
+            hard_floor_pct=hard_floor_pct,
+        )
+
+        # -------- §4.5.6 Permission 归并 --------
+        (
+            final_permission, permission_composition,
+        ) = _merge_permissions(
+            overall_risk_level=overall_risk_level,
+            crowding_score=crowding_score,
+            event_risk_score=event_risk_score,
+            macro_headwind_score=macro_headwind_score,
+            grade=grade,
+            regime=regime,
+            regime_stability=regime_stability,
+            l1_regime_chaos=(regime == "chaos"),
+            l5_extreme=l5_extreme,
+            state_machine_state=state_machine_state,
+            l3_permission=l3_permission,
+        )
+
+        # -------- 硬下限 15% 的适用性(建模 §4.5.5 问题 4)--------
+        final_cap_pct, cap_composition = _apply_floor_gate(
+            cap_pct=final_cap_pct,
+            composition=cap_composition,
+            final_permission=final_permission,
+            overall_risk_level=overall_risk_level,
+            hard_floor_pct=hard_floor_pct,
+        )
+        final_cap = round(final_cap_pct / 100.0, 5)
+
+        # -------- Stop Loss + hard_invalidation_levels(§4.5.4)--------
+        stop_loss_ref: Optional[dict[str, Any]] = None
+        if stance in {"bullish", "bearish"}:
+            stop_loss_ref = _compute_stop_loss(
+                klines_1d, stance, vol_regime, stop_cfg,
+            )
+        hard_invalidation_levels = _build_hard_invalidation_levels(
+            stop_loss_ref=stop_loss_ref, stance=stance,
+        )
+
+        # -------- Risk-Reward --------
+        rr_result = _compute_rr(
+            klines_1d, stance, stop_loss_ref, composites, rr_cfg,
+        )
+
+        # -------- Scale-in plan(Sprint 1.10 沿用,按 grade + cold_start)--------
         cold_start = context.get("cold_start") or {}
         is_cold = bool(cold_start.get("warming_up"))
-
-        # ---- Step 1: 基础 cap ----
-        base_cap = float(grade_to_base.get(grade, 0.0))
-
-        # Grade=none 或 stance=neutral:cap=0 直接出口
-        if grade == "none" or stance == "neutral" or base_cap <= 0:
-            return self._emit_no_open(
-                reason=(
-                    f"grade={grade}, stance={stance} → no open"
-                ),
-                base_cap=base_cap,
-                l3_permission=l3_permission,
-                strictness=strictness,
-                scale_plans=scale_plans,
-                grade=grade,
-            )
-
-        # ---- Step 2: 逐项衰减因子(乘法累乘)----
-        applied_factors: dict[str, float] = {}
-
-        # crowding 衰减
-        crowd_mul = float(
-            (decay.get("crowding") or {}).get(crowd_band, 1.0)
-        )
-        applied_factors["crowding"] = crowd_mul
-
-        # event_risk 衰减
-        er_mul = float(
-            (decay.get("event_risk") or {}).get(er_band, 1.0)
-        )
-        applied_factors["event_risk"] = er_mul
-
-        # volatility 衰减
-        vol_mul = float(
-            (decay.get("volatility") or {}).get(vol_regime, 1.0)
-        )
-        applied_factors["volatility"] = vol_mul
-
-        # stance_confidence 分档
-        sc_mul = _resolve_stance_confidence_multiplier(
-            stance_confidence, decay.get("stance_confidence") or []
-        )
-        applied_factors["stance_confidence"] = sc_mul
-
-        # anti_pattern_count 衰减
-        ap_count = len(anti_patterns)
-        ap_cfg = decay.get("anti_pattern_count") or {}
-        if ap_count == 0:
-            ap_mul = float(ap_cfg.get("zero", 1.0))
-        elif ap_count == 1:
-            ap_mul = float(ap_cfg.get("one", 0.85))
-        else:
-            ap_mul = float(ap_cfg.get("two_or_more", 0.70))
-        applied_factors["anti_pattern_count"] = ap_mul
-
-        # 冷启动
         if is_cold:
-            cold_mul = float(decay.get("cold_start_multiplier", 0.5))
-        else:
-            cold_mul = 1.0
-        applied_factors["cold_start"] = cold_mul
-
-        raw_cap_before_clamp = base_cap
-        for mul in applied_factors.values():
-            raw_cap_before_clamp *= mul
-
-        # ---- Step 3: clamp 到 grade ceiling + 最小保护 ----
-        # stance_confidence 1.05 加成让 raw 可能超过 base;clamp 回 base
-        clamped_to_ceiling = raw_cap_before_clamp > base_cap
-        after_ceiling = min(raw_cap_before_clamp, base_cap)
-
-        if after_ceiling < cap_min:
-            final_cap = 0.0
-            cap_min_hit = True
-        else:
-            final_cap = after_ceiling
-            cap_min_hit = False
-
-        # ---- Step 4: Stop Loss 计算 ----
-        stop_loss_ref = _compute_stop_loss(
-            klines_1d, stance, vol_regime, stop_cfg,
-        )
-
-        # ---- Step 5: Risk-Reward Ratio ----
-        rr_result = _compute_rr(
-            klines_1d, stance, stop_loss_ref, composites,
-            rr_cfg,
-        )
-        # rr_result: {"ratio": float|None, "target1_pct": float|None,
-        #             "target_source": str, "pass_level": "full"|"reduced"|"fail"}
-
-        # RR 修正:reduced 档额外 cap × 0.8
-        if rr_result["pass_level"] == "reduced":
-            final_cap *= float(rr_cfg.get("reduced_cap_multiplier", 0.8))
-
-        # RR fail 或 stop 缺失 → permission 强制 watch + cap 清零
-        if rr_result["pass_level"] == "fail" or stop_loss_ref is None:
-            final_cap = 0.0
-
-        # ---- Step 6: Scale-In Plan ----
-        plan_key = grade
-        if is_cold:
-            # 冷启动期强制 1 层
             scale_in_plan = {
-                "layers": 1,
-                "allocations": [1.0],
+                "layers": 1, "allocations": [1.0],
                 "trigger_conditions": ["冷启动期:不加仓,仅初始进场"],
             }
         else:
-            plan_cfg = scale_plans.get(plan_key, scale_plans.get("none", {}))
+            plan_cfg = scale_plans.get(grade, scale_plans.get("none", {}))
             scale_in_plan = {
                 "layers": int(plan_cfg.get("layers", 0)),
                 "allocations": list(plan_cfg.get("allocations") or []),
                 "trigger_conditions": list(plan_cfg.get("trigger_conditions") or []),
             }
 
-        # ---- Step 7: Permission 合并 ----
-        # L4 内部 permission 规则
-        l4_internal_permission = _l4_internal_permission(
-            final_cap, stop_loss_ref, rr_result
-        )
-
-        risk_permission = merge_permissions(l3_permission, l4_internal_permission)
-
-        rationale_parts = [f"L3 gave {l3_permission}"]
-        if l4_internal_permission != l3_permission:
-            rationale_parts.append(f"L4 internal={l4_internal_permission}")
-        if risk_permission != l3_permission:
-            rationale_parts.append(f"merged stricter → {risk_permission}")
-        rationale = " | ".join(rationale_parts)
-
-        # ---- 组装输出 ----
+        # -------- notes --------
         notes: list[str] = []
-        if cap_min_hit:
-            notes.append(f"final cap {after_ceiling:.4f} < min {cap_min} → cap=0")
-        if stop_loss_ref is None:
-            notes.append("stop_loss unavailable → risk_permission=watch")
-        if rr_result["pass_level"] == "fail":
-            notes.append(f"RR {rr_result.get('ratio')} < 1.5 → cap=0 + watch")
-        if is_cold:
-            notes.append("cold_start: cap × 0.5 and scale-in forced to 1 layer")
-        if risk_permission in ("hold_only", "watch", "protective") and final_cap > 0:
+        if overall_risk_level == "critical":
+            notes.append("overall_risk_level=critical: 允许 final_cap 低于 15% 硬下限")
+        if cap_composition.get("hard_floor_applied_to_final"):
             notes.append(
-                f"permission={risk_permission} blocks new opens despite cap={final_cap:.4f}"
+                f"final_cap < hard_floor({hard_floor_pct}%) 且 "
+                f"permission={final_permission},已抬升到 hard_floor"
             )
+        if permission_composition.get("a_grade_buffer_applied"):
+            notes.append("A 级缓冲激活:final_permission 不得严于 cautious_open")
+        if permission_composition.get("override_reason"):
+            notes.append(
+                f"A 级缓冲被例外覆盖:{permission_composition['override_reason']}"
+            )
+        if stop_loss_ref is None and stance in {"bullish", "bearish"}:
+            notes.append("stop_loss 不可用 → 慎重开仓")
+
+        # -------- 回传 L3 merge(保守)--------
+        risk_permission = merge_permissions(l3_permission, final_permission)
+        rationale = (
+            f"L3={l3_permission} | L4 merged={final_permission} | "
+            f"final(stricter)={risk_permission}"
+        )
 
         diagnostics = {
             "inputs": {
-                "grade": grade,
-                "stance": stance,
-                "stance_confidence": stance_confidence,
-                "vol_regime": vol_regime,
-                "crowd_band": crowd_band,
-                "event_risk_band": er_band,
-                "bp_phase": bp_phase,
-                "anti_patterns": anti_patterns,
+                "grade": grade, "stance": stance, "regime": regime,
+                "regime_stability": regime_stability,
+                "volatility_regime": vol_regime,
                 "l3_permission": l3_permission,
-                "cold_start": is_cold,
+                "crowding_score": crowding_score,
+                "event_risk_score": event_risk_score,
+                "macro_headwind_score": macro_headwind_score,
+                "l5_extreme_event_detected": l5_extreme,
+                "state_machine_state": state_machine_state,
             },
-            "cap_chain": {
-                "base": base_cap,
-                "factors": {k: round(v, 4) for k, v in applied_factors.items()},
-                "raw_product": round(raw_cap_before_clamp, 5),
-                "after_ceiling_clamp": round(after_ceiling, 5),
-                "min_hit": cap_min_hit,
-                "final": round(final_cap, 5),
-            },
+            "overall_risk_level": overall_risk_level,
+            "cap_5_step_composition": cap_composition,
+            "permission_composition": permission_composition,
             "stop_loss_details": stop_loss_ref,
             "rr_details": rr_result,
-            "permission_strictness_used": strictness,
         }
 
         return {
-            "position_cap": round(final_cap, 5),
-            "position_cap_breakdown": {
-                "base_cap_from_grade": base_cap,
-                "applied_factors": {k: round(v, 4) for k, v in applied_factors.items()},
-                "raw_cap_before_clamp": round(raw_cap_before_clamp, 5),
-                "clamped_to_grade_ceiling": clamped_to_ceiling,
-                "min_floor_applied": cap_min_hit,
-            },
+            "overall_risk_level": overall_risk_level,
+            "position_cap": final_cap,
+            "position_cap_composition": cap_composition,
+            "permission_composition": permission_composition,
+            "execution_permission": final_permission,
+            "risk_permission": risk_permission,          # 向后兼容
+            "risk_permission_rationale": rationale,
+            "hard_invalidation_levels": hard_invalidation_levels,
             "stop_loss_reference": stop_loss_ref,
             "risk_reward_ratio": rr_result.get("ratio"),
             "rr_pass_level": rr_result.get("pass_level"),
             "scale_in_plan": scale_in_plan,
-            "risk_permission": risk_permission,
-            "risk_permission_rationale": rationale,
-            "diagnostics": diagnostics,
             "notes": notes,
             "health_status": "healthy",
             "confidence_tier": _grade_to_tier(grade),
             "computation_method": "rule_based",
-        }
-
-    def _emit_no_open(
-        self, *, reason: str, base_cap: float, l3_permission: str,
-        strictness: list[str], scale_plans: dict, grade: str,
-    ) -> dict[str, Any]:
-        """grade=none / stance=neutral 的统一出口。"""
-        risk_permission = merge_permissions(l3_permission, "watch")
-        return {
-            "position_cap": 0.0,
-            "position_cap_breakdown": {
-                "base_cap_from_grade": base_cap,
-                "applied_factors": {},
-                "raw_cap_before_clamp": 0.0,
-                "clamped_to_grade_ceiling": False,
-                "min_floor_applied": False,
-            },
-            "stop_loss_reference": None,
-            "risk_reward_ratio": None,
-            "rr_pass_level": "n_a",
-            "scale_in_plan": {
-                "layers": 0, "allocations": [], "trigger_conditions": [],
-            },
-            "risk_permission": risk_permission,
-            "risk_permission_rationale": f"no-open: {reason}",
-            "diagnostics": {"early_exit_reason": reason, "grade": grade},
-            "notes": [reason],
-            "health_status": "healthy",
-            "confidence_tier": "very_low",
-            "computation_method": "rule_based",
+            "diagnostics": diagnostics,
         }
 
 
 # ============================================================
-# 辅助:stance_confidence 分档
+# §4.5.7 overall_risk_level 规则
 # ============================================================
 
-def _resolve_stance_confidence_multiplier(
-    stance_confidence: float, tiers: list[dict[str, Any]],
+def _derive_overall_risk_level(
+    *,
+    vol_regime: str,
+    crowding_score: Optional[int],
+    event_risk_score: Optional[float],
+    macro_headwind_score: Optional[float],
+    l5_extreme: bool,
+) -> str:
+    """按最严档归档(critical > high > elevated > moderate > low)。"""
+    if l5_extreme:
+        return "critical"
+
+    # 按单因子严重度评估,取最严
+    levels: list[str] = []
+
+    # volatility_regime
+    if vol_regime == "extreme":
+        levels.append("high")
+    elif vol_regime == "elevated":
+        levels.append("elevated")
+    else:
+        levels.append("low")
+
+    # crowding
+    if crowding_score is not None:
+        if crowding_score >= 7:
+            levels.append("high")
+        elif crowding_score >= 5:
+            levels.append("elevated")
+        elif crowding_score >= 3:
+            levels.append("moderate")
+        else:
+            levels.append("low")
+
+    # event_risk
+    if event_risk_score is not None:
+        if event_risk_score >= 10:
+            levels.append("high")
+        elif event_risk_score >= 6:
+            levels.append("elevated")
+        elif event_risk_score >= 3:
+            levels.append("moderate")
+        else:
+            levels.append("low")
+
+    # macro_headwind(负值越深越严)
+    if macro_headwind_score is not None:
+        if macro_headwind_score <= -6:
+            levels.append("high")
+        elif macro_headwind_score <= -3:
+            levels.append("elevated")
+        elif macro_headwind_score <= -1:
+            levels.append("moderate")
+        else:
+            levels.append("low")
+
+    severity = ["low", "moderate", "elevated", "high", "critical"]
+    picked = max(levels, key=lambda x: severity.index(x)) if levels else "moderate"
+    return picked
+
+
+# ============================================================
+# §4.5.5 Position Cap 5 步合成
+# ============================================================
+
+def _compose_position_cap(
+    *,
+    base_pct: float,
+    overall_risk_level: str,
+    crowding_score: Optional[int],
+    macro_headwind_score: Optional[float],
+    event_risk_score: Optional[float],
+    hard_floor_pct: float,
+) -> tuple[float, dict[str, Any]]:
+    """
+    建模 §4.5.5 的 5 步串行合成,返回 (final_pct, composition dict)。
+    最终 floor 在 _apply_floor_gate 中处理(依赖 final_permission)。
+    """
+    comp: dict[str, Any] = {"base": round(base_pct, 4)}
+
+    # step 2: × L4_overall_risk_level
+    mult_risk = _RISK_LEVEL_MULTIPLIERS.get(overall_risk_level, 1.0)
+    after_l4_risk = base_pct * mult_risk
+    comp["after_l4_risk"] = round(after_l4_risk, 4)
+    comp["l4_risk_multiplier"] = mult_risk
+
+    # step 3: × L4_crowding
+    mult_crowd = _score_to_multiplier(crowding_score, _CROWDING_BANDS, default=1.0)
+    after_l4_crowding = after_l4_risk * mult_crowd
+    comp["after_l4_crowding"] = round(after_l4_crowding, 4)
+    comp["l4_crowding_multiplier"] = mult_crowd
+
+    # step 4: × L5_macro_headwind
+    mult_macro = _score_to_multiplier(
+        macro_headwind_score, _MACRO_BANDS, default=1.0,
+    )
+    after_l5_macro = after_l4_crowding * mult_macro
+    comp["after_l5_macro"] = round(after_l5_macro, 4)
+    comp["l5_macro_headwind_multiplier"] = mult_macro
+
+    # step 5: × L4_event_risk
+    mult_event = _score_to_multiplier(event_risk_score, _EVENT_BANDS, default=1.0)
+    after_l4_event = after_l5_macro * mult_event
+    comp["after_l4_event"] = round(after_l4_event, 4)
+    comp["l4_event_risk_multiplier"] = mult_event
+
+    comp["hard_floor_pct"] = hard_floor_pct
+    comp["hard_floor_applied_to_final"] = False  # 由 _apply_floor_gate 置位
+    comp["final_before_floor_gate"] = round(after_l4_event, 4)
+    comp["final"] = round(after_l4_event, 4)  # 会被 _apply_floor_gate 更新
+
+    return after_l4_event, comp
+
+
+def _apply_floor_gate(
+    *,
+    cap_pct: float,
+    composition: dict[str, Any],
+    final_permission: str,
+    overall_risk_level: str,
+    hard_floor_pct: float,
+) -> tuple[float, dict[str, Any]]:
+    """
+    §4.5.5 问题 4:
+      * permission ∈ {can_open, cautious_open, ambush_only} → hard_floor 生效
+      * permission = no_chase → 保留计算值(不抬升)
+      * permission = hold_only → 仅约束新开仓,对已持仓无约束(此处保留计算值)
+      * permission ∈ {watch, protective} → 不抬升
+      * overall_risk_level = critical → 不抬升(允许 < 15% 甚至 0)
+    """
+    final = cap_pct
+    floor_applies = (
+        overall_risk_level != "critical"
+        and final_permission in {"can_open", "cautious_open", "ambush_only"}
+    )
+    if floor_applies and final < hard_floor_pct:
+        final = hard_floor_pct
+        composition["hard_floor_applied_to_final"] = True
+    composition["final"] = round(final, 4)
+    composition["final_permission_at_floor_eval"] = final_permission
+    return final, composition
+
+
+# ============================================================
+# §4.5.6 Permission 归并 + A 级缓冲
+# ============================================================
+
+def _merge_permissions(
+    *,
+    overall_risk_level: str,
+    crowding_score: Optional[int],
+    event_risk_score: Optional[float],
+    macro_headwind_score: Optional[float],
+    grade: str,
+    regime: str,
+    regime_stability: str,
+    l1_regime_chaos: bool,
+    l5_extreme: bool,
+    state_machine_state: Optional[str],
+    l3_permission: str,
+) -> tuple[str, dict[str, Any]]:
+    """
+    每个因子产出建议档位,final_permission = 所有建议中的最严档位。
+    再依次应用 A 级缓冲 + 4 例外(§4.5.6 问题 3)。
+    """
+    suggestions: dict[str, str] = {}
+
+    # L4 overall_risk_level 建议
+    suggestions["l4_risk_level"] = _RISK_LEVEL_PERMISSION.get(
+        overall_risk_level, "cautious_open",
+    )
+
+    # L4 Crowding 建议
+    suggestions["l4_crowding"] = _score_to_permission(
+        crowding_score, _CROWDING_PERMISSION_BANDS, default="can_open",
+    )
+
+    # L4 EventRisk 建议
+    suggestions["l4_event_risk"] = _score_to_permission(
+        event_risk_score, _EVENT_PERMISSION_BANDS, default="can_open",
+    )
+
+    # L5 MacroHeadwind 建议
+    suggestions["l5_macro_headwind"] = _score_to_permission(
+        macro_headwind_score, _MACRO_PERMISSION_BANDS, default="can_open",
+    )
+
+    merged = merge_permissions(*suggestions.values())
+
+    composition: dict[str, Any] = {
+        "suggestions": suggestions,
+        "merged_before_buffer": merged,
+        "a_grade_buffer_applied": False,
+        "override_reason": None,
+    }
+
+    # ---- A 级缓冲 ----
+    buffer_eligible = (
+        grade == "A"
+        and regime in _A_GRADE_REGIME_STABLE
+        and regime_stability in _A_GRADE_STABILITY_OK
+    )
+    override_reason = _a_grade_buffer_override(
+        l5_extreme=l5_extreme,
+        overall_risk_level=overall_risk_level,
+        state_machine_state=state_machine_state,
+        l1_regime_chaos=l1_regime_chaos,
+    )
+    composition["a_grade_buffer_eligible"] = buffer_eligible
+    composition["override_reason"] = override_reason
+
+    if buffer_eligible and override_reason is None:
+        # 抬升到 cautious_open(不得更严)
+        loosened = merge_permissions(merged, _A_GRADE_BUFFER_FLOOR)
+        # merge 返回"更严",我们要"不严于 cautious_open"——取严格度较低者
+        final = _min_strict(merged, _A_GRADE_BUFFER_FLOOR)
+        if final != merged:
+            composition["a_grade_buffer_applied"] = True
+        final_permission = final
+    elif override_reason is not None:
+        # 4 例外强制值
+        final_permission = _override_permission_for_reason(override_reason)
+    else:
+        final_permission = merged
+
+    composition["final_permission"] = final_permission
+    return final_permission, composition
+
+
+def _a_grade_buffer_override(
+    *,
+    l5_extreme: bool,
+    overall_risk_level: str,
+    state_machine_state: Optional[str],
+    l1_regime_chaos: bool,
+) -> Optional[str]:
+    """建模 §4.5.6 问题 3 四例外,顺序:PROTECTION → extreme → critical → chaos。"""
+    if state_machine_state == "PROTECTION":
+        return "state_in_protection"
+    if l5_extreme:
+        return "l5_extreme_event_detected"
+    if overall_risk_level == "critical":
+        return "l4_overall_risk_critical"
+    if l1_regime_chaos:
+        return "l1_regime_chaos"
+    return None
+
+
+def _override_permission_for_reason(reason: str) -> str:
+    return {
+        "state_in_protection": "protective",
+        "l5_extreme_event_detected": "protective",
+        "l4_overall_risk_critical": "protective",
+        "l1_regime_chaos": "watch",
+    }.get(reason, "watch")
+
+
+def _min_strict(a: str, b: str) -> str:
+    """返回两个 permission 中"更不严"的那个(索引更小)。"""
+    from ..utils.permission import get_permission_order
+    order = get_permission_order()
+    if a not in order:
+        return b
+    if b not in order:
+        return a
+    return a if order.index(a) < order.index(b) else b
+
+
+# ============================================================
+# §4.5.4 hard_invalidation_levels(Sprint 1.5b v1:由 stop_loss_reference 升格)
+# ============================================================
+
+def _build_hard_invalidation_levels(
+    *,
+    stop_loss_ref: Optional[dict[str, Any]],
+    stance: str,
+) -> list[dict[str, Any]]:
+    """
+    建模 §4.5.7 hard_invalidation_levels 每条:
+      { price, direction, basis, priority, confirmation_timeframe }
+    v1:直接把 stop_loss_reference 升格为单一 hard_invalidation_level;
+    Sprint 1.5c+ 再接入更精细的结构性失效位。
+    """
+    if stop_loss_ref is None or stance not in {"bullish", "bearish"}:
+        return []
+    return [{
+        "price": stop_loss_ref.get("price"),
+        "direction": "below" if stance == "bullish" else "above",
+        "basis": stop_loss_ref.get("method_used", "atr"),
+        "priority": 1,
+        "confirmation_timeframe": "4H",
+    }]
+
+
+# ============================================================
+# 辅助:score → 乘数 / permission 区间匹配
+# ============================================================
+
+def _score_to_multiplier(
+    score: Optional[float],
+    bands: list[tuple[tuple[int, int], float]],
+    *,
+    default: float,
 ) -> float:
-    """按 tiers 列表(有序,min 高到低)查找命中 tier。"""
-    if not tiers:
-        return 1.0
-    # 按 min 降序匹配(首个 stance_confidence >= min 命中)
-    sorted_tiers = sorted(tiers, key=lambda t: float(t.get("min", 0)), reverse=True)
-    for tier in sorted_tiers:
-        if stance_confidence >= float(tier.get("min", 0)):
-            return float(tier.get("multiplier", 1.0))
-    return 1.0
+    if score is None:
+        return default
+    for (lo, hi), mul in bands:
+        if lo <= float(score) <= hi:
+            return float(mul)
+    return default
+
+
+def _score_to_permission(
+    score: Optional[float],
+    bands: list[tuple[tuple[int, int], str]],
+    *,
+    default: str,
+) -> str:
+    if score is None:
+        return default
+    for (lo, hi), perm in bands:
+        if lo <= float(score) <= hi:
+            return perm
+    return default
+
+
+def _safe_int(v: Any) -> Optional[int]:
+    if v is None:
+        return None
+    try:
+        return int(float(v))
+    except (TypeError, ValueError):
+        return None
+
+
+def _safe_number(v: Any) -> Optional[float]:
+    if v is None:
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
 
 
 # ============================================================
-# 辅助:Stop Loss 计算
+# Sprint 1.10 保留:stop_loss + rr 计算
 # ============================================================
 
 def _compute_stop_loss(
@@ -324,10 +652,6 @@ def _compute_stop_loss(
     stance: str, vol_regime: str,
     stop_cfg: dict[str, Any],
 ) -> Optional[dict[str, Any]]:
-    """
-    返回 {price, distance_pct, method_used, atr_stop, swing_stop} 或 None。
-    method_used ∈ {atr, swing, combined}。
-    """
     if klines_1d is None or not isinstance(klines_1d, pd.DataFrame) \
             or len(klines_1d) < 20:
         return None
@@ -336,9 +660,8 @@ def _compute_stop_loss(
     if current <= 0:
         return None
 
-    # ---- ATR 逻辑 ----
     atr_series = atr(
-        klines_1d["high"], klines_1d["low"], klines_1d["close"], period=14
+        klines_1d["high"], klines_1d["low"], klines_1d["close"], period=14,
     )
     atr_val = atr_series.dropna().iloc[-1] if not atr_series.dropna().empty else None
 
@@ -352,23 +675,19 @@ def _compute_stop_loss(
         elif stance == "bearish":
             atr_stop_price = current + atr_mul * float(atr_val)
 
-    # ---- Swing 逻辑 ----
     swing_stop_price: Optional[float] = None
     buffer_pct = float(stop_cfg.get("swing_buffer_pct", 0.015))
     swing_max_dist = float(stop_cfg.get("swing_max_distance_pct", 0.10))
 
-    # 最近 60 根做 swing 分析
     recent = klines_1d.tail(60)
     events = swing_points(recent["high"], recent["low"], lookback=5)
 
     if stance == "bullish":
-        # 从最近的 swing_low 中找离现价最近的
         lows = [e["price"] for e in events if e["type"] == "low"]
-        # 取最近 3 个
         lows = lows[-3:] if len(lows) >= 3 else lows
         valid_lows = [p for p in lows if 0 < p < current]
         if valid_lows:
-            best = max(valid_lows)  # 离现价最近的低点(最高的低点)
+            best = max(valid_lows)
             dist = (current - best) / current
             if dist <= swing_max_dist:
                 swing_stop_price = best * (1 - buffer_pct)
@@ -377,17 +696,15 @@ def _compute_stop_loss(
         highs = highs[-3:] if len(highs) >= 3 else highs
         valid_highs = [p for p in highs if p > current > 0]
         if valid_highs:
-            best = min(valid_highs)  # 离现价最近的高点(最低的高点)
+            best = min(valid_highs)
             dist = (best - current) / current
             if dist <= swing_max_dist:
                 swing_stop_price = best * (1 + buffer_pct)
 
-    # ---- 合并:取"止损更近"者 ----
     if atr_stop_price is None and swing_stop_price is None:
         return None
 
     if stance == "bullish":
-        # 止损更近 = stop 价格更高(离现价更近的下方)
         if atr_stop_price is not None and swing_stop_price is not None:
             chosen_price = max(atr_stop_price, swing_stop_price)
             method = "combined"
@@ -412,7 +729,6 @@ def _compute_stop_loss(
     else:
         return None
 
-    # 止损距离必须 > 0(否则表示入场即打止损)
     if distance_pct <= 0:
         return None
 
@@ -428,10 +744,6 @@ def _compute_stop_loss(
     }
 
 
-# ============================================================
-# 辅助:Risk-Reward
-# ============================================================
-
 def _compute_rr(
     klines_1d: Optional[pd.DataFrame],
     stance: str,
@@ -439,10 +751,6 @@ def _compute_rr(
     composites: dict[str, Any],
     rr_cfg: dict[str, Any],
 ) -> dict[str, Any]:
-    """
-    返回 {ratio, target1_pct, target_source, pass_level}。
-    stop 缺失 → fail。
-    """
     full_th = float(rr_cfg.get("full_threshold", 2.0))
     reduced_th = float(rr_cfg.get("reduced_threshold", 1.5))
     fallback_atr_mul = float(rr_cfg.get("fallback_target_atr_multiplier", 3.0))
@@ -460,13 +768,11 @@ def _compute_rr(
     target1_pct: Optional[float] = None
     source = "unknown"
 
-    # 优先:swing 结构给目标
     recent = klines_1d.tail(60)
     events = swing_points(recent["high"], recent["low"], lookback=5)
 
     if stance == "bullish":
         highs = [e["price"] for e in events if e["type"] == "high"]
-        # 取高于现价的最低 swing_high
         above = [p for p in highs if p > current]
         if above:
             target1_pct = (min(above) - current) / current
@@ -478,10 +784,9 @@ def _compute_rr(
             target1_pct = (current - max(below)) / current
             source = "swing_low"
 
-    # 回退:ATR × multiplier
     if target1_pct is None or target1_pct <= 0:
         atr_series = atr(
-            klines_1d["high"], klines_1d["low"], klines_1d["close"], period=14
+            klines_1d["high"], klines_1d["low"], klines_1d["close"], period=14,
         )
         atr_val = atr_series.dropna().iloc[-1] if not atr_series.dropna().empty else None
         if atr_val is not None and atr_val > 0 and current > 0:
@@ -509,29 +814,6 @@ def _compute_rr(
         "target_source": source,
         "pass_level": pass_level,
     }
-
-
-# ============================================================
-# 辅助:Permission 合并(Sprint 1.11 统一使用 src.utils.permission)
-# ============================================================
-
-def _l4_internal_permission(
-    final_cap: float,
-    stop_loss_ref: Optional[dict[str, Any]],
-    rr_result: dict[str, Any],
-) -> str:
-    """L4 内部根据 cap / stop / RR 计算 permission。"""
-    if final_cap <= 0:
-        return "watch"
-    if stop_loss_ref is None:
-        return "watch"
-    pass_level = rr_result.get("pass_level")
-    if pass_level == "fail":
-        return "watch"
-    if pass_level == "reduced":
-        return "cautious_open"
-    # full pass + 有 cap + 有 stop → L4 不额外收紧,保留 L3
-    return "can_open"  # 最宽松档(实际会被 L3 限制)
 
 
 def _grade_to_tier(grade: str) -> str:

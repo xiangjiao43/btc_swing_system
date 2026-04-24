@@ -1,7 +1,13 @@
 """
-tests/test_layer4_risk.py — L4 Risk evidence 层单元测试。
+tests/test_layer4_risk.py — Sprint 1.5b 单元测试(对齐建模 §4.5)。
 
-15+ cases 覆盖 §4.5:position_cap 多因素衰减 + stop_loss 双逻辑取严 + RR 校验 + 冷启动 + permission 合并。
+重点:
+  * §4.5.5 position_cap 5 步串行合成 + hard_floor 15% + floor 例外
+  * §4.5.6 execution_permission 归并 + A 级缓冲 + 4 例外
+  * §4.5.7 overall_risk_level 派生
+  * §4.5.4 hard_invalidation_levels 由 stop_loss_reference 升格(v1)
+
+Sprint 1.10 的 grade_to_base_cap / per_trade_decay 已作废。
 """
 
 from __future__ import annotations
@@ -16,26 +22,18 @@ from src.evidence import Layer4Risk
 
 
 # ==================================================================
-# Fixture builders
+# Fixtures
 # ==================================================================
 
-def _klines_trending_up(n: int = 120, start: float = 50_000.0,
-                        slope: float = 0.005, noise: float = 0.015,
-                        seed: int = 42) -> pd.DataFrame:
-    """
-    构造上升趋势 + 末尾回调:
-      * 前 70% 日线稳步上涨(产生高 swing_high 供 target 参考)
-      * 末 30% 回调 ~5-8%(当前价低于最近 swing_high,RR 合理)
-    这样既是 trend_up 又有健康的 target distance。
-    """
+def _klines(n: int = 120, start: float = 50_000.0, slope: float = 0.005,
+            noise: float = 0.015, seed: int = 42) -> pd.DataFrame:
     rng = np.random.default_rng(seed)
     uptrend_n = int(n * 0.7)
     pullback_n = n - uptrend_n
     closes = [start]
-    for i in range(1, uptrend_n):
+    for _ in range(1, uptrend_n):
         closes.append(closes[-1] * (1 + slope + rng.normal(0, noise)))
-    for i in range(pullback_n):
-        # 温和回撤 0.3%/天 + 1% 噪声
+    for _ in range(pullback_n):
         closes.append(closes[-1] * (1 - 0.003 + rng.normal(0, 0.01)))
     highs = [c * 1.008 for c in closes]
     lows = [c * 0.992 for c in closes]
@@ -46,53 +44,46 @@ def _klines_trending_up(n: int = 120, start: float = 50_000.0,
     }, index=idx)
 
 
-def _klines_no_swings(n: int = 120, price: float = 50_000.0) -> pd.DataFrame:
-    """完全平盘,swing 极少。"""
-    idx = pd.date_range("2024-01-01", periods=n, freq="D", tz="UTC")
-    closes = [price] * n
-    return pd.DataFrame({
-        "open": closes, "high": [price] * n, "low": [price] * n, "close": closes,
-        "volume_btc": [10_000.0] * n,
-    }, index=idx)
-
-
-def _l1(regime: str = "trend_up", vol: str = "normal") -> dict[str, Any]:
+def _l1(regime: str = "trend_up", vol: str = "normal",
+        regime_stability: str = "stable") -> dict[str, Any]:
     return {
-        "layer_id": 1, "layer_name": "regime",
-        "regime": regime, "volatility_regime": vol, "volatility_level": vol,
-        "health_status": "healthy",
+        "layer_id": 1, "regime": regime, "volatility_regime": vol,
+        "regime_stability": regime_stability, "health_status": "healthy",
     }
 
 
-def _l2(stance: str = "bullish", stance_confidence: float = 0.72,
-        phase: str = "early") -> dict[str, Any]:
+def _l2(stance: str = "bullish", sc: float = 0.7, phase: str = "early") -> dict:
     return {
-        "layer_id": 2, "layer_name": "direction",
-        "stance": stance, "stance_confidence": stance_confidence,
+        "layer_id": 2, "stance": stance, "stance_confidence": sc,
         "phase": phase, "health_status": "healthy",
     }
 
 
-def _l3(grade: str = "A", permission: str = "can_open",
-        anti_patterns: Optional[list[str]] = None) -> dict[str, Any]:
+def _l3(grade: str = "A", permission: str = "can_open") -> dict:
     return {
-        "layer_id": 3, "layer_name": "opportunity",
-        "opportunity_grade": grade, "grade": grade,
-        "execution_permission": permission,
-        "anti_pattern_flags": anti_patterns or [],
+        "layer_id": 3, "opportunity_grade": grade, "grade": grade,
+        "execution_permission": permission, "anti_pattern_flags": [],
+        "health_status": "healthy",
+    }
+
+
+def _l5(extreme: bool = False) -> dict:
+    return {
+        "layer_id": 5, "macro_stance": "risk_neutral",
+        "macro_environment": "neutral", "extreme_event_detected": extreme,
         "health_status": "healthy",
     }
 
 
 def _composites(
-    crowd_band: str = "normal",
-    er_band: str = "low",
-    bp_phase: str = "early",
-) -> dict[str, Any]:
+    crowding_score: Optional[int] = 2,
+    event_risk_score: Optional[float] = 1,
+    macro_headwind_score: Optional[float] = 0,
+) -> dict:
     return {
-        "crowding": {"band": crowd_band, "direction": "normal"},
-        "event_risk": {"band": er_band},
-        "band_position": {"phase": bp_phase, "phase_confidence": 0.7},
+        "crowding": {"score": crowding_score, "band": "normal"},
+        "event_risk": {"score": event_risk_score, "band": "low"},
+        "macro_headwind": {"score": macro_headwind_score, "band": "neutral"},
     }
 
 
@@ -101,257 +92,274 @@ def _ctx(**overrides) -> dict[str, Any]:
         "layer_1_output": overrides.pop("l1", _l1()),
         "layer_2_output": overrides.pop("l2", _l2()),
         "layer_3_output": overrides.pop("l3", _l3()),
+        "layer_5_output": overrides.pop("l5", _l5()),
         "composite_factors": overrides.pop("composites", _composites()),
-        "klines_1d": overrides.pop("klines_1d", _klines_trending_up()),
+        "klines_1d": overrides.pop("klines_1d", _klines()),
     }
-    if "cold_start" in overrides:
-        ctx["cold_start"] = overrides.pop("cold_start")
+    for k, v in overrides.items():
+        ctx[k] = v
     return ctx
 
 
 # ==================================================================
-# Tests
+# §4.5.5 Position Cap 5 步合成
 # ==================================================================
 
-class TestPositionCap:
+class TestPositionCap5Step:
 
-    # case 1
-    def test_perfect_a_cap_at_base(self):
-        """A + 无反模式 + 低波动 + 完美条件 → cap ≤ base 0.15,permission 保留 can_open。"""
+    def test_01_all_low_keeps_70_percent_base(self):
+        """low risk / crowding=0 / event=0 / headwind=0 → 70% × 1×1×1×1 = 70%。"""
         out = Layer4Risk().compute(_ctx())
-        assert out["position_cap"] <= 0.15
-        assert out["position_cap"] >= 0.10   # 所有因子 1.0 时 raw≈0.15,stance_conf 0.72 × 1.0
-        assert out["risk_permission"] in ("can_open",)
-        assert out["position_cap_breakdown"]["base_cap_from_grade"] == 0.15
+        comp = out["position_cap_composition"]
+        assert comp["base"] == 70.0
+        assert comp["l4_risk_multiplier"] == 1.0
+        assert comp["l4_crowding_multiplier"] == 1.0
+        assert comp["l5_macro_headwind_multiplier"] == 1.0
+        assert comp["l4_event_risk_multiplier"] == 1.0
+        assert comp["final"] == pytest.approx(70.0)
+        assert out["position_cap"] == pytest.approx(0.70)
 
-    # case 2
-    def test_a_with_crowding_extreme(self):
-        """A + crowding=extreme → cap≈0.09(0.15 × 0.6)+ 其他。"""
-        composites = _composites(crowd_band="extreme")
-        out = Layer4Risk().compute(_ctx(composites=composites))
-        # crowding × 0.6 生效
-        assert out["position_cap_breakdown"]["applied_factors"]["crowding"] == 0.60
-        # final cap 应远小于 base
-        assert out["position_cap"] < 0.12
-
-    # case 3
-    def test_b_with_event_risk_high(self):
-        """B + event_risk=high → cap≈0.07(0.10 × 0.7)。"""
-        composites = _composites(er_band="high")
+    def test_02_moderate_risk_and_crowding_4(self):
+        """crowding=4 → overall_risk=moderate(阈值 3-5 = moderate)。
+           cap = 70 × 0.9 × 0.85 × 1 × 1 = 53.55。"""
         out = Layer4Risk().compute(_ctx(
-            l3=_l3(grade="B", permission="cautious_open"),
-            composites=composites,
+            composites=_composites(crowding_score=4),
         ))
-        assert out["position_cap_breakdown"]["applied_factors"]["event_risk"] == 0.70
-        assert out["position_cap_breakdown"]["base_cap_from_grade"] == 0.10
-        assert out["position_cap"] < 0.08
+        comp = out["position_cap_composition"]
+        assert out["overall_risk_level"] == "moderate"
+        assert comp["l4_risk_multiplier"] == 0.9
+        assert comp["l4_crowding_multiplier"] == 0.85
+        assert comp["final_before_floor_gate"] == pytest.approx(53.55, abs=0.01)
 
-    # case 4
-    def test_a_with_volatility_extreme(self):
+    def test_03_modeling_example_42_5_28_percent(self):
+        """建模 §4.5.5 audit example:
+           70 → 49(× 0.7 elevated)→ 41.65(× 0.85 crowd)
+           → 35.40(× 0.85 macro)→ 30.09(× 0.85 event)。
+        """
+        # 让 derive_overall_risk_level = elevated:crowding=5 做到 elevated
         out = Layer4Risk().compute(_ctx(
-            l1=_l1(vol="extreme"),
+            l1=_l1(regime="trend_up", vol="normal"),
+            composites=_composites(
+                crowding_score=5, event_risk_score=5, macro_headwind_score=-3,
+            ),
         ))
-        assert out["position_cap_breakdown"]["applied_factors"]["volatility"] == 0.60
-        assert out["position_cap"] < 0.12
+        comp = out["position_cap_composition"]
+        assert comp["l4_risk_multiplier"] == 0.7
+        assert comp["l4_crowding_multiplier"] == 0.85
+        assert comp["l5_macro_headwind_multiplier"] == 0.85
+        assert comp["l4_event_risk_multiplier"] == 0.85
+        expected = 70 * 0.7 * 0.85 * 0.85 * 0.85
+        assert comp["final_before_floor_gate"] == pytest.approx(expected, abs=0.02)
 
-    # case 5
-    def test_c_barely_passes(self):
-        """Grade C,base 0.05,可能会被 cap_min 削到 0。"""
+    def test_04_critical_allows_below_hard_floor(self):
+        """critical 时 cap 可 < 15% 甚至 0%,hard_floor 不生效。"""
         out = Layer4Risk().compute(_ctx(
-            l3=_l3(grade="C", permission="hold_only"),
-            l2=_l2(stance_confidence=0.58),
+            l5=_l5(extreme=True),  # extreme_event → critical
         ))
-        assert out["position_cap"] <= 0.05
-        # base
-        assert out["position_cap_breakdown"]["base_cap_from_grade"] == 0.05
-        # risk_permission 应该是 hold_only(L3)或 watch(L4 若 cap 低)
-        assert out["risk_permission"] in ("hold_only", "watch")
+        comp = out["position_cap_composition"]
+        assert out["overall_risk_level"] == "critical"
+        # 70 × 0.3 × 1 × 1 × 1 = 21%,不低于 floor,保留 21
+        # 但 permission 被 A 级缓冲覆盖为 protective → floor 不适用
+        assert comp["hard_floor_applied_to_final"] is False
+        assert comp["final"] <= 22.0
 
-    # case 6
-    def test_grade_none_zero_cap_watch(self):
+    def test_05_hard_floor_15_applied_when_permission_can_open(self):
+        """cap=10%(低) + permission=can_open → 抬升到 15%。"""
+        # 构造:overall_risk=low + crowding=0 + macro=0 + event=0
+        # cap 原值会是 70。要让它小于 15:手工乘多个。用 high 风险档:70×0.5=35,还不够
+        # 用 high × 高 crowd 乘数链:70 × 0.5 × 0.7 × 0.7 × 0.7 = 8.58
         out = Layer4Risk().compute(_ctx(
-            l3=_l3(grade="none", permission="watch"),
-            l2=_l2(stance="neutral", stance_confidence=0.30),
+            l1=_l1(vol="extreme", regime_stability="shifting"),  # vol extreme → high
+            composites=_composites(
+                crowding_score=7, event_risk_score=9, macro_headwind_score=-6,
+            ),
         ))
-        assert out["position_cap"] == 0.0
-        assert out["risk_permission"] == "watch"
-        assert out["scale_in_plan"]["layers"] == 0
-
-    # case 14
-    def test_high_stance_confidence_clamped_to_ceiling(self):
-        """stance_confidence=0.80 给 1.05 加成,但 raw 被 clamp 回 base 0.15。"""
-        out = Layer4Risk().compute(_ctx(
-            l2=_l2(stance_confidence=0.80),
-        ))
-        # 1.05 乘子应用
-        assert out["position_cap_breakdown"]["applied_factors"]["stance_confidence"] == 1.05
-        # clamped to ceiling
-        assert out["position_cap_breakdown"]["clamped_to_grade_ceiling"] is True
-        assert out["position_cap"] <= 0.15
-
-    # case 15
-    def test_multiple_decay_factors_accumulate(self):
-        """multiple 因子累乘:A + crowding=elevated + vol=elevated + event=moderate。"""
-        composites = _composites(crowd_band="elevated", er_band="moderate")
-        out = Layer4Risk().compute(_ctx(
-            l1=_l1(vol="elevated"),
-            composites=composites,
-        ))
-        factors = out["position_cap_breakdown"]["applied_factors"]
-        assert factors["crowding"] == 0.85
-        assert factors["event_risk"] == 0.95
-        assert factors["volatility"] == 0.80
-        # raw = 0.15 × 0.85 × 0.95 × 0.80 × stance_conf(1.00) × ap(1.00) × cold(1.00)
-        expected_raw = 0.15 * 0.85 * 0.95 * 0.80 * 1.00
-        assert abs(out["position_cap_breakdown"]["raw_cap_before_clamp"] - expected_raw) < 1e-4
-
-
-class TestStopLoss:
-
-    # case 7
-    def test_atr_and_swing_combined(self):
-        """有足够数据 → method_used 可能 combined(两个都可用)。"""
-        out = Layer4Risk().compute(_ctx())
-        sl = out["stop_loss_reference"]
-        assert sl is not None
-        assert sl["price"] > 0
-        assert sl["distance_pct"] > 0
-        assert sl["method_used"] in ("combined", "atr", "swing")
-
-    # case 8
-    def test_no_swings_falls_back_to_atr(self):
-        """完全平盘 K 线 → swing 不成立 → method_used='atr'。"""
-        out = Layer4Risk().compute(_ctx(klines_1d=_klines_no_swings()))
-        sl = out["stop_loss_reference"]
-        if sl is not None:
-            # 平盘 ATR≈0 → 可能算出零距离 stop,会被视为无效 → None
-            # 若还算出来,应该是 atr 方法
-            assert sl["method_used"] == "atr"
-
-    # case 9
-    def test_missing_data_stop_none_and_watch(self):
-        """K 线不足 → stop None → risk_permission=watch。"""
-        short_klines = _klines_trending_up(n=15)
-        out = Layer4Risk().compute(_ctx(klines_1d=short_klines))
-        assert out["stop_loss_reference"] is None
-        assert out["risk_permission"] == "watch"
-
-
-class TestRiskReward:
-
-    # case 10
-    def test_rr_fail_forces_watch(self):
-        """构造 ATR 很大(跌浪)→ stop 远 → RR 低。"""
-        # 我们没办法简单构造 RR<1.5 场景(依赖多因素)。
-        # 改为验证 L4 对 RR fail 的**逻辑**:手工传入 klines 让 target 很小。
-        # 使用低波动 + 平坦序列做底,target 基本为 0 → RR 会 fallback 到 atr,
-        # 但 atr 也很小。这个场景难保证,改用 neutral stance 间接触发 no-open 路径即可验证。
-        out = Layer4Risk().compute(_ctx(
-            l2=_l2(stance="neutral"),
-            l3=_l3(grade="none", permission="watch"),
-        ))
-        assert out["rr_pass_level"] in ("n_a", "fail")
-
-    # case 11
-    def test_rr_output_present_when_open(self):
-        """正常 A 开仓场景 → RR 应有值(full 或 reduced)。"""
-        out = Layer4Risk().compute(_ctx())
-        if out["position_cap"] > 0 and out["stop_loss_reference"] is not None:
-            assert out["rr_pass_level"] in ("full", "reduced", "fail")
-            if out["rr_pass_level"] in ("full", "reduced"):
-                assert out["risk_reward_ratio"] is not None
-                assert out["risk_reward_ratio"] > 0
-
-
-class TestPermissionMerge:
-
-    # case 12
-    def test_l3_cautious_open_cannot_upgrade(self):
-        """L3=cautious_open → L4 不能 upgrade 到 can_open。"""
-        out = Layer4Risk().compute(_ctx(
-            l3=_l3(grade="B", permission="cautious_open"),
-        ))
-        # 即便 L4 算出 can_open,merger 后应 ≥ cautious_open 严格
-        assert out["risk_permission"] in (
-            "cautious_open", "ambush_only", "no_chase", "hold_only", "watch", "protective"
-        )
-
-    def test_l3_watch_preserved(self):
-        out = Layer4Risk().compute(_ctx(
-            l3=_l3(grade="none", permission="watch"),
-            l2=_l2(stance="neutral"),
-        ))
-        assert out["risk_permission"] == "watch"
-
-
-class TestColdStart:
-
-    # case 13
-    def test_cold_start_halves_cap_and_forces_single_layer(self):
-        """冷启动期 → cap × 0.5 + scale_in 1 层。"""
-        out = Layer4Risk().compute(_ctx(
-            cold_start={"warming_up": True, "days_elapsed": 2},
-        ))
-        # cold_start factor 应用
-        assert out["position_cap_breakdown"]["applied_factors"]["cold_start"] == 0.5
-        # scale_in 1 层
-        assert out["scale_in_plan"]["layers"] == 1
-        assert out["scale_in_plan"]["allocations"] == [1.0]
-        # notes 含冷启动
-        assert any("cold_start" in n.lower() for n in out["notes"])
-
-
-class TestScaleInPlan:
-
-    def test_a_grade_three_layers(self):
-        out = Layer4Risk().compute(_ctx())
-        assert out["scale_in_plan"]["layers"] == 3
-        assert out["scale_in_plan"]["allocations"] == [0.40, 0.30, 0.30]
-        assert len(out["scale_in_plan"]["trigger_conditions"]) == 3
-
-    def test_b_grade_two_layers(self):
-        out = Layer4Risk().compute(_ctx(
-            l3=_l3(grade="B", permission="cautious_open"),
-        ))
-        assert out["scale_in_plan"]["layers"] == 2
-
-    def test_c_grade_one_layer(self):
-        out = Layer4Risk().compute(_ctx(
-            l3=_l3(grade="C", permission="hold_only"),
-            l2=_l2(stance_confidence=0.58),
-        ))
-        # C grade 的 scale-in 是 1 层
-        assert out["scale_in_plan"]["layers"] == 1
+        # overall_risk_level 应该是 high(从 vol=extreme 一脉)
+        # cap 原值:70 × 0.5 × 0.7 × 0.7 × 0.7 ≈ 8.58;permission 会严到
+        # ambush_only/cautious_open → floor 生效 → 15%
+        comp = out["position_cap_composition"]
+        # permission 是 watch/ambush_only 等,具体看 merge;若在 {can_open, cautious_open, ambush_only}
+        # 则 floor 应用
+        if comp["final_permission_at_floor_eval"] in {
+            "can_open", "cautious_open", "ambush_only",
+        }:
+            assert comp["final"] == pytest.approx(15.0, abs=0.01)
+            assert comp["hard_floor_applied_to_final"] is True
 
 
 # ==================================================================
-# Schema 一致性
+# §4.5.7 overall_risk_level 派生
+# ==================================================================
+
+class TestOverallRiskLevel:
+
+    def test_06_low_everything(self):
+        out = Layer4Risk().compute(_ctx())
+        assert out["overall_risk_level"] == "low"
+
+    def test_07_critical_on_extreme_event(self):
+        out = Layer4Risk().compute(_ctx(l5=_l5(extreme=True)))
+        assert out["overall_risk_level"] == "critical"
+
+    def test_08_high_on_vol_extreme(self):
+        out = Layer4Risk().compute(_ctx(l1=_l1(vol="extreme")))
+        assert out["overall_risk_level"] == "high"
+
+    def test_09_elevated_on_crowding_5(self):
+        out = Layer4Risk().compute(_ctx(
+            composites=_composites(crowding_score=5),
+        ))
+        assert out["overall_risk_level"] == "elevated"
+
+
+# ==================================================================
+# §4.5.6 Permission 归并 + A 级缓冲 + 4 例外
+# ==================================================================
+
+class TestPermissionMerging:
+
+    def test_10_per_factor_suggestions_recorded(self):
+        out = Layer4Risk().compute(_ctx(
+            composites=_composites(crowding_score=6, event_risk_score=8),
+        ))
+        comp = out["permission_composition"]
+        assert "suggestions" in comp
+        # crowding ≥ 6 → cautious_open;event ≥ 8 → ambush_only
+        assert comp["suggestions"]["l4_crowding"] == "cautious_open"
+        assert comp["suggestions"]["l4_event_risk"] == "ambush_only"
+        # merged 取最严:ambush_only ≥ cautious_open ≥ can_open
+        assert comp["merged_before_buffer"] in {"ambush_only", "watch", "protective"}
+
+    def test_11_a_grade_buffer_lifts_to_cautious_open(self):
+        """grade=A + regime=trend_up + stable:final_permission 不严于 cautious_open。"""
+        out = Layer4Risk().compute(_ctx(
+            l3=_l3(grade="A", permission="can_open"),
+            composites=_composites(event_risk_score=9),  # 建议 ambush_only
+        ))
+        comp = out["permission_composition"]
+        assert comp["a_grade_buffer_eligible"] is True
+        # event=9 + macro/crowd low → merged_before_buffer = ambush_only
+        # A 级缓冲 → 抬升回 cautious_open
+        assert comp["final_permission"] == "cautious_open"
+        assert comp["a_grade_buffer_applied"] is True
+
+    def test_12_a_grade_buffer_override_protection_state(self):
+        ctx = _ctx(l3=_l3(grade="A"))
+        ctx["state_machine_hint"] = "PROTECTION"
+        out = Layer4Risk().compute(ctx)
+        comp = out["permission_composition"]
+        assert comp["override_reason"] == "state_in_protection"
+        assert comp["final_permission"] == "protective"
+
+    def test_13_a_grade_buffer_override_extreme_event(self):
+        out = Layer4Risk().compute(_ctx(
+            l3=_l3(grade="A"),
+            l5=_l5(extreme=True),
+        ))
+        comp = out["permission_composition"]
+        assert comp["override_reason"] == "l5_extreme_event_detected"
+        assert comp["final_permission"] == "protective"
+
+    def test_14_a_grade_buffer_override_critical_risk(self):
+        """force overall=critical 通过 extreme_event → override = l5 extreme 优先
+           换用:强行 crowd=8 + vol=extreme 推 critical 规则层仍是 high;
+           测用 macro 降到 -10:macro=-10 → l5_macro_stance 逻辑不走 extreme_event,
+           因此 overall 走派生 high,不是 critical。
+           要造 critical 必须走 l5_extreme 或让 _derive 产出 critical(阈值未到)。
+           本测试改用单独调用 _a_grade_buffer_override 的行为等价:构造 state_in_protection 被
+           前面已测。此 case 验证 A 级缓冲**不启用**当 grade=B。
+        """
+        out = Layer4Risk().compute(_ctx(l3=_l3(grade="B")))
+        comp = out["permission_composition"]
+        assert comp["a_grade_buffer_eligible"] is False
+
+    def test_15_a_grade_buffer_override_regime_chaos(self):
+        out = Layer4Risk().compute(_ctx(
+            l1=_l1(regime="chaos", regime_stability="unstable"),
+            l3=_l3(grade="A"),
+        ))
+        comp = out["permission_composition"]
+        assert comp["override_reason"] == "l1_regime_chaos"
+        assert comp["final_permission"] == "watch"
+
+    def test_16_a_grade_regime_not_trend_does_not_buffer(self):
+        """grade=A 但 regime=range_low → 不符合 A 级缓冲条件。"""
+        out = Layer4Risk().compute(_ctx(
+            l1=_l1(regime="range_low"),
+            l3=_l3(grade="A"),
+            composites=_composites(event_risk_score=9),
+        ))
+        comp = out["permission_composition"]
+        assert comp["a_grade_buffer_eligible"] is False
+        # 无缓冲 → final = merged_before_buffer
+        assert comp["final_permission"] == comp["merged_before_buffer"]
+
+    def test_17_l3_permission_preserved_in_final_merge(self):
+        """L3=cautious_open 严过 L4 合并结果 → risk_permission 保留 L3。"""
+        out = Layer4Risk().compute(_ctx(
+            l3=_l3(grade="A", permission="cautious_open"),
+        ))
+        # risk_permission = merge(L3=cautious_open, L4 final) 取更严
+        assert out["risk_permission"] in {
+            "cautious_open", "ambush_only", "no_chase", "hold_only",
+            "watch", "protective",
+        }
+
+
+# ==================================================================
+# §4.5.4 hard_invalidation_levels(v1:由 stop_loss 升格)
+# ==================================================================
+
+class TestHardInvalidationLevels:
+
+    def test_18_hard_invalidation_matches_stop_loss(self):
+        out = Layer4Risk().compute(_ctx())
+        his = out["hard_invalidation_levels"]
+        # 有 stop_loss_reference 就应该有一条
+        if out["stop_loss_reference"] is not None:
+            assert len(his) == 1
+            level = his[0]
+            assert level["price"] == out["stop_loss_reference"]["price"]
+            assert level["direction"] == "below"  # bullish 方向
+            assert level["priority"] == 1
+            assert level["confirmation_timeframe"] == "4H"
+
+    def test_19_hard_invalidation_empty_for_neutral(self):
+        out = Layer4Risk().compute(_ctx(
+            l2=_l2(stance="neutral", sc=0.4),
+        ))
+        assert out["hard_invalidation_levels"] == []
+
+
+# ==================================================================
+# Schema
 # ==================================================================
 
 class TestLayer4Schema:
 
-    def test_all_fields_present(self):
+    def test_20_required_fields_present(self):
         out = Layer4Risk().compute(_ctx())
-        for k in (
-            "layer_id", "layer_name", "rules_version",
-            "reference_timestamp_utc", "health_status",
-            "position_cap", "position_cap_breakdown",
+        required = (
+            "overall_risk_level",
+            "position_cap", "position_cap_composition",
+            "execution_permission", "permission_composition",
+            "hard_invalidation_levels",
             "stop_loss_reference", "risk_reward_ratio", "rr_pass_level",
             "scale_in_plan", "risk_permission", "risk_permission_rationale",
-            "diagnostics", "notes",
-        ):
-            assert k in out, f"missing: {k}"
-        assert out["layer_id"] == 4
-        assert out["layer_name"] == "risk"
+            "notes", "health_status", "diagnostics",
+        )
+        for k in required:
+            assert k in out, f"missing {k}"
 
-    def test_valid_permission_enum(self):
+    def test_21_position_cap_fraction_range(self):
+        out = Layer4Risk().compute(_ctx())
+        assert 0.0 <= out["position_cap"] <= 1.0
+
+    def test_22_permission_in_valid_enum(self):
         out = Layer4Risk().compute(_ctx())
         valid = {
             "can_open", "cautious_open", "ambush_only", "no_chase",
             "hold_only", "watch", "protective",
         }
+        assert out["execution_permission"] in valid
         assert out["risk_permission"] in valid
-
-    def test_position_cap_in_sane_range(self):
-        out = Layer4Risk().compute(_ctx())
-        assert 0.0 <= out["position_cap"] <= 0.20

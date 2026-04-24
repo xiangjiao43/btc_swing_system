@@ -1,5 +1,5 @@
 /* =========================================================================
-   styles.css — BTC Strategy 审计台(Sprint 2.2 bitmiro 风格紧凑版)
+   styles.css — BTC Strategy 审计台(Sprint 2.3 单栏全宽 5 区域)
    ========================================================================= */
 
 [x-cloak] { display: none !important; }
@@ -8,14 +8,14 @@
 
 html { -webkit-font-smoothing: antialiased; }
 
-/* -------- 卡片:平面设计,无阴影,细边框 -------- */
+/* -------- 卡片(平面设计、细边框、无阴影)-------- */
 .audit-card {
     background: #ffffff;
     border: 1px solid #e2e8f0;         /* slate-200 */
     border-radius: 6px;
 }
 .dark .audit-card {
-    background: #0f172a;               /* slate-900 略亮一档 */
+    background: #0f172a;               /* slate-900 */
     border-color: #1e293b;             /* slate-800 */
 }
 
@@ -27,9 +27,25 @@ html { -webkit-font-smoothing: antialiased; }
     color: #64748b;                    /* slate-500 */
     line-height: 1.2;
 }
-.dark .stat-label { color: #94a3b8; } /* slate-400 */
+.dark .stat-label { color: #94a3b8; }  /* slate-400 */
 
-/* -------- scrollbar 克制 -------- */
+/* -------- 区域内部副标题 -------- */
+.subheading {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #475569;                    /* slate-600 */
+    border-bottom: 1px solid #e2e8f0;
+    padding-bottom: 2px;
+    margin-bottom: 4px;
+}
+.dark .subheading {
+    color: #cbd5e1;                    /* slate-300 */
+    border-color: #1e293b;
+}
+
+/* -------- scrollbar -------- */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
@@ -37,17 +53,16 @@ html { -webkit-font-smoothing: antialiased; }
 ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
 .dark ::-webkit-scrollbar-thumb:hover { background: #475569; }
 
-/* -------- details 样式 -------- */
+/* -------- details 样式(若用到)-------- */
 details > summary { list-style: none; cursor: pointer; }
 details > summary::-webkit-details-marker { display: none; }
 details[open] > summary::after { content: " ▴"; color: #94a3b8; }
 details:not([open]) > summary::after { content: " ▾"; color: #94a3b8; }
 
-/* -------- 手机端更紧凑 -------- */
+/* -------- 手机端:卡片圆角更小 -------- */
 @media (max-width: 640px) {
     .audit-card { border-radius: 4px; }
-    .stat-label { font-size: 9px; }
+    .stat-label, .subheading { font-size: 9.5px; }
 }
 
-/* -------- jumpToCard 的高亮动画(Tailwind ring 负责样式,这里只加过渡)-------- */
 article[id^="card-"] { transition: box-shadow 0.3s; }

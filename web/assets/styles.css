@@ -1,0 +1,55 @@
+/* =========================================================================
+   styles.css — BTC Strategy 审计台
+   风格参考 bitmiro.com:简洁紧凑、信息密度高、装饰克制。
+   Sprint 2.1(2026-04-24):骨架 v1。
+   ========================================================================= */
+
+/* 隐藏 Alpine 未初始化时闪烁 */
+[x-cloak] { display: none !important; }
+
+/* 字体加载(CDN) */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+/* 让 body 过渡色更柔和 */
+html { -webkit-font-smoothing: antialiased; }
+
+/* 统一的"卡片"容器:浅色白底 / 深色近黑底,细边框。 */
+.audit-card {
+    background: #ffffff;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    transition: border-color 0.15s;
+}
+.dark .audit-card {
+    background: #131313;
+    border-color: #2a2a2a;
+}
+
+/* 表格式 key-value 里让 <dt><dd> 同行 */
+dl.kv > div {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.5rem;
+}
+
+/* scrollbar 克制样式(Webkit/Chromium) */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+    background: #d4d4d8;
+    border-radius: 4px;
+}
+.dark ::-webkit-scrollbar-thumb { background: #2a2a2a; }
+::-webkit-scrollbar-thumb:hover { background: #a1a1aa; }
+.dark ::-webkit-scrollbar-thumb:hover { background: #3f3f46; }
+
+/* details 样式微调 */
+details > summary { list-style: none; }
+details > summary::-webkit-details-marker { display: none; }
+details[open] > summary::after { content: " ▴"; }
+details:not([open]) > summary::after { content: " ▾"; }
+
+/* 手机端轻微收紧 padding */
+@media (max-width: 640px) {
+    .audit-card { border-radius: 4px; }
+}

@@ -1,0 +1,345 @@
+{
+  "meta": {
+    "run_id": "7e2a9c14-4f1b-48ae-9c1b-3df1e0a8c912",
+    "generated_at_utc": "2026-04-24T04:15:30Z",
+    "generated_at_bjt": "2026-04-24 12:15 (BJT)",
+    "reference_timestamp_utc": "2026-04-24T04:15:00Z",
+    "rules_version": "v1.2.0",
+    "system_version": "0.1.0",
+    "strategy_flavor": "swing",
+    "run_trigger": "scheduled",
+    "ai_model_actual": "claude-sonnet-4-5-20250929",
+    "fallback_level": null,
+    "next_run_eta_bjt": "2026-04-24 15:39 (BJT)",
+    "cold_start": {
+      "warming_up": true,
+      "runs_completed": 7,
+      "threshold": 42,
+      "days_elapsed": 2
+    }
+  },
+  "data_health": {
+    "overall": "green",
+    "sources": {
+      "price": {"status": "green", "last_update_bjt": "2026-04-24 12:14 (BJT)", "age_hours": 0.02},
+      "derivatives": {"status": "green", "last_update_bjt": "2026-04-24 12:10 (BJT)", "age_hours": 0.08},
+      "onchain": {"status": "yellow", "last_update_bjt": "2026-04-24 08:00 (BJT)", "age_hours": 4.25},
+      "macro": {"status": "green", "last_update_bjt": "2026-04-24 05:30 (BJT)", "age_hours": 6.75},
+      "events": {"status": "green", "last_update_bjt": "2026-04-24 06:00 (BJT)", "age_hours": 6.25}
+    },
+    "degraded_stages": [],
+    "data_completeness_pct": 94.5
+  },
+  "market_snapshot": {
+    "btc_price_usd": 84312.50,
+    "btc_price_change_24h_pct": -1.42,
+    "btc_price_updated_bjt": "2026-04-24 12:14 (BJT)",
+    "volume_24h_btc": 28431.5,
+    "dominance_pct": 54.2
+  },
+  "main_strategy": {
+    "action_state": "FLAT",
+    "previous_action_state": "FLAT",
+    "stable_in_state": true,
+    "state_transitioned": false,
+    "lifecycle_phase": "待启动",
+    "opportunity_grade": "C",
+    "execution_permission": "cautious_open",
+    "observation_category": "cold_start_warming_up"
+  },
+  "trade_plan": null,
+  "lifecycle": null,
+  "evidence_summary": {
+    "layer_1": {
+      "layer_id": 1,
+      "layer_name": "market_regime",
+      "verdict": "市场处于向上过渡阶段,波动率低档;结构稳定性正在主动调整。",
+      "confidence_tier": "low",
+      "confidence_numeric": 0.42,
+      "data_freshness": "green",
+      "contribution": "neutral",
+      "key_signals": [
+        "regime=transition_up(从 range_high 切换)",
+        "volatility_regime=low(21 天 ATR/price 在 15 分位)",
+        "regime_stability=slightly_shifting"
+      ],
+      "contradicting_signals": [
+        "EMA 系统尚未完成多头排列",
+        "1W 级别仍未突破前高"
+      ]
+    },
+    "layer_2": {
+      "layer_id": 2,
+      "layer_name": "direction",
+      "verdict": "方向中性,置信度不足以做多或做空。",
+      "confidence_tier": "very_low",
+      "confidence_numeric": 0.44,
+      "data_freshness": "green",
+      "contribution": "blocking",
+      "key_signals": [
+        "stance=neutral,stance_confidence=0.44",
+        "多头门槛 0.55 / 空头门槛 0.75 均未达到",
+        "exchange_momentum=0.12(微弱正)"
+      ],
+      "contradicting_signals": [
+        "4H 级别有初步多头结构,但 1D 级别未确认"
+      ]
+    },
+    "layer_3": {
+      "layer_id": 3,
+      "layer_name": "opportunity",
+      "verdict": "机会评级 C,无明确开仓机会;执行许可 cautious_open(名义放行,但实际不入场)。",
+      "confidence_tier": "low",
+      "confidence_numeric": 0.38,
+      "data_freshness": "green",
+      "contribution": "challenging",
+      "key_signals": [
+        "opportunity_grade=C(低档)",
+        "execution_permission=cautious_open",
+        "anti_pattern_flags=[]"
+      ],
+      "contradicting_signals": []
+    },
+    "layer_4": {
+      "layer_id": 4,
+      "layer_name": "risk",
+      "verdict": "风险整体低档;硬失效位已计算;position_cap 21%(冷启动折减)。",
+      "confidence_tier": "medium",
+      "confidence_numeric": 0.65,
+      "data_freshness": "green",
+      "contribution": "supportive",
+      "key_signals": [
+        "overall_risk_level=low",
+        "position_cap=21.0%(base 70% × risk 1.0 × crowding 1.0 × macro 0.85 × event 1.0)",
+        "hard_invalidation_levels:structural HL @ 81200 / ATR stop @ 79800"
+      ],
+      "contradicting_signals": [
+        "cold_start 冷启动期允许开仓规模 ≤50% 常规"
+      ]
+    },
+    "layer_5": {
+      "layer_id": 5,
+      "layer_name": "macro",
+      "verdict": "宏观 neutral,DXY 与 VIX 均在常态区间;未检测到极端事件。",
+      "confidence_tier": "medium",
+      "confidence_numeric": 0.60,
+      "data_freshness": "yellow",
+      "contribution": "neutral",
+      "key_signals": [
+        "macro_stance=risk_neutral",
+        "macro_headwind_score=-1(轻度逆风)",
+        "btc_nasdaq_correlation=0.35"
+      ],
+      "contradicting_signals": [
+        "US10Y 过去 7 日 +18bp(接近阈值)"
+      ]
+    }
+  },
+  "evidence_cards": [
+    {
+      "card_id": "price_ema_200_20260424",
+      "category": "price_structure",
+      "name": "EMA 200(1D)",
+      "current_value": "82150",
+      "history_percentile": 68,
+      "one_line_interpretation": "价格高于 EMA200,长期结构偏多。",
+      "analysis": "BTC 当前报 84,312,高于 1D EMA200(82,150)约 2.6%,过去 90 天该差值处于 68 分位。长期均线斜率转正。",
+      "strategy_impact": "supportive_long",
+      "direction": "bullish",
+      "captured_at_bjt": "2026-04-24 12:00 (BJT)",
+      "data_fresh": "green"
+    },
+    {
+      "card_id": "price_structure_hl_20260424",
+      "category": "price_structure",
+      "name": "最近 Higher Low",
+      "current_value": "81200",
+      "history_percentile": null,
+      "one_line_interpretation": "近 60 日出现 HL 结构,失效位 81200。",
+      "analysis": "最近 swing_low 为 81,200,前一个 swing_low 为 79,400,构成有效 Higher Low。跌破 81,200 即多头结构失效。",
+      "strategy_impact": "structural_invalidation",
+      "direction": "bullish",
+      "captured_at_bjt": "2026-04-24 12:00 (BJT)",
+      "data_fresh": "green"
+    },
+    {
+      "card_id": "deriv_funding_rate_20260424",
+      "category": "derivatives",
+      "name": "Binance 永续资金费率",
+      "current_value": "0.0042% / 8h",
+      "history_percentile": 42,
+      "one_line_interpretation": "资金费率中性偏正,未见过热。",
+      "analysis": "过去 30 天分位 42%,近 3 次结算均低于 0.01%,多头杠杆无明显累积。",
+      "strategy_impact": "neutral",
+      "direction": "neutral",
+      "captured_at_bjt": "2026-04-24 12:10 (BJT)",
+      "data_fresh": "green"
+    },
+    {
+      "card_id": "deriv_oi_20260424",
+      "category": "derivatives",
+      "name": "全网未平仓合约",
+      "current_value": "$28.4B",
+      "history_percentile": 55,
+      "one_line_interpretation": "OI 中等水平,24h 变动 +2.1%。",
+      "analysis": "OI 过去 30 天分位 55%,24 小时增量 +2.1%,未达 +15% 告警阈值。",
+      "strategy_impact": "neutral",
+      "direction": "neutral",
+      "captured_at_bjt": "2026-04-24 12:10 (BJT)",
+      "data_fresh": "green"
+    },
+    {
+      "card_id": "onchain_mvrv_z_20260424",
+      "category": "onchain",
+      "name": "MVRV Z-Score",
+      "current_value": "2.1",
+      "history_percentile": 62,
+      "one_line_interpretation": "MVRV-Z 中高位,未进入极端区间。",
+      "analysis": "当前 MVRV-Z=2.1,过去 1 年分位 62%。极高阈值 7.0、极低阈值 -0.2 均未触及。",
+      "strategy_impact": "cautious",
+      "direction": "neutral",
+      "captured_at_bjt": "2026-04-24 08:00 (BJT)",
+      "data_fresh": "yellow"
+    },
+    {
+      "card_id": "onchain_nupl_20260424",
+      "category": "onchain",
+      "name": "NUPL",
+      "current_value": "0.54",
+      "history_percentile": 58,
+      "one_line_interpretation": "NUPL 处于 Belief 区间,持仓整体盈利。",
+      "analysis": "当前 NUPL=0.54,位于 Belief(0.5-0.75)区间。未到 Euphoria(>0.75)。",
+      "strategy_impact": "neutral",
+      "direction": "bullish",
+      "captured_at_bjt": "2026-04-24 08:00 (BJT)",
+      "data_fresh": "yellow"
+    },
+    {
+      "card_id": "liquidity_spread_20260424",
+      "category": "liquidity",
+      "name": "Binance BTC-USDT 买卖价差",
+      "current_value": "0.014 bp",
+      "history_percentile": 30,
+      "one_line_interpretation": "流动性良好,价差处于低位。",
+      "analysis": "1 分钟级别 spread 低于 30 分位,显示做市商深度充足。",
+      "strategy_impact": "supportive",
+      "direction": "neutral",
+      "captured_at_bjt": "2026-04-24 12:14 (BJT)",
+      "data_fresh": "green"
+    },
+    {
+      "card_id": "macro_dxy_20260424",
+      "category": "macro",
+      "name": "美元指数 DXY",
+      "current_value": "104.2",
+      "history_percentile": 48,
+      "one_line_interpretation": "美元指数中性,近 20 日变动 -0.4%。",
+      "analysis": "DXY 当前 104.2,过去 20 日变动 -0.4%,未触发 ±2% 阈值。",
+      "strategy_impact": "neutral",
+      "direction": "neutral",
+      "captured_at_bjt": "2026-04-24 05:30 (BJT)",
+      "data_fresh": "green"
+    },
+    {
+      "card_id": "macro_vix_20260424",
+      "category": "macro",
+      "name": "VIX 恐慌指数",
+      "current_value": "14.8",
+      "history_percentile": 22,
+      "one_line_interpretation": "VIX 偏低,市场情绪平静。",
+      "analysis": "VIX 14.8,低于 elevated 阈值 25。当前市场对 BTC 风险偏好中性偏正。",
+      "strategy_impact": "supportive_long",
+      "direction": "bullish",
+      "captured_at_bjt": "2026-04-24 05:30 (BJT)",
+      "data_fresh": "green"
+    },
+    {
+      "card_id": "event_fomc_next_20260501",
+      "category": "events",
+      "name": "下次 FOMC 决议",
+      "current_value": "7 天后",
+      "history_percentile": null,
+      "one_line_interpretation": "7 天后 FOMC,暂未进入事件窗口。",
+      "analysis": "距离下次 FOMC 还有 7 天,超过事件窗口 48 小时阈值。届时 event_risk_score 将自动升级。",
+      "strategy_impact": "future_caution",
+      "direction": "neutral",
+      "captured_at_bjt": "2026-05-01 02:00 (BJT)",
+      "data_fresh": "green"
+    },
+    {
+      "card_id": "risk_tag_cold_start_20260424",
+      "category": "risk_tags",
+      "name": "cold_start_warming_up",
+      "current_value": "活跃",
+      "history_percentile": null,
+      "one_line_interpretation": "系统运行不足 7 天,所有仓位 × 0.5 折减。",
+      "analysis": "已运行 7/42 次,累计 2 天。冷启动期所有 position_cap 额外 × 0.5;触发的 fallback 阈值宽松一档。",
+      "strategy_impact": "force_conservative",
+      "direction": "neutral",
+      "captured_at_bjt": "2026-04-24 12:15 (BJT)",
+      "data_fresh": "green"
+    }
+  ],
+  "ai_verdict": {
+    "one_line_summary": "当前冷启动阶段,建议观察不交易。",
+    "narrative": "BTC 市场处于向上过渡阶段,但方向置信度不足(0.44)且机会评级为 C;系统仍在冷启动期(已运行 7/42 次),按纪律应保持观望。五层证据一致指向"等待更明确信号"的状态,特别是 L2 多空门槛均未达到,L3 未触发 A/B 级机会。风险侧 position_cap 压到 21%,在允许范围内但冷启动期不建议使用。",
+    "primary_drivers": [
+      {"evidence_ref": "price_structure_hl_20260424", "text": "HL 结构成立于 81,200,给多头提供清晰失效位"},
+      {"evidence_ref": "onchain_nupl_20260424", "text": "NUPL 处 Belief 区,长期持有者尚未分发"},
+      {"evidence_ref": "deriv_funding_rate_20260424", "text": "资金费率中性,无多头杠杆过热"}
+    ],
+    "counter_arguments": [
+      {"text": "L1 regime=transition_up 说明趋势尚未完全确认"},
+      {"text": "L2 stance_confidence=0.44 低于多头门槛 0.55"},
+      {"text": "cold_start 未结束,即使有机会也应减半规模"}
+    ],
+    "what_would_change_mind": [
+      "stance_confidence 升至 ≥ 0.60 并连续 4 次运行保持",
+      "L3 opportunity_grade 升到 B 级以上",
+      "冷启动期结束(runs_completed ≥ 42)"
+    ],
+    "thesis_assessment": null,
+    "holding_guidance": null,
+    "transition_reason": "保持 FLAT:无迁移条件成立",
+    "confidence_breakdown": {
+      "overall": 0.56,
+      "evidence_agreement": 0.72,
+      "historical_precedent": 0.48,
+      "data_quality": 0.85
+    }
+  },
+  "risks": {
+    "hard_invalidation_levels": [
+      {"price": 81200, "direction": "below", "basis": "structural_hl", "priority": 1, "confirmation_timeframe": "4H"},
+      {"price": 79800, "direction": "below", "basis": "stop_combined", "priority": 2, "confirmation_timeframe": "4H"}
+    ],
+    "active_risk_tags": ["cold_start_warming_up"],
+    "event_windows": [
+      {"event_name": "FOMC 利率决议", "event_time_bjt": "2026-05-01 02:00 (BJT)", "hours_to": 168, "in_window": false}
+    ],
+    "worst_case_estimate": {
+      "drawdown_scenario": "跌破 HL + VIX 突发升到 30",
+      "estimated_drawdown_pct": -12.5,
+      "probability_hint": "低(< 10%)"
+    }
+  },
+  "delta_from_previous": {
+    "has_previous": true,
+    "previous_run_id_short": "5f9a8c03",
+    "action_state_changed": false,
+    "summary_tag": "状态未变",
+    "notable_changes": [
+      "stance_confidence 0.41 → 0.44(微升)",
+      "position_cap 20.5% → 21.0%"
+    ]
+  },
+  "extra": {
+    "history_timeline_preview": [
+      {"ts_bjt": "2026-04-22 08:00 (BJT)", "type": "state_enter", "label": "进入 FLAT(系统首次运行)"},
+      {"ts_bjt": "2026-04-22 15:30 (BJT)", "type": "cold_start_tick", "label": "冷启动第 1 轮完成"},
+      {"ts_bjt": "2026-04-23 09:00 (BJT)", "type": "cold_start_tick", "label": "冷启动第 3 轮完成"},
+      {"ts_bjt": "2026-04-24 06:45 (BJT)", "type": "cold_start_tick", "label": "冷启动第 5 轮完成"},
+      {"ts_bjt": "2026-04-24 12:15 (BJT)", "type": "cold_start_tick", "label": "冷启动第 7 轮完成(本次)"}
+    ]
+  }
+}

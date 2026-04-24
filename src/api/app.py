@@ -13,9 +13,11 @@ from __future__ import annotations
 
 import logging
 import time
+from pathlib import Path
 from typing import Any, Callable, Optional
 
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 from .routes import alerts as alerts_routes
 from .routes import data as data_routes
@@ -33,6 +35,9 @@ from .state import AppState
 logger = logging.getLogger(__name__)
 
 VERSION: str = "1.15.0"
+
+_PROJECT_ROOT: Path = Path(__file__).resolve().parent.parent.parent
+_WEB_DIR: Path = _PROJECT_ROOT / "web"
 
 
 def create_app(
@@ -76,6 +81,18 @@ def create_app(
     app.include_router(fallback_routes.router, prefix="/api")
     app.include_router(data_routes.router, prefix="/api")
     app.include_router(alerts_routes.router, prefix="/api")
+
+    # Sprint 2.1 §9 前端:web/ 目录作为 StaticFiles 挂在根路径 /
+    # 必须放在所有 /api/* 路由之后(StaticFiles 会接管 404 fallback)。
+    if _WEB_DIR.exists():
+        app.mount(
+            "/",
+            StaticFiles(directory=str(_WEB_DIR), html=True),
+            name="web",
+        )
+    else:
+        logger.warning("web/ directory not found at %s; frontend not mounted",
+                       _WEB_DIR)
 
     return app
 

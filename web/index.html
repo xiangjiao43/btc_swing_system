@@ -162,10 +162,8 @@
     <!-- ============================================================ -->
     <div class="grid grid-cols-1 lg:grid-cols-5 gap-4 items-start">
 
-    <!-- Sprint 2.5-A:外层不再用 audit-card,避免冷启动期"框内底部空白"。
-         子卡片(交易计划格、论据卡、硬失效位三格、6 张组合因子卡)各自保留边框。-->
-    <section id="region-1" class="lg:col-span-3">
-      <header class="px-4 py-2.5">
+    <section id="region-1" class="audit-card lg:col-span-3">
+      <header class="px-4 py-2.5 border-b border-slate-200 dark:border-slate-800">
         <h2 class="text-base font-semibold flex items-center gap-2">
           <span>🎯</span><span>AI 策略建议</span>
         </h2>
@@ -391,10 +389,9 @@
       </div>
     </section>
 
-    <!-- 右侧 40%:组合因子紧凑版(2 列 × 3 行)
-         Sprint 2.5-A:同样去掉 audit-card 外框。-->
-    <section id="region-3" class="lg:col-span-2">
-      <header class="px-4 py-2.5">
+    <!-- 右侧 40%:组合因子紧凑版(2 列 × 3 行)-->
+    <section id="region-3" class="audit-card lg:col-span-2">
+      <header class="px-4 py-2.5 border-b border-slate-200 dark:border-slate-800">
         <h2 class="text-base font-semibold flex items-center gap-2">
           <span>🔢</span><span>组合因子</span>
           <span class="text-[11px] font-normal text-slate-500 ml-1">6 个</span>

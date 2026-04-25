@@ -182,6 +182,8 @@ class AIAdjudicator:
                 model_name=self._effective_model(),
                 status="success",
                 notes=forced.get("notes"),
+                facts=facts,
+                state=strategy_state,
             )
 
         # 3. 是否进入 AI 路径
@@ -195,6 +197,8 @@ class AIAdjudicator:
                 evidence_gaps=_collect_evidence_gaps(facts),
                 model_name=self._effective_model(),
                 status="success",
+                facts=facts,
+                state=strategy_state,
             )
 
         # 4. AI 路径
@@ -339,6 +343,8 @@ class AIAdjudicator:
                 model_name=self._effective_model(),
                 status="degraded_error",
                 notes=["ai_client_unavailable"],
+                facts=facts,
+                state=strategy_state,
             )
 
         allowed_actions = _allowed_actions_for_facts(facts)
@@ -410,6 +416,8 @@ class AIAdjudicator:
             tokens_in=total_tokens_in,
             tokens_out=total_tokens_out,
             latency_ms=total_latency_ms,
+            facts=facts,
+            state=strategy_state,
         )
 
     # ------------------------------------------------------------------
@@ -936,19 +944,39 @@ def _build_rule_output(
     tokens_in: int = 0,
     tokens_out: int = 0,
     latency_ms: int = 0,
+    facts: Optional[dict[str, Any]] = None,
+    state: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
+    # Sprint 2.7-no-opp:facts + state 都给了 → 走纯模板 narrator,
+    # 输出与 AI 真触发路径的 4 段结构 100% 兼容,前端不再需要兜底
+    narrative = rationale
+    primary_drivers: list[Any] = []
+    counter_arguments: list[Any] = []
+    what_would_change_mind: list[Any] = []
+    if facts is not None and state is not None:
+        try:
+            from ..strategy.no_opportunity_narrator import (
+                generate_no_opportunity_narrative,
+            )
+            narr = generate_no_opportunity_narrative(facts, state)
+            narrative = narr["narrative"]
+            primary_drivers = narr["primary_drivers"]
+            counter_arguments = narr["counter_arguments"]
+            what_would_change_mind = narr["what_would_change_mind"]
+        except Exception as e:  # pragma: no cover
+            logger.warning("no_opportunity_narrator failed: %s", e)
     return {
         "action": action,
         "direction": direction if direction is not None else _infer_direction(action),
         "confidence": max(0.0, min(1.0, float(confidence))),
         "rationale": rationale,
-        "narrative": rationale,
+        "narrative": narrative,
         "one_line_summary": rationale[:80],
         "opportunity_grade": "none",
         "trade_plan": None,
-        "primary_drivers": [],
-        "counter_arguments": [],
-        "what_would_change_mind": [],
+        "primary_drivers": primary_drivers,
+        "counter_arguments": counter_arguments,
+        "what_would_change_mind": what_would_change_mind,
         "confidence_breakdown": {"trade_plan_confidence_tier": "none"},
         "transition_reason": "",
         "constraints": constraints,

@@ -411,12 +411,386 @@ _SPECS: dict[str, Any] = {
 }
 
 
+# ============================================================
+# Sprint 2.5-B-rewrite:纯模板的"📊 当前态势 / 🎯 对策略影响"双段
+# 完全规则化、零 AI 介入(对齐建模 §2.5 双轨原则 #3)
+# ============================================================
+
+_FALLBACK_TEXT: str = "基础数据暂未就绪,无法生成态势分析"
+
+
+def _missing_counts(c: dict[str, Any]) -> tuple[int, int]:
+    comp = c.get("composition")
+    if not isinstance(comp, list):
+        return 0, 0
+    total = len(comp)
+    missing = sum(
+        1 for it in comp
+        if isinstance(it, dict)
+        and (it.get("value") is None or it.get("value") == "")
+    )
+    return missing, total
+
+
+def _comp_value(c: dict[str, Any], factor_id: str) -> Any:
+    for it in c.get("composition") or []:
+        if isinstance(it, dict) and it.get("factor_id") == factor_id:
+            return it.get("value")
+    return None
+
+
+def _fmt(v: Any, *, decimals: int = 2, suffix: str = "") -> str:
+    if v is None:
+        return "—"
+    if isinstance(v, bool):
+        return "是" if v else "否"
+    try:
+        return f"{float(v):.{decimals}f}{suffix}"
+    except (TypeError, ValueError):
+        return str(v)
+
+
+def _fallback_narrative(c: dict[str, Any]) -> dict[str, Any]:
+    missing, total = _missing_counts(c)
+    return {
+        "current_analysis": _FALLBACK_TEXT,
+        "strategy_impact": _FALLBACK_TEXT,
+        "missing_count": missing,
+        "total_count": total,
+    }
+
+
+def _l(state: dict[str, Any], n: int) -> dict[str, Any]:
+    er = state.get("evidence_reports") or {}
+    layer = er.get(f"layer_{n}") or {}
+    return layer if isinstance(layer, dict) else {}
+
+
+# ---- TruthTrend(§3.8.1)----
+def _truth_trend_narrative(c: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
+    score = c.get("score")
+    adx_1d = _comp_value(c, "price_adx_14_1d")
+    adx_4h = _comp_value(c, "price_adx_14_4h")
+    tf_align = _comp_value(c, "price_tf_alignment")
+    ma_stack = _comp_value(c, "price_ma_stack")
+    ma200 = _comp_value(c, "price_ma_200_relation")
+
+    parts: list[str] = []
+    if adx_1d is not None:
+        parts.append(f"ADX-14(1D)={_fmt(adx_1d, decimals=1)}")
+    if adx_4h is not None:
+        parts.append(f"4H={_fmt(adx_4h, decimals=1)}")
+    if ma_stack is not None:
+        parts.append(f"MA 排列 {ma_stack}")
+    if tf_align is not None:
+        parts.append("三周期方向" + ("一致" if tf_align else "分歧"))
+    if ma200 is not None:
+        parts.append(f"价格相对 MA-200:{ma200}")
+    if score is not None:
+        parts.append(f"合计 {int(score)}/9")
+    if not parts:
+        return _fallback_narrative(c)
+    current_analysis = "、".join(parts) + "。"
+
+    if score is None:
+        band_text = "档位未定"
+        impact_action = "L1.regime 暂不输出趋势型,L2 保持中性"
+    elif score >= 6:
+        band_text = "真趋势(≥6)"
+        impact_action = "L1.regime 进入趋势型,L2.stance_confidence 不做修正"
+    elif score >= 4:
+        band_text = "弱趋势(4-5)"
+        impact_action = "L1.regime 仍可定向,但 L2.stance_confidence 适度下调"
+    else:
+        band_text = "无趋势(≤3)"
+        impact_action = "L1.regime 输出 range,L2 不允许使用趋势型 stance"
+
+    l1_regime = _l(state, 1).get("regime") or _l(state, 1).get("regime_primary") or "—"
+    strategy_impact = (
+        f"对应建模 §3.8.1 {band_text}档,当前 L1.regime={l1_regime};{impact_action}。"
+    )
+
+    missing, total = _missing_counts(c)
+    return {
+        "current_analysis": current_analysis,
+        "strategy_impact": strategy_impact,
+        "missing_count": missing,
+        "total_count": total,
+    }
+
+
+# ---- BandPosition(§3.8.2)----
+def _band_position_narrative(c: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
+    ext = _comp_value(c, "price_swing_extension_ratio")
+    seq = _comp_value(c, "price_swing_sequence")
+    ma60 = _comp_value(c, "price_ma_60_distance")
+    pull = _comp_value(c, "price_pullback_depth")
+
+    parts: list[str] = []
+    if ext is not None:
+        parts.append(f"swing 扩展比率 {_fmt(ext, decimals=2)}")
+    if seq is not None:
+        parts.append(f"近期结构 {seq}")
+    if ma60 is not None:
+        parts.append(f"距 MA-60 {_fmt(ma60, decimals=2)}")
+    if pull is not None:
+        parts.append(f"最近回撤 {_fmt(pull, decimals=2)}")
+    if not parts:
+        return _fallback_narrative(c)
+
+    l2 = _l(state, 2)
+    phase = l2.get("phase") or "—"
+    parts.append(f"L2 当前 phase={phase}")
+    current_analysis = "、".join(parts) + "。"
+
+    phase_text = {
+        "early": "波段早期(扩展比 < 50%),回撤充足,做多性价比高",
+        "mid": "波段中期(扩展比 50-100%),主升浪可跟",
+        "late": "波段晚期(扩展比 100-138%),追涨风险升高",
+        "exhausted": "衰竭期(扩展比 > 138%),反向概率升高",
+        "unclear": "位置不明,等待结构明朗",
+        "n_a": "无明显波段",
+    }.get(phase, "phase 未输出")
+
+    strategy_impact = (
+        f"对应建模 §3.8.2 {phase_text};L3 按 phase 查规则表,"
+        f"L4.position_cap 默认值不做修正。"
+    )
+
+    missing, total = _missing_counts(c)
+    return {
+        "current_analysis": current_analysis,
+        "strategy_impact": strategy_impact,
+        "missing_count": missing,
+        "total_count": total,
+    }
+
+
+# ---- CyclePosition(§3.8.4)----
+def _cycle_position_narrative(c: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
+    mvrv = _comp_value(c, "onchain_mvrv_z")
+    nupl = _comp_value(c, "onchain_nupl")
+    lth = _comp_value(c, "onchain_lth_supply")
+    ath = _comp_value(c, "price_drawdown_from_ath")
+    pos = c.get("cycle_position") or c.get("band")
+
+    parts: list[str] = []
+    if mvrv is not None:
+        parts.append(f"MVRV-Z={_fmt(mvrv, decimals=2)}")
+    if nupl is not None:
+        parts.append(f"NUPL={_fmt(nupl, decimals=2)}")
+    if lth is not None:
+        parts.append(f"LTH 90d 变化 {_fmt(lth, decimals=2)}%")
+    if ath is not None:
+        parts.append(f"距 ATH {_fmt(ath, decimals=1)}%")
+    if not parts:
+        return _fallback_narrative(c)
+    if pos is not None:
+        parts.append(f"判档 {pos}")
+    current_analysis = "、".join(parts) + "。"
+
+    pos_text = {
+        "accumulation": "累积期(底部吸筹,做多性价比极高)",
+        "early_bull": "牛市早期(做多最佳窗口)",
+        "mid_bull": "牛市中段(仍可持仓)",
+        "late_bull": "牛市晚期(开始减仓)",
+        "distribution": "顶部分发(空头布局期)",
+        "early_bear": "熊市早期(做空或观望)",
+        "mid_bear": "熊市中段(现金为王)",
+        "late_bear": "熊市晚期(关注底部信号)",
+        "unclear": "周期不明朗(保守观望)",
+    }.get(pos, "周期未输出")
+
+    l2 = _l(state, 2)
+    stance = l2.get("stance") or "—"
+    strategy_impact = (
+        f"对应建模 §3.8.4 {pos_text};驱动 L2.动态门槛表 上调多头阈值或下调空头阈值。"
+        f"当前 L2.stance={stance}。"
+    )
+
+    missing, total = _missing_counts(c)
+    return {
+        "current_analysis": current_analysis,
+        "strategy_impact": strategy_impact,
+        "missing_count": missing,
+        "total_count": total,
+    }
+
+
+# ---- Crowding(§3.8.3)----
+def _crowding_narrative(c: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
+    score = c.get("score")
+    funding = _comp_value(c, "derivatives_funding_rate_current")
+    lsr = _comp_value(c, "derivatives_top_long_short_ratio")
+    basis = _comp_value(c, "derivatives_basis")
+    pcr = _comp_value(c, "derivatives_put_call")
+
+    parts: list[str] = []
+    if funding is not None:
+        parts.append(f"资金费率 {_fmt(funding * 100, decimals=4, suffix='%')}")
+    if lsr is not None:
+        parts.append(f"大户多空比 {_fmt(lsr, decimals=2)}")
+    if basis is not None:
+        parts.append(f"基差 {_fmt(basis * 100, decimals=2, suffix='%')}")
+    if pcr is not None:
+        parts.append(f"Put/Call {_fmt(pcr, decimals=2)}")
+    if score is not None:
+        parts.append(f"合计 {_fmt(score, decimals=0)}/8")
+    if not parts:
+        return _fallback_narrative(c)
+    current_analysis = "、".join(parts) + "。"
+
+    if score is None:
+        band_text = "档位未定"
+        cap_action = "L4.crowding_multiplier 暂不修正"
+    elif score >= 6:
+        band_text = "极度拥挤(≥6)"
+        cap_action = "L4.crowding_multiplier × 0.7,position_cap 显著收紧"
+    elif score >= 4:
+        band_text = "偏拥挤(4-5)"
+        cap_action = "L4.crowding_multiplier × 0.85"
+    else:
+        band_text = "正常(≤3)"
+        cap_action = "L4.crowding_multiplier × 1.0,不收紧"
+
+    strategy_impact = (
+        f"对应建模 §3.8.3 {band_text}档;{cap_action}。仅作用于 L4,不进 L2 / L3。"
+    )
+
+    missing, total = _missing_counts(c)
+    return {
+        "current_analysis": current_analysis,
+        "strategy_impact": strategy_impact,
+        "missing_count": missing,
+        "total_count": total,
+    }
+
+
+# ---- MacroHeadwind(§3.8.5)----
+def _macro_headwind_narrative(c: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
+    score = c.get("score")
+    vix = _comp_value(c, "macro_vix_current")
+    dxy = _comp_value(c, "macro_dxy_20d_change")
+    us10y = _comp_value(c, "macro_us10y_30d_change")
+    ndx = _comp_value(c, "macro_nasdaq_20d")
+
+    parts: list[str] = []
+    if vix is not None:
+        parts.append(f"VIX={_fmt(vix, decimals=2)}")
+    if dxy is not None:
+        parts.append(f"DXY 20d {_fmt(dxy, decimals=2, suffix='%')}")
+    if us10y is not None:
+        parts.append(f"US10Y 30d {_fmt(us10y, decimals=0, suffix='bp')}")
+    if ndx is not None:
+        parts.append(f"纳指 20d {_fmt(ndx, decimals=2, suffix='%')}")
+    if score is not None:
+        parts.append(f"综合 {_fmt(score, decimals=1)}")
+    if not parts:
+        return _fallback_narrative(c)
+    current_analysis = "、".join(parts) + "。"
+
+    if score is None:
+        band_text = "档位未定"
+        cap_action = "L5.macro_headwind_multiplier 暂不修正"
+    elif score <= -5:
+        band_text = "强逆风(≤ -5)"
+        cap_action = "L5.macro_headwind_multiplier × 0.7,position_cap 显著下调"
+    elif score <= -2:
+        band_text = "轻度逆风(-4 ~ -2)"
+        cap_action = "L5.macro_headwind_multiplier × 0.85"
+    else:
+        band_text = "中性或顺风(≥ -1)"
+        cap_action = "L5.macro_headwind_multiplier × 1.0,不收紧"
+
+    l5 = _l(state, 5)
+    macro = l5.get("macro_stance") or l5.get("macro_environment") or "—"
+    strategy_impact = (
+        f"对应建模 §3.8.5 {band_text}档;{cap_action}。当前 L5.macro_stance={macro}。"
+    )
+
+    missing, total = _missing_counts(c)
+    return {
+        "current_analysis": current_analysis,
+        "strategy_impact": strategy_impact,
+        "missing_count": missing,
+        "total_count": total,
+    }
+
+
+# ---- EventRisk(§3.8.6)----
+def _event_risk_narrative(c: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
+    score = c.get("score")
+    fomc = _comp_value(c, "event_fomc_next")
+    cpi = _comp_value(c, "event_cpi_next")
+    nfp = _comp_value(c, "event_nfp_next")
+    opt = _comp_value(c, "event_options_expiry")
+
+    parts: list[str] = []
+    if fomc is not None:
+        parts.append(f"FOMC 距 {_fmt(fomc, decimals=0)}h")
+    if cpi is not None:
+        parts.append(f"CPI 距 {_fmt(cpi, decimals=0)}h")
+    if nfp is not None:
+        parts.append(f"NFP 距 {_fmt(nfp, decimals=0)}h")
+    if opt is not None:
+        parts.append(f"期权到期 距 {_fmt(opt, decimals=0)}h")
+    if score is not None:
+        parts.append(f"加权 {_fmt(score, decimals=1)}")
+    if not parts:
+        # 无即时事件 = 低风险,不算 fallback
+        if score is None or float(score or 0) == 0:
+            current_analysis = "未来 72 小时无登记事件(FOMC / CPI / NFP / 期权大到期)。"
+        else:
+            return _fallback_narrative(c)
+    else:
+        current_analysis = "、".join(parts) + "。"
+
+    if score is None:
+        band_text = "档位未定"
+        cap_action = "L4.event_risk_multiplier 暂不修正"
+    elif score >= 8:
+        band_text = "高(≥8)"
+        cap_action = "L4.event_risk_multiplier × 0.7,permission 自动降到 ambush_only"
+    elif score >= 4:
+        band_text = "中(4-7)"
+        cap_action = "L4.event_risk_multiplier × 0.85"
+    else:
+        band_text = "低(<4)"
+        cap_action = "L4.event_risk_multiplier × 1.0,permission 不降档"
+
+    strategy_impact = (
+        f"对应建模 §3.8.6 {band_text}档;{cap_action}。"
+    )
+
+    missing, total = _missing_counts(c)
+    return {
+        "current_analysis": current_analysis,
+        "strategy_impact": strategy_impact,
+        "missing_count": missing,
+        "total_count": total,
+    }
+
+
+_NARRATIVE_GENERATORS: dict[str, Any] = {
+    "truth_trend": _truth_trend_narrative,
+    "band_position": _band_position_narrative,
+    "cycle_position": _cycle_position_narrative,
+    "crowding": _crowding_narrative,
+    "macro_headwind": _macro_headwind_narrative,
+    "event_risk": _event_risk_narrative,
+}
+
+
 def inject_composite_composition(
     state: dict[str, Any],
     context: dict[str, Any],
 ) -> None:
     """就地为 state.composite_factors[k] 加 composition / rule_description /
-    value_interpretation / affects_layer 四个讲述式字段。
+    value_interpretation / affects_layer / current_analysis / strategy_impact /
+    missing_count / total_count 字段。
+
+    Sprint 2.5-B-rewrite:current_analysis / strategy_impact 由纯模板生成,
+    完全规则化,零 AI 介入(对齐建模 §2.5 双轨原则 #3)。
     """
     composite = state.get("composite_factors") or {}
     if not isinstance(composite, dict):
@@ -438,3 +812,13 @@ def inject_composite_composition(
             c.update(extras)
         except Exception as e:  # pragma: no cover
             logger.warning("composite_composition[%s] failed: %s", key, e)
+        # Sprint 2.5-B-rewrite:再加双段叙事(纯模板,零 AI)
+        narrator = _NARRATIVE_GENERATORS.get(key)
+        if narrator is None:
+            continue
+        try:
+            c.update(narrator(c, state))
+        except Exception as e:  # pragma: no cover
+            logger.warning("composite_narrative[%s] failed: %s", key, e)
+            c.setdefault("current_analysis", _FALLBACK_TEXT)
+            c.setdefault("strategy_impact", _FALLBACK_TEXT)

@@ -13,6 +13,17 @@ from src.evidence.pillars import inject_pillars
 from src.evidence.plain_reading import inject_plain_readings
 from src.strategy.composite_composition import inject_composite_composition
 from src.strategy.factor_card_emitter import emit_factor_cards
+from src.strategy.no_opportunity_narrator import (
+    SCENARIO_COLD_START,
+    SCENARIO_EXTREME_EVENT,
+    SCENARIO_FALLBACK_DEGRADED,
+    SCENARIO_GRADE_NONE,
+    SCENARIO_PERMISSION_RESTRICTED,
+    SCENARIO_POSITION_CAP_ZERO,
+    SCENARIO_POST_PROTECTION,
+    SCENARIO_PROTECTION,
+    generate_no_opportunity_narrative,
+)
 
 
 # 禁止模式清单(对照风格指南 §3)
@@ -20,7 +31,9 @@ FORBIDDEN_PATTERNS = [
     (r'\bstance\s*=\s*\w+', 'stance=*'),
     (r'\bregime\s*=\s*\w+', 'regime=*'),
     (r'\bphase\s*=\s*\w+', 'phase=*'),
-    (r'§\d+\.\d+', '§X.Y 章节引用'),
+    # 允许 "建模 §X.Y" 形式(用户明确放行,见 sprint_2_7_no_opp_narrative spec);
+    # 其它裸 §X.Y 引用仍禁止
+    (r'(?<!建模 )§\d+\.\d+', '裸 §X.Y 章节引用(用"建模 §X.Y"代替)'),
     (r'\bL\d\.\w+_\w+', 'L*. 字段路径(如 L4.crowding_multiplier)'),
     (r'\bambush_only\b', 'ambush_only'),
     (r'\bcautious_open\b', 'cautious_open'),
@@ -235,3 +248,62 @@ class TestFactorCardsNoMachineTerms:
                         card.get("plain_interpretation") or "")
             _check_text(f"card[{cid}].strategy_impact",
                         card.get("strategy_impact") or "")
+
+
+# ============================================================
+# No-opportunity narrator(8 个场景)
+# ============================================================
+
+class TestNoOpportunityNarratorNoMachineTerms:
+    """8 种 AI 未触发场景的 narrator 输出全部扫描禁止术语。"""
+
+    _ALL_SCENARIOS = [
+        ("cold_start",
+         {"cold_start_warming_up": True},
+         {"meta": {"cold_start": {"days_remaining": 5}}}),
+        ("extreme_event",
+         {"l5_extreme_event_detected": True},
+         {}),
+        ("protection",
+         {"state_machine_current": "PROTECTION"},
+         {}),
+        ("fallback_degraded",
+         {"fallback_level": "level_2"},
+         {}),
+        ("post_protection",
+         {"state_machine_current": "POST_PROTECTION_REASSESS"},
+         {}),
+        ("permission_restricted",
+         {"l3_permission": "watch"},
+         {}),
+        ("position_cap_zero",
+         {"l4_position_cap": 0.0},
+         {}),
+        ("grade_none",
+         {"l3_grade": "none"},
+         {"evidence_reports": {
+             "layer_1": {"regime": "transition_up"},
+             "layer_2": {"stance": "neutral"},
+             "layer_3": {"rule_trace": {
+                 "upgrade_conditions": [
+                     "做多信心达到 55% 以上",
+                     "趋势状态稳定",
+                     "波段位置出现初段或中段",
+                 ]}},
+             "layer_5": {"macro_stance": "neutral"},
+         }}),
+    ]
+
+    def test_all_scenarios_no_machine_terms(self):
+        for label, facts, state in self._ALL_SCENARIOS:
+            out = generate_no_opportunity_narrative(facts, state)
+            _check_text(f"narrator[{label}].narrative", out["narrative"])
+            for i, d in enumerate(out["primary_drivers"]):
+                _check_text(f"narrator[{label}].primary_drivers[{i}].text",
+                            d.get("text") or "")
+            for i, c in enumerate(out["counter_arguments"]):
+                _check_text(f"narrator[{label}].counter_arguments[{i}].text",
+                            c.get("text") or "")
+            for i, s in enumerate(out["what_would_change_mind"]):
+                _check_text(f"narrator[{label}].what_would_change_mind[{i}]",
+                            str(s))

@@ -42,6 +42,8 @@
 
 **v1.2 的目标**:覆盖所有"若不澄清会让代码走偏或让系统长期不给策略"的问题,作为编码的唯一蓝本。
 
+**v1.2 增补(Sprint 2.5-meta,2026-04-25)**:在 §2.2 加第 9 条核心原则,新增 §2.5 "双轨输出原则"。明确"机读版给 AI / 人读版给用户,人读版严禁 AI 生成"为系统级硬约束。
+
 ---
 
 # 目录
@@ -212,6 +214,7 @@
 6. **v1.2 新增:先抓后算**:所有数据采集完成后才开始证据层计算,严禁交错
 7. **v1.2 新增:因子单一作用点**:每个组合因子只在指定的一个层发挥作用,禁止跨层再次评分
 8. **v1.2 新增:opportunity_grade 三重封闭**:L3 为唯一产出点,AI 不可修改,其他层不可旁路改写
+9. **v1.2 新增:双轨输出**:同一份初步分析数据必须产出"机读版给 AI"和"人读版给用户"两份,人读版严禁由 AI 生成(详见 §2.5)
 
 ## 2.3 程序与 AI 分工
 
@@ -258,6 +261,59 @@
 - L3 opportunity_grade = none  
 - L4 其他风险标签
 - L5 非 extreme 事件
+
+## 2.5 双轨输出原则(Dual-Track Output Principle,v1.2 新增)
+
+本系统对同一份"初步分析数据"必须产出两个版本。
+
+### 机读版 (Machine Track)
+
+- **受众**:AI 裁决器
+- **格式**:JSON / 结构化字段 / 数值阈值表
+- **用途**:喂给 Claude 做综合裁决
+- **位置**:`src/ai/adjudicator.py` 的 prompt 上下文(facts dict / system + user prompt)
+
+### 人读版 (Human Track)
+
+- **受众**:终端用户(策略所有者)
+- **格式**:中文叙述,带阈值含义、规则原文、当前状态对接
+- **用途**:网页展示,供用户审计系统逻辑
+- **位置**:`src/strategy/composite_composition.py`、`src/evidence/plain_reading.py`、`src/evidence/pillars.py` 等"人类视图层" 注入函数
+
+### 硬约束
+
+1. 两份信息源同一(都来自系统初步分析的同一批数据)
+2. 人读版必须由规则化代码生成(查阈值表 + 拼接模板 + 引用建模规则原文)
+3. 人读版严禁由 AI 生成 — 避免 AI 改写造成失真
+4. 人读版严禁直接展示机读版的 JSON 原文 — 那不是给人看的
+5. AI 只参与"综合裁决"(stance / regime / phase / opportunity / permission / trade_plan),不参与因子解释、不参与规则转述
+
+### 设计意图
+
+用户打开网页是来"审计系统",不是来"看 AI 报告"。
+用户必须看到"系统是怎么想的",而不是"AI 怎么转述系统的想法"。
+
+### 当前实现对照
+
+| 内容 | 机读版位置 | 人读版位置 | AI 是否参与人读版 |
+|---|---|---|---|
+| L1-L5 证据层结论 | `state.evidence_reports.layer_*` 的 raw 字段 | `inject_plain_readings()` 拼模板 | ❌ 否 |
+| L1-L5 三支柱 / 四角度 | `state.evidence_reports.layer_*.pillars` raw | `inject_pillars()` 拼模板 | ❌ 否 |
+| 6 个组合因子 composition / 规则 / 影响层 | `state.composite_factors[k]` raw | `inject_composite_composition()` 拼模板 | ❌ 否 |
+| 综合 trade_plan / 主叙事 narrative | adjudicator 输出的结构化字段 | adjudicator 输出的 narrative 文本 | ✅ 是(综合裁决环节) |
+| 6 个组合因子的"当前态势 / 对策略影响"双段(2.5-B 引入) | adjudicator 输出 composite_factors[] | 同字段直接渲染 | ⚠ 是 — **此例外需要在 v1.3 重新评估是否合规** |
+
+### v1.3 待办(Sprint 2.5-meta 备注)
+
+Sprint 2.5-B 引入的"6 张组合因子的双段 AI 分析"严格说违反硬约束 #5。
+当前临时保留是因为:
+  - 用户明确提出该需求并希望保留 AI 文风;
+  - 有 5 条硬约束(数字必出、规则编号必引、stance/regime 必落地)兜住失真风险;
+  - 软约束失败只记 notes 不阻断,有事后审计能力。
+
+下次复盘需重新评估:
+  (A) 改为规则化生成(查 composition + 阈值表 → 拼模板),与本原则严格对齐;或
+  (B) 在原则中追加"AI 生成的人读版必须满足 X/Y/Z 条审计性约束"的例外条款。
 
 ---
 

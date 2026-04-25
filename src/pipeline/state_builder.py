@@ -542,6 +542,12 @@ class StrategyStateBuilder:
             if "adjudicator" not in degraded_stages:
                 degraded_stages.append("adjudicator")
 
+        # === Sprint 2.5-B:把 AI 的双段分析合并回 state.composite_factors[key] ===
+        try:
+            _merge_composite_analyses_into_state(state, adjudicator_result)
+        except Exception as e:
+            logger.warning("merge composite analyses failed: %s", e)
+
         # === Stage: State Machine(建模 §5 14 档 —— Sprint 1.5a 对齐)===
         sm_block = self._run_stage(
             "state_machine", failures, degraded_stages, run_ts_utc,
@@ -978,6 +984,36 @@ def _state_machine_fallback(reason: str, run_ts_utc: str) -> dict[str, Any]:
         "on_enter_effects": {"applied": False, "reason": "degraded_fallback"},
         "disciplines_violated": [],
     }
+
+
+def _merge_composite_analyses_into_state(
+    state: dict[str, Any],
+    adjudicator_result: dict[str, Any],
+) -> None:
+    """Sprint 2.5-B:把 AI 输出的 composite_factors[] 双段分析合并到
+    state.composite_factors[key].current_analysis / strategy_impact / missing_count。
+    """
+    if not isinstance(adjudicator_result, dict):
+        return
+    arr = adjudicator_result.get("composite_factors")
+    if not isinstance(arr, list) or not arr:
+        return
+    composite = state.get("composite_factors")
+    if not isinstance(composite, dict):
+        return
+    for entry in arr:
+        if not isinstance(entry, dict):
+            continue
+        k = entry.get("key")
+        if not isinstance(k, str) or k not in composite:
+            continue
+        target = composite[k]
+        if not isinstance(target, dict):
+            continue
+        for fld in ("current_analysis", "strategy_impact",
+                    "missing_count", "total_count"):
+            if fld in entry:
+                target[fld] = entry[fld]
 
 
 def _layer_error_report(layer_id: int, layer_name: str,

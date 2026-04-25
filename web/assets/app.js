@@ -426,6 +426,27 @@ function app() {
             return r && r.affects_layer || '';
         },
 
+        // Sprint 2.5-B:AI 双段分析 + 缺失数据提示
+        compositeCurrentAnalysis(card_id) {
+            const r = this._composite_raw(card_id);
+            return r && r.current_analysis || '';
+        },
+        compositeStrategyImpact(card_id) {
+            const r = this._composite_raw(card_id);
+            return r && r.strategy_impact || '';
+        },
+        compositeMissingHint(card_id) {
+            // 返回 '' / '⚠ 数据未就绪' / '⚠ N 项中 X 项数据缺失,分析基于已有项'
+            const r = this._composite_raw(card_id);
+            if (!r) return '';
+            const total = r.total_count;
+            const missing = r.missing_count;
+            if (total == null || missing == null || total <= 0) return '';
+            if (missing >= total) return '⚠ 数据未就绪';
+            if (missing > 0) return `⚠ ${total} 项中 ${missing} 项数据缺失,分析基于已有项`;
+            return '';
+        },
+
         // 区域 4 分组(Sprint 2.3 tuning:顺序改为价格→衍生→链上→宏观→事件)
         factorGroups() {
             const cards = ((this.state && this.state.factor_cards) || [])

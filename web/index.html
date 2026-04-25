@@ -443,11 +443,28 @@
             <!-- 细分割线 -->
             <div class="border-t border-slate-100 dark:border-slate-800"></div>
 
-            <!-- 影响一行 -->
-            <div class="text-[10px] text-slate-500 dark:text-slate-400 leading-snug truncate"
-                 :title="compositeAffects(c.card_id) || c.strategy_impact || ''"
-                 x-text="'影响:' + (compositeAffects(c.card_id) || c.strategy_impact || '—')">
+            <!-- Sprint 2.5-B:AI 双段分析(当前态势 / 对策略影响) -->
+            <div>
+              <div class="text-[11px] font-semibold text-slate-600 dark:text-slate-400
+                          flex items-center gap-1">
+                <span>📊</span><span>当前态势</span>
+              </div>
+              <p class="text-[11px] leading-snug text-slate-700 dark:text-slate-300 mt-0.5"
+                 x-text="compositeCurrentAnalysis(c.card_id) || '—'"></p>
             </div>
+            <div class="mt-3">
+              <div class="text-[11px] font-semibold text-slate-600 dark:text-slate-400
+                          flex items-center gap-1">
+                <span>🎯</span><span>对策略影响</span>
+              </div>
+              <p class="text-[11px] leading-snug text-slate-700 dark:text-slate-300 mt-0.5"
+                 x-text="compositeStrategyImpact(c.card_id) || '—'"></p>
+            </div>
+
+            <!-- 数据缺失提示(全有 → 不显示) -->
+            <div x-show="compositeMissingHint(c.card_id)"
+                 class="text-[10px] text-slate-400 dark:text-slate-500 mt-2"
+                 x-text="compositeMissingHint(c.card_id)"></div>
           </article>
         </template>
         <div x-show="compositeCards().length === 0"

@@ -1,0 +1,8 @@
+# pre-commit hooks for BTC Swing System
+# Activate locally: `pre-commit install`(详见 docs/dev_setup.md)
+
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.18.4
+    hooks:
+      - id: gitleaks

@@ -301,9 +301,11 @@
 | L1-L5 三支柱 / 四角度 | `state.evidence_reports.layer_*.pillars` raw | `inject_pillars()` 拼模板 | ❌ 否 |
 | 6 个组合因子 composition / 规则 / 影响层 | `state.composite_factors[k]` raw | `inject_composite_composition()` 拼模板 | ❌ 否 |
 | 6 个组合因子的"当前态势 / 对策略影响"双段 | `state.composite_factors[k]` raw | 规则化模板(2.5-B 已确定走此路线) | ❌ 否 |
-| 综合 trade_plan / 主叙事 narrative | adjudicator 输出的结构化字段 | adjudicator 输出的 narrative 文本 | ✅ 是(唯一允许的"综合裁决"环节) |
+| 综合 trade_plan / 主叙事 narrative | adjudicator 输出的结构化字段 | adjudicator 输出的 narrative 文本 | ✅ 是(允许的"综合裁决"出口 #1) |
+| L5 宏观综合判断(规划中,待 Sprint 2.6 实施) | 宏观数据 / 事件输入 → AI → Layer5Output schema | adjudicator 通过 L5 输出消费,不直渲染 | ✅ 是(允许的 AI 出口 #2,详见 §6.8 实施状态段) |
 
 > Sprint 2.5-B 已确定走规则化模板路线,不构成原则例外。
+> L5 宏观判断为已登记的第二个合规 AI 出口,过渡期走规则化 fallback,实施排在 Sprint 2.6。
 
 ---
 
@@ -1822,6 +1824,13 @@ L5 背景事件:
   "macro_headwind_score": -10 到 10
 }
 ```
+
+### 实施状态(v1.2 增补,Sprint 2.5-cleanup)
+
+本层 AI 接入为已确认的设计意图,与双轨原则 §2.5 一致(AI 在此做综合判断,
+非人读层文案改写)。具体实施排在 **Sprint 2.6**,前置条件:macro_metrics
+数据回填完成(Yahoo + FRED collector 修复)。当前过渡期使用规则化 fallback,
+产出 `macro_headwind_score = 0.0`,等价于"无宏观信号"。
 
 ## 6.9 Fallback 三档(v1.2 对应 M33)
 

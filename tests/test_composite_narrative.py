@@ -295,47 +295,60 @@ class TestEmptyDataPlaceholderSuppressed:
         assert "综合 -3.0" in out["current_analysis"]
 
 
-class TestStrategyImpactCitation:
-    """直接调每个 narrator,确保 strategy_impact 引用对应建模章节编号。"""
+class TestStrategyImpactHumanReadable:
+    """Sprint 2.7-readability:strategy_impact 必须是中文人话,不再引用 §X.Y 章节编号。"""
 
-    def test_truth_trend_cites_3_8_1(self):
+    def test_truth_trend_no_section_ref(self):
         c = {"score": 6, "composition": [
             {"factor_id": "price_adx_14_1d", "value": 28.5},
         ]}
         out = _truth_trend_narrative(c, {"evidence_reports": {"layer_1": {"regime": "trend_up"}}})
-        assert "§3.8.1" in out["strategy_impact"]
+        assert "§" not in out["strategy_impact"]
+        assert "L1." not in out["strategy_impact"]
+        assert "真趋势" in out["strategy_impact"]
 
-    def test_band_position_cites_3_8_2(self):
+    def test_band_position_no_section_ref(self):
         c = {"composition": [
             {"factor_id": "price_swing_extension_ratio", "value": 0.65},
         ]}
         out = _band_position_narrative(c, {"evidence_reports": {"layer_2": {"phase": "mid"}}})
-        assert "§3.8.2" in out["strategy_impact"]
+        assert "§" not in out["strategy_impact"]
+        assert "L2." not in out["strategy_impact"]
 
-    def test_crowding_cites_3_8_3(self):
+    def test_crowding_no_section_ref(self):
         c = {"score": 3, "composition": [
             {"factor_id": "derivatives_funding_rate_current", "value": 0.0001},
         ]}
         out = _crowding_narrative(c, {})
-        assert "§3.8.3" in out["strategy_impact"]
+        assert "§" not in out["strategy_impact"]
+        assert "L4." not in out["strategy_impact"]
+        assert "拥挤度" in out["strategy_impact"] or "正常" in out["strategy_impact"]
 
-    def test_cycle_position_cites_3_8_4(self):
+    def test_cycle_position_no_section_ref(self):
         c = {"cycle_position": "early_bull", "composition": [
             {"factor_id": "onchain_mvrv_z", "value": 1.5},
         ]}
         out = _cycle_position_narrative(c, {"evidence_reports": {"layer_2": {"stance": "bullish"}}})
-        assert "§3.8.4" in out["strategy_impact"]
+        assert "§" not in out["strategy_impact"]
+        assert "L2." not in out["strategy_impact"]
+        # 中文枚举应被翻译,不应保留英文 early_bull
+        assert "early_bull" not in out["strategy_impact"]
+        assert "牛市早期" in out["strategy_impact"]
 
-    def test_macro_headwind_cites_3_8_5(self):
+    def test_macro_headwind_no_section_ref(self):
         c = {"score": -1, "composition": [
             {"factor_id": "macro_vix_current", "value": 18.5},
         ]}
         out = _macro_headwind_narrative(c, {"evidence_reports": {"layer_5": {"macro_stance": "neutral"}}})
-        assert "§3.8.5" in out["strategy_impact"]
+        assert "§" not in out["strategy_impact"]
+        assert "L5." not in out["strategy_impact"]
 
-    def test_event_risk_cites_3_8_6(self):
+    def test_event_risk_no_section_ref(self):
         c = {"score": 0, "composition": [
             {"factor_id": "event_fomc_next", "value": None},
         ]}
         out = _event_risk_narrative(c, {})
-        assert "§3.8.6" in out["strategy_impact"]
+        assert "§" not in out["strategy_impact"]
+        assert "L4." not in out["strategy_impact"]
+        # ambush_only 这种英文枚举必须翻译
+        assert "ambush_only" not in out["strategy_impact"]

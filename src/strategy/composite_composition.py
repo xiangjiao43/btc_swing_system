@@ -497,20 +497,30 @@ def _truth_trend_narrative(c: dict[str, Any], state: dict[str, Any]) -> dict[str
 
     if score is None:
         band_text = "档位未定"
-        impact_action = "L1.regime 暂不输出趋势型,L2 保持中性"
+        impact_action = "市场状态暂不输出方向,系统保持中性"
     elif score >= 6:
-        band_text = "真趋势(≥6)"
-        impact_action = "L1.regime 进入趋势型,L2.stance_confidence 不做修正"
+        band_text = "真趋势(≥6 分)"
+        impact_action = "市场已进入趋势型,做多/做空信心不做下调"
     elif score >= 4:
-        band_text = "弱趋势(4-5)"
-        impact_action = "L1.regime 仍可定向,但 L2.stance_confidence 适度下调"
+        band_text = "弱趋势(4-5 分)"
+        impact_action = "市场仍可定向,但做多/做空信心会适度下调"
     else:
-        band_text = "无趋势(≤3)"
-        impact_action = "L1.regime 输出 range,L2 不允许使用趋势型 stance"
+        band_text = "无趋势(≤3 分)"
+        impact_action = "市场处于震荡区间,系统不允许追趋势,只做区间或观望"
 
-    l1_regime = _l(state, 1).get("regime") or _l(state, 1).get("regime_primary") or "—"
+    l1_regime_raw = _l(state, 1).get("regime") or _l(state, 1).get("regime_primary")
+    regime_h = {
+        "trend_up": "上升趋势确立",
+        "trend_down": "下跌趋势确立",
+        "transition_up": "趋势在转向多头但还没站稳",
+        "transition_down": "趋势在转向空头但还没站稳",
+        "range_high": "高位震荡",
+        "range_mid": "中位震荡",
+        "range_low": "低位震荡",
+        "chaos": "市场失序",
+    }.get(l1_regime_raw or "", "市场状态未输出")
     strategy_impact = (
-        f"对应建模 §3.8.1 {band_text}档,当前 L1.regime={l1_regime};{impact_action}。"
+        f"当前为{band_text}。市场目前判定为{regime_h};{impact_action}。"
     )
 
     missing, total = _missing_counts(c)
@@ -543,21 +553,25 @@ def _band_position_narrative(c: dict[str, Any], state: dict[str, Any]) -> dict[s
 
     l2 = _l(state, 2)
     phase = l2.get("phase") or "—"
-    parts.append(f"L2 当前 phase={phase}")
+    phase_short = {
+        "early": "趋势初段", "mid": "趋势中段", "late": "趋势末段",
+        "exhausted": "衰竭期", "unclear": "波段位置不明",
+        "n_a": "波段位置不明",
+    }.get(phase, "波段位置不明")
+    parts.append(f"波段位置 {phase_short}")
     current_analysis = "、".join(parts) + "。"
 
     phase_text = {
-        "early": "波段早期(扩展比 < 50%),回撤充足,做多性价比高",
-        "mid": "波段中期(扩展比 50-100%),主升浪可跟",
-        "late": "波段晚期(扩展比 100-138%),追涨风险升高",
+        "early": "波段初段(扩展比 < 50%),回撤充足,做多性价比高",
+        "mid": "波段中段(扩展比 50-100%),主升浪可跟",
+        "late": "波段末段(扩展比 100-138%),追涨风险升高",
         "exhausted": "衰竭期(扩展比 > 138%),反向概率升高",
-        "unclear": "位置不明,等待结构明朗",
+        "unclear": "波段位置不明,等待结构明朗",
         "n_a": "无明显波段",
-    }.get(phase, "phase 未输出")
+    }.get(phase, "波段位置未输出")
 
     strategy_impact = (
-        f"对应建模 §3.8.2 {phase_text};L3 按 phase 查规则表,"
-        f"L4.position_cap 默认值不做修正。"
+        f"当前为{phase_text}。系统会按这个波段位置查机会档规则,建议仓位上限不做额外修正。"
     )
 
     missing, total = _missing_counts(c)
@@ -588,27 +602,38 @@ def _cycle_position_narrative(c: dict[str, Any], state: dict[str, Any]) -> dict[
         parts.append(f"距 ATH {_fmt(ath, decimals=1)}%")
     if not parts:
         return _fallback_narrative(c)
+    pos_short = {
+        "accumulation": "底部累积期", "early_bull": "牛市早期",
+        "mid_bull": "牛市中段", "late_bull": "牛市晚期",
+        "distribution": "顶部派发期", "early_bear": "熊市早期",
+        "mid_bear": "熊市中段", "late_bear": "熊市晚期",
+        "unclear": "周期位置不明朗",
+    }.get(pos or "", "周期位置未输出")
     if pos is not None:
-        parts.append(f"判档 {pos}")
+        parts.append(f"判定为{pos_short}")
     current_analysis = "、".join(parts) + "。"
 
     pos_text = {
-        "accumulation": "累积期(底部吸筹,做多性价比极高)",
+        "accumulation": "底部累积期(底部吸筹,做多性价比极高)",
         "early_bull": "牛市早期(做多最佳窗口)",
         "mid_bull": "牛市中段(仍可持仓)",
         "late_bull": "牛市晚期(开始减仓)",
-        "distribution": "顶部分发(空头布局期)",
+        "distribution": "顶部派发期(空头布局期)",
         "early_bear": "熊市早期(做空或观望)",
         "mid_bear": "熊市中段(现金为王)",
         "late_bear": "熊市晚期(关注底部信号)",
-        "unclear": "周期不明朗(保守观望)",
-    }.get(pos, "周期未输出")
+        "unclear": "周期位置不明朗(保守观望)",
+    }.get(pos, "周期位置未输出")
 
     l2 = _l(state, 2)
-    stance = l2.get("stance") or "—"
+    stance_h = {
+        "bullish": "倾向看多",
+        "bearish": "倾向看空",
+        "neutral": "方向不明",
+    }.get(l2.get("stance") or "", "方向未输出")
     strategy_impact = (
-        f"对应建模 §3.8.4 {pos_text};驱动 L2.动态门槛表 上调多头阈值或下调空头阈值。"
-        f"当前 L2.stance={stance}。"
+        f"当前为{pos_text}。系统会按周期位置调整做多/做空门槛"
+        f"(牛市早期是做多最佳窗口,熊市早期则做空门槛放宽);当前方向判断:{stance_h}。"
     )
 
     missing, total = _missing_counts(c)
@@ -647,19 +672,20 @@ def _crowding_narrative(c: dict[str, Any], state: dict[str, Any]) -> dict[str, A
 
     if score is None:
         band_text = "档位未定"
-        cap_action = "L4.crowding_multiplier 暂不修正"
+        cap_action = "拥挤度修正暂不生效"
     elif score >= 6:
-        band_text = "极度拥挤(≥6)"
-        cap_action = "L4.crowding_multiplier × 0.7,position_cap 显著收紧"
+        band_text = "极度拥挤(≥6 分)"
+        cap_action = "建议仓位上限收紧到 70%"
     elif score >= 4:
-        band_text = "偏拥挤(4-5)"
-        cap_action = "L4.crowding_multiplier × 0.85"
+        band_text = "偏拥挤(4-5 分)"
+        cap_action = "建议仓位上限轻度下调(× 85%)"
     else:
-        band_text = "正常(≤3)"
-        cap_action = "L4.crowding_multiplier × 1.0,不收紧"
+        band_text = "正常(≤3 分)"
+        cap_action = "建议仓位上限不做修正"
 
     strategy_impact = (
-        f"对应建模 §3.8.3 {band_text}档;{cap_action}。仅作用于 L4,不进 L2 / L3。"
+        f"当前为{band_text}。{cap_action}。"
+        f"拥挤度只影响仓位大小,不影响方向判断,也不参与机会档评估。"
     )
 
     missing, total = _missing_counts(c)
@@ -698,21 +724,28 @@ def _macro_headwind_narrative(c: dict[str, Any], state: dict[str, Any]) -> dict[
 
     if score is None:
         band_text = "档位未定"
-        cap_action = "L5.macro_headwind_multiplier 暂不修正"
+        cap_action = "宏观修正暂不生效"
     elif score <= -5:
-        band_text = "强逆风(≤ -5)"
-        cap_action = "L5.macro_headwind_multiplier × 0.7,position_cap 显著下调"
+        band_text = "强逆风(≤ -5 分)"
+        cap_action = "建议仓位上限收紧到 70%"
     elif score <= -2:
-        band_text = "轻度逆风(-4 ~ -2)"
-        cap_action = "L5.macro_headwind_multiplier × 0.85"
+        band_text = "轻度逆风(-4 ~ -2 分)"
+        cap_action = "建议仓位上限轻度下调(× 85%)"
     else:
-        band_text = "中性或顺风(≥ -1)"
-        cap_action = "L5.macro_headwind_multiplier × 1.0,不收紧"
+        band_text = "中性或顺风(≥ -1 分)"
+        cap_action = "建议仓位上限不做修正"
 
     l5 = _l(state, 5)
-    macro = l5.get("macro_stance") or l5.get("macro_environment") or "—"
+    macro_h = {
+        "risk_on": "风险偏好(顺风)",
+        "risk_off": "避险(逆风)",
+        "extreme_risk_off": "极端避险",
+        "risk_neutral": "中性",
+        "neutral": "中性",
+        "unclear": "宏观环境不明",
+    }.get(l5.get("macro_stance") or l5.get("macro_environment") or "", "宏观环境未输出")
     strategy_impact = (
-        f"对应建模 §3.8.5 {band_text}档;{cap_action}。当前 L5.macro_stance={macro}。"
+        f"当前为{band_text}。{cap_action}。当前宏观环境判定:{macro_h}。"
     )
 
     missing, total = _missing_counts(c)
@@ -756,19 +789,19 @@ def _event_risk_narrative(c: dict[str, Any], state: dict[str, Any]) -> dict[str,
 
     if score is None:
         band_text = "档位未定"
-        cap_action = "L4.event_risk_multiplier 暂不修正"
+        cap_action = "事件风险修正暂不生效"
     elif score >= 8:
-        band_text = "高(≥8)"
-        cap_action = "L4.event_risk_multiplier × 0.7,permission 自动降到 ambush_only"
+        band_text = "高(≥8 分)"
+        cap_action = "建议仓位上限收紧到 70%,系统强制只允许埋伏单"
     elif score >= 4:
-        band_text = "中(4-7)"
-        cap_action = "L4.event_risk_multiplier × 0.85"
+        band_text = "中(4-7 分)"
+        cap_action = "建议仓位上限轻度下调(× 85%)"
     else:
-        band_text = "低(<4)"
-        cap_action = "L4.event_risk_multiplier × 1.0,permission 不降档"
+        band_text = "低(<4 分)"
+        cap_action = "建议仓位上限不做修正,执行许可不降档"
 
     strategy_impact = (
-        f"对应建模 §3.8.6 {band_text}档;{cap_action}。"
+        f"当前为{band_text}事件风险。{cap_action}。"
     )
 
     missing, total = _missing_counts(c)

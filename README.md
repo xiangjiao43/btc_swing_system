@@ -13,6 +13,14 @@
 详细建模见 [docs/modeling.md](docs/modeling.md)(v1.2,编码唯一蓝本)。
 项目决策与里程碑见 [docs/PROJECT_LOG.md](docs/PROJECT_LOG.md)。
 
+## Security
+
+- This repository is public.
+- All API keys are injected via `.env` (gitignored, never committed).
+- Pre-commit gitleaks hook is configured; run `pre-commit install` after cloning.
+  See [docs/dev_setup.md](docs/dev_setup.md).
+- Production server credentials in historical sprint reports are intentionally public per owner's decision.
+
 ## 技术栈
 
 - Python 3.12

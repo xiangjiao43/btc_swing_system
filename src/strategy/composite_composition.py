@@ -486,7 +486,10 @@ def _truth_trend_narrative(c: dict[str, Any], state: dict[str, Any]) -> dict[str
         parts.append("三周期方向" + ("一致" if tf_align else "分歧"))
     if ma200 is not None:
         parts.append(f"价格相对 MA-200:{ma200}")
-    if score is not None:
+    # Sprint 2.5-cleanup:仅当有真实数据 OR score 非 0 时才追加 "合计 N/9"。
+    # 否则避免单独输出 "合计 0/9。" 这种空内容(应走 fallback)。
+    have_data = len(parts) > 0
+    if score is not None and (have_data or score != 0):
         parts.append(f"合计 {int(score)}/9")
     if not parts:
         return _fallback_narrative(c)
@@ -634,7 +637,9 @@ def _crowding_narrative(c: dict[str, Any], state: dict[str, Any]) -> dict[str, A
         parts.append(f"基差 {_fmt(basis * 100, decimals=2, suffix='%')}")
     if pcr is not None:
         parts.append(f"Put/Call {_fmt(pcr, decimals=2)}")
-    if score is not None:
+    # Sprint 2.5-cleanup:仅当有真实数据 OR score 非 0 时追加 "合计 N/8"
+    have_data = len(parts) > 0
+    if score is not None and (have_data or float(score) != 0):
         parts.append(f"合计 {_fmt(score, decimals=0)}/8")
     if not parts:
         return _fallback_narrative(c)
@@ -683,7 +688,9 @@ def _macro_headwind_narrative(c: dict[str, Any], state: dict[str, Any]) -> dict[
         parts.append(f"US10Y 30d {_fmt(us10y, decimals=0, suffix='bp')}")
     if ndx is not None:
         parts.append(f"纳指 20d {_fmt(ndx, decimals=2, suffix='%')}")
-    if score is not None:
+    # Sprint 2.5-cleanup:仅当有真实数据 OR score 非 0 时追加 "综合 X.X"
+    have_data = len(parts) > 0
+    if score is not None and (have_data or float(score) != 0):
         parts.append(f"综合 {_fmt(score, decimals=1)}")
     if not parts:
         return _fallback_narrative(c)
@@ -734,7 +741,9 @@ def _event_risk_narrative(c: dict[str, Any], state: dict[str, Any]) -> dict[str,
         parts.append(f"NFP 距 {_fmt(nfp, decimals=0)}h")
     if opt is not None:
         parts.append(f"期权到期 距 {_fmt(opt, decimals=0)}h")
-    if score is not None:
+    # Sprint 2.5-cleanup:仅当有事件 OR score 非 0 时追加 "加权 X.X"
+    have_data = len(parts) > 0
+    if score is not None and (have_data or float(score) != 0):
         parts.append(f"加权 {_fmt(score, decimals=1)}")
     if not parts:
         # 无即时事件 = 低风险,不算 fallback

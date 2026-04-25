@@ -219,6 +219,82 @@ class TestPartialMissing:
 # Acceptance: strategy_impact 引用 §3.8.X 编号
 # ==================================================================
 
+class TestEmptyDataPlaceholderSuppressed:
+    """Sprint 2.5-cleanup:全空 + score=0 时不能输出"合计 0/9"等占位,
+    必须走 fallback。"""
+
+    def test_truth_trend_empty_data_zero_score_falls_back(self):
+        c = {"score": 0, "composition": [
+            {"factor_id": "price_adx_14_1d", "value": None},
+            {"factor_id": "price_adx_14_4h", "value": None},
+            {"factor_id": "price_tf_alignment", "value": None},
+            {"factor_id": "price_ma_stack", "value": None},
+            {"factor_id": "price_ma_200_relation", "value": None},
+        ]}
+        out = _truth_trend_narrative(c, {})
+        assert out["current_analysis"] == _FALLBACK_TEXT
+        assert "合计 0/9" not in out["current_analysis"]
+
+    def test_crowding_empty_data_zero_score_falls_back(self):
+        c = {"score": 0, "composition": [
+            {"factor_id": "derivatives_funding_rate_current", "value": None},
+            {"factor_id": "derivatives_top_long_short_ratio", "value": None},
+            {"factor_id": "derivatives_basis", "value": None},
+            {"factor_id": "derivatives_put_call", "value": None},
+        ]}
+        out = _crowding_narrative(c, {})
+        assert out["current_analysis"] == _FALLBACK_TEXT
+        assert "合计 0/8" not in out["current_analysis"]
+
+    def test_macro_headwind_empty_data_zero_score_falls_back(self):
+        c = {"score": 0, "composition": [
+            {"factor_id": "macro_vix_current", "value": None},
+            {"factor_id": "macro_dxy_20d_change", "value": None},
+            {"factor_id": "macro_us10y_30d_change", "value": None},
+            {"factor_id": "macro_nasdaq_20d", "value": None},
+        ]}
+        out = _macro_headwind_narrative(c, {})
+        assert out["current_analysis"] == _FALLBACK_TEXT
+        assert "综合 0.0" not in out["current_analysis"]
+
+    def test_event_risk_empty_data_zero_score_uses_no_event_message(self):
+        # event_risk 的 0 事件 + score=0 走"未来 72 小时无登记事件"分支(非 fallback)
+        c = {"score": 0, "composition": [
+            {"factor_id": "event_fomc_next", "value": None},
+            {"factor_id": "event_cpi_next", "value": None},
+            {"factor_id": "event_nfp_next", "value": None},
+            {"factor_id": "event_options_expiry", "value": None},
+            {"factor_id": "event_vol_extreme_bonus", "value": None},
+        ]}
+        out = _event_risk_narrative(c, {})
+        assert "未来 72 小时无登记事件" in out["current_analysis"]
+        assert "加权 0.0" not in out["current_analysis"]
+
+    def test_truth_trend_with_data_keeps_score_line(self):
+        # 有数据时 "合计 N/9" 仍然出现(无论 score 是否 0)
+        c = {"score": 0, "composition": [
+            {"factor_id": "price_adx_14_1d", "value": 18.0},
+            {"factor_id": "price_adx_14_4h", "value": None},
+            {"factor_id": "price_tf_alignment", "value": None},
+            {"factor_id": "price_ma_stack", "value": None},
+            {"factor_id": "price_ma_200_relation", "value": None},
+        ]}
+        out = _truth_trend_narrative(c, {})
+        assert "合计 0/9" in out["current_analysis"]
+        assert "ADX-14(1D)=18.0" in out["current_analysis"]
+
+    def test_macro_headwind_nonzero_score_no_data_keeps_line(self):
+        # score 非 0 即使没有数据,也不走 fallback(允许 score-only 输出)
+        c = {"score": -3, "composition": [
+            {"factor_id": "macro_vix_current", "value": None},
+            {"factor_id": "macro_dxy_20d_change", "value": None},
+            {"factor_id": "macro_us10y_30d_change", "value": None},
+            {"factor_id": "macro_nasdaq_20d", "value": None},
+        ]}
+        out = _macro_headwind_narrative(c, {})
+        assert "综合 -3.0" in out["current_analysis"]
+
+
 class TestStrategyImpactCitation:
     """直接调每个 narrator,确保 strategy_impact 引用对应建模章节编号。"""
 

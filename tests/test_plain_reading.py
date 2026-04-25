@@ -78,7 +78,7 @@ def test_l2_bullish_late():
         "stance": "bullish", "stance_confidence": 0.72, "phase": "late",
         "health_status": "healthy",
     })
-    assert "晚期" in s and "追涨" in s
+    assert "末段" in s and "追涨" in s
 
 
 def test_l2_bearish():
@@ -94,7 +94,7 @@ def test_l2_neutral():
         "stance": "neutral", "stance_confidence": 0.4, "phase": "n_a",
         "health_status": "healthy",
     })
-    assert "中性" in s and "观望" in s
+    assert "方向不明" in s and "观望" in s
 
 
 def test_l2_low_confidence_does_not_open():
@@ -116,14 +116,14 @@ def test_l3_a_grade():
     s = plain_reading_l3({
         "opportunity_grade": "A", "execution_permission": "can_open",
     })
-    assert "A 级" in s
+    assert "高等级机会" in s
 
 
 def test_l3_b_grade():
     s = plain_reading_l3({
         "opportunity_grade": "B", "execution_permission": "cautious_open",
     })
-    assert "B 级" in s
+    assert "中等级机会" in s
     assert "70" in s
 
 
@@ -131,7 +131,7 @@ def test_l3_c_grade_gives_plan_at_40pct():
     s = plain_reading_l3({
         "opportunity_grade": "C", "execution_permission": "cautious_open",
     })
-    assert "C 级" in s
+    assert "低等级参考机会" in s
     assert "40" in s
 
 
@@ -174,7 +174,7 @@ def test_l4_moderate_with_structural():
         ],
     })
     assert "81200" in s
-    assert "priority=1" in s
+    assert "优先级 1" in s
 
 
 def test_l4_high_risk():

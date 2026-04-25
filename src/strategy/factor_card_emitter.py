@@ -320,22 +320,22 @@ def _emit_composite_cards(composite: dict[str, Any], today: str) -> list[dict[st
         # (key, card_id_suffix, name_cn, name_en, linked_layer, plain_impact)
         ("truth_trend", "truth_trend", "趋势真实性指数",
          "TruthTrend", "L1",
-         "趋势强度综合判定,影响 L1.regime_confidence"),
+         "📍 综合 ADX、多周期方向一致性、均线排列,判定当前是真趋势还是震荡。≥6 真趋势,≤3 无趋势。"),
         ("band_position", "band_position", "波段位置综合指数",
          "BandPosition", "L2",
-         "当前波段阶段(early/mid/late/exhausted),影响 L2.phase"),
+         "📍 用价格几何(swing 扩展比、结构序列、MA 距离、回撤深度)判定当前波段处在初段/中段/末段/衰竭期。"),
         ("cycle_position", "cycle_position", "长周期位置",
          "CyclePosition", "L2",
-         "BTC 在多年周期中的位置(9 档),影响做多做空动态门槛"),
+         "📍 用 MVRV、NUPL、LTH 持仓和距 ATH 跌幅,判断 BTC 处于 9 档长周期中的哪一档,直接影响系统做多/做空的门槛。"),
         ("crowding", "crowding", "拥挤度指数",
          "Crowding", "L4",
-         "衍生品是否极端拥挤,影响 position_cap(≥6 时 × 0.7)"),
+         "📍 用 funding、OI、多空比、basis、Put/Call 综合判定衍生品是否极端拥挤。≥6 极度拥挤,系统会收紧仓位。"),
         ("macro_headwind", "macro_headwind", "宏观逆风指数",
          "MacroHeadwind", "L5",
-         "宏观对风险资产顺风/逆风,≤-5 时 position_cap × 0.7"),
+         "📍 综合 DXY、US10Y、VIX、纳指变化,衡量宏观环境对 BTC 是顺风还是逆风。≤-5 强逆风,系统会收紧仓位。"),
         ("event_risk", "event_risk", "风险事件密度",
          "EventRisk", "L4",
-         "72h 内事件加权风险,≥8 时 position_cap × 0.7 + permission 降档"),
+         "📍 综合未来 72 小时的 FOMC、CPI、NFP、期权大到期等事件,按重要度和距离加权打分。≥8 系统会强制只埋伏单。"),
     ]
 
     for key, slug, name_cn, name_en, layer, impact in _composite_specs:
@@ -426,64 +426,83 @@ def _composite_direction(key: str, data: dict[str, Any]) -> str:
 
 def _composite_plain_reading(key: str, data: dict[str, Any]) -> str:
     if not data:
-        return "数据不足(该组合因子未能产出)"
+        return "📊 数据不足(该组合因子未能产出)\n🔍 等数据齐全后系统会重新计算"
     score = data.get("score")
     band = data.get("band") or data.get("phase") or data.get("cycle_position")
 
     if key == "truth_trend":
         if score is None:
-            return "趋势强度未能计算(数据不足)"
+            return "📊 趋势强度未能计算(数据不足)\n🔍 ≥6 = 真趋势;4-5 = 弱趋势;≤3 = 无趋势(震荡)"
         if score >= 6:
-            return f"当前 ADX + 均线 + 多周期一致性综合 {score} 分,属于真趋势。"
+            return (f"📊 当前 ADX + 均线 + 多周期一致性综合 {score}/9 分,属于真趋势\n"
+                    f"🔍 ≥6 = 真趋势;4-5 = 弱趋势,谨慎跟进;≤3 = 无趋势,以区间思路为主")
         if score >= 4:
-            return f"当前趋势信号 {score} 分,弱趋势,谨慎跟进。"
-        return f"当前趋势信号 {score} 分,无趋势,以区间思路为主。"
+            return (f"📊 当前趋势信号 {score}/9 分,弱趋势,谨慎跟进\n"
+                    f"🔍 ≥6 = 真趋势;4-5 = 弱趋势;≤3 = 无趋势")
+        return (f"📊 当前趋势信号 {score}/9 分,无趋势,以区间思路为主\n"
+                f"🔍 ≥6 = 真趋势;4-5 = 弱趋势;≤3 = 无趋势")
 
     if key == "cycle_position":
         if band is None or band == "unclear":
-            return "长周期位置不明朗,三主指标未形成共识。"
+            return ("📊 长周期位置不明朗,三主指标未形成共识\n"
+                    "🔍 三主指标 = MVRV-Z / NUPL / LTH 90 日变化;一致 = 高置信,分歧 = 不明")
         labels = {
-            "accumulation": "累积期(底部吸筹)",
+            "accumulation": "底部累积期(底部吸筹)",
             "early_bull": "牛市早期",
             "mid_bull": "牛市中段",
             "late_bull": "牛市晚期",
-            "distribution": "顶部分发期",
+            "distribution": "顶部派发期",
             "early_bear": "熊市早期",
             "mid_bear": "熊市中段",
             "late_bear": "熊市晚期",
         }
-        return f"当前处于 {labels.get(band, band)},门槛按此调整。"
+        return (f"📊 当前处于 {labels.get(band, band)},系统按此调整做多/做空门槛\n"
+                f"🔍 9 档:底部累积期 → 牛市早/中/晚期 → 顶部派发期 → 熊市早/中/晚期")
 
     if key == "crowding":
         if score is None:
-            return "衍生品拥挤度未能计算。"
+            return ("📊 衍生品拥挤度未能计算\n"
+                    "🔍 ≥6 = 极度拥挤(仓位收紧 70%);4-5 = 偏拥挤(× 85%);≤3 = 正常")
         if score >= 6:
-            return f"拥挤度 {score}/8,极度拥挤,反向挤压风险增加。"
+            return (f"📊 拥挤度 {score}/8,极度拥挤,反向挤压风险增加\n"
+                    f"🔍 ≥6 = 极度拥挤(仓位收紧 70%);4-5 = 偏拥挤(× 85%);≤3 = 正常")
         if score >= 4:
-            return f"拥挤度 {score}/8,偏拥挤,仓位乘数 × 0.85。"
-        return f"拥挤度 {score}/8,正常。"
+            return (f"📊 拥挤度 {score}/8,偏拥挤,仓位上限轻度下调(× 85%)\n"
+                    f"🔍 ≥6 = 极度拥挤;4-5 = 偏拥挤;≤3 = 正常")
+        return (f"📊 拥挤度 {score}/8,正常,不收紧仓位\n"
+                f"🔍 ≥6 = 极度拥挤;4-5 = 偏拥挤;≤3 = 正常")
 
     if key == "macro_headwind":
         if score is None:
-            return "宏观逆风未能计算。"
+            return ("📊 宏观逆风未能计算\n"
+                    "🔍 ≤-5 = 强逆风(仓位收紧 70%);-4~-2 = 轻度逆风(× 85%);≥-1 = 中性或顺风")
         if score <= -5:
-            return f"宏观强逆风({score}),仓位上限 × 0.7。"
+            return (f"📊 宏观强逆风({score} 分),建议仓位上限收紧到 70%\n"
+                    f"🔍 ≤-5 = 强逆风;-4~-2 = 轻度逆风;≥-1 = 中性或顺风")
         if score <= -2:
-            return f"宏观轻度逆风({score}),仓位上限 × 0.85。"
-        return f"宏观中性或顺风({score})。"
+            return (f"📊 宏观轻度逆风({score} 分),建议仓位上限轻度下调(× 85%)\n"
+                    f"🔍 ≤-5 = 强逆风;-4~-2 = 轻度逆风;≥-1 = 中性或顺风")
+        return (f"📊 宏观中性或顺风({score} 分),建议仓位上限不做修正\n"
+                f"🔍 ≤-5 = 强逆风;-4~-2 = 轻度逆风;≥-1 = 中性或顺风")
 
     if key == "event_risk":
         if score is None:
-            return "事件风险未能计算。"
+            return ("📊 事件风险未能计算\n"
+                    "🔍 ≥8 = 高(只允许埋伏单,仓位 × 70%);4-7 = 中等(× 85%);<4 = 低")
         if score >= 8:
-            return f"72h 事件密度高({score}),仓位 × 0.7 + 权限降档。"
+            return (f"📊 未来 72 小时事件密度高({score} 分),系统强制只允许埋伏单\n"
+                    f"🔍 ≥8 = 高(只埋伏单,仓位 × 70%);4-7 = 中等(× 85%);<4 = 低")
         if score >= 4:
-            return f"72h 事件密度中等({score}),仓位 × 0.85。"
-        return f"72h 事件密度低({score}),正常。"
+            return (f"📊 未来 72 小时事件密度中等({score} 分),仓位上限轻度下调(× 85%)\n"
+                    f"🔍 ≥8 = 高;4-7 = 中等;<4 = 低")
+        return (f"📊 未来 72 小时事件密度低({score} 分),正常\n"
+                f"🔍 ≥8 = 高;4-7 = 中等;<4 = 低")
 
     if key == "band_position":
-        labels = {"early": "早期", "mid": "中期", "late": "晚期", "exhausted": "衰竭期"}
-        return f"当前波段位置:{labels.get(band, band or '未知')}。"
+        labels = {"early": "趋势初段", "mid": "趋势中段",
+                  "late": "趋势末段", "exhausted": "衰竭期"}
+        return (f"📊 当前波段位置:{labels.get(band, band or '波段位置不明')}\n"
+                f"🔍 初段 = 扩展比 < 50%;中段 = 50-100%;末段 = 100-138%;衰竭 = > 138%")
 
     return str(data)
 
@@ -510,11 +529,18 @@ def _emit_onchain_primary(
         historical_percentile=pct,
         captured_at_bjt=ts,
         plain_interpretation=(
-            f"市场估值偏高,过去 180 天 {pct}% 分位" if val is not None and pct and pct >= 70
-            else f"市场估值偏低,过去 180 天 {pct}% 分位" if val is not None and pct and pct <= 30
-            else f"MVRV Z={val:.2f}" if val is not None else "数据不足"
+            (f"📊 当前 {val:.2f},过去 180 天 {pct:.0f}% 分位,处于历史偏高区,链上估值偏高\n"
+             f"🔍 > 6 顶部派发期;2 ~ 4 牛市中段;-0.5 ~ 2 牛市早期;< -0.5 底部累积期"
+             ) if val is not None and pct is not None and pct >= 70
+            else (f"📊 当前 {val:.2f},过去 180 天 {pct:.0f}% 分位,处于历史偏低区,链上估值偏低\n"
+                  f"🔍 > 6 顶部派发期;2 ~ 4 牛市中段;-0.5 ~ 2 牛市早期;< -0.5 底部累积期"
+                  ) if val is not None and pct is not None and pct <= 30
+            else (f"📊 当前 {val:.2f},处于价值与高估之间的过渡区\n"
+                  f"🔍 > 6 顶部派发期;2 ~ 4 牛市中段;-0.5 ~ 2 牛市早期;< -0.5 底部累积期"
+                  ) if val is not None
+            else "📊 数据不足\n🔍 > 6 顶部派发期;2 ~ 4 牛市中段;-0.5 ~ 2 牛市早期;< -0.5 底部累积期"
         ),
-        strategy_impact="CyclePosition 主裁决因子:>2 偏分发期,<-0.5 偏累积期",
+        strategy_impact="📍 链上市场估值的 Z 分数:衡量当前市值相对长期实现市值的偏离程度。是判断长周期位置(累积/牛市/派发)的核心指标之一。",
         impact_direction=_impact_direction_from_value(
             val, bear_above=2.0, bull_below=-0.5,
         ),
@@ -534,12 +560,21 @@ def _emit_onchain_primary(
         historical_percentile=pct,
         captured_at_bjt=ts,
         plain_interpretation=(
-            "整体持仓处于盈利状态(Belief 区间)" if val is not None and 0.5 <= val < 0.75
-            else "市场 Euphoria 区间,历史顶部信号" if val is not None and val >= 0.75
-            else "市场 Capitulation 区间,历史底部信号" if val is not None and val <= 0
-            else f"NUPL={val:.2f}" if val is not None else "数据不足"
+            (f"📊 当前 {val:.2f},整体持仓处于盈利状态(Belief 区间)\n"
+             f"🔍 > 0.75 = 极度狂热(Euphoria,历史顶);0.5-0.75 = Belief;0-0.5 = 希望与忧虑交织;< 0 = 投降(Capitulation,历史底)"
+             ) if val is not None and 0.5 <= val < 0.75
+            else (f"📊 当前 {val:.2f},市场处于 Euphoria 区间,历史顶部信号\n"
+                  f"🔍 > 0.75 = 极度狂热;0.5-0.75 = Belief;0-0.5 = 希望与忧虑;< 0 = 投降"
+                  ) if val is not None and val >= 0.75
+            else (f"📊 当前 {val:.2f},市场处于 Capitulation 区间,历史底部信号\n"
+                  f"🔍 > 0.75 = 极度狂热;0.5-0.75 = Belief;0-0.5 = 希望与忧虑;< 0 = 投降"
+                  ) if val is not None and val <= 0
+            else (f"📊 当前 {val:.2f},市场处在希望与忧虑交织区间(0-0.5)\n"
+                  f"🔍 > 0.75 = 极度狂热;0.5-0.75 = Belief;0-0.5 = 希望与忧虑;< 0 = 投降"
+                  ) if val is not None
+            else "📊 数据不足\n🔍 > 0.75 = 极度狂热;0.5-0.75 = Belief;0-0.5 = 希望与忧虑;< 0 = 投降"
         ),
-        strategy_impact="CyclePosition 主裁决:>0.65 分发期,<0 累积期",
+        strategy_impact="📍 链上整体未实现盈亏比例:衡量市场上 BTC 持有者整体处于盈利还是亏损,以及程度如何。是判断长周期位置的核心指标。",
         impact_direction=_impact_direction_from_value(
             val, bear_above=0.65, bull_below=0.0,
         ),
@@ -559,12 +594,18 @@ def _emit_onchain_primary(
         value_unit="%",
         captured_at_bjt=ts,
         plain_interpretation=(
-            f"长期持有者过去 90 天净增持 {change_90d:.1f}%,底部吸筹中" if change_90d is not None and change_90d > 2
-            else f"长期持有者过去 90 天净减持 {change_90d:.1f}%,顶部分发中" if change_90d is not None and change_90d < -3
-            else f"LTH 供应 90 日变化 {change_90d:.1f}%,稳定" if change_90d is not None
-            else "数据不足(需 90 天历史)"
+            (f"📊 长期持有者过去 90 天净增持 {change_90d:.1f}%,底部吸筹中(底部信号)\n"
+             f"🔍 > +2% = 净增持(底部吸筹);±2% = 稳定;< -3% = 净减持(顶部派发)"
+             ) if change_90d is not None and change_90d > 2
+            else (f"📊 长期持有者过去 90 天净减持 {change_90d:.1f}%,顶部派发中(顶部信号)\n"
+                  f"🔍 > +2% = 净增持;±2% = 稳定;< -3% = 净减持"
+                  ) if change_90d is not None and change_90d < -3
+            else (f"📊 长期持有者 90 日变化 {change_90d:.1f}%,持仓相对稳定\n"
+                  f"🔍 > +2% = 净增持(吸筹);±2% = 稳定;< -3% = 净减持(派发)"
+                  ) if change_90d is not None
+            else "📊 数据不足(需 90 天历史)\n🔍 > +2% = 净增持;±2% = 稳定;< -3% = 净减持"
         ),
-        strategy_impact="CyclePosition 主裁决因子:>+2% 增持 / <-3% 减持",
+        strategy_impact="📍 长期持有者(持有 ≥ 155 天)的总持仓在过去 90 天的变化。增持往往伴随底部吸筹,减持往往伴随顶部派发。",
         impact_direction=_impact_direction_from_value(
             change_90d, bull_above=2, bear_below=-3,
         ),
@@ -592,12 +633,18 @@ def _emit_onchain_primary(
         value_unit="BTC",
         captured_at_bjt=ts,
         plain_interpretation=(
-            f"7 日均净流入 {avg7:.0f} BTC,供应压力增加" if avg7 is not None and avg7 > 500
-            else f"7 日均净流出 {-avg7:.0f} BTC,持币意愿增强" if avg7 is not None and avg7 < -500
-            else f"交易所净流量 {avg7:.0f} BTC/日,平稳" if avg7 is not None
-            else "数据不足"
+            (f"📊 7 日均净流入 {avg7:.0f} BTC,大量币流入交易所,供应压力增加\n"
+             f"🔍 > +500 BTC = 流入压力大(偏空);±500 BTC = 平稳;< -500 BTC = 流出强,持币意愿增强(偏多)"
+             ) if avg7 is not None and avg7 > 500
+            else (f"📊 7 日均净流出 {-avg7:.0f} BTC,大量币离开交易所,持币意愿增强\n"
+                  f"🔍 > +500 BTC = 流入压力大;±500 BTC = 平稳;< -500 BTC = 流出强(偏多)"
+                  ) if avg7 is not None and avg7 < -500
+            else (f"📊 交易所净流量 {avg7:.0f} BTC/日,平稳\n"
+                  f"🔍 > +500 BTC = 流入压力大;±500 BTC = 平稳;< -500 BTC = 流出强"
+                  ) if avg7 is not None
+            else "📊 数据不足\n🔍 > +500 BTC = 流入压力大;±500 BTC = 平稳;< -500 BTC = 流出强(偏多)"
         ),
-        strategy_impact="ExchangeMomentum 修正 L2.stance_confidence(× 1.05 或 × 0.95)",
+        strategy_impact="📍 BTC 流入交易所的速度(扣减流出)。币流入 = 卖压可能增加;流出 = 持币意愿强、潜在多头。这是修正方向判断信心的辅助指标。",
         impact_direction=_impact_direction_from_value(
             avg7, bear_above=500, bull_below=-500,
         ),
@@ -615,12 +662,18 @@ def _emit_onchain_primary(
         value_unit="%",
         captured_at_bjt=ts,
         plain_interpretation=(
-            f"当前距离历史最高价 {drawdown_pct:.1f}%,深度回撤" if drawdown_pct is not None and drawdown_pct < -20
-            else f"当前距离 ATH {drawdown_pct:.1f}%,相对高位" if drawdown_pct is not None and drawdown_pct > -5
-            else f"距 ATH 跌幅 {drawdown_pct:.1f}%" if drawdown_pct is not None
-            else "数据不足(需 K 线历史)"
+            (f"📊 当前距离历史最高价 {drawdown_pct:.1f}%,深度回撤,价值区\n"
+             f"🔍 > -5% = 相对高位;-5% ~ -20% = 中段回调;< -20% = 深度回撤(可能进入熊市早期)"
+             ) if drawdown_pct is not None and drawdown_pct < -20
+            else (f"📊 当前距离历史高点 {drawdown_pct:.1f}%,相对高位,接近顶部\n"
+                  f"🔍 > -5% = 相对高位;-5% ~ -20% = 中段回调;< -20% = 深度回撤"
+                  ) if drawdown_pct is not None and drawdown_pct > -5
+            else (f"📊 距历史高点跌幅 {drawdown_pct:.1f}%,中段回调区\n"
+                  f"🔍 > -5% = 相对高位;-5% ~ -20% = 中段回调;< -20% = 深度回撤"
+                  ) if drawdown_pct is not None
+            else "📊 数据不足(需 K 线历史)\n🔍 > -5% = 相对高位;-5% ~ -20% = 中段回调;< -20% = 深度回撤"
         ),
-        strategy_impact="CyclePosition 辅助:>20% 跌幅是 early_bear 辅助条件",
+        strategy_impact="📍 当前价格距离历史最高点的跌幅。配合 MVRV-Z 和 NUPL 用于判断长周期位置(深度回撤往往是熊市早期的辅助信号)。",
         impact_direction=_impact_direction_from_value(
             drawdown_pct, bull_below=-20,
         ),
@@ -640,12 +693,18 @@ def _emit_onchain_primary(
         historical_percentile=pct,
         captured_at_bjt=ts,
         plain_interpretation=(
-            f"储备风险偏高({val:.4f}),长期持有者倾向抛售" if val is not None and val > 0.02
-            else f"储备风险偏低({val:.4f}),长期持有者惜售" if val is not None and val < 0.002
-            else f"Reserve Risk={val:.4f}" if val is not None
-            else "数据不足"
+            (f"📊 当前 {val:.4f},储备风险偏高,长期持有者倾向抛售(顶部信号)\n"
+             f"🔍 < 0.002 = 历史底部区间(惜售,买入性价比高);0.002 ~ 0.02 = 正常;> 0.02 = 顶部区间(抛售意愿高)"
+             ) if val is not None and val > 0.02
+            else (f"📊 当前 {val:.4f},储备风险偏低,长期持有者惜售(底部信号,买入性价比高)\n"
+                  f"🔍 < 0.002 = 历史底部区间;0.002 ~ 0.02 = 正常;> 0.02 = 顶部区间"
+                  ) if val is not None and val < 0.002
+            else (f"📊 当前 {val:.4f},储备风险处于正常区间\n"
+                  f"🔍 < 0.002 = 历史底部区间;0.002 ~ 0.02 = 正常;> 0.02 = 顶部区间"
+                  ) if val is not None
+            else "📊 数据不足\n🔍 < 0.002 = 历史底部区间;0.002 ~ 0.02 = 正常;> 0.02 = 顶部区间"
         ),
-        strategy_impact="底部信号:<0.002 是历史底部区间,买入性价比高",
+        strategy_impact="📍 长期持有者抛售意愿与价格的比值,反映底部信号强度。极低值常出现在历史大底,极高值常出现在大顶。",
         impact_direction=_impact_direction_from_value(val, bear_above=0.02, bull_below=0.002),
         impact_weight=0.7,
         linked_layer="L2", source="Glassnode",
@@ -691,11 +750,18 @@ def _emit_derivatives_primary(
         historical_percentile=pct,
         captured_at_bjt=ts,
         plain_interpretation=(
-            "资金费率过热,多头杠杆累积,反向挤压风险升高" if val is not None and val > 0.0003
-            else "资金费率深度为负,空头拥挤,反向挤压潜在" if val is not None and val < -0.0002
-            else "资金费率中性" if val is not None else "数据不足"
+            (f"📊 当前 {val*100:.4f}%,资金费率过热,多头杠杆累积,反向挤压风险升高\n"
+             f"🔍 > 0.03% 连续 3 次 = 多头过度拥挤(警告);-0.01% ~ 0.01% = 正常;< -0.05% = 空头过度拥挤(反弹信号)"
+             ) if val is not None and val > 0.0003
+            else (f"📊 当前 {val*100:.4f}%,资金费率深度为负,空头拥挤,反弹挤压潜在\n"
+                  f"🔍 > 0.03% 连续 3 次 = 多头过度拥挤;-0.01% ~ 0.01% = 正常;< -0.05% = 空头过度拥挤"
+                  ) if val is not None and val < -0.0002
+            else (f"📊 当前 {val*100:.4f}%,资金费率中性,情绪平衡\n"
+                  f"🔍 > 0.03% 连续 3 次 = 多头过度拥挤;-0.01% ~ 0.01% = 正常;< -0.05% = 空头过度拥挤"
+                  ) if val is not None
+            else "📊 数据不足\n🔍 > 0.03% 连续 3 次 = 多头过度拥挤;-0.01% ~ 0.01% = 正常;< -0.05% = 空头过度拥挤"
         ),
-        strategy_impact="Crowding 主因子,>0.03% 且连续 3 次 → +2 分",
+        strategy_impact="📍 永续合约多空双方互付的费率。正值=多头付空头(多头愿意为多头仓位付溢价),负值=空头付多头。极端值反映市场情绪和拥挤度。",
         impact_direction=_impact_direction_from_value(val, bear_above=0.0003, bull_below=-0.0002),
         impact_weight=0.9,
         linked_layer="L4", source="CoinGlass",
@@ -710,11 +776,15 @@ def _emit_derivatives_primary(
         value_unit="分位",
         captured_at_bjt=ts,
         plain_interpretation=(
-            f"资金费率在过去 30 日的 {pct:.0f}% 分位,历史高位" if pct is not None and pct >= 85
-            else f"资金费率在过去 30 日 {pct:.0f}% 分位" if pct is not None
-            else "数据不足"
+            (f"📊 资金费率在过去 30 日的 {pct:.0f}% 分位,历史高位\n"
+             f"🔍 > 85 分位 = 历史极高(过热,反向挤压风险);15-85 分位 = 正常;< 15 分位 = 历史极低(可能空头拥挤)"
+             ) if pct is not None and pct >= 85
+            else (f"📊 资金费率在过去 30 日 {pct:.0f}% 分位,历史正常区间\n"
+                  f"🔍 > 85 分位 = 历史极高;15-85 = 正常;< 15 = 历史极低"
+                  ) if pct is not None
+            else "📊 数据不足\n🔍 > 85 分位 = 历史极高;15-85 = 正常;< 15 = 历史极低"
         ),
-        strategy_impact="Crowding 主因子,>85 分位 → +2 分",
+        strategy_impact="📍 当前资金费率在过去 30 天的相对位置。> 85 分位通常意味着多头过度拥挤,常与短期顶部相关。",
         impact_direction=_impact_direction_from_value(pct, bear_above=85),
         impact_weight=0.8,
         linked_layer="L4", source="CoinGlass",
@@ -732,11 +802,15 @@ def _emit_derivatives_primary(
         value_unit="%",
         captured_at_bjt=ts_oi,
         plain_interpretation=(
-            f"OI 24h +{change_24h:.1f}%,杠杆快速累积" if change_24h is not None and change_24h > 15
-            else f"OI 24h {change_24h:.1f}%,正常" if change_24h is not None
-            else "数据不足(需至少 2 日 OI)"
+            (f"📊 OI 过去 24 小时增加 {change_24h:.1f}%,杠杆快速累积,反向挤压风险升高\n"
+             f"🔍 > +15% 24h = 杠杆快速累积(警告);±15% = 正常;< -15% = 大量平仓(可能去杠杆)"
+             ) if change_24h is not None and change_24h > 15
+            else (f"📊 OI 24h 变化 {change_24h:+.1f}%,杠杆水平稳定\n"
+                  f"🔍 > +15% = 快速累积;±15% = 正常;< -15% = 大量平仓"
+                  ) if change_24h is not None
+            else "📊 数据不足(需至少 2 日 OI 数据)\n🔍 > +15% = 快速累积;±15% = 正常;< -15% = 大量平仓"
         ),
-        strategy_impact="Crowding 主因子,>+15% → +1 分",
+        strategy_impact="📍 OI(未平仓合约)= 永续合约持仓总量。24 小时快速累积往往意味着杠杆扩张、拥挤度上升;快速下降则可能是去杠杆。",
         impact_direction=_impact_direction_from_value(change_24h, bear_above=15),
         impact_weight=0.7,
         linked_layer="L4", source="CoinGlass",
@@ -760,10 +834,15 @@ def _emit_derivatives_primary(
         current_value=round(val, 3) if val is not None else None,
         captured_at_bjt=ts,
         plain_interpretation=(
-            f"大户多头占比极高({val:.2f}),多头拥挤" if val is not None and val > 2.5
-            else f"大户多空比 {val:.2f}" if val is not None else "数据不足"
+            (f"📊 大户多空比 {val:.2f},多头占比极高,多头拥挤(反向挤压风险)\n"
+             f"🔍 > 2.5 = 多头过度拥挤;0.7 ~ 2.0 = 正常区间;< 0.5 = 空头过度拥挤"
+             ) if val is not None and val > 2.5
+            else (f"📊 大户多空比 {val:.2f},多空相对均衡\n"
+                  f"🔍 > 2.5 = 多头过度拥挤;0.7 ~ 2.0 = 正常区间;< 0.5 = 空头过度拥挤"
+                  ) if val is not None
+            else "📊 数据不足\n🔍 > 2.5 = 多头过度拥挤;0.7 ~ 2.0 = 正常;< 0.5 = 空头过度拥挤"
         ),
-        strategy_impact="Crowding 主因子,>2.5 → +1 分",
+        strategy_impact="📍 大户(高净值合约账户)中持有多头仓位 / 持有空头仓位的比值。极端值往往是反向信号,因为聪明钱的拥挤往往不持续。",
         impact_direction=_impact_direction_from_value(val, bear_above=2.5),
         impact_weight=0.6,
         linked_layer="L4", source="CoinGlass",
@@ -793,11 +872,15 @@ def _emit_price_tech_primary(
         current_value=round(adx, 2) if adx is not None else None,
         captured_at_bjt=ts,
         plain_interpretation=(
-            f"ADX={adx:.1f}≥25,存在明确趋势" if adx is not None and adx >= 25
-            else f"ADX={adx:.1f},震荡市" if adx is not None
-            else "数据不足(需 20+ 天)"
+            (f"📊 ADX={adx:.1f},≥25 存在明确趋势\n"
+             f"🔍 ≥ 25 = 有效趋势;20-25 = 趋势过渡区;< 20 = 无趋势(震荡市)"
+             ) if adx is not None and adx >= 25
+            else (f"📊 ADX={adx:.1f},趋势强度不足,处于震荡市\n"
+                  f"🔍 ≥ 25 = 有效趋势;20-25 = 过渡区;< 20 = 无趋势"
+                  ) if adx is not None
+            else "📊 数据不足(需至少 20 天 1D K 线)\n🔍 ≥ 25 = 有效趋势;20-25 = 过渡区;< 20 = 无趋势"
         ),
-        strategy_impact="TruthTrend 主因子,≥25 → +2 分",
+        strategy_impact="📍 ADX(平均方向指数)= 衡量趋势强度的经典指标(不分方向)。≥ 25 表示有明显趋势,< 20 表示无趋势(震荡市)。",
         impact_direction=_impact_direction_from_value(adx, bull_above=25),
         impact_weight=0.85,
         linked_layer="L1", source="Binance klines",
@@ -815,12 +898,18 @@ def _emit_price_tech_primary(
         value_unit="分位",
         captured_at_bjt=ts,
         plain_interpretation=(
-            f"波动率在历史 {atr_pct:.0f}% 分位,极端波动" if atr_pct is not None and atr_pct > 85
-            else f"波动率在历史 {atr_pct:.0f}% 分位,偏低" if atr_pct is not None and atr_pct < 20
-            else f"波动率 {atr_pct:.0f}% 分位,正常" if atr_pct is not None
-            else "数据不足(需 180 天)"
+            (f"📊 波动率在历史 {atr_pct:.0f}% 分位,极端波动(警告)\n"
+             f"🔍 < 30 分位 = 低波动;30-60 = 正常;60-85 = 偏高;≥ 85 = 极端波动"
+             ) if atr_pct is not None and atr_pct > 85
+            else (f"📊 波动率在历史 {atr_pct:.0f}% 分位,偏低,行情趋稳\n"
+                  f"🔍 < 30 = 低波动;30-60 = 正常;60-85 = 偏高;≥ 85 = 极端"
+                  ) if atr_pct is not None and atr_pct < 20
+            else (f"📊 波动率 {atr_pct:.0f}% 分位,正常区间\n"
+                  f"🔍 < 30 = 低波动;30-60 = 正常;60-85 = 偏高;≥ 85 = 极端"
+                  ) if atr_pct is not None
+            else "📊 数据不足(需 180 天)\n🔍 < 30 = 低波动;30-60 = 正常;60-85 = 偏高;≥ 85 = 极端"
         ),
-        strategy_impact="L1.volatility_regime 主因子,决定 stop_loss ATR 倍数",
+        strategy_impact="📍 ATR(平均真实波幅)在过去 180 天的相对位置。决定系统给止损价时使用的 ATR 倍数。极端波动会让止损放宽。",
         impact_direction="neutral",
         impact_weight=0.7,
         linked_layer="L1", source="Binance klines",
@@ -844,11 +933,13 @@ def _emit_price_tech_primary(
         current_value=alignment_value if alignment_value is not None else "n/a",
         captured_at_bjt=ts,
         plain_interpretation=(
-            "4H/1D/1W 方向一致,趋势强度高"
-            if alignment and alignment_value
-            else "数据不足或各周期方向分歧"
+            ("📊 4H、1D、1W 三个周期方向一致,趋势强度高\n"
+             "🔍 三周期一致 = 趋势确立(强信号);两周期一致 = 弱信号;三周期分歧 = 无趋势"
+             ) if alignment and alignment_value
+            else ("📊 数据不足或各周期方向分歧\n"
+                  "🔍 三周期一致 = 趋势确立;两周期一致 = 弱信号;三周期分歧 = 无趋势")
         ),
-        strategy_impact="TruthTrend 主因子,三周期一致 → +3 分",
+        strategy_impact="📍 4H、1D、1W 三个时间周期的趋势方向是否一致。三周期方向一致是真趋势的最重要信号之一。",
         impact_direction=alignment_direction,
         impact_weight=0.85,
         linked_layer="L1", source="Binance klines",
@@ -909,12 +1000,18 @@ def _emit_macro_primary(macro: dict[str, Any], today: str) -> list[dict[str, Any
         value_unit="%",
         captured_at_bjt=ts,
         plain_interpretation=(
-            f"美元 20 日 +{dxy_20d:.1f}%,对风险资产逆风" if dxy_20d is not None and dxy_20d > 2
-            else f"美元 20 日 {dxy_20d:.1f}%,对风险资产顺风" if dxy_20d is not None and dxy_20d < -2
-            else f"美元 20 日 {dxy_20d:.1f}%,中性" if dxy_20d is not None
-            else "数据不足(需 20 天 DXY)"
+            (f"📊 美元指数 20 日变化 +{dxy_20d:.1f}%,美元强势,对 BTC 等风险资产逆风\n"
+             f"🔍 > +2% = 美元强势(对风险资产逆风);±2% = 中性;< -2% = 美元弱势(对风险资产顺风)"
+             ) if dxy_20d is not None and dxy_20d > 2
+            else (f"📊 美元指数 20 日变化 {dxy_20d:.1f}%,美元弱势,对 BTC 等风险资产顺风\n"
+                  f"🔍 > +2% = 美元强势(逆风);±2% = 中性;< -2% = 美元弱势(顺风)"
+                  ) if dxy_20d is not None and dxy_20d < -2
+            else (f"📊 美元指数 20 日变化 {dxy_20d:+.1f}%,中性\n"
+                  f"🔍 > +2% = 美元强势(逆风);±2% = 中性;< -2% = 美元弱势(顺风)"
+                  ) if dxy_20d is not None
+            else "📊 数据不足(需 20 天 DXY)\n🔍 > +2% = 美元强势(逆风);±2% = 中性;< -2% = 美元弱势(顺风)"
         ),
-        strategy_impact="MacroHeadwind 主因子,>+2% → -2 分",
+        strategy_impact="📍 DXY(美元指数,衡量美元相对一篮子货币的强弱)的 20 日变化。美元强势通常压制风险资产(BTC、纳指、黄金)。",
         impact_direction=_impact_direction_from_value(dxy_20d, bear_above=2, bull_below=-2),
         impact_weight=0.8,
         linked_layer="L5", source="Yahoo Finance",
@@ -929,12 +1026,18 @@ def _emit_macro_primary(macro: dict[str, Any], today: str) -> list[dict[str, Any
         current_value=round(val, 2) if val is not None else None,
         captured_at_bjt=ts,
         plain_interpretation=(
-            f"VIX={val:.1f},极端恐慌,风险资产承压" if val is not None and val > 35
-            else f"VIX={val:.1f},elevated 风险意识" if val is not None and val > 25
-            else f"VIX={val:.1f},市场情绪平静" if val is not None
-            else "数据不足"
+            (f"📊 VIX={val:.1f},极端恐慌,风险资产承压\n"
+             f"🔍 < 15 = 平静;15-25 = 正常;25-35 = 偏高(警惕);> 35 = 极端恐慌(危机信号)"
+             ) if val is not None and val > 35
+            else (f"📊 VIX={val:.1f},风险意识偏高,市场谨慎\n"
+                  f"🔍 < 15 = 平静;15-25 = 正常;25-35 = 偏高;> 35 = 极端"
+                  ) if val is not None and val > 25
+            else (f"📊 VIX={val:.1f},市场情绪平静\n"
+                  f"🔍 < 15 = 平静;15-25 = 正常;25-35 = 偏高;> 35 = 极端"
+                  ) if val is not None
+            else "📊 数据不足\n🔍 < 15 = 平静;15-25 = 正常;25-35 = 偏高;> 35 = 极端"
         ),
-        strategy_impact="MacroHeadwind 主因子,>25 → -2 分;极端事件检测",
+        strategy_impact="📍 VIX(标普 500 期权波动率,俗称恐慌指数)。> 25 通常意味着市场避险情绪上升,风险资产承压;> 35 是危机级别。",
         impact_direction=_impact_direction_from_value(val, bear_above=25),
         impact_weight=0.85,
         linked_layer="L5", source="Yahoo Finance",
@@ -950,21 +1053,33 @@ def _emit_onchain_reference(onchain: dict[str, Any], today: str) -> list[dict[st
     cards: list[dict[str, Any]] = []
     _ref_specs = [
         ("mvrv", "onchain_mvrv", "MVRV 比率", "MVRV Ratio",
-         "市值 / 实现市值,<1 底部区间"),
+         "📍 市值 / 实现市值。衡量平均持币者整体盈亏。< 1 = 整体亏损(底部区间);> 3.7 = 历史顶部信号。",
+         "🔍 < 1 = 底部区间;1 ~ 2 = 牛市早期;2 ~ 3 = 牛市中段;> 3.7 = 顶部"),
         ("realized_price", "onchain_realized_price", "实现价格",
-         "Realized Price", "平均成本价"),
+         "Realized Price",
+         "📍 全市场所有 BTC 上一次链上转移时的平均价格,代表全市场的平均成本价。",
+         "🔍 价格跌破实现价格 = 整体亏损,常见于熊市底部"),
         ("lth_realized_price", "onchain_lth_realized_price", "LTH 实现价格",
-         "LTH Realized Price", "长期持有者成本价"),
+         "LTH Realized Price",
+         "📍 长期持有者(持有 ≥ 155 天)的平均成本价。",
+         "🔍 LTH 成本是关键支撑,跌破常意味着持币信仰动摇"),
         ("sth_realized_price", "onchain_sth_realized_price", "STH 实现价格",
-         "STH Realized Price", "短期持有者成本价"),
+         "STH Realized Price",
+         "📍 短期持有者(持有 < 155 天)的平均成本价。",
+         "🔍 牛市中跌破 STH 成本常是回调买点;熊市中跌破常是继续下跌信号"),
         ("sopr", "onchain_sopr", "SOPR", "SOPR",
-         ">1 整体盈利卖出,<1 亏损卖出"),
+         "📍 已花费产出利润比。> 1 = 整体盈利卖出;< 1 = 亏损卖出(常见底部信号)。",
+         "🔍 > 1.05 = 大量获利了结;1 = 平衡;< 0.95 = 投降式抛售(底部信号)"),
         ("sopr_adjusted", "onchain_asopr", "aSOPR",
-         "Adjusted SOPR", "排除 1h 内交易的 SOPR"),
+         "Adjusted SOPR",
+         "📍 调整后的 SOPR,排除 1 小时内的交易(去噪声)。比 SOPR 更稳定。",
+         "🔍 > 1 = 盈利卖出主导;= 1 = 关键支撑/阻力位;< 1 = 投降"),
         ("puell_multiple", "onchain_puell_multiple", "Puell Multiple",
-         "Puell Multiple", "矿工收入倍数,顶底信号"),
+         "Puell Multiple",
+         "📍 矿工日收入 / 365 日均收入。极高 = 矿工抛压高(顶部);极低 = 矿工惜售(底部)。",
+         "🔍 > 4 = 历史顶部区间;0.5 ~ 4 = 正常;< 0.5 = 历史底部区间"),
     ]
-    for key, card_slug, name_cn, name_en, desc in _ref_specs:
+    for key, card_slug, name_cn, name_en, impact_desc, threshold_desc in _ref_specs:
         series = onchain.get(key) if isinstance(onchain, dict) else None
         val, ts = _latest(series)
         pct = _percentile_180d(series, val)
@@ -976,11 +1091,12 @@ def _emit_onchain_reference(onchain: dict[str, Any], today: str) -> list[dict[st
             historical_percentile=pct,
             captured_at_bjt=ts,
             plain_interpretation=(
-                f"当前 {val:.3f},180 日分位 {pct:.0f}%" if val is not None and pct is not None
-                else f"{name_en}={val:.3f}" if val is not None
-                else "数据不足"
+                f"📊 当前 {val:.3f},过去 180 天 {pct:.0f}% 分位\n{threshold_desc}"
+                if val is not None and pct is not None
+                else f"📊 当前 {val:.3f}\n{threshold_desc}" if val is not None
+                else f"📊 数据不足\n{threshold_desc}"
             ),
-            strategy_impact=desc,
+            strategy_impact=impact_desc,
             impact_direction="neutral",
             impact_weight=0.4,
             linked_layer="L2", source="Glassnode",
@@ -1015,8 +1131,13 @@ def _emit_derivatives_reference(
         current_value=round(avg7 * 100, 4) if avg7 is not None else None,
         value_unit="%",
         captured_at_bjt=ts,
-        plain_interpretation=(f"7 日均 {avg7 * 100:.4f}%" if avg7 is not None else "数据不足"),
-        strategy_impact="衍生品趋势辅助",
+        plain_interpretation=(
+            f"📊 过去 7 天的平均资金费率 {avg7 * 100:.4f}%\n"
+            f"🔍 看 7 日均比看实时值更稳定:持续偏正 = 多头持续付溢价;持续偏负 = 空头持续付溢价"
+            if avg7 is not None
+            else "📊 数据不足\n🔍 7 日均反映短期情绪倾向是多还是空"
+        ),
+        strategy_impact="📍 资金费率的 7 天移动平均,过滤短期噪声,看出持续的情绪倾向。比单点值更能反映趋势性拥挤。",
         impact_direction="neutral", impact_weight=0.3,
         linked_layer="L4", source="CoinGlass",
     ))
@@ -1041,11 +1162,14 @@ def _emit_derivatives_reference(
         current_value=round(zscore, 2) if zscore is not None else None,
         captured_at_bjt=ts,
         plain_interpretation=(
-            f"Z={zscore:.2f},极端水平" if zscore is not None and abs(zscore) > 2
-            else f"Z={zscore:.2f}" if zscore is not None
-            else "数据不足(需 90 天)"
+            (f"📊 Z={zscore:.2f},极端水平,资金费率显著偏离过去 90 天均值\n"
+             f"🔍 |Z| > 2 = 极端;|Z| 1-2 = 偏高;|Z| < 1 = 正常"
+             ) if zscore is not None and abs(zscore) > 2
+            else (f"📊 Z={zscore:.2f},正常区间内\n🔍 |Z| > 2 = 极端;|Z| 1-2 = 偏高;|Z| < 1 = 正常"
+                  ) if zscore is not None
+            else "📊 数据不足(需 90 天)\n🔍 |Z| > 2 = 极端;|Z| 1-2 = 偏高;|Z| < 1 = 正常"
         ),
-        strategy_impact="资金费率极值警报",
+        strategy_impact="📍 当前资金费率相对过去 90 天分布的标准化偏离。极端 Z 值是反向交易的辅助信号。",
         impact_direction="neutral", impact_weight=0.3,
         linked_layer="L4", source="CoinGlass",
     ))
@@ -1059,8 +1183,13 @@ def _emit_derivatives_reference(
         name="未平仓合约 · 当前", name_en="Open Interest",
         current_value=round(val, 2) if val is not None else None,
         captured_at_bjt=ts,
-        plain_interpretation=(f"OI = {val:,.0f}" if val is not None else "数据不足"),
-        strategy_impact="配合 24h 变化率看杠杆累积速度",
+        plain_interpretation=(
+            f"📊 OI 当前规模 {val:,.0f}\n"
+            f"🔍 单看绝对值意义有限,主要看与历史水平的对比 + 变化速度"
+            if val is not None
+            else "📊 数据不足\n🔍 OI 绝对值需要配合变化率判断"
+        ),
+        strategy_impact="📍 OI(未平仓合约)= 永续合约市场上所有未平仓的多空合约总规模。配合 24h 变化率才能判断杠杆累积速度。",
         impact_direction="neutral", impact_weight=0.3,
         linked_layer="L4", source="CoinGlass",
     ))
@@ -1082,9 +1211,12 @@ def _emit_derivatives_reference(
         value_unit="USD",
         captured_at_bjt=ts,
         plain_interpretation=(
-            f"24h 清算 ${val:,.0f}" if val is not None else "数据不足"
+            f"📊 过去 24 小时全市场清算总额 ${val:,.0f}\n"
+            f"🔍 极端单日清算(数十亿美元)常伴随急涨急跌的反向行情结束"
+            if val is not None
+            else "📊 数据不足\n🔍 极端清算事件是去杠杆信号"
         ),
-        strategy_impact="清算密度指数因子,极端爆仓事件信号",
+        strategy_impact="📍 过去 24 小时被强制平仓的合约总额(美元)。极端值往往是市场情绪反转的信号(瀑布式清算后常出现反弹)。",
         impact_direction="neutral", impact_weight=0.4,
         linked_layer="L4", source="CoinGlass",
     ))
@@ -1108,10 +1240,12 @@ def _emit_derivatives_reference(
         value_unit="%",
         captured_at_bjt=ts,
         plain_interpretation=(
-            f"大户多空比 24h 变化 {lsr_24h_change:.1f}%" if lsr_24h_change is not None
-            else "数据不足"
+            f"📊 大户多空比 24h 变化 {lsr_24h_change:+.1f}%\n"
+            f"🔍 短时间剧烈变化常意味着大户立场转变,值得留意"
+            if lsr_24h_change is not None
+            else "📊 数据不足\n🔍 短时间剧烈变化常反映大户情绪转向"
         ),
-        strategy_impact="跟踪大户情绪变化速度",
+        strategy_impact="📍 大户多空比的 24 小时变化速度。跟踪大户情绪变化的快慢,配合绝对值看是趋势性还是噪声。",
         impact_direction="neutral", impact_weight=0.3,
         linked_layer="L4", source="CoinGlass",
     ))
@@ -1127,9 +1261,12 @@ def _emit_derivatives_reference(
         value_unit="%",
         captured_at_bjt=ts,
         plain_interpretation=(
-            f"全市场加权费率 {val*100:.4f}%" if val is not None else "数据不足(仅币安主因子可用)"
+            f"📊 全市场加权资金费率 {val*100:.4f}%\n"
+            f"🔍 看跨交易所平均比单家更有代表性"
+            if val is not None
+            else "📊 数据不足(只有币安数据可用)\n🔍 看跨交易所平均比单家更有代表性"
         ),
-        strategy_impact="跨交易所拥挤度参考",
+        strategy_impact="📍 多家交易所资金费率的加权平均,跨交易所拥挤度的参考指标。",
         impact_direction="neutral", impact_weight=0.3,
         linked_layer="L4", source="CoinGlass",
     ))
@@ -1154,7 +1291,9 @@ def _emit_price_tech_reference(klines_1d: Any, today: str) -> list[dict[str, Any
                 category="price_structure", tier="reference",
                 name=name_cn, name_en=name_en,
                 linked_layer="L1", source="Binance klines",
-                plain_interpretation="数据不足(需至少 20 天 K 线)",
+                plain_interpretation=("📊 数据不足(需至少 20 天 K 线)\n"
+                                      "🔍 价格在均线上方 = 支撑;在下方 = 阻力"),
+                strategy_impact=f"📍 {name_cn}(均线)。价格相对均线的位置反映该周期内的趋势倾向。",
             ))
         return cards
     closes = klines_1d["close"].astype(float)
@@ -1166,15 +1305,22 @@ def _emit_price_tech_reference(klines_1d: Any, today: str) -> list[dict[str, Any
             ma = float(closes.tail(period).mean())
             diff_pct = (current / ma - 1.0) * 100.0
             direction = "bullish" if diff_pct > 0 else "bearish"
-            interp = (
-                f"当前价格高于 {name_cn} {diff_pct:.1f}%" if diff_pct > 0
-                else f"当前价格低于 {name_cn} {-diff_pct:.1f}%"
-            )
+            if diff_pct > 0:
+                interp = (
+                    f"📊 当前价格高于 {name_cn} {diff_pct:.1f}%\n"
+                    f"🔍 价格在 {name_cn} 上方 = 该周期均线对价格构成支撑"
+                )
+            else:
+                interp = (
+                    f"📊 当前价格低于 {name_cn} {-diff_pct:.1f}%\n"
+                    f"🔍 价格在 {name_cn} 下方 = 该周期均线对价格构成阻力"
+                )
         else:
             ma = None
             diff_pct = None
             direction = "neutral"
-            interp = f"数据不足(需 {period} 天,当前仅 {len(closes)} 天)"
+            interp = (f"📊 数据不足(需 {period} 天,当前仅 {len(closes)} 天)\n"
+                      f"🔍 价格在均线上方 = 支撑;在下方 = 阻力")
         cards.append(_make_card(
             card_id=f"price_ma_{period}_{today}",
             category="price_structure", tier="reference",
@@ -1182,7 +1328,8 @@ def _emit_price_tech_reference(klines_1d: Any, today: str) -> list[dict[str, Any
             current_value=round(ma, 2) if ma is not None else None,
             captured_at_bjt=ts,
             plain_interpretation=interp,
-            strategy_impact="均线系统,组合判断趋势结构",
+            strategy_impact=(f"📍 {name_cn}(过去 {period} 个交易日的算术平均价)。"
+                             f"价格相对均线的位置反映该周期内的趋势倾向。"),
             impact_direction=direction, impact_weight=0.4,
             linked_layer="L1", source="Binance klines",
         ))
@@ -1207,9 +1354,12 @@ def _emit_macro_reference(macro: dict[str, Any], today: str) -> list[dict[str, A
         value_unit="%",
         captured_at_bjt=ts,
         plain_interpretation=(
-            f"10Y 30 日 {us10y_30d:+.2f}%" if us10y_30d is not None else "数据不足"
+            f"📊 美国 10 年期国债收益率 30 日变化 {us10y_30d:+.2f}%\n"
+            f"🔍 > +30bp(基点)= 利率快速上行(对风险资产逆风);±30bp = 正常;< -30bp = 快速下行(顺风)"
+            if us10y_30d is not None
+            else "📊 数据不足\n🔍 > +30bp = 利率上行(逆风);±30bp = 正常;< -30bp = 利率下行(顺风)"
         ),
-        strategy_impact="MacroHeadwind 因子,>+30bp → -2 分",
+        strategy_impact="📍 US10Y(美国 10 年期国债收益率)= 全球风险资产定价的无风险利率基准。快速上升通常压制风险资产估值。",
         impact_direction=_impact_direction_from_value(us10y_30d, bear_above=0.3),
         impact_weight=0.6,
         linked_layer="L5", source="Yahoo / FRED",
@@ -1226,9 +1376,12 @@ def _emit_macro_reference(macro: dict[str, Any], today: str) -> list[dict[str, A
         value_unit="%",
         captured_at_bjt=ts,
         plain_interpretation=(
-            f"纳指 20 日 {nasdaq_20d:+.2f}%" if nasdaq_20d is not None else "数据不足"
+            f"📊 纳指过去 20 日变化 {nasdaq_20d:+.2f}%\n"
+            f"🔍 > +5% = 风险偏好上升(对 BTC 顺风);±5% = 中性;< -5% = 风险情绪恶化(对 BTC 逆风)"
+            if nasdaq_20d is not None
+            else "📊 数据不足\n🔍 > +5% = 顺风;±5% = 中性;< -5% = 逆风"
         ),
-        strategy_impact="MacroHeadwind:<-5% 或 >+5% 各加 2 分",
+        strategy_impact="📍 美股纳指(科技股权重高)的 20 日表现。BTC 与纳指相关性较高,纳指强弱常领先反映风险偏好。",
         impact_direction=_impact_direction_from_value(nasdaq_20d, bear_below=-5, bull_above=5),
         impact_weight=0.6,
         linked_layer="L5", source="Yahoo Finance",
@@ -1241,8 +1394,9 @@ def _emit_macro_reference(macro: dict[str, Any], today: str) -> list[dict[str, A
         name="BTC-纳指 60 日相关性", name_en="BTC-Nasdaq 60d Correlation",
         current_value=None,
         captured_at_bjt=None,
-        plain_interpretation="由 MacroHeadwind composite 计算;>0.7 时宏观权重 × 1.5",
-        strategy_impact="MacroHeadwind 权重修正",
+        plain_interpretation=("📊 由宏观逆风指数计算;> 0.7 时系统会加大宏观信号权重\n"
+                              "🔍 BTC 与纳指相关性高 = 同涨同跌,宏观权重增加;相关性低 = 独立行情"),
+        strategy_impact="📍 BTC 与美股纳指过去 60 天的滚动相关系数。相关性高时,纳指变化对 BTC 影响放大。",
         impact_direction="neutral", impact_weight=0.4,
         linked_layer="L5", source="derived",
     ))
@@ -1252,8 +1406,9 @@ def _emit_macro_reference(macro: dict[str, Any], today: str) -> list[dict[str, A
         name="BTC-黄金 60 日相关性", name_en="BTC-Gold 60d Correlation",
         current_value=None,
         captured_at_bjt=None,
-        plain_interpretation="数字黄金叙事监测,Sprint 2.x 再接入",
-        strategy_impact="叙事监测",
+        plain_interpretation=("📊 数据采集尚未接入(后续 sprint 启用)\n"
+                              "🔍 BTC 与黄金正相关 = 数字黄金叙事强;负相关 = 风险资产属性强"),
+        strategy_impact="📍 BTC 与黄金过去 60 天的相关系数,用于跟踪BTC 的数字黄金叙事强度。",
         impact_direction="neutral", impact_weight=0.2,
         linked_layer="L5", source="derived",
     ))
@@ -1276,6 +1431,11 @@ def _emit_events_reference(events: list[Any], today: str) -> list[dict[str, Any]
         t = (ev.get("event_type") or "").lower()
         if t in target_types and t not in seen:
             seen[t] = ev
+    event_descriptions = {
+        "fomc": "📍 FOMC = 美联储议息会议,决定基准利率。是月度级别最重要的宏观事件之一,常引发风险资产剧烈波动。",
+        "cpi": "📍 CPI = 美国消费者物价指数,衡量通胀。CPI 数据会直接影响美联储加息预期和市场风险情绪。",
+        "nfp": "📍 NFP = 美国非农就业数据(每月第一个周五公布)。反映美国就业市场强弱,影响美联储政策预期。",
+    }
     for t in target_types:
         ev = seen.get(t)
         label = type_labels[t]
@@ -1289,10 +1449,13 @@ def _emit_events_reference(events: list[Any], today: str) -> list[dict[str, Any]
             captured_at_bjt=datetime.now(_BJT).strftime("%Y-%m-%d %H:%M (BJT)"),
             data_fresh=True,
             plain_interpretation=(
-                f"距离下次 {label} {hours_to:.0f} 小时" if hours_to is not None
-                else f"72 小时内无 {label}"
+                (f"📊 距离下次 {label} 还有 {hours_to:.0f} 小时\n"
+                 f"🔍 < 24h = 高风险窗口(系统降档);24-48h = 中等风险;48-72h = 低风险;> 72h = 无影响"
+                 ) if hours_to is not None
+                else (f"📊 未来 72 小时内无 {label}\n"
+                      f"🔍 < 24h = 高风险窗口;24-48h = 中等;48-72h = 低;> 72h = 无影响")
             ),
-            strategy_impact="EventRisk 因子,48h 内事件加分并降档",
+            strategy_impact=event_descriptions[t],
             impact_direction=("bearish" if hours_to is not None and hours_to < 48 else "neutral"),
             impact_weight=0.5,
             linked_layer="L4", source="Event calendar",

@@ -136,43 +136,43 @@ def plain_reading_l2(layer_2_output: dict[str, Any]) -> str:
         conf = None
     phase = layer_2_output.get("phase") or "n_a"
 
-    stance_label = {"bullish": "看多", "bearish": "看空", "neutral": "中性"}.get(
+    stance_label = {"bullish": "看多", "bearish": "看空", "neutral": "方向不明"}.get(
         stance, stance,
     )
     phase_label = {
-        "early":     "早期",
-        "mid":       "中期",
-        "late":      "晚期",
+        "early":     "趋势初段",
+        "mid":       "趋势中段",
+        "late":      "趋势末段",
         "exhausted": "衰竭期",
-        "n_a":       "无明确阶段",
+        "n_a":       "波段位置不明",
     }.get(phase, phase)
 
     if stance == "neutral":
         return (
-            f"方向判断中性,置信度 {_fmt_conf(conf)}。"
-            "多头和空头门槛均未达到,系统不给方向性建议,保持观望。"
+            f"方向不明,信心 {_fmt_conf(conf)}。"
+            "做多和做空门槛均未达到,系统不给方向性建议,保持观望。"
         )
 
     if conf is not None and conf < 0.55:
         return (
-            f"当前信号偏{stance_label},但置信度仅 {_fmt_conf(conf)},"
+            f"当前信号偏{stance_label},但信心仅 {_fmt_conf(conf)},"
             "低于开仓门槛。建议只观察,不下单。"
         )
 
     if stance == "bullish" and phase in ("early", "mid"):
         return (
-            f"看多,置信度 {_fmt_conf(conf)},当前波段{phase_label}。"
-            "位置相对合理,如 L3 给出 A/B 级机会,可以按计划分层入场。"
+            f"倾向看多,信心 {_fmt_conf(conf)},当前波段{phase_label}。"
+            "位置相对合理,如果机会层给出高/中等级机会,可以按计划分层入场。"
         )
     if stance == "bullish" and phase == "late":
         return (
-            f"看多,但波段已到晚期(置信度 {_fmt_conf(conf)})。"
+            f"倾向看多,但波段已到末段(信心 {_fmt_conf(conf)})。"
             "追涨风险大,更合理的策略是等待深回撤或干脆放弃这波。"
         )
     if stance == "bearish":
         return (
-            f"看空,置信度 {_fmt_conf(conf)},波段{phase_label}。"
-            "空头门槛比多头严,若 L3 同时给出 A/B 级空头机会,可以考虑顺势。"
+            f"倾向看空,信心 {_fmt_conf(conf)},波段{phase_label}。"
+            "做空门槛比做多严,若机会层同时给出高/中等级空头机会,可以考虑顺势。"
         )
     return f"方向:{stance_label}({_fmt_conf(conf)}),阶段:{phase_label}。"
 
@@ -196,34 +196,34 @@ def plain_reading_l3(layer_3_output: dict[str, Any]) -> str:
     anti = layer_3_output.get("anti_pattern_flags") or []
 
     perm_label = {
-        "can_open":      "可开仓",
-        "cautious_open": "可谨慎开仓",
-        "ambush_only":   "埋伏单",
-        "no_chase":      "不追",
-        "hold_only":     "仅持不新开",
-        "watch":         "只观察",
-        "protective":    "防御性减仓",
+        "can_open":      "可以开仓",
+        "cautious_open": "谨慎开仓",
+        "ambush_only":   "只允许埋伏单",
+        "no_chase":      "不追单",
+        "hold_only":     "仅持仓不开新",
+        "watch":         "仅观察,不开仓",
+        "protective":    "保护性减仓",
     }.get(perm, perm)
 
     if grade == "A":
         base = (
-            f"A 级机会,可开仓档 {perm_label}。"
-            "这是系统判定的最高档机会,trade_plan 按满仓配置给出。"
+            f"高等级机会(信心高),执行许可:{perm_label}。"
+            "这是系统判定的最高等级机会,交易计划按满仓配置给出。"
         )
     elif grade == "B":
         base = (
-            f"B 级机会(中等信心,{perm_label})。"
-            "门槛比 A 宽但仍然可行,trade_plan 按 70% 仓位给出。"
+            f"中等级机会(信心中),执行许可:{perm_label}。"
+            "门槛比高等级宽但仍然可行,交易计划按 70% 仓位给出。"
         )
     elif grade == "C":
         base = (
-            f"C 级机会(低信心参考,{perm_label})。"
-            "trade_plan 按 40% 仓位给出,不建议重仓;等条件升到 B 再加码。"
+            f"低等级参考机会(信心低),执行许可:{perm_label}。"
+            "交易计划按 40% 仓位给出,不建议重仓;等条件升到中等级再加码。"
         )
     elif grade == "none":
         base = (
-            "当前没有够格的交易机会。"
-            f"不是'不会涨',只是条件不满足任何 A/B/C 级门槛,{perm_label}。"
+            "当前没有符合条件的交易机会。"
+            f"不是'不会涨',只是条件不满足任何机会档位的门槛 — {perm_label}。"
         )
     else:
         base = f"机会评级:{grade},执行许可:{perm_label}。"
@@ -263,25 +263,25 @@ def plain_reading_l4(layer_4_output: dict[str, Any]) -> str:
 
     if overall == "critical":
         return (
-            f"{risk_label}。当前 position_cap 压到 {cap_pct},建议不开新仓。"
+            f"{risk_label}。建议仓位上限压到 {cap_pct},不开新仓。"
             "优先平仓或执行保护流程。"
         )
     if overall in ("high", "elevated"):
         base = (
-            f"{risk_label},position_cap 被压到 {cap_pct}。"
-            "开仓必须有明确失效位,且严格按 stop_loss 执行。"
+            f"{risk_label},建议仓位上限压到 {cap_pct}。"
+            "开仓必须有明确失效位,且严格按止损价执行。"
         )
     else:
         base = (
-            f"{risk_label}。position_cap 上限 {cap_pct},"
-            "在此范围内按 L3 机会等级分配仓位。"
+            f"{risk_label}。建议仓位上限 {cap_pct},"
+            "在此范围内按机会等级分配仓位。"
         )
 
     if his:
         lvl1 = [h for h in his if h.get("priority") == 1]
         if lvl1:
             p = lvl1[0].get("price")
-            base += f" 结构性失效位在 {p}(priority=1,4H 收盘确认)。"
+            base += f" 结构性失效位在 {p}(优先级 1,4H 收盘确认)。"
     return base
 
 
@@ -324,16 +324,16 @@ def plain_reading_l5(layer_5_output: dict[str, Any]) -> str:
     if stance == "risk_off":
         return (
             f"宏观环境{stance_label}。DXY / US10Y / VIX 里至少一项在警戒区间,"
-            f"position_cap 受逆风乘数影响。"
+            f"建议仓位上限受逆风系数压低。"
         )
     if stance == "risk_on":
         return (
             f"宏观环境{stance_label}。对 BTC 是顺风,"
-            "如果 L1-L3 也都偏多,可以适度放开仓位。"
+            "如果市场状态、方向判断、机会档也都偏多,可以适度放开仓位。"
         )
     if stance in ("risk_neutral", "neutral"):
         return (
-            f"宏观中性。对 BTC 不构成明显顺风或逆风,主要看 L1-L4 自身信号。"
+            f"宏观中性。对 BTC 不构成明显顺风或逆风,主要看市场内部信号。"
         )
     # Fallback
     if completeness is not None and float(completeness) < 50:

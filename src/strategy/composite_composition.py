@@ -93,7 +93,7 @@ def _truth_trend(tt: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
             "≥6 真趋势 / 4-5 弱 / ≤3 无"
         ),
         "value_interpretation": interp,
-        "affects_layer": "L1 regime 判定 + L2 stance_confidence 轻度修正",
+        "affects_layer": "影响市场状态判定 + 方向判断信心的轻度修正",
     }
 
 
@@ -157,7 +157,7 @@ def _band_position(bp: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
             "最高得分 phase 胜出"
         ),
         "value_interpretation": interp,
-        "affects_layer": "L2.phase → L3 规则表查档",
+        "affects_layer": "决定波段位置(初/中/末段),影响机会档查表",
     }
 
 
@@ -230,7 +230,7 @@ def _cycle_position(cp: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
             "三票一致 conf=0.85 / 两票一致 conf=0.60 / 分歧 → unclear"
         ),
         "value_interpretation": interp,
-        "affects_layer": "L2.动态门槛表(多头 / 空头门槛按周期档位调整)",
+        "affects_layer": "驱动动态门槛表(根据周期位置调整做多/做空门槛)",
     }
 
 
@@ -290,7 +290,7 @@ def _crowding(cr: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
             "≥6 极度(× 0.7)/ 4-5 偏拥挤(× 0.85)/ ≤3 正常"
         ),
         "value_interpretation": interp,
-        "affects_layer": "L4.position_cap × crowding_multiplier + active_risk_tags",
+        "affects_layer": "影响建议仓位上限的拥挤度修正系数 + 活跃风险标签",
     }
 
 
@@ -347,7 +347,7 @@ def _macro_headwind(mh: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
             "≤-5 强逆风 / -4~-2 轻度 / ≥-1 中性+顺风"
         ),
         "value_interpretation": interp,
-        "affects_layer": "L5.macro_headwind_score → position_cap 乘数 + permission 建议",
+        "affects_layer": "影响宏观逆风评分,进而调整建议仓位上限和执行许可",
     }
 
 
@@ -393,7 +393,7 @@ def _event_risk(er: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
             "vol extreme 每事件 +1;相关性高时美宏事件 +1"
         ),
         "value_interpretation": interp,
-        "affects_layer": "L4.event_risk_multiplier 和 permission 降档建议",
+        "affects_layer": "影响事件风险修正系数,以及执行许可的降档建议",
     }
 
 

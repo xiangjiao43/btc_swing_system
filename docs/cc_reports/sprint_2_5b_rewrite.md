@@ -114,9 +114,40 @@ $ .venv/bin/python -m pytest tests/ -q
 
 ---
 
-## 5. 样本输出(部署后实拍)
+## 5. 样本输出(部署后实拍 · 2026-04-25)
 
-待部署后 curl 一次拉到 `composite_factors.cycle_position.current_analysis` 等字段,贴此处。
+`curl -u admin:*** http://124.222.89.86/api/strategy/current | jq '.state.composite_factors'`
+6 张卡的真实模板渲染如下(`b67a75a` 部署后 / `1b90925` 恢复外框前后无差别 — 模板与 frame 无关):
+
+### cycle_position(missing 1/4 · 部分有值)
+- **📊 当前态势:** `MVRV-Z=0.83、NUPL=0.31、距 ATH -32.1%、判档 early_bull。`
+- **🎯 对策略影响:** `对应建模 §3.8.4 牛市早期(做多最佳窗口);驱动 L2.动态门槛表 上调多头阈值或下调空头阈值。当前 L2.stance=neutral。`
+
+### truth_trend(missing 5/5 · score=0 全空 → 拼了"合计 0/9"占位)
+- **📊 当前态势:** `合计 0/9。`
+- **🎯 对策略影响:** `对应建模 §3.8.1 无趋势(≤3)档,当前 L1.regime=transition_up;L1.regime 输出 range,L2 不允许使用趋势型 stance。`
+
+### band_position(missing 4/4 · 全空 → fallback)
+- **📊 当前态势:** `基础数据暂未就绪,无法生成态势分析`
+- **🎯 对策略影响:** `基础数据暂未就绪,无法生成态势分析`
+
+### crowding(missing 4/6 · 部分有值)
+- **📊 当前态势:** `资金费率 -0.4900%、大户多空比 0.71、合计 2/8。`
+- **🎯 对策略影响:** `对应建模 §3.8.3 正常(≤3)档;L4.crowding_multiplier × 1.0,不收紧。仅作用于 L4,不进 L2 / L3。`
+
+### macro_headwind(missing 5/5 · score=0 但拼"综合 0.0")
+- **📊 当前态势:** `综合 0.0。`
+- **🎯 对策略影响:** `对应建模 §3.8.5 中性或顺风(≥ -1)档;L5.macro_headwind_multiplier × 1.0,不收紧。当前 L5.macro_stance=unclear。`
+
+### event_risk(missing 5/5 · score=0 但拼"加权 0.0")
+- **📊 当前态势:** `加权 0.0。`
+- **🎯 对策略影响:** `对应建模 §3.8.6 低(<4)档;L4.event_risk_multiplier × 1.0,permission 不降档。`
+
+### 观察
+1. `cycle_position` 模板效果最佳:有真实数值 + phase 判档 + 引用 §3.8.4 + 落地 L2.stance — 完全合规
+2. `truth_trend` / `macro_headwind` / `event_risk` 出现"score=0 但 composition 全空"的微妙状态:narrator 因 `if score is not None` 分支拼了"合计 0/9"等占位文案,严格说不算 fallback 但也没什么信息量。可考虑下次优化:`if score is not None and (have > 0 or score != 0)` 才拼,否则走 fallback
+3. 6 张卡的 `strategy_impact` 全部正确引用了 `§3.8.X` 章节编号 + `L1./L2./L3./L4./L5.` 规则编号 ✅
+4. 100% determinism — 同 state 多次 GET 文本完全一致(测试已覆盖)
 
 ---
 

@@ -300,20 +300,10 @@
 | L1-L5 证据层结论 | `state.evidence_reports.layer_*` 的 raw 字段 | `inject_plain_readings()` 拼模板 | ❌ 否 |
 | L1-L5 三支柱 / 四角度 | `state.evidence_reports.layer_*.pillars` raw | `inject_pillars()` 拼模板 | ❌ 否 |
 | 6 个组合因子 composition / 规则 / 影响层 | `state.composite_factors[k]` raw | `inject_composite_composition()` 拼模板 | ❌ 否 |
-| 综合 trade_plan / 主叙事 narrative | adjudicator 输出的结构化字段 | adjudicator 输出的 narrative 文本 | ✅ 是(综合裁决环节) |
-| 6 个组合因子的"当前态势 / 对策略影响"双段(2.5-B 引入) | adjudicator 输出 composite_factors[] | 同字段直接渲染 | ⚠ 是 — **此例外需要在 v1.3 重新评估是否合规** |
+| 6 个组合因子的"当前态势 / 对策略影响"双段 | `state.composite_factors[k]` raw | 规则化模板(2.5-B 已确定走此路线) | ❌ 否 |
+| 综合 trade_plan / 主叙事 narrative | adjudicator 输出的结构化字段 | adjudicator 输出的 narrative 文本 | ✅ 是(唯一允许的"综合裁决"环节) |
 
-### v1.3 待办(Sprint 2.5-meta 备注)
-
-Sprint 2.5-B 引入的"6 张组合因子的双段 AI 分析"严格说违反硬约束 #5。
-当前临时保留是因为:
-  - 用户明确提出该需求并希望保留 AI 文风;
-  - 有 5 条硬约束(数字必出、规则编号必引、stance/regime 必落地)兜住失真风险;
-  - 软约束失败只记 notes 不阻断,有事后审计能力。
-
-下次复盘需重新评估:
-  (A) 改为规则化生成(查 composition + 阈值表 → 拼模板),与本原则严格对齐;或
-  (B) 在原则中追加"AI 生成的人读版必须满足 X/Y/Z 条审计性约束"的例外条款。
+> Sprint 2.5-B 已确定走规则化模板路线,不构成原则例外。
 
 ---
 

@@ -112,16 +112,16 @@ def _pillars_l1(l1: dict[str, Any]) -> dict[str, Any]:
 def _l1_downstream_hint(l1: dict[str, Any]) -> str:
     regime = l1.get("regime") or l1.get("regime_primary")
     if regime == "trend_up":
-        return "trend_up 下 L2 可给 stance=bullish 高置信度;L3 若 phase 合适可直接 A/B"
+        return "上升趋势已确立,系统会判定倾向看多;如果波段位置合适,可能直接给出高/中等级机会"
     if regime == "trend_down":
-        return "trend_down 下 L2 可给 stance=bearish;空头仍走 §4.4.5 的 A/B 高门槛"
+        return "下跌趋势已确立,系统会判定倾向看空;但做空门槛比做多更高,需要更明确的证据"
     if regime in ("range_high", "range_mid", "range_low"):
-        return "震荡区间下 L2 倾向 neutral,L3 默认 none,不追趋势"
+        return "市场处于震荡区间,系统倾向方向不明,默认不给机会档,不追趋势"
     if regime in ("transition_up", "transition_down"):
-        return "过渡期 L3 最多给 C 档;结构未确认前不可重仓"
+        return "趋势在转向但还没站稳,系统最多给低等级参考机会;结构未确认前不可重仓"
     if regime == "chaos":
-        return "chaos 强制降级 watch / 冻结开仓"
-    return "regime 未就绪,L2 将按动态门槛 unclear 处理(多头 0.65 / 空头 0.70)"
+        return "市场失序,系统强制只观察、冻结开仓"
+    return "市场状态尚未就绪,系统会按保守阈值处理(做多信心 65%,做空信心 70%)"
 
 
 # ============================================================
@@ -218,21 +218,71 @@ def _l2_downstream_hint(l2: dict[str, Any], cp: Optional[str]) -> str:
     }
     long_t, short_t = thresholds.get(cp or "", (0.65, 0.70))
     if stance == "neutral":
-        return f"stance=neutral,L3 直接判 none(未达多头 {long_t:.2f} 或空头 {short_t:.2f})"
+        return (f"方向不明,系统目前不给机会档"
+                f"(做多信心要超过 {long_t*100:.0f}%,做空要超过 {short_t*100:.0f}%)")
     if stance == "bullish" and conf is not None:
-        return (f"stance=bullish(confidence {conf:.2f} vs 多头门槛 {long_t:.2f})→ "
-                + ("达标,L3 可进入 A/B/C 查档" if conf >= long_t
-                   else "不达标,L3 判 none"))
+        return (f"倾向看多,信心 {conf*100:.0f}% vs 多头门槛 {long_t*100:.0f}% → "
+                + ("达标,系统会进入机会档评估" if conf >= long_t
+                   else "未达标,系统不给机会档"))
     if stance == "bearish" and conf is not None:
-        return (f"stance=bearish(confidence {conf:.2f} vs 空头门槛 {short_t:.2f})→ "
-                + ("达标,L3 可进入 A/B 查档(空头无 C)" if conf >= short_t
-                   else "不达标,L3 判 none"))
-    return "L3 将按规则表映射 grade"
+        return (f"倾向看空,信心 {conf*100:.0f}% vs 空头门槛 {short_t*100:.0f}% → "
+                + ("达标,系统会进入机会档评估(做空无低等级参考档)" if conf >= short_t
+                   else "未达标,系统不给机会档"))
+    return "系统会按规则表映射出机会档位"
 
 
 # ============================================================
 # Layer 3(纯规则层,不是三支柱)
 # ============================================================
+
+_REGIME_HUMAN: dict[str, str] = {
+    "trend_up": "上升趋势确立",
+    "trend_down": "下跌趋势确立",
+    "transition_up": "趋势在转向多头但还没站稳",
+    "transition_down": "趋势在转向空头但还没站稳",
+    "range_high": "高位震荡",
+    "range_mid": "中位震荡",
+    "range_low": "低位震荡",
+    "chaos": "市场失序",
+    "unclear_insufficient": "数据不足",
+}
+
+_STANCE_HUMAN: dict[str, str] = {
+    "bullish": "倾向看多",
+    "bearish": "倾向看空",
+    "neutral": "方向不明",
+}
+
+_PHASE_HUMAN: dict[str, str] = {
+    "early": "趋势初段",
+    "mid": "趋势中段",
+    "late": "趋势末段",
+    "exhausted": "衰竭期",
+    "unclear": "波段位置不明",
+    "n_a": "波段位置不明",
+}
+
+_PERM_HUMAN: dict[str, str] = {
+    "can_open": "可以开仓",
+    "cautious_open": "谨慎开仓",
+    "ambush_only": "只允许埋伏单",
+    "no_chase": "不追单",
+    "hold_only": "仅持仓不开新",
+    "watch": "仅观察,不开仓",
+    "protective": "保护性减仓",
+}
+
+_GRADE_HUMAN: dict[str, str] = {
+    "A": "高等级机会(信心高)",
+    "B": "中等级机会(信心中)",
+    "C": "低等级参考机会(信心低)",
+    "none": "暂无符合条件的机会",
+}
+
+
+def _humanize(d: dict[str, str], v: Any) -> str:
+    return d.get(v or "", str(v) if v else "—")
+
 
 def _pillars_l3(l3: dict[str, Any], l1: dict[str, Any], l2: dict[str, Any]) -> dict[str, Any]:
     grade = l3.get("opportunity_grade") or l3.get("grade") or "none"
@@ -242,38 +292,45 @@ def _pillars_l3(l3: dict[str, Any], l1: dict[str, Any], l2: dict[str, Any]) -> d
     conf = _as_float(l2.get("stance_confidence"))
     phase = l2.get("phase")
 
+    regime_h = _humanize(_REGIME_HUMAN, regime)
+    stance_h = _humanize(_STANCE_HUMAN, stance)
+    phase_h = _humanize(_PHASE_HUMAN, phase)
+    perm_h = _humanize(_PERM_HUMAN, perm)
+    grade_h = _humanize(_GRADE_HUMAN, grade)
+    conf_str = f"{conf*100:.0f}%" if conf is not None else "—"
+
     # 反推为什么是这档 + 升档条件
     if grade == "A":
-        matched = (f"regime={regime} / stance={stance} (conf {conf:.2f}) / "
-                   f"phase={phase} / 位置合适 → A 档")
-        upgrade_conditions = ["A 已经是最高档,维持证据直到开仓"]
+        matched = (f"市场处于{regime_h},{stance_h}(信心 {conf_str}),"
+                   f"波段处于{phase_h},位置合适 — 满足高等级机会的全部条件")
+        upgrade_conditions = ["已经是最高等级,维持现有证据直到开仓即可"]
     elif grade == "B":
-        matched = (f"regime={regime} / stance={stance} (conf {conf:.2f}) / "
-                   f"phase={phase} → B 档(位置或阶段条件未满足 A)")
-        upgrade_conditions = ["phase 进入 early/mid", "位置进入 near_support / mid_range"]
+        matched = (f"市场处于{regime_h},{stance_h}(信心 {conf_str}),"
+                   f"波段处于{phase_h} — 满足中等级机会(位置或阶段未达高等级)")
+        upgrade_conditions = ["波段进入趋势初段或中段", "价格回到关键支撑附近或区间中段"]
     elif grade == "C":
-        matched = (f"规则表匹配 C:{stance} + phase=late + 位置 near_resistance")
+        matched = (f"{stance_h} + 波段处于趋势末段 + 价格靠近阻力位 — 仅给低等级参考机会")
         upgrade_conditions = [
-            "phase 由 late 回到 early/mid(需回撤)",
-            "位置从 near_resistance 走到 mid_range",
-            "stance_confidence 提升 0.1 以上",
+            "波段从末段回到初段或中段(需要一次回撤)",
+            "价格从阻力位附近回到区间中段",
+            "做多/做空信心提升 10 个百分点以上",
         ]
     else:  # none
         reasons = []
         if stance == "neutral":
-            reasons.append("stance=neutral 不满足任何档")
+            reasons.append("方向不明,不满足任何机会档位的条件")
         elif conf is not None:
-            reasons.append(f"stance_confidence={conf:.2f} 未达对应门槛")
+            reasons.append(f"做多/做空信心 {conf_str} 未达对应门槛")
         if regime in ("chaos", "transition_up", "transition_down"):
-            reasons.append(f"regime={regime},过渡/混乱期 A/B 门槛不开")
+            reasons.append(f"市场处于{regime_h},过渡或混乱期不开高/中等级机会")
         if not reasons:
-            reasons.append("无任一 A/B/C 规则匹配")
-        matched = "; ".join(reasons)
+            reasons.append("没有任何机会档位的规则被命中")
+        matched = ";".join(reasons)
         upgrade_conditions = [
-            "stance_confidence ≥ 多头门槛 0.55(牛市早期)或空头门槛 0.75",
-            "regime 稳定(非 chaos / transition_*)",
-            "phase 出现 early/mid",
-            "CyclePosition 明确(非 unclear)",
+            "做多信心达到 55% 以上(牛市早期门槛),或做空信心达到 75%",
+            "市场状态稳定(不再是失序或过渡期)",
+            "波段进入趋势初段或中段",
+            "长周期位置明确(不再是周期不明朗)",
         ]
 
     return {
@@ -287,9 +344,9 @@ def _pillars_l3(l3: dict[str, Any], l1: dict[str, Any], l2: dict[str, Any]) -> d
             "anti_pattern_flags": l3.get("anti_pattern_flags") or [],
         },
         "downstream_hint": (
-            f"grade={grade} / permission={perm} → AI 裁决在此档内决策"
+            f"机会等级:{grade_h};执行许可:{perm_h} — 系统会在此档位内做综合决策"
             if grade != "none"
-            else "grade=none → AI 强制 watch,不给交易计划"
+            else "暂无符合条件的机会,系统强制观望,不下交易计划。证据真不够,这是按规则执行的纪律,不是判断保守。"
         ),
     }
 
@@ -322,14 +379,14 @@ def _pillars_l4(
     crowding_score = crowding.get("score")
     if crowding_score is not None:
         if crowding_score >= 6:
-            cw_interp = f"Crowding={crowding_score}/8,极度拥挤(→ cap × 0.7)"
+            cw_interp = f"拥挤度 {crowding_score}/8 极度拥挤,建议仓位上限收紧到 70%"
         elif crowding_score >= 4:
-            cw_interp = f"Crowding={crowding_score}/8,偏拥挤(→ cap × 0.85)"
+            cw_interp = f"拥挤度 {crowding_score}/8 偏拥挤,仓位上限轻度下调(× 85%)"
         else:
-            cw_interp = f"Crowding={crowding_score}/8,正常"
+            cw_interp = f"拥挤度 {crowding_score}/8 正常,不收紧仓位"
         cw_status = "ok"
     else:
-        cw_interp = "Crowding 未就绪"
+        cw_interp = "拥挤度数据未就绪"
         cw_status = "missing"
 
     # 角度三:事件窗口
@@ -338,15 +395,15 @@ def _pillars_l4(
     er_events = event_risk.get("contributing_events") or []
     if er_score is not None:
         if er_score >= 8:
-            er_interp = (f"EventRisk={er_score:.0f},≥8 permission 强制 ambush_only"
+            er_interp = (f"风险事件密度 {er_score:.0f} 偏高,系统只允许埋伏单,不主动开仓"
                          + (f"(最近事件 {er_events[0].get('name', '?')})" if er_events else ""))
         elif er_score >= 4:
-            er_interp = f"EventRisk={er_score:.0f},中等(cap × 0.85)"
+            er_interp = f"风险事件密度 {er_score:.0f} 中等,仓位上限轻度下调(× 85%)"
         else:
-            er_interp = f"EventRisk={er_score:.0f},72h 低风险"
+            er_interp = f"风险事件密度 {er_score:.0f},未来 72 小时风险低"
         er_status = "ok"
     else:
-        er_interp = "EventRisk 未就绪(事件日历需手动维护)"
+        er_interp = "事件风险数据未就绪(事件日历需手动维护)"
         er_status = "missing"
 
     # position_cap 合成过程
@@ -367,7 +424,7 @@ def _pillars_l4(
         "position_cap_chain": cap_comp,
         "permission_chain": perm_comp,
         "downstream_hint": (
-            "AI 裁决的 trade_plan.stop_loss 必须从 hard_invalidation_levels 选"
+            "系统的止损价必须从这里给出的结构性失效位中选,不能另设"
         ),
     }
 
@@ -418,7 +475,7 @@ def _pillars_l5(l5: dict[str, Any]) -> dict[str, Any]:
 
     completeness_warning = None
     if completeness is not None and completeness < 50:
-        completeness_warning = f"宏观数据完整度 {completeness:.0f}% < 50%,影响力降级"
+        completeness_warning = f"宏观数据完整度 {completeness:.0f}% < 50%,系统降低宏观信号权重"
 
     return {
         "core_question": "宏观对当前 BTC 是加分还是减分?有没有极端事件?",
@@ -437,7 +494,7 @@ def _pillars_l5(l5: dict[str, Any]) -> dict[str, Any]:
         "data_completeness_pct": completeness,
         "completeness_warning": completeness_warning,
         "downstream_hint": (
-            "macro_stance 只作修正项,不主导方向;extreme=true 才能硬接管"
+            "宏观环境只作为仓位修正,不直接决定方向;只有检测到极端宏观事件时才会强制保护"
         ),
     }
 

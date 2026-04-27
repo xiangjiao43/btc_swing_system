@@ -1508,17 +1508,34 @@ def _emit_macro_reference(
         linked_layer="L5", source="Yahoo Finance",
     ))
 
-    # 简化相关性(从 l5 或 macro_headwind composite 里读)
+    # Sprint 2.6-M B1:BTC-纳指 60 日相关性(原本 hardcoded None,与下面黄金卡同算法)
+    nasdaq_series = macro.get("nasdaq") if isinstance(macro, dict) else None
+    btc_nasdaq_corr = _compute_corr_60d(klines_1d, nasdaq_series)
+    if btc_nasdaq_corr is not None:
+        nas_interp = (
+            f"📊 BTC 与纳指 60 日相关系数 = {btc_nasdaq_corr:+.2f}\n"
+            f"🔍 > 0.7 = 高度相关(系统加大宏观权重);±0.4 内 = 弱相关 / 独立行情;"
+            f"< -0.4 = 反向(罕见,信号强)"
+        )
+        nas_dir = (
+            "neutral" if -0.4 <= btc_nasdaq_corr <= 0.4
+            else ("bullish" if btc_nasdaq_corr > 0.4 else "bearish")
+        )
+    else:
+        nas_interp = (
+            "📊 数据不足(需 BTC 与纳指各 60+ 天)\n"
+            "🔍 > 0.7 = 高度相关(系统加大宏观权重);独立行情 = 减权重"
+        )
+        nas_dir = "neutral"
     cards.append(_make_card(
         card_id=f"macro_btc_nasdaq_corr_60d_{today}",
         category="macro", tier="reference",
         name="BTC-纳指 60 日相关性", name_en="BTC-Nasdaq 60d Correlation",
-        current_value=None,
+        current_value=round(btc_nasdaq_corr, 3) if btc_nasdaq_corr is not None else None,
         captured_at_bjt=None,
-        plain_interpretation=("📊 由宏观逆风指数计算;> 0.7 时系统会加大宏观信号权重\n"
-                              "🔍 BTC 与纳指相关性高 = 同涨同跌,宏观权重增加;相关性低 = 独立行情"),
+        plain_interpretation=nas_interp,
         strategy_impact="📍 BTC 与美股纳指过去 60 天的滚动相关系数。相关性高时,纳指变化对 BTC 影响放大。",
-        impact_direction="neutral", impact_weight=0.4,
+        impact_direction=nas_dir, impact_weight=0.4,
         linked_layer="L5", source="derived",
     ))
     # Sprint 2.6-F:BTC-黄金 60 日相关性(FRED gold_price → 现在能算了)

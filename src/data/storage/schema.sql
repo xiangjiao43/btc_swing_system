@@ -241,6 +241,18 @@ CREATE INDEX IF NOT EXISTS idx_events_type ON events_calendar(event_type);
 
 
 -- ============================================================
+-- Sprint 2.6-G:数据抓取时间记录(配 migrations/004_add_data_fetch_log.sql)
+-- 解决卡片显示 K 线 bar 时间被误解为"系统未刷新"
+-- ============================================================
+CREATE TABLE IF NOT EXISTS data_fetch_log (
+    source             TEXT PRIMARY KEY,
+    last_fetched_utc   TEXT NOT NULL,
+    rows_upserted      INTEGER,
+    notes              TEXT
+);
+
+
+-- ============================================================
 -- 完成
 -- ============================================================
 -- Python 层在 connection.py 启用 PRAGMA foreign_keys=ON。

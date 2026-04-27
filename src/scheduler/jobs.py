@@ -155,12 +155,18 @@ def job_data_collection(
         # ---- FRED(无 key 时优雅 skip)----
         try:
             from ..data.collectors.fred import FredCollector
+            from ..data.storage.dao import DataFetchLogDAO
             fc = FredCollector()
             if fc.enabled:
                 fred_stats = fc.collect_and_save_all(conn, since_days=since_days)
                 by_collector["fred"] = sum(
                     v for k, v in fred_stats.items()
                     if isinstance(v, int) and not k.startswith("__")
+                )
+                # Sprint 2.6-G:记 fetch 时间(供前端"刚抓取"显示)
+                DataFetchLogDAO.record_fetch(
+                    conn, source="macro",
+                    rows_upserted=by_collector["fred"],
                 )
                 conn.commit()
             else:
@@ -175,7 +181,8 @@ def job_data_collection(
         try:
             from ..data.collectors.coinglass import CoinglassCollector
             from ..data.storage.dao import (
-                BTCKlinesDAO, DerivativeMetric, DerivativesDAO, KlineRow,
+                BTCKlinesDAO, DataFetchLogDAO, DerivativeMetric,
+                DerivativesDAO, KlineRow,
             )
             cg = CoinglassCollector()
             cg_count = 0
@@ -220,6 +227,13 @@ def job_data_collection(
                 except Exception as inner:
                     logger.warning("coinglass %s failed: %s", fn_name, inner)
             by_collector["coinglass"] = cg_count
+            # Sprint 2.6-G:CoinGlass 同时管 K 线 + 衍生品两条线
+            DataFetchLogDAO.record_fetch(
+                conn, source="klines", rows_upserted=cg_count,
+            )
+            DataFetchLogDAO.record_fetch(
+                conn, source="derivatives", rows_upserted=cg_count,
+            )
             conn.commit()
         except Exception as e:
             logger.exception("data_collection.coinglass failed: %s", e)
@@ -229,7 +243,9 @@ def job_data_collection(
         # ---- Glassnode(增量,9 个指标)----
         try:
             from ..data.collectors.glassnode import GlassnodeCollector
-            from ..data.storage.dao import OnchainDAO, OnchainMetric
+            from ..data.storage.dao import (
+                DataFetchLogDAO, OnchainDAO, OnchainMetric,
+            )
             gn = GlassnodeCollector()
             gn_count = 0
             for fn_name in (
@@ -256,6 +272,9 @@ def job_data_collection(
                 except Exception as inner:
                     logger.warning("glassnode.%s failed: %s", fn_name, inner)
             by_collector["glassnode"] = gn_count
+            DataFetchLogDAO.record_fetch(
+                conn, source="onchain", rows_upserted=gn_count,
+            )
             conn.commit()
         except Exception as e:
             logger.exception("data_collection.glassnode failed: %s", e)

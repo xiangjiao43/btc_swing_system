@@ -634,12 +634,20 @@ class StrategyStateBuilder:
         events = EventsCalendarDAO.get_upcoming_within_hours(
             conn, hours=self.events_window_hours, now_utc=now_utc)
 
+        # Sprint 2.6-G:每个数据源的最后 fetch 时间(供前端"刚刚抓取"显示)
+        try:
+            from ..data.storage.dao import DataFetchLogDAO
+            data_freshness = DataFetchLogDAO.get_all(conn)
+        except Exception:
+            data_freshness = {}
+
         return {
             "reference_timestamp_utc": now_utc or _utc_now_iso(),
             "klines_1h": klines_1h, "klines_4h": klines_4h,
             "klines_1d": klines_1d, "klines_1w": klines_1w,
             "derivatives": derivatives, "onchain": onchain, "macro": macro,
             "events_upcoming_48h": events,
+            "data_freshness": data_freshness,
         }
 
     # ------------------------------------------------------------------

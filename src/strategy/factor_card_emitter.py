@@ -156,6 +156,7 @@ def _make_card(
     value_unit: str = "",
     historical_percentile: Optional[float] = None,
     captured_at_bjt: Optional[str] = None,
+    fetched_at_bjt: Optional[str] = None,
     data_fresh: Optional[bool] = None,
     plain_interpretation: str = "",
     strategy_impact: str = "",
@@ -188,6 +189,10 @@ def _make_card(
         "value_unit": value_unit,
         "historical_percentile": historical_percentile,
         "captured_at_bjt": captured_at_bjt,
+        # Sprint 2.6-G:fetched_at_bjt = 系统最后一次 fetch 该数据源的时间。
+        # 与 captured_at_bjt(K线 bar 时间 / 数据点时间)区别开,前端可显示
+        # "数据时间 X / 抓取于 Y 分钟前",避免误判系统未刷新。
+        "fetched_at_bjt": fetched_at_bjt,
         "data_fresh": data_fresh,
         "plain_interpretation": plain_interpretation,
         "strategy_impact": strategy_impact,
@@ -305,7 +310,60 @@ def emit_factor_cards(
     # ========== 事件日历(reference)==========
     cards.extend(_emit_events_reference(events, today))
 
+    # Sprint 2.6-G:统一回填 fetched_at_bjt(按 group → data_freshness source)
+    _stamp_fetched_at(cards, context.get("data_freshness") or {})
+
     return cards
+
+
+_GROUP_TO_FRESHNESS_SOURCE: dict[str, str] = {
+    "onchain": "onchain",
+    "derivatives": "derivatives",
+    "price_technical": "klines",
+    "macro": "macro",
+    # "events" / "composite" 没有单一对应 source,按 min(all) 处理
+}
+
+
+def _stamp_fetched_at(
+    cards: list[dict[str, Any]],
+    data_freshness: dict[str, str],
+) -> None:
+    """把每张卡按 group 归属的数据源 last_fetched_utc 转 BJT 写到 fetched_at_bjt。
+
+    若该 group 没数据(空 dict),fetched_at_bjt 保持为 None,前端可降级。
+    """
+    if not data_freshness:
+        return
+    for c in cards:
+        if c.get("fetched_at_bjt") is not None:
+            continue  # 已显式设过的不动
+        group = c.get("group") or ""
+        source = _GROUP_TO_FRESHNESS_SOURCE.get(group)
+        if source is None:
+            # composite / events:取所有源里最旧那个(最保守的"刚刚")
+            ts_list = [v for v in data_freshness.values() if v]
+            if not ts_list:
+                continue
+            ts_utc = min(ts_list)
+        else:
+            ts_utc = data_freshness.get(source)
+            if not ts_utc:
+                continue
+        c["fetched_at_bjt"] = _utc_iso_to_bjt_pretty(ts_utc)
+
+
+def _utc_iso_to_bjt_pretty(utc_iso: str) -> Optional[str]:
+    try:
+        from datetime import timezone, timedelta
+        s = utc_iso.replace("Z", "+00:00")
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        bjt = dt.astimezone(timezone(timedelta(hours=8)))
+        return bjt.strftime("%Y-%m-%d %H:%M (BJT)")
+    except Exception:
+        return None
 
 
 # ============================================================

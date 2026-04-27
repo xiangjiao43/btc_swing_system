@@ -714,6 +714,42 @@ class EventsCalendarDAO:
 
 
 # ============================================================
+# Sprint 2.6-G:数据抓取时间记录
+# ============================================================
+
+class DataFetchLogDAO:
+    """data_fetch_log 表 DAO(每个数据源最后一次成功 fetch 的 UTC 时间)。"""
+
+    @staticmethod
+    def record_fetch(
+        conn: sqlite3.Connection,
+        source: str,
+        rows_upserted: Optional[int] = None,
+        notes: Optional[str] = None,
+        now_utc: Optional[str] = None,
+    ) -> None:
+        ts = now_utc or _utc_now_iso()
+        conn.execute(
+            "INSERT INTO data_fetch_log "
+            "(source, last_fetched_utc, rows_upserted, notes) "
+            "VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(source) DO UPDATE SET "
+            "  last_fetched_utc = excluded.last_fetched_utc, "
+            "  rows_upserted = excluded.rows_upserted, "
+            "  notes = excluded.notes",
+            (source, ts, rows_upserted, notes),
+        )
+
+    @staticmethod
+    def get_all(conn: sqlite3.Connection) -> dict[str, str]:
+        """Returns {source: last_fetched_utc}。空表返回 {}。"""
+        rows = conn.execute(
+            "SELECT source, last_fetched_utc FROM data_fetch_log"
+        ).fetchall()
+        return {r["source"]: r["last_fetched_utc"] for r in rows}
+
+
+# ============================================================
 # StrategyState 历史归档
 # ============================================================
 

@@ -27,12 +27,12 @@ jobs:
     description: 'Pipeline 主循环,每 4 小时执行一次 StrategyStateBuilder.run()'
 
   data_collection:
-    enabled: false
+    enabled: true                  # Sprint 2.6-A:实施完成,每小时增量采集
     interval: '1h'
     misfire_grace_time: 300
     coalesce: true
     max_instances: 1
-    description: '数据采集(Binance / Glassnode / CoinGlass / macro / events);骨架默认关闭'
+    description: '数据采集:Yahoo / FRED / CoinGlass / Glassnode 增量采集(since_days=7)'
 
   cleanup:
     enabled: false

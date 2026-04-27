@@ -120,10 +120,188 @@ def job_pipeline_run(
                 pass
 
 
-def job_data_collection() -> dict[str, Any]:
-    """骨架。真实实现在 Sprint 2+,这里只打日志。"""
-    logger.info("job_data_collection: skeleton (no-op)")
-    return {"status": "skipped", "reason": "skeleton_only"}
+def job_data_collection(
+    *,
+    conn_factory: Optional[Callable[[], Any]] = None,
+    since_days: int = 7,
+) -> dict[str, Any]:
+    """Sprint 2.6-A:数据采集主任务,每小时调一次 4 个 collector 把最新数据写入 DB。
+
+    优雅失败语义:
+    - 单个 collector 抛异常 → 记日志 + by_collector[name]=0 + 继续其他
+    - 全部失败 → 也不抛(scheduler 不能 crash),但 status='all_failed'
+    - FRED key 未配置时 fred 优雅 skip,不算失败
+
+    Returns:
+      {status, total_upserted, by_collector: {yahoo, fred, coinglass, glassnode},
+       errors: {collector_name: msg}, duration_ms, since_days}
+    """
+    import time
+
+    from ..data.storage.connection import get_connection
+
+    cf = conn_factory or get_connection
+    start_ts = time.time()
+    by_collector: dict[str, int] = {}
+    errors: dict[str, str] = {}
+    conn = None
+
+    try:
+        conn = cf()
+
+        # ---- Yahoo Finance ----
+        try:
+            from ..data.collectors.yahoo_finance import YahooFinanceCollector
+            yf_stats = YahooFinanceCollector().collect_and_save_all(
+                conn, since_days=since_days,
+            )
+            by_collector["yahoo"] = sum(
+                v for v in yf_stats.values() if isinstance(v, int)
+            )
+            conn.commit()
+        except Exception as e:
+            logger.exception("data_collection.yahoo failed: %s", e)
+            by_collector["yahoo"] = 0
+            errors["yahoo"] = str(e)[:200]
+
+        # ---- FRED(无 key 时优雅 skip)----
+        try:
+            from ..data.collectors.fred import FredCollector
+            fc = FredCollector()
+            if fc.enabled:
+                fred_stats = fc.collect_and_save_all(conn, since_days=since_days)
+                by_collector["fred"] = sum(
+                    v for k, v in fred_stats.items()
+                    if isinstance(v, int) and not k.startswith("__")
+                )
+                conn.commit()
+            else:
+                by_collector["fred"] = 0
+                logger.info("data_collection.fred skipped (no API key)")
+        except Exception as e:
+            logger.exception("data_collection.fred failed: %s", e)
+            by_collector["fred"] = 0
+            errors["fred"] = str(e)[:200]
+
+        # ---- CoinGlass(增量,只更新最新)----
+        try:
+            from ..data.collectors.coinglass import CoinglassCollector
+            from ..data.storage.dao import (
+                BTCKlinesDAO, DerivativeMetric, DerivativesDAO, KlineRow,
+            )
+            cg = CoinglassCollector()
+            cg_count = 0
+            for tf in ("1h", "4h", "1d"):
+                try:
+                    rows = cg.fetch_klines(interval=tf, limit=24)
+                    if rows:
+                        klines = [
+                            KlineRow(
+                                timeframe=tf, timestamp=r["timestamp"],
+                                open=r["open"], high=r["high"],
+                                low=r["low"], close=r["close"],
+                                volume_btc=r.get("volume", 0.0) or 0.0,
+                            )
+                            for r in rows
+                        ]
+                        cg_count += BTCKlinesDAO.upsert_klines(conn, klines)
+                except Exception as inner:
+                    logger.warning("coinglass klines.%s failed: %s", tf, inner)
+            for fn_name in (
+                "fetch_funding_rate_history", "fetch_long_short_ratio_history",
+            ):
+                try:
+                    fn = getattr(cg, fn_name, None)
+                    if fn is None:
+                        continue
+                    rows = fn(interval="1d", limit=7)
+                    if rows:
+                        metrics = [
+                            DerivativeMetric(
+                                timestamp=r["timestamp"],
+                                metric_name=r.get("metric_name"),
+                                metric_value=r.get("metric_value"),
+                            )
+                            for r in rows
+                        ]
+                        cg_count += DerivativesDAO.upsert_batch(conn, metrics)
+                except Exception as inner:
+                    logger.warning("coinglass %s failed: %s", fn_name, inner)
+            by_collector["coinglass"] = cg_count
+            conn.commit()
+        except Exception as e:
+            logger.exception("data_collection.coinglass failed: %s", e)
+            by_collector["coinglass"] = 0
+            errors["coinglass"] = str(e)[:200]
+
+        # ---- Glassnode(增量,9 个指标)----
+        try:
+            from ..data.collectors.glassnode import GlassnodeCollector
+            from ..data.storage.dao import OnchainDAO, OnchainMetric
+            gn = GlassnodeCollector()
+            gn_count = 0
+            for fn_name in (
+                "fetch_mvrv_z_score", "fetch_nupl", "fetch_lth_supply",
+                "fetch_exchange_net_flow", "fetch_mvrv", "fetch_realized_price",
+                "fetch_sopr", "fetch_reserve_risk", "fetch_puell_multiple",
+            ):
+                try:
+                    fn = getattr(gn, fn_name, None)
+                    if fn is None:
+                        continue
+                    rows = fn(since_days=since_days)
+                    if rows:
+                        metrics = [
+                            OnchainMetric(
+                                timestamp=r["timestamp"],
+                                metric_name=r.get("metric_name"),
+                                metric_value=r.get("metric_value"),
+                                source=r.get("source", "glassnode_primary"),
+                            )
+                            for r in rows
+                        ]
+                        gn_count += OnchainDAO.upsert_batch(conn, metrics)
+                except Exception as inner:
+                    logger.warning("glassnode.%s failed: %s", fn_name, inner)
+            by_collector["glassnode"] = gn_count
+            conn.commit()
+        except Exception as e:
+            logger.exception("data_collection.glassnode failed: %s", e)
+            by_collector["glassnode"] = 0
+            errors["glassnode"] = str(e)[:200]
+
+        total = sum(by_collector.values())
+        any_success = any(v > 0 for v in by_collector.values())
+        status = "ok" if any_success else "all_failed"
+
+        logger.info(
+            "data_collection done: status=%s total=%d by=%s errors=%s",
+            status, total, by_collector, list(errors.keys()),
+        )
+
+        return {
+            "status": status,
+            "total_upserted": total,
+            "by_collector": by_collector,
+            "errors": errors,
+            "duration_ms": int((time.time() - start_ts) * 1000),
+            "since_days": since_days,
+        }
+    except Exception as e:
+        logger.exception("data_collection top-level failed: %s", e)
+        return {
+            "status": "fatal_error",
+            "error_type": type(e).__name__,
+            "error_message": str(e)[:300],
+            "by_collector": by_collector,
+            "duration_ms": int((time.time() - start_ts) * 1000),
+        }
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
 def job_cleanup() -> dict[str, Any]:

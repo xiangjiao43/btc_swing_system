@@ -212,95 +212,51 @@ def backfill_onchain(conn, *, days: int, dry_run: bool) -> None:
 # ============================================================
 
 def backfill_macro(conn, *, days: int, dry_run: bool) -> None:
+    """Sprint 2.6-A:用 collector 自带的 collect_and_save_all,不再 hasattr 探测。
+
+    Yahoo:`YahooFinanceCollector.collect_and_save_all(conn, since_days)` 内部已
+    处理 symbol 列表 + DAO upsert。
+    FRED:`FredCollector.collect_and_save_all(conn, since_days)` 同上;无 key 时
+    `enabled=False`,优雅 skip。
+    """
+    # ---- Yahoo Finance ----
     try:
         from src.data.collectors.yahoo_finance import YahooFinanceCollector
-        yf = YahooFinanceCollector()
-    except Exception as e:
-        logger.error("[macro.yahoo] cannot init collector: %s", e)
-        yf = None
-
-    try:
-        from src.data.collectors.fred import FREDCollector
-        fred = FREDCollector()
-    except Exception as e:
-        logger.error("[macro.fred] cannot init collector: %s", e)
-        fred = None
-
-    period = f"{max(1, days)}d"
-    yahoo_series: dict[str, Callable[[], list[dict[str, Any]]]] = {}
-    if yf is not None:
-        # YahooFinanceCollector API 通常是 fetch_series(symbol, period, interval)
-        # 不同实现函数名不同,这里只用 hasattr 判断逐个尝试
-        for sym, metric in (
-            ("DX-Y.NYB", "dxy"),
-            ("^GSPC", "sp500"),
-            ("^IXIC", "nasdaq"),
-            ("^VIX", "vix"),
-            ("^TNX", "us10y"),
-        ):
-            if hasattr(yf, "fetch_series"):
-                yahoo_series[metric] = lambda s=sym, m=metric: yf.fetch_series(
-                    symbol=s, period=period, interval="1d",
-                )
-            elif hasattr(yf, "fetch"):
-                yahoo_series[metric] = lambda s=sym: yf.fetch(
-                    symbol=s, period=period,
-                )
-    for name, fn in yahoo_series.items():
+        yf_coll = YahooFinanceCollector()
         start = time.time()
-        rows = _safe(fn, f"macro.{name}") or []
-        if not rows:
-            _log_stage(f"macro.{name}", 0, 0, _elapsed_ms(start))
-            continue
-        metrics = [
-            MacroMetric(
-                timestamp=r["timestamp"],
-                metric_name=r.get("metric_name", name),
-                metric_value=r.get("metric_value"),
-                source="yahoo_finance",
-            )
-            for r in rows
-        ]
         if dry_run:
-            _log_stage(f"macro.{name}", len(rows), 0, _elapsed_ms(start))
-            continue
-        upserted = MacroDAO.upsert_batch(conn, metrics)
-        conn.commit()
-        _log_stage(f"macro.{name}", len(rows), upserted, _elapsed_ms(start))
+            logger.info("[macro.yahoo] dry_run skip")
+        else:
+            stats = yf_coll.collect_and_save_all(conn, since_days=days)
+            total = sum(v for v in stats.values() if isinstance(v, int))
+            _log_stage("macro.yahoo", total, total, _elapsed_ms(start))
+            for metric, n in stats.items():
+                logger.info("  macro.yahoo.%s upserted=%d", metric, n)
+    except Exception as e:
+        logger.error("[macro.yahoo] failed: %s", e)
 
-    # FRED: 基础几个
-    if fred is not None:
-        fred_series = {}
-        if hasattr(fred, "fetch_series"):
-            for fid, metric in (
-                ("DFF", "fed_funds_rate"),
-                ("DGS10", "us10y_fred"),
-                ("VIXCLS", "vix_fred"),
-            ):
-                fred_series[metric] = lambda i=fid, m=metric: fred.fetch_series(
-                    series_id=i, limit=days,
-                )
-        for name, fn in fred_series.items():
-            start = time.time()
-            rows = _safe(fn, f"macro.fred.{name}") or []
-            if not rows:
-                _log_stage(f"macro.fred.{name}", 0, 0, _elapsed_ms(start))
-                continue
-            metrics = [
-                MacroMetric(
-                    timestamp=r["timestamp"],
-                    metric_name=r.get("metric_name", name),
-                    metric_value=r.get("metric_value"),
-                    source="fred",
-                )
-                for r in rows
-            ]
-            if dry_run:
-                _log_stage(f"macro.fred.{name}", len(rows), 0, _elapsed_ms(start))
-                continue
-            upserted = MacroDAO.upsert_batch(conn, metrics)
-            conn.commit()
-            _log_stage(f"macro.fred.{name}", len(rows), upserted, _elapsed_ms(start))
+    # ---- FRED(无 key 优雅 skip) ----
+    try:
+        from src.data.collectors.fred import FredCollector
+        fred_coll = FredCollector()
+        if not fred_coll.enabled:
+            logger.info("[macro.fred] FRED_API_KEY not set, skip")
+            return
+        start = time.time()
+        if dry_run:
+            logger.info("[macro.fred] dry_run skip")
+        else:
+            stats = fred_coll.collect_and_save_all(conn, since_days=days)
+            total = sum(
+                v for k, v in stats.items()
+                if isinstance(v, int) and not k.startswith("__")
+            )
+            _log_stage("macro.fred", total, total, _elapsed_ms(start))
+            for metric, n in stats.items():
+                if not metric.startswith("__"):
+                    logger.info("  macro.fred.%s upserted=%d", metric, n)
+    except Exception as e:
+        logger.error("[macro.fred] failed: %s", e)
 
 
 # ============================================================

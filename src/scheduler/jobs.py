@@ -203,8 +203,11 @@ def job_data_collection(
                 except Exception as inner:
                     logger.warning("coinglass klines.%s failed: %s", tf, inner)
             # Sprint 2.6-B:补 OI + liquidation,之前漏调导致这两组列长期 NULL
+            # Sprint 2.6-F.3:补 funding_rate_aggregated(2.6-F 只动了
+            # collect_and_save_all,jobs.py 自己的列表漏了,生产端从未拉到)
             for fn_name in (
                 "fetch_funding_rate_history",
+                "fetch_funding_rate_aggregated",
                 "fetch_open_interest_history",
                 "fetch_long_short_ratio_history",
                 "fetch_liquidation_history",

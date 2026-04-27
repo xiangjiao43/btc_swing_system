@@ -227,3 +227,13 @@ cd5666b fix(api): move events seed hook to FastAPI startup (was scheduler/main.p
 GOLDPMGBD228NLBM 已 discontinued,且 Yahoo IP banned / Stooq apikey wall /
 LBMA paid-only,目前无可行免费日级数据源。卡保持"数字黄金叙事监测,Sprint 2.x
 再接入",待找到可靠数据源后单独 sprint 处理。
+
+**Sprint 2.6-F.3 遗留:LTH/STH realized price 不接入。**
+2026-04-27 实测 alphanode 中转 11 个 endpoint 候选(`/v1/metrics/supply/lth_realized_price`
+等)全部 HTTP 404 + middleware "did you mean..." 提示。Glassnode **不开放独立的
+LTH/STH realized price endpoint**;最接近的是
+`/v1/metrics/breakdowns/price_realized_usd_by_age`(Tier 2 / Advanced,付费),
+返回的是按持币年龄的 cohort 分布,需要客户端自行按 hodl_waves(>= 6 个月 = LTH)
+加权聚合。本 sprint 已按 §X 把死路径 + fetch 方法 + 测试一起删除。
+若未来有 Advanced API key,可单独 sprint 接入 breakdowns endpoint + cohort 聚合逻辑。
+当前 onchain 主裁决只少这 2 个 metric,不影响 L1/L2/L3/L4/L5 主路径。

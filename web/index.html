@@ -659,23 +659,19 @@
                                   + (c.value_unit ? (' ' + c.value_unit) : '')"></span>
                     <span class="inline-block w-1.5 h-1.5 rounded-full shrink-0"
                           :class="freshnessColor(c.data_fresh ? 'green' : 'red')"
-                          :title="freshnessDotTitle(c)"></span>
+                          :title="fetchedAtPrimary(c) || '无时间戳'"></span>
                   </header>
                   <p class="text-[10.5px] text-slate-600 dark:text-slate-400 leading-snug truncate"
                      :title="c.plain_interpretation"
                      x-text="c.plain_interpretation"></p>
-                  <!-- Sprint 2.6-H:fetched_at_bjt 与 captured_at_bjt 不同时显示双行
-                       (数据时间 = K 线 bar / 数据点时刻;抓取于 = 系统最近 fetch 时刻) -->
-                  <div class="flex items-start justify-between text-[10px] leading-tight">
+                  <!-- Sprint 2.6-H.1:单行显示 fetched_at_bjt(K 线 bar 时间对用户没用,
+                       误导为"数据停留")。fetched 缺失时降级到 captured。 -->
+                  <div class="flex items-center justify-between text-[10px] leading-tight">
                     <span :class="directionClass(c.impact_direction)"
                           x-text="'影响:' + directionLabel(c.impact_direction)
                                   + ' · ' + c.linked_layer"></span>
-                    <div class="font-mono tabular-nums text-slate-500 ml-2 text-right shrink-0">
-                      <div class="truncate" x-text="c.captured_at_bjt || '—'"></div>
-                      <div x-show="fetchedAtDisplay(c)"
-                           class="text-[9px] text-slate-400 truncate"
-                           x-text="fetchedAtDisplay(c)"></div>
-                    </div>
+                    <span class="font-mono tabular-nums text-slate-500 truncate ml-2"
+                          x-text="fetchedAtPrimary(c) || '—'"></span>
                   </div>
                 </article>
               </template>

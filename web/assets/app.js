@@ -730,10 +730,9 @@ function app() {
             return { bullish: '偏多', bearish: '偏空', neutral: '中性' }[d] || d || '中性';
         },
 
-        // ---- Sprint 2.6-H:fetched_at_bjt 与 captured_at_bjt 双行显示 ----
-        // captured_at_bjt = K 线 bar 时间 / 数据点采集时刻
-        // fetched_at_bjt  = 系统最后一次成功 fetch 该数据源的 BJT 时间
-        // 两者不同 = 用户能看到"刚抓取"而非误以为系统 12 小时未刷新
+        // ---- Sprint 2.6-H.1:单行 fetched_at_bjt 显示 ----
+        // 用户只关心"什么时候抓的 + 多新",K 线 bar 时间对其没用且误导。
+        // fetched 缺失时降级到 captured(老兜底)。
         _parseBjt(s) {
             // "2026-04-27 14:00 (BJT)" → Date(UTC = BJT - 8h)
             if (!s || typeof s !== 'string') return null;
@@ -755,21 +754,15 @@ function app() {
             const days = Math.floor(hours / 24);
             return days + ' 天前';
         },
-        fetchedAtDisplay(c) {
-            // 返回第二行文案,或 null(单行)
-            // null 触发条件:fetched_at_bjt 缺失 / 与 captured_at_bjt 完全相同
-            if (!c || !c.fetched_at_bjt) return null;
-            if (c.fetched_at_bjt === c.captured_at_bjt) return null;
-            const m = c.fetched_at_bjt.match(/(\d{2}:\d{2})\s*\(BJT\)/);
-            const hhmm = m ? m[1] : c.fetched_at_bjt;
+        fetchedAtPrimary(c) {
+            // fetched_at_bjt 存在 → "抓取于 YYYY-MM-DD HH:MM(N 分钟前)"
+            // 否则 → 原样返回 captured_at_bjt(降级)
+            if (!c) return null;
+            if (!c.fetched_at_bjt) return c.captured_at_bjt || null;
+            // 去掉 " (BJT)" 后缀(用户已知是 BJT,简化文案)
+            const stamp = c.fetched_at_bjt.replace(/\s*\(BJT\)\s*$/, '');
             const ago = this._agoLabel(c.fetched_at_bjt);
-            return ago ? '抓取于 ' + hhmm + '(' + ago + ')' : '抓取于 ' + hhmm;
-        },
-        freshnessDotTitle(c) {
-            if (!c) return '无时间戳';
-            const cap = c.captured_at_bjt || '无时间戳';
-            const second = this.fetchedAtDisplay(c);
-            return second ? cap + '\n' + second : cap;
+            return ago ? '抓取于 ' + stamp + '(' + ago + ')' : '抓取于 ' + stamp;
         },
 
         tradePlanTierLabel(t) {

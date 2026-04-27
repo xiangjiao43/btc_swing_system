@@ -730,6 +730,48 @@ function app() {
             return { bullish: '偏多', bearish: '偏空', neutral: '中性' }[d] || d || '中性';
         },
 
+        // ---- Sprint 2.6-H:fetched_at_bjt 与 captured_at_bjt 双行显示 ----
+        // captured_at_bjt = K 线 bar 时间 / 数据点采集时刻
+        // fetched_at_bjt  = 系统最后一次成功 fetch 该数据源的 BJT 时间
+        // 两者不同 = 用户能看到"刚抓取"而非误以为系统 12 小时未刷新
+        _parseBjt(s) {
+            // "2026-04-27 14:00 (BJT)" → Date(UTC = BJT - 8h)
+            if (!s || typeof s !== 'string') return null;
+            const m = s.match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})/);
+            if (!m) return null;
+            const [, y, mo, d, h, mi] = m;
+            return new Date(Date.UTC(+y, +mo - 1, +d, +h - 8, +mi));
+        },
+        _agoLabel(s) {
+            const dt = this._parseBjt(s);
+            if (!dt) return null;
+            const diffMs = Date.now() - dt.getTime();
+            if (diffMs < 0) return null;       // 未来时刻,异常
+            const mins = Math.floor(diffMs / 60000);
+            if (mins < 1) return '刚刚';
+            if (mins < 60) return mins + ' 分钟前';
+            const hours = Math.floor(mins / 60);
+            if (hours < 24) return hours + ' 小时前';
+            const days = Math.floor(hours / 24);
+            return days + ' 天前';
+        },
+        fetchedAtDisplay(c) {
+            // 返回第二行文案,或 null(单行)
+            // null 触发条件:fetched_at_bjt 缺失 / 与 captured_at_bjt 完全相同
+            if (!c || !c.fetched_at_bjt) return null;
+            if (c.fetched_at_bjt === c.captured_at_bjt) return null;
+            const m = c.fetched_at_bjt.match(/(\d{2}:\d{2})\s*\(BJT\)/);
+            const hhmm = m ? m[1] : c.fetched_at_bjt;
+            const ago = this._agoLabel(c.fetched_at_bjt);
+            return ago ? '抓取于 ' + hhmm + '(' + ago + ')' : '抓取于 ' + hhmm;
+        },
+        freshnessDotTitle(c) {
+            if (!c) return '无时间戳';
+            const cap = c.captured_at_bjt || '无时间戳';
+            const second = this.fetchedAtDisplay(c);
+            return second ? cap + '\n' + second : cap;
+        },
+
         tradePlanTierLabel(t) {
             return { high: 'A · 高信心', medium: 'B · 中信心', low: 'C · 低信心参考' }[t] || t;
         },

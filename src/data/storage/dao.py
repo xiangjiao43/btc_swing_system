@@ -421,6 +421,12 @@ class DerivativesDAO:
             else:
                 b.setdefault("_extras", {})[name] = val
 
+        # Sprint 2.6-F.4:full_data_json 必须 MERGE 而非 COALESCE。
+        # 此前用 COALESCE(excluded.full_data_json, existing.full_data_json),
+        # 当多个批次都写 extras(例如 batch A 写 funding_rate_aggregated,
+        # batch B 写 long_short_ratio_top alias)→ 后者会**覆盖**前者,
+        # 表现为生产端 derivatives_snapshots 看不到 funding_rate_aggregated。
+        # 用 json_patch(existing, new) 实现键级合并。NULL 用 '{}' 兜底。
         sql = """
             INSERT INTO derivatives_snapshots
                 (captured_at_utc, funding_rate, open_interest,
@@ -435,7 +441,10 @@ class DerivativesDAO:
                 liquidation_long = COALESCE(excluded.liquidation_long, derivatives_snapshots.liquidation_long),
                 liquidation_short = COALESCE(excluded.liquidation_short, derivatives_snapshots.liquidation_short),
                 liquidation_total = COALESCE(excluded.liquidation_total, derivatives_snapshots.liquidation_total),
-                full_data_json = COALESCE(excluded.full_data_json, derivatives_snapshots.full_data_json)
+                full_data_json = json_patch(
+                    COALESCE(derivatives_snapshots.full_data_json, '{}'),
+                    COALESCE(excluded.full_data_json, '{}')
+                )
         """
         values = []
         for ts, b in buckets.items():

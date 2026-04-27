@@ -310,50 +310,137 @@ def emit_factor_cards(
     # ========== 事件日历(reference)==========
     cards.extend(_emit_events_reference(events, today))
 
-    # Sprint 2.6-G:统一回填 fetched_at_bjt(按 group → data_freshness source)
-    _stamp_fetched_at(cards, context.get("data_freshness") or {})
+    # Sprint 2.6-J:per-metric inserted_at_utc 回填 fetched_at_bjt(秒级精度)
+    _stamp_fetched_at(cards, context.get("metric_inserted_at") or {}, today)
 
     return cards
 
 
-_GROUP_TO_FRESHNESS_SOURCE: dict[str, str] = {
-    "onchain": "onchain",
-    "derivatives": "derivatives",
-    "price_technical": "klines",
-    "macro": "macro",
-    # "events" / "composite" 没有单一对应 source,按 min(all) 处理
-}
-
-
 def _stamp_fetched_at(
     cards: list[dict[str, Any]],
-    data_freshness: dict[str, str],
+    metric_inserted_at: dict[str, Any],
+    today: str,
 ) -> None:
-    """把每张卡按 group 归属的数据源 last_fetched_utc 转 BJT 写到 fetched_at_bjt。
+    """Sprint 2.6-J:按卡的 category + card_id 反查每张卡真实写入时间。
 
-    若该 group 没数据(空 dict),fetched_at_bjt 保持为 None,前端可降级。
+    metric_inserted_at 结构:
+      {
+        "onchain":      {metric_name: iso_or_None},
+        "macro":        {metric_name: iso_or_None},
+        "klines_by_tf": {timeframe:   iso_or_None},
+        "derivatives_snapshot": iso_or_None,
+      }
+
+    每张卡按 category 路由:
+      onchain primary/reference  → 解析 card_id 反查 onchain map
+      macro primary/reference    → 同上 macro map
+      derivatives primary/ref    → snapshot 级单值(wide 表固有限制)
+      price_structure(K线衍生) → klines_by_tf['1d'](默认)
+      composite_*                → max(所有 metric 的 inserted_at)
+      events                    → 不盖(events 不是 metric 卡)
+
+    任何 inserted_at 为 None(legacy 数据)→ fetched_at_bjt 保留 None,
+    前端会降级到 captured_at_bjt 显示。
     """
-    if not data_freshness:
-        return
+    onchain_map = metric_inserted_at.get("onchain") or {}
+    macro_map = metric_inserted_at.get("macro") or {}
+    klines_by_tf = metric_inserted_at.get("klines_by_tf") or {}
+    derivatives_snapshot = metric_inserted_at.get("derivatives_snapshot")
+
+    # composite 卡用 max(所有 metric 的 inserted_at)— 保守的"上次系统刷新"语义
+    all_inserted = [
+        ts for ts in (
+            *(onchain_map.values() or []),
+            *(macro_map.values() or []),
+            *(klines_by_tf.values() or []),
+            derivatives_snapshot,
+        ) if ts
+    ]
+    composite_max = max(all_inserted) if all_inserted else None
+
     for c in cards:
         if c.get("fetched_at_bjt") is not None:
             continue  # 已显式设过的不动
-        group = c.get("group") or ""
-        source = _GROUP_TO_FRESHNESS_SOURCE.get(group)
-        if source is None:
-            # composite / events:取所有源里最旧那个(最保守的"刚刚")
-            ts_list = [v for v in data_freshness.values() if v]
-            if not ts_list:
-                continue
-            ts_utc = min(ts_list)
-        else:
-            ts_utc = data_freshness.get(source)
-            if not ts_utc:
-                continue
-        c["fetched_at_bjt"] = _utc_iso_to_bjt_pretty(ts_utc)
+        category = c.get("category") or ""
+        ts_utc: Optional[str] = None
+
+        if category == "onchain":
+            metric_name = _parse_metric_name_from_card_id(
+                c.get("card_id", ""), prefix="onchain_", today=today,
+                lookup=onchain_map,
+            )
+            if metric_name is not None:
+                ts_utc = onchain_map.get(metric_name)
+            # 解析失败 → 退回 onchain 整组的 max(避免 None,但精度损失)
+            if ts_utc is None:
+                vs = [v for v in onchain_map.values() if v]
+                ts_utc = max(vs) if vs else None
+
+        elif category == "macro":
+            metric_name = _parse_metric_name_from_card_id(
+                c.get("card_id", ""), prefix="macro_", today=today,
+                lookup=macro_map,
+            )
+            if metric_name is not None:
+                ts_utc = macro_map.get(metric_name)
+            if ts_utc is None:
+                vs = [v for v in macro_map.values() if v]
+                ts_utc = max(vs) if vs else None
+
+        elif category == "derivatives":
+            ts_utc = derivatives_snapshot
+
+        elif category == "price_structure":
+            ts_utc = klines_by_tf.get("1d") or klines_by_tf.get("4h") or \
+                     klines_by_tf.get("1h")
+
+        elif category in (
+            "composite", "ai", "state_machine", "kpi", "lifecycle",
+        ):
+            ts_utc = composite_max
+
+        # events / 未识别 → 保持 None
+        if ts_utc:
+            c["fetched_at_bjt"] = _utc_iso_to_bjt_pretty(ts_utc)
+
+
+_DERIVED_SUFFIXES: tuple[str, ...] = (
+    # 已知按规则衍生的卡名后缀,strip 后才能匹配到原 metric_name
+    "_30d_change", "_20d_change", "_60d_change", "_90d_change",
+    "_24h_change", "_180d_percentile", "_60d_corr", "_corr_60d",
+    "_aggregated", "_drawdown_from_ath", "_percentile_180d",
+    "_14_1d", "_14", "_1d", "_4h", "_1h", "_60", "_200",
+)
+
+
+def _parse_metric_name_from_card_id(
+    card_id: str, *, prefix: str, today: str,
+    lookup: dict[str, Any],
+) -> Optional[str]:
+    """从 card_id 反推 DB 里的 metric_name。
+
+    card_id 形如 'onchain_mvrv_z_score_20260427' →
+    strip prefix 'onchain_' + 后缀 '_<today>' → 'mvrv_z_score',直接命中 lookup。
+    若命中失败,尝试 strip 已知衍生后缀(如 '_30d_change')再 lookup。
+    """
+    s = card_id
+    suf = f"_{today}"
+    if s.endswith(suf):
+        s = s[: -len(suf)]
+    if s.startswith(prefix):
+        s = s[len(prefix):]
+    if s in lookup:
+        return s
+    for sfx in _DERIVED_SUFFIXES:
+        if s.endswith(sfx):
+            base = s[: -len(sfx)]
+            if base in lookup:
+                return base
+    return None
 
 
 def _utc_iso_to_bjt_pretty(utc_iso: str) -> Optional[str]:
+    """ISO UTC → 'YYYY-MM-DD HH:MM:SS (BJT)'。Sprint 2.6-J:秒级精度。"""
     try:
         from datetime import timezone, timedelta
         s = utc_iso.replace("Z", "+00:00")
@@ -361,7 +448,7 @@ def _utc_iso_to_bjt_pretty(utc_iso: str) -> Optional[str]:
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
         bjt = dt.astimezone(timezone(timedelta(hours=8)))
-        return bjt.strftime("%Y-%m-%d %H:%M (BJT)")
+        return bjt.strftime("%Y-%m-%d %H:%M:%S (BJT)")
     except Exception:
         return None
 

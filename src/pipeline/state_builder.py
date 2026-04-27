@@ -648,12 +648,30 @@ class StrategyStateBuilder:
         events = EventsCalendarDAO.get_upcoming_within_hours(
             conn, hours=self.events_window_hours, now_utc=now_utc)
 
-        # Sprint 2.6-G:每个数据源的最后 fetch 时间(供前端"刚刚抓取"显示)
+        # Sprint 2.6-J:per-metric 系统侧写入时间。Sprint 2.6-G 的 data_fetch_log
+        # group 级精度被废弃,改成按 metric 聚合。
+        # 字典结构:
+        #   {
+        #     "onchain":      {metric_name: inserted_at_iso | None},
+        #     "macro":        {metric_name: inserted_at_iso | None},
+        #     "klines_by_tf": {timeframe:   inserted_at_iso | None},
+        #     "derivatives_snapshot": iso_or_None,
+        #   }
         try:
-            from ..data.storage.dao import DataFetchLogDAO
-            data_freshness = DataFetchLogDAO.get_all(conn)
-        except Exception:
-            data_freshness = {}
+            metric_inserted_at = {
+                "onchain": OnchainDAO.get_metric_inserted_at_map(conn),
+                "macro":   MacroDAO.get_metric_inserted_at_map(conn),
+                "klines_by_tf": BTCKlinesDAO.get_latest_inserted_at_by_timeframe(conn),
+                "derivatives_snapshot": (
+                    DerivativesDAO.get_latest_snapshot_inserted_at(conn)
+                ),
+            }
+        except Exception as e:
+            logger.warning("metric_inserted_at lookup failed: %s", e)
+            metric_inserted_at = {
+                "onchain": {}, "macro": {},
+                "klines_by_tf": {}, "derivatives_snapshot": None,
+            }
 
         return {
             "reference_timestamp_utc": now_utc or _utc_now_iso(),
@@ -661,7 +679,7 @@ class StrategyStateBuilder:
             "klines_1d": klines_1d, "klines_1w": klines_1w,
             "derivatives": derivatives, "onchain": onchain, "macro": macro,
             "events_upcoming_48h": events,
-            "data_freshness": data_freshness,
+            "metric_inserted_at": metric_inserted_at,
         }
 
     # ------------------------------------------------------------------
@@ -1011,7 +1029,6 @@ def _layer_error_report(layer_id: int, layer_name: str,
         "generated_at_utc": _utc_now_iso(),
         "rules_version": DEFAULT_RULES_VERSION,
         "run_trigger": "scheduled",
-        "data_freshness": {},
         "health_status": "error",
         "confidence_tier": "very_low",
         "computation_method": "error",

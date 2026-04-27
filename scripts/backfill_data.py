@@ -208,34 +208,14 @@ def backfill_onchain(conn, *, days: int, dry_run: bool) -> None:
 
 
 # ============================================================
-# Macro(Yahoo Finance + FRED)
+# Macro(FRED 唯一主源,Sprint 2.6-A.4 起)
 # ============================================================
 
 def backfill_macro(conn, *, days: int, dry_run: bool) -> None:
-    """Sprint 2.6-A:用 collector 自带的 collect_and_save_all,不再 hasattr 探测。
-
-    Yahoo:`YahooFinanceCollector.collect_and_save_all(conn, since_days)` 内部已
-    处理 symbol 列表 + DAO upsert。
-    FRED:`FredCollector.collect_and_save_all(conn, since_days)` 同上;无 key 时
-    `enabled=False`,优雅 skip。
+    """Sprint 2.6-A.4:Yahoo 已弃用(腾讯云 IP 被全局 429 封禁),FRED 是唯一
+    macro 主源,覆盖 dxy/vix/sp500/nasdaq/dgs10/dff/cpi/unemployment_rate 共 8 个字段。
+    无 key 时 `enabled=False`,优雅 skip。
     """
-    # ---- Yahoo Finance ----
-    try:
-        from src.data.collectors.yahoo_finance import YahooFinanceCollector
-        yf_coll = YahooFinanceCollector()
-        start = time.time()
-        if dry_run:
-            logger.info("[macro.yahoo] dry_run skip")
-        else:
-            stats = yf_coll.collect_and_save_all(conn, since_days=days)
-            conn.commit()  # Sprint 2.6-A.1:DAO.upsert_batch 不 commit,这里必须显式提交
-            total = sum(v for v in stats.values() if isinstance(v, int))
-            _log_stage("macro.yahoo", total, total, _elapsed_ms(start))
-            for metric, n in stats.items():
-                logger.info("  macro.yahoo.%s upserted=%d", metric, n)
-    except Exception as e:
-        logger.error("[macro.yahoo] failed: %s", e)
-
     # ---- FRED(无 key 优雅 skip) ----
     try:
         from src.data.collectors.fred import FredCollector

@@ -125,7 +125,10 @@ def job_data_collection(
     conn_factory: Optional[Callable[[], Any]] = None,
     since_days: int = 7,
 ) -> dict[str, Any]:
-    """Sprint 2.6-A:数据采集主任务,每小时调一次 4 个 collector 把最新数据写入 DB。
+    """Sprint 2.6-A:数据采集主任务,每小时调一次 3 个 collector 把最新数据写入 DB。
+
+    Sprint 2.6-A.4:Yahoo 已弃用(腾讯云 IP 被 Yahoo 全局 429 封禁),
+    macro 数据全部由 FRED 提供。当前 collector 列表:FRED / CoinGlass / Glassnode。
 
     优雅失败语义:
     - 单个 collector 抛异常 → 记日志 + by_collector[name]=0 + 继续其他
@@ -133,7 +136,7 @@ def job_data_collection(
     - FRED key 未配置时 fred 优雅 skip,不算失败
 
     Returns:
-      {status, total_upserted, by_collector: {yahoo, fred, coinglass, glassnode},
+      {status, total_upserted, by_collector: {fred, coinglass, glassnode},
        errors: {collector_name: msg}, duration_ms, since_days}
     """
     import time
@@ -148,21 +151,6 @@ def job_data_collection(
 
     try:
         conn = cf()
-
-        # ---- Yahoo Finance ----
-        try:
-            from ..data.collectors.yahoo_finance import YahooFinanceCollector
-            yf_stats = YahooFinanceCollector().collect_and_save_all(
-                conn, since_days=since_days,
-            )
-            by_collector["yahoo"] = sum(
-                v for v in yf_stats.values() if isinstance(v, int)
-            )
-            conn.commit()
-        except Exception as e:
-            logger.exception("data_collection.yahoo failed: %s", e)
-            by_collector["yahoo"] = 0
-            errors["yahoo"] = str(e)[:200]
 
         # ---- FRED(无 key 时优雅 skip)----
         try:

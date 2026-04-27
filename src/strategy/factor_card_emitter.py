@@ -860,10 +860,8 @@ def _emit_price_tech_primary(
 ) -> list[dict[str, Any]]:
     cards: list[dict[str, Any]] = []
 
-    # ADX-14(1D)—— 如果 L1 已算过直接读
-    adx = l1.get("adx_14_1d") or l1.get("adx_1d")
-    if adx is None:
-        adx = _compute_adx_latest(klines_1d)
+    # ADX-14(1D)—— Sprint 2.6-C:layer1 直接暴露 adx_14_1d,不再回退计算
+    adx = l1.get("adx_14_1d")
     ts = _to_bjt(klines_1d.index[-1]) if isinstance(klines_1d, pd.DataFrame) and len(klines_1d) > 0 else None
     cards.append(_make_card(
         card_id=f"price_adx_14_1d_{today}",
@@ -886,10 +884,8 @@ def _emit_price_tech_primary(
         linked_layer="L1", source="Binance klines",
     ))
 
-    # ATR 百分位
-    atr_pct = l1.get("atr_percentile_180d") or l1.get("atr_pct")
-    if atr_pct is None:
-        atr_pct = _compute_atr_percentile(klines_1d)
+    # ATR 百分位 —— Sprint 2.6-C:layer1 直接暴露 atr_percentile_180d
+    atr_pct = l1.get("atr_percentile_180d")
     cards.append(_make_card(
         card_id=f"price_atr_percentile_180d_{today}",
         category="price_structure", tier="primary",
@@ -947,39 +943,11 @@ def _emit_price_tech_primary(
     return cards
 
 
-def _compute_adx_latest(klines_1d: Any) -> Optional[float]:
-    try:
-        from src.indicators.volatility import atr
-    except Exception:
-        return None
-    try:
-        # 用现成的 indicator?没有单独的 ADX indicator 函数;
-        # 这里简单回退:若 L1 没提供就返回 None
-        return None
-    except Exception:
-        return None
-
-
-def _compute_atr_percentile(klines_1d: Any) -> Optional[float]:
-    if klines_1d is None or not isinstance(klines_1d, pd.DataFrame) or len(klines_1d) < 30:
-        return None
-    try:
-        from src.indicators.volatility import atr
-        atr_series = atr(
-            klines_1d["high"], klines_1d["low"], klines_1d["close"], period=14,
-        ).dropna()
-        if len(atr_series) < 30:
-            return None
-        atr_rel = atr_series / klines_1d["close"]
-        atr_rel = atr_rel.dropna()
-        if len(atr_rel) < 30:
-            return None
-        recent = atr_rel.iloc[-1]
-        window = atr_rel.iloc[-180:] if len(atr_rel) > 180 else atr_rel
-        pct = (window <= recent).sum() / len(window) * 100.0
-        return round(float(pct), 1)
-    except Exception:
-        return None
+# Sprint 2.6-C:_compute_adx_latest / _compute_atr_percentile 已删除。
+# 这两个函数原本是 layer1 数据缺失时的本地回退,但前者写死 return None(从未真算)、
+# 后者重复了 layer1 已有的 ATR 计算。layer1_regime 现在直接暴露 adx_14_1d /
+# atr_percentile_180d 顶层字段,本文件直接 l1.get(...) 读取。
+# 按 CLAUDE.md §X 工程纪律:被替代的旧代码必须删除。
 
 
 # ============================================================
@@ -1195,9 +1163,12 @@ def _emit_derivatives_reference(
     ))
 
     # 清算(liquidation)— 不能用 `a or b`,pd.Series bool 报 ambiguous
+    # Sprint 2.6-C:DerivativesDAO.get_all_metrics 把 liquidation_total/long/short
+    # 作为独立 key,优先用 liquidation_total(代表 24h 总清算)。
+    # 兼容旧名 'liquidation' / 'liquidation_24h' 仅作 fallback。
     liq_series = None
     if isinstance(derivatives, dict):
-        for k in ("liquidation", "liquidation_24h"):
+        for k in ("liquidation_total", "liquidation", "liquidation_24h"):
             v = derivatives.get(k)
             if v is not None:
                 liq_series = v

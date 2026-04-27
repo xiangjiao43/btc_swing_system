@@ -300,7 +300,7 @@ def emit_factor_cards(
     cards.extend(_emit_price_tech_reference(klines_1d, today))
 
     # ========== 宏观参考(reference)==========
-    cards.extend(_emit_macro_reference(macro, today))
+    cards.extend(_emit_macro_reference(macro, today, klines_1d=klines_1d))
 
     # ========== 事件日历(reference)==========
     cards.extend(_emit_events_reference(events, today))
@@ -1311,7 +1311,12 @@ def _emit_price_tech_reference(klines_1d: Any, today: str) -> list[dict[str, Any
 # 宏观 reference
 # ============================================================
 
-def _emit_macro_reference(macro: dict[str, Any], today: str) -> list[dict[str, Any]]:
+def _emit_macro_reference(
+    macro: dict[str, Any],
+    today: str,
+    *,
+    klines_1d: Optional[pd.DataFrame] = None,
+) -> list[dict[str, Any]]:
     cards: list[dict[str, Any]] = []
 
     us10y = macro.get("us10y") if isinstance(macro, dict) else None
@@ -1371,19 +1376,73 @@ def _emit_macro_reference(macro: dict[str, Any], today: str) -> list[dict[str, A
         impact_direction="neutral", impact_weight=0.4,
         linked_layer="L5", source="derived",
     ))
+    # Sprint 2.6-F:BTC-黄金 60 日相关性(FRED gold_price → 现在能算了)
+    gold_series = macro.get("gold_price") if isinstance(macro, dict) else None
+    btc_gold_corr = _compute_corr_60d(klines_1d, gold_series)
+    if btc_gold_corr is not None:
+        gold_interp = (
+            f"📊 BTC 与黄金 60 日相关系数 = {btc_gold_corr:+.2f}\n"
+            f"🔍 > +0.5 = 数字黄金叙事强(避险买盘共振);±0.5 内 = 弱相关;"
+            f"< -0.5 = 风险资产属性主导(与黄金背离)"
+        )
+        gold_dir = (
+            "neutral" if -0.5 <= btc_gold_corr <= 0.5
+            else ("bullish" if btc_gold_corr > 0.5 else "bearish")
+        )
+    else:
+        gold_interp = (
+            "📊 数据不足(需 BTC 与黄金各 60+ 天)\n"
+            "🔍 > +0.5 = 数字黄金叙事强;< -0.5 = 风险资产属性主导"
+        )
+        gold_dir = "neutral"
     cards.append(_make_card(
         card_id=f"macro_btc_gold_corr_60d_{today}",
         category="macro", tier="reference",
         name="BTC-黄金 60 日相关性", name_en="BTC-Gold 60d Correlation",
-        current_value=None,
+        current_value=round(btc_gold_corr, 3) if btc_gold_corr is not None else None,
         captured_at_bjt=None,
-        plain_interpretation=("📊 数据采集尚未接入(后续 sprint 启用)\n"
-                              "🔍 BTC 与黄金正相关 = 数字黄金叙事强;负相关 = 风险资产属性强"),
+        plain_interpretation=gold_interp,
         strategy_impact="📍 BTC 与黄金过去 60 天的相关系数,用于跟踪BTC 的数字黄金叙事强度。",
-        impact_direction="neutral", impact_weight=0.2,
+        impact_direction=gold_dir, impact_weight=0.2,
         linked_layer="L5", source="derived",
     ))
     return cards
+
+
+def _compute_corr_60d(
+    klines_1d: Optional[pd.DataFrame],
+    other_series: Optional[pd.Series],
+    lookback_days: int = 60,
+) -> Optional[float]:
+    """Sprint 2.6-F:BTC 收盘价 vs 任意 macro series 的滚动相关性。
+
+    与 layer5_macro._compute_btc_nasdaq_correlation 同算法(pct_change → Pearson),
+    但只返回 float(emitter 不需要 strength label)。
+    """
+    if klines_1d is None or not isinstance(klines_1d, pd.DataFrame):
+        return None
+    if other_series is None or not isinstance(other_series, pd.Series):
+        return None
+
+    btc_close = klines_1d["close"].dropna()
+    other = other_series.dropna()
+    if len(btc_close) < lookback_days + 1 or len(other) < lookback_days + 1:
+        return None
+
+    btc_ret = btc_close.pct_change().dropna()
+    other_ret = other.pct_change().dropna()
+    joined = pd.concat([btc_ret, other_ret], axis=1, join="inner").dropna()
+    if len(joined) < lookback_days:
+        return None
+
+    recent = joined.tail(lookback_days)
+    try:
+        corr = float(recent.iloc[:, 0].corr(recent.iloc[:, 1]))
+    except Exception:
+        return None
+    if pd.isna(corr):
+        return None
+    return corr
 
 
 # ============================================================

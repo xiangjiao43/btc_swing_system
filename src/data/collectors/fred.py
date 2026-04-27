@@ -48,6 +48,8 @@ SERIES_TO_METRIC: dict[str, str] = {
     # 波动率与美元(Sprint 2.6-A.4 新增)
     "VIXCLS":   "vix",                # CBOE VIX(daily,1990-至今)
     "DTWEXBGS": "dxy",                # Trade Weighted USD Index(Fed 官方版,语义等同 ICE DXY)
+    # 商品(Sprint 2.6-F 新增,用于 BTC-黄金 60d 相关性)
+    "GOLDPMGBD228NLBM": "gold_price",  # London Gold Fixing PM (USD/oz, daily)
 }
 
 # Sprint 2.6-A.4:metric 别名 — 同一份 series 数据写多个 metric_name。

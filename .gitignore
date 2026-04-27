@@ -1,8 +1,19 @@
-# ---- Secrets ----
+# ============= ENV FILES (CRITICAL: never commit) =============
+# 历史教训:Sprint 2.6-A.4 的 .env.save 因 *.env 不匹配 .env.save 而被 commit。
+# 从 incident 2026-04-27 起,扩展为 .env / .env.* / *.env / *.env.* 全覆盖,
+# 加上常见编辑器备份后缀。
 .env
-.env.local
-.env.*.local
+.env.*
 *.env
+*.env.*
+# 编辑器 / 工具备份(防误提交带凭据的备份文件)
+*.bak
+*.backup
+*.save
+*.swp
+*.swo
+*~
+# ============= 其他敏感 =============
 secrets/
 credentials/
 *.key

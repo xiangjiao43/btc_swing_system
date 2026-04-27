@@ -187,7 +187,12 @@ def backfill_onchain(conn, *, days: int, dry_run: bool) -> None:
         "exchange_net_flow": lambda: coll.fetch_exchange_net_flow(since_days=days),
         "mvrv": lambda: coll.fetch_mvrv(since_days=days),
         "realized_price": lambda: coll.fetch_realized_price(since_days=days),
+        # Sprint 2.6-F.1:补 3 个新 metric(2.6-F 只动了 collect_and_save_all,
+        # backfill 走自己的 dict 不会自动同步)
+        "lth_realized_price": lambda: coll.fetch_lth_realized_price(since_days=days),
+        "sth_realized_price": lambda: coll.fetch_sth_realized_price(since_days=days),
         "sopr": lambda: coll.fetch_sopr(since_days=days),
+        "sopr_adjusted": lambda: coll.fetch_sopr_adjusted(since_days=days),
         "reserve_risk": lambda: coll.fetch_reserve_risk(since_days=days),
         "puell_multiple": lambda: coll.fetch_puell_multiple(since_days=days),
     }

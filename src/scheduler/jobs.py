@@ -251,7 +251,11 @@ def job_data_collection(
             for fn_name in (
                 "fetch_mvrv_z_score", "fetch_nupl", "fetch_lth_supply",
                 "fetch_exchange_net_flow", "fetch_mvrv", "fetch_realized_price",
-                "fetch_sopr", "fetch_reserve_risk", "fetch_puell_multiple",
+                # Sprint 2.6-F.1:补 3 个新 metric 漏注册(2.6-F regression test
+                # 只覆盖了 collect_and_save_all,没覆盖 jobs.py 自己的 fn_name 列表)
+                "fetch_lth_realized_price", "fetch_sth_realized_price",
+                "fetch_sopr", "fetch_sopr_adjusted",
+                "fetch_reserve_risk", "fetch_puell_multiple",
             ):
                 try:
                     fn = getattr(gn, fn_name, None)

@@ -2,8 +2,13 @@
 fred.py — FRED(美联储经济数据)采集器
 
 对应建模 §3.6.4。直连 FRED 官方 API,需要免费注册拿 API key。
-如果 FRED_API_KEY 为空,collect_and_save_all 返回 {} 并 warning,**不报错**
-(允许 Yahoo 作主源、FRED 作备用,FRED 未配置时跳过)。
+
+Sprint 2.6-A.4:覆盖 layer5_macro.py 全部 8 个核心字段,包括
+dxy / vix / sp500 / nasdaq(FRED 是这些指数的官方权威数据源)。
+原 Yahoo Finance 路径已弃用 — 腾讯云 IP 被 Yahoo 全局 429 封禁,
+FRED 是当前唯一可用的 macro 主源。
+
+如果 FRED_API_KEY 为空,collect_and_save_all 返回 {} 并 warning,**不报错**。
 """
 
 from __future__ import annotations
@@ -28,11 +33,28 @@ class FredCollectorError(RuntimeError):
 
 
 # series_id → metric_name 映射
+# Sprint 2.6-A.4:扩展覆盖 layer5_macro.py 全部 8 个核心字段(原 Yahoo 字段
+# 全部由 FRED 接管,因为 Yahoo Finance 在腾讯云 IP 被全局 429 封禁)
 SERIES_TO_METRIC: dict[str, str] = {
-    "DGS10":    "dgs10",              # 10-year Treasury yield
-    "DFF":      "dff",                # Federal funds rate
-    "CPIAUCSL": "cpi",                # CPI (all urban consumers, seasonally adj)
-    "UNRATE":   "unemployment_rate",  # Unemployment rate
+    # 利率类
+    "DGS10":    "dgs10",              # 10-year Treasury yield(daily)
+    "DFF":      "dff",                # Federal funds rate(daily)
+    # 通胀 / 就业
+    "CPIAUCSL": "cpi",                # CPI all urban consumers(monthly)
+    "UNRATE":   "unemployment_rate",  # Unemployment rate(monthly)
+    # 股指(Sprint 2.6-A.4 新增,FRED 是 SP500 / NASDAQ 的官方数据源)
+    "SP500":    "sp500",              # S&P 500(daily,~10 年历史)
+    "NASDAQCOM": "nasdaq",            # NASDAQ Composite(daily,1971-至今)
+    # 波动率与美元(Sprint 2.6-A.4 新增)
+    "VIXCLS":   "vix",                # CBOE VIX(daily,1990-至今)
+    "DTWEXBGS": "dxy",                # Trade Weighted USD Index(Fed 官方版,语义等同 ICE DXY)
+}
+
+# Sprint 2.6-A.4:metric 别名 — 同一份 series 数据写多个 metric_name。
+# layer5_macro.py 同时期望 us10y 和 dgs10(都是 10 年期国债收益率,语义等同),
+# 这里把 DGS10 的 fetched rows 也复制一份为 us10y 写入。
+_METRIC_ALIASES: dict[str, list[str]] = {
+    "dgs10": ["us10y"],
 }
 
 
@@ -157,6 +179,22 @@ class FredCollector:
                 n = MacroDAO.upsert_batch(conn, metrics)
                 stats[metric] = n
                 logger.info("%s: upserted %d rows", metric, n)
+                # Sprint 2.6-A.4:同份 series 写多个 metric_name 别名
+                # (例如 DGS10 → 同时写 dgs10 和 us10y)
+                for alias in _METRIC_ALIASES.get(metric, []):
+                    alias_metrics = [
+                        MacroMetric(
+                            timestamp=r["timestamp"],
+                            metric_name=alias,
+                            metric_value=r["metric_value"],
+                            source="fred",
+                        )
+                        for r in raw
+                    ]
+                    n_alias = MacroDAO.upsert_batch(conn, alias_metrics)
+                    stats[alias] = n_alias
+                    logger.info("%s (alias of %s): upserted %d rows",
+                                alias, metric, n_alias)
             except Exception as e:
                 logger.error("%s (series=%s) failed: %s", metric, series_id, e)
                 failures.append(metric)

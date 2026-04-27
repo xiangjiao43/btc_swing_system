@@ -228,6 +228,7 @@ def backfill_macro(conn, *, days: int, dry_run: bool) -> None:
             logger.info("[macro.yahoo] dry_run skip")
         else:
             stats = yf_coll.collect_and_save_all(conn, since_days=days)
+            conn.commit()  # Sprint 2.6-A.1:DAO.upsert_batch 不 commit,这里必须显式提交
             total = sum(v for v in stats.values() if isinstance(v, int))
             _log_stage("macro.yahoo", total, total, _elapsed_ms(start))
             for metric, n in stats.items():
@@ -247,6 +248,7 @@ def backfill_macro(conn, *, days: int, dry_run: bool) -> None:
             logger.info("[macro.fred] dry_run skip")
         else:
             stats = fred_coll.collect_and_save_all(conn, since_days=days)
+            conn.commit()  # Sprint 2.6-A.1:同上,显式提交否则数据丢失
             total = sum(
                 v for k, v in stats.items()
                 if isinstance(v, int) and not k.startswith("__")

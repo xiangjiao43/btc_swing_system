@@ -130,6 +130,7 @@ class Layer1Regime(EvidenceLayerBase):
         swing_events = swing_points(high, low, lookback=swing_window)
         swing_stability, hh, hl, lh, ll = _analyze_swing(swing_events)
         swing_amp_pct = _latest_swing_amplitude_pct(swing_events)
+        latest_structure = _latest_structure_label(swing_events)
 
         # ---- 价格三分位(range 判定用)----
         price_partition = _price_partition(close.tail(100))
@@ -275,6 +276,9 @@ class Layer1Regime(EvidenceLayerBase):
             "weekly_macd_direction": weekly_macd_direction,
             "price_partition": price_partition,
             "swing_counts": {"HH": hh, "HL": hl, "LH": lh, "LL": ll},
+            # Sprint 2.6-L:最近一个 swing 事件相对前任同类的关系。
+            # 给 L2 structure_features.latest_structure 用,modeling §4.3.4 字段。
+            "latest_structure": latest_structure,
             "scoring": {
                 "chaos_hits": chaos_hits,
                 "trend_up_hits": trend_up_hits,
@@ -474,6 +478,39 @@ def _analyze_swing(
     if lh > hh and ll > hl:
         return "more_lower_lows", hh, hl, lh, ll
     return "mixed", hh, hl, lh, ll
+
+
+def _latest_structure_label(
+    events: list[dict[str, Any]],
+) -> Optional[str]:
+    """Sprint 2.6-L:返回最近一个 swing 事件相对其同类前任的关系标签。
+
+    标签 ∈ {"HH", "HL", "LH", "LL", None}。
+    - 最近事件是 high → 与前一个 high 比:更高 = HH,更低 = LH
+    - 最近事件是 low  → 与前一个 low 比 :更高 = HL,更低 = LL
+    - 同类历史不足 2 个 → None
+    """
+    if not events:
+        return None
+    last = events[-1]
+    last_type = last.get("type")
+    last_price = last.get("price")
+    if last_type not in ("high", "low") or last_price is None:
+        return None
+    # 找之前最近的同类 swing
+    prior = None
+    for ev in reversed(events[:-1]):
+        if ev.get("type") == last_type:
+            prior = ev
+            break
+    if prior is None:
+        return None
+    prior_price = prior.get("price")
+    if prior_price is None:
+        return None
+    if last_type == "high":
+        return "HH" if last_price > prior_price else "LH"
+    return "HL" if last_price > prior_price else "LL"
 
 
 def _latest_swing_amplitude_pct(events: list[dict[str, Any]]) -> float:

@@ -295,6 +295,24 @@ class Layer2Direction(EvidenceLayerBase):
         if clamp_notes:
             notes.append(f"stance_confidence clamp: {clamp_notes}")
 
+        # Sprint 2.6-L:modeling §4.3.4 专属字段 structure_features
+        # = {hh_count, hl_count, lh_count, ll_count, latest_structure}
+        # L2 不直接读 K 线(§4.3.2 纪律),从 L1.diagnostics 取。
+        # L1 swing_stability='insufficient' → 返回 None,pillar 自动 missing。
+        l1_diag = (l1 or {}).get("diagnostics") or {}
+        l1_sc = l1_diag.get("swing_counts") or {}
+        l1_stability = l1.get("swing_stability") if isinstance(l1, dict) else None
+        if (l1_sc and l1_stability and l1_stability != "insufficient"):
+            structure_features: Optional[dict[str, Any]] = {
+                "hh_count": int(l1_sc.get("HH") or 0),
+                "hl_count": int(l1_sc.get("HL") or 0),
+                "lh_count": int(l1_sc.get("LH") or 0),
+                "ll_count": int(l1_sc.get("LL") or 0),
+                "latest_structure": l1_diag.get("latest_structure"),
+            }
+        else:
+            structure_features = None
+
         return {
             "stance": stance,
             "phase": phase,
@@ -303,6 +321,7 @@ class Layer2Direction(EvidenceLayerBase):
             "thresholds_applied": thresholds_applied,
             "conflict_flags": conflict_flags,
             "diagnostics": diagnostics,
+            "structure_features": structure_features,
             "band_position_score": bp.get("phase_confidence"),
             "exchange_momentum_score": em_score,
             "long_cycle_context": {

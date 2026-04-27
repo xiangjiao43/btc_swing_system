@@ -218,3 +218,12 @@ d247ff0 feat(coinglass): add OI-weighted funding rate across exchanges
 43e468f test(glassnode): regression guard for 13 metrics in collect_and_save_all
 cd5666b fix(api): move events seed hook to FastAPI startup (was scheduler/main.py)
 ```
+
+---
+
+## Backlog
+
+**Sprint 2.6-F 子任务遗留:BTC-黄金 60 日相关性数据源问题。**
+GOLDPMGBD228NLBM 已 discontinued,且 Yahoo IP banned / Stooq apikey wall /
+LBMA paid-only,目前无可行免费日级数据源。卡保持"数字黄金叙事监测,Sprint 2.x
+再接入",待找到可靠数据源后单独 sprint 处理。

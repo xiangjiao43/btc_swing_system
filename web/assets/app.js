@@ -734,12 +734,14 @@ function app() {
         // 用户只关心"什么时候抓的 + 多新",K 线 bar 时间对其没用且误导。
         // fetched 缺失时降级到 captured(老兜底)。
         _parseBjt(s) {
-            // "2026-04-27 14:00 (BJT)" → Date(UTC = BJT - 8h)
+            // "2026-04-27 14:06:23 (BJT)" 或 "2026-04-27 14:06 (BJT)" → Date(UTC = BJT - 8h)
+            // Sprint 2.6-J:支持秒级输入(后端 _utc_iso_to_bjt_pretty 现在产 "HH:MM:SS")。
+            // 没有秒就当 0 处理(兼容 captured_at_bjt 等仍为分钟级的字段)。
             if (!s || typeof s !== 'string') return null;
-            const m = s.match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})/);
+            const m = s.match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})(?::(\d{2}))?/);
             if (!m) return null;
-            const [, y, mo, d, h, mi] = m;
-            return new Date(Date.UTC(+y, +mo - 1, +d, +h - 8, +mi));
+            const [, y, mo, d, h, mi, sec] = m;
+            return new Date(Date.UTC(+y, +mo - 1, +d, +h - 8, +mi, +(sec || 0)));
         },
         _agoLabel(s) {
             const dt = this._parseBjt(s);

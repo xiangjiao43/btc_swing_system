@@ -235,5 +235,19 @@ LTH/STH realized price endpoint**;最接近的是
 `/v1/metrics/breakdowns/price_realized_usd_by_age`(Tier 2 / Advanced,付费),
 返回的是按持币年龄的 cohort 分布,需要客户端自行按 hodl_waves(>= 6 个月 = LTH)
 加权聚合。本 sprint 已按 §X 把死路径 + fetch 方法 + 测试一起删除。
-若未来有 Advanced API key,可单独 sprint 接入 breakdowns endpoint + cohort 聚合逻辑。
-当前 onchain 主裁决只少这 2 个 metric,不影响 L1/L2/L3/L4/L5 主路径。
+**Sprint 2.6-I 后续证实**:alphanode 中转走 Tier 3 / Premium,实测 LTH/STH realized
+price 已通过 `/breakdowns/price_realized_usd_by_age + /breakdowns/supply_by_age`
+客户端 supply 加权聚合恢复 — 此遗留已关闭。
+
+**Sprint 2.6-J 遗留(per-metric inserted_at 实施完毕,以下 4 项后续):**
+
+1. `data_fetch_log` 表 dead 但仍在 DB,后续单 sprint drop 表 + `migrations/004`
+   (rollback 安全保留中)。
+2. Legacy 1647 行 `inserted_at_utc=NULL` 状态保留(诚实降级 — 前端遇到 NULL
+   显示 captured_at_bjt,不撒谎说"上游时间 = 系统写入时间")。
+3. derivatives wide 表精度天花板:funding/OI/LSR 共享 1 行 `inserted_at_utc`,
+   未来若需 per-derivative-metric 精度,需 derivatives_snapshots 改回长表
+   (大改,跨多个 sprint 可能涉及)。
+4. Format 对称性候选:`captured_at_bjt`(分钟级)vs `fetched_at_bjt`(秒级)
+   视觉不一致,纯前端 ~10 行可统一(给 captured 也加 `:SS`,或给 fetched
+   去掉 `:SS`)。

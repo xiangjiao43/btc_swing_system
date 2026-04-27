@@ -707,6 +707,9 @@ class EventsCalendarDAO:
                     r["hours_to"] = None
             except Exception:
                 r["hours_to"] = None
+            # Sprint 2.6-D fix:event_risk.py 期待 'name' 字段,DAO 列叫 'event_name'
+            if "name" not in r and "event_name" in r:
+                r["name"] = r["event_name"]
         return rows
 
 

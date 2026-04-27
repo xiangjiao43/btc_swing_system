@@ -13,8 +13,11 @@ glassnode.py — Glassnode 链上数据采集器(走 api.alphanode.work 中转)
 覆盖建模 §3.6.3:
   - 第一类(primary 5):mvrv_z_score / nupl / lth_supply / exchange_net_flow /
     btc_price_close(后三者 + price 用于 indicators 层算 LTH 90d 变化 / ATH 跌幅)
-  - 第二类(display 7):mvrv / realized_price / lth_realized_price /
-    sth_realized_price / sopr / sopr_adjusted / reserve_risk / puell_multiple
+  - 第二类(display 5):mvrv / realized_price / sopr / sopr_adjusted /
+    reserve_risk / puell_multiple
+  - Sprint 2.6-F.3:lth_realized_price / sth_realized_price 已删
+    (Glassnode 不开放独立 endpoint,/v1/metrics/supply/{lth,sth}_realized_price
+     皆 404,见 docs/cc_reports/sprint_2_6_chain_verify.md backlog)
 """
 
 from __future__ import annotations
@@ -70,8 +73,6 @@ class GlassnodeCollector:
     # ---- Display 7(辅助)----
     _PATH_MVRV               = f"{_BASE_PATH}/market/mvrv"
     _PATH_REALIZED_PRICE     = f"{_BASE_PATH}/market/price_realized_usd"
-    _PATH_LTH_REALIZED_PRICE = f"{_BASE_PATH}/supply/lth_realized_price"
-    _PATH_STH_REALIZED_PRICE = f"{_BASE_PATH}/supply/sth_realized_price"
     _PATH_SOPR               = f"{_BASE_PATH}/indicators/sopr"
     _PATH_SOPR_ADJUSTED      = f"{_BASE_PATH}/indicators/sopr_adjusted"
     _PATH_RESERVE_RISK       = f"{_BASE_PATH}/indicators/reserve_risk"
@@ -349,24 +350,6 @@ class GlassnodeCollector:
             source="glassnode_display",
         )
 
-    def fetch_lth_realized_price(
-        self, interval: str = "24h", since_days: int = 180
-    ) -> list[dict[str, Any]]:
-        return self._fetch_series(
-            self._PATH_LTH_REALIZED_PRICE, "lth_realized_price",
-            interval=interval, since_days=since_days,
-            source="glassnode_display",
-        )
-
-    def fetch_sth_realized_price(
-        self, interval: str = "24h", since_days: int = 180
-    ) -> list[dict[str, Any]]:
-        return self._fetch_series(
-            self._PATH_STH_REALIZED_PRICE, "sth_realized_price",
-            interval=interval, since_days=since_days,
-            source="glassnode_display",
-        )
-
     def fetch_sopr(
         self, interval: str = "24h", since_days: int = 180
     ) -> list[dict[str, Any]]:
@@ -427,8 +410,6 @@ class GlassnodeCollector:
             # Display 7
             ("mvrv",               self.fetch_mvrv),
             ("realized_price",     self.fetch_realized_price),
-            ("lth_realized_price", self.fetch_lth_realized_price),
-            ("sth_realized_price", self.fetch_sth_realized_price),
             ("sopr",               self.fetch_sopr),
             ("sopr_adjusted",      self.fetch_sopr_adjusted),
             ("reserve_risk",       self.fetch_reserve_risk),

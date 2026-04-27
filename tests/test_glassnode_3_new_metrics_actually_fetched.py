@@ -1,4 +1,4 @@
-"""tests/test_glassnode_3_new_metrics_actually_fetched.py — Sprint 2.6-F.1。
+"""tests/test_glassnode_3_new_metrics_actually_fetched.py — Sprint 2.6-F.1 + F.3。
 
 Sprint 2.6-F Commit 1 加的 regression guard 只覆盖了 GlassnodeCollector.collect_and_save_all
 的 source 文本,但生产端两条路径都绕开了 collect_and_save_all,自带硬编码列表:
@@ -6,8 +6,9 @@ Sprint 2.6-F Commit 1 加的 regression guard 只覆盖了 GlassnodeCollector.co
   - src/scheduler/jobs.py::job_data_collection 的 glassnode loop
   - scripts/backfill_data.py::backfill_onchain 的 fetches dict
 
-两处都漏了 lth_realized_price / sth_realized_price / sopr_adjusted。
-本测试用 mock 实例验证两条路径都会**真的**调到这 3 个 fetch 方法。
+Sprint 2.6-F.1 加了 lth_realized_price / sth_realized_price / sopr_adjusted。
+Sprint 2.6-F.3:lth/sth_realized_price 服务器实测 404 → 删,只剩 sopr_adjusted。
+本测试用 mock 实例验证两条路径都会**真的**调到 fetch_sopr_adjusted。
 """
 
 from __future__ import annotations
@@ -17,8 +18,6 @@ from unittest.mock import MagicMock, patch
 
 
 _NEW_METRIC_FETCHERS: tuple[str, ...] = (
-    "fetch_lth_realized_price",
-    "fetch_sth_realized_price",
     "fetch_sopr_adjusted",  # = aSOPR (adjusted SOPR)
 )
 
@@ -43,19 +42,23 @@ def test_jobs_data_collection_glassnode_loop_includes_3_new_fetchers():
 # 2. backfill_data.py::backfill_onchain 的 fetches dict 含这 3 个
 # ============================================================
 
-def test_backfill_onchain_fetches_dict_includes_3_new_metrics():
-    """source-level guard:backfill_data.backfill_onchain 的 dict 必须含 3 个 lambda。"""
+def test_backfill_onchain_fetches_dict_includes_sopr_adjusted():
+    """source-level guard:backfill_data.backfill_onchain 必须 invoke sopr_adjusted。"""
     import scripts.backfill_data as bf
     src = inspect.getsource(bf.backfill_onchain)
-    for label in ("lth_realized_price", "sth_realized_price", "sopr_adjusted"):
-        assert f'"{label}"' in src, (
-            f"backfill_onchain.fetches missing key {label!r}. "
-            f"--only onchain --days N will skip this metric forever."
-        )
+    assert '"sopr_adjusted"' in src
     for fn in _NEW_METRIC_FETCHERS:
         assert f"coll.{fn}" in src, (
             f"backfill_onchain doesn't actually invoke coll.{fn}"
         )
+
+
+def test_backfill_onchain_no_longer_invokes_lth_sth_realized():
+    """Sprint 2.6-F.3 §X:已删除的 fetch 方法不能再被调用(只允许出现在注释里)。"""
+    import scripts.backfill_data as bf
+    src = inspect.getsource(bf.backfill_onchain)
+    assert "coll.fetch_lth_realized_price" not in src
+    assert "coll.fetch_sth_realized_price" not in src
 
 
 # ============================================================
@@ -67,7 +70,6 @@ def _make_glassnode_mock() -> MagicMock:
     for fn in (
         "fetch_mvrv_z_score", "fetch_nupl", "fetch_lth_supply",
         "fetch_exchange_net_flow", "fetch_mvrv", "fetch_realized_price",
-        "fetch_lth_realized_price", "fetch_sth_realized_price",
         "fetch_sopr", "fetch_sopr_adjusted",
         "fetch_reserve_risk", "fetch_puell_multiple",
     ):

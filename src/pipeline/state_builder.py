@@ -684,6 +684,10 @@ class StrategyStateBuilder:
             "derivatives": derivatives, "onchain": onchain, "macro": macro,
             "events_upcoming_48h": events,
             "next_events_by_type": next_events_by_type,
+            # Sprint 2.6-M C2:exchange_momentum_score 给 L2 §B5 修正项用
+            # (modeling §3.8 把 ExchangeMomentum 从 composite 降级为 L2 内部
+            #  stance_confidence 修正,但 single_factors 此前从未写入)
+            "single_factors": _build_single_factors(onchain),
             "metric_inserted_at": metric_inserted_at,
         }
 
@@ -962,6 +966,18 @@ class StrategyStateBuilder:
 # ==================================================================
 # 降级占位符构造
 # ==================================================================
+
+def _build_single_factors(onchain: dict[str, Any]) -> dict[str, Any]:
+    """Sprint 2.6-M C2:产出 L2 §B5 用的 single_factors 字典。
+
+    当前只含 exchange_momentum_score(modeling §3.8 降级项)。
+    数据不足 → score=None,L2 走 skip 路径。
+    """
+    from ..single_factors.exchange_momentum import compute_exchange_momentum_score
+    return {
+        "exchange_momentum_score": compute_exchange_momentum_score(onchain),
+    }
+
 
 def _factor_degraded(name: str, reason: str = "stage exception") -> dict[str, Any]:
     return {

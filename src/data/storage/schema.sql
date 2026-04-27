@@ -160,14 +160,16 @@ CREATE INDEX IF NOT EXISTS idx_kpi_name ON kpi_snapshots(kpi_name);
 -- ============================================================
 -- §10.4 的 price_candles 带 symbol,v0.1 只存 BTCUSDT;保留 volume 单列。
 CREATE TABLE IF NOT EXISTS price_candles (
-    symbol         TEXT NOT NULL,
-    timeframe      TEXT NOT NULL CHECK (timeframe IN ('1h', '4h', '1d', '1w')),
-    open_time_utc  TEXT NOT NULL,
-    open           REAL,
-    high           REAL,
-    low            REAL,
-    close          REAL,
-    volume         REAL,
+    symbol            TEXT NOT NULL,
+    timeframe         TEXT NOT NULL CHECK (timeframe IN ('1h', '4h', '1d', '1w')),
+    open_time_utc     TEXT NOT NULL,
+    open              REAL,
+    high              REAL,
+    low               REAL,
+    close             REAL,
+    volume            REAL,
+    -- Sprint 2.6-J:系统侧 wall clock(写入 DB 那一刻),legacy NULL
+    inserted_at_utc   TEXT DEFAULT NULL,
     PRIMARY KEY (symbol, timeframe, open_time_utc)
 );
 
@@ -188,7 +190,9 @@ CREATE TABLE IF NOT EXISTS derivatives_snapshots (
     liquidation_long    REAL,
     liquidation_short   REAL,
     liquidation_total   REAL,
-    full_data_json      TEXT
+    full_data_json      TEXT,
+    -- Sprint 2.6-J:snapshot 级写入时间(wide 表共享 1 个时间戳,无法 per-metric)
+    inserted_at_utc     TEXT DEFAULT NULL
 );
 
 
@@ -200,6 +204,8 @@ CREATE TABLE IF NOT EXISTS onchain_metrics (
     captured_at_utc    TEXT NOT NULL,
     value              REAL,
     source             TEXT DEFAULT 'glassnode',
+    -- Sprint 2.6-J:per-metric 系统侧写入时间,legacy NULL → 前端降级 captured
+    inserted_at_utc    TEXT DEFAULT NULL,
     PRIMARY KEY (metric_name, captured_at_utc)
 );
 
@@ -214,6 +220,8 @@ CREATE TABLE IF NOT EXISTS macro_metrics (
     captured_at_utc    TEXT NOT NULL,
     value              REAL,
     source             TEXT,
+    -- Sprint 2.6-J:per-metric 系统侧写入时间
+    inserted_at_utc    TEXT DEFAULT NULL,
     PRIMARY KEY (metric_name, captured_at_utc)
 );
 

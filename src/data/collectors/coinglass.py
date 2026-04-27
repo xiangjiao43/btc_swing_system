@@ -158,6 +158,8 @@ class CoinglassCollector:
     _PATH_PREFIX        = "/open-api-v4.coinglass.com/api"
     _PATH_KLINES        = f"{_PATH_PREFIX}/futures/price/history"
     _PATH_FUNDING       = f"{_PATH_PREFIX}/futures/funding-rate/history"
+    # Sprint 2.6-F:OI 加权跨交易所资金费率(filled funding_rate_aggregated)
+    _PATH_FUNDING_AGG   = f"{_PATH_PREFIX}/futures/funding-rate/oi-weight-history"
     _PATH_OI            = f"{_PATH_PREFIX}/futures/open-interest/aggregated-history"
     _PATH_LONG_SHORT    = f"{_PATH_PREFIX}/futures/global-long-short-account-ratio/history"
     _PATH_LIQUIDATION   = f"{_PATH_PREFIX}/futures/liquidation/history"
@@ -449,6 +451,51 @@ class CoinglassCollector:
             })
         return result
 
+    # ---- B.1.b 聚合资金费率(OI 加权,跨交易所;symbol=BTC 不传 exchange)----
+    def fetch_funding_rate_aggregated(
+        self,
+        interval: str = "h8",  # funding 周期通常 8h
+        limit: int = 500,
+        symbol: str = "BTC",
+    ) -> list[dict[str, Any]]:
+        """Sprint 2.6-F:OI 加权跨交易所聚合资金费率。
+
+        GET /v4/api/futures/funding-rate/oi-weight-history
+        响应 OHLC 格式;取 close 作为 metric_value(该 8h 周期末聚合费率)。
+
+        Returns:
+            list[{timestamp, metric_name='funding_rate_aggregated', metric_value}]
+        """
+        body = self._request(
+            "GET", self._PATH_FUNDING_AGG,
+            params={"symbol": symbol, "interval": interval, "limit": limit},
+        )
+        rows = self._unwrap_data(body)
+        self._log_response_shape("funding_rate_aggregated", rows)
+
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            try:
+                ts = _guess_timestamp(row)
+            except (KeyError, ValueError):
+                continue
+            value = extract_value(row, FUNDING_RATE_VALUE_KEYS)
+            if value is None:
+                logger.warning(
+                    "Skipping funding_rate_aggregated row at %s: no numeric value "
+                    "(tried %s; keys=%s)", ts, FUNDING_RATE_VALUE_KEYS,
+                    list(row)[:10],
+                )
+                continue
+            result.append({
+                "timestamp": ts,
+                "metric_name": "funding_rate_aggregated",
+                "metric_value": value,
+            })
+        return result
+
     # ---- B.2 聚合 OI(响应 OHLC,取 close;symbol=BTC 不传 exchange)----
     def fetch_open_interest_history(
         self,
@@ -734,11 +781,12 @@ class CoinglassCollector:
 
         # -------- 衍生品 5 端点 --------
         derivatives_tasks: list[tuple[str, Callable[[], list[dict[str, Any]]]]] = [
-            ("funding_rate",     lambda: self.fetch_funding_rate_history()),
-            ("open_interest",    lambda: self.fetch_open_interest_history()),
-            ("long_short_ratio", lambda: self.fetch_long_short_ratio_history()),
-            ("liquidation",      lambda: self.fetch_liquidation_history()),
-            ("net_position",     lambda: self.fetch_net_position_history()),
+            ("funding_rate",            lambda: self.fetch_funding_rate_history()),
+            ("funding_rate_aggregated", lambda: self.fetch_funding_rate_aggregated()),
+            ("open_interest",           lambda: self.fetch_open_interest_history()),
+            ("long_short_ratio",        lambda: self.fetch_long_short_ratio_history()),
+            ("liquidation",             lambda: self.fetch_liquidation_history()),
+            ("net_position",            lambda: self.fetch_net_position_history()),
         ]
 
         for label, fetcher in derivatives_tasks:

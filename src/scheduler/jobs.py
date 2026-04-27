@@ -195,8 +195,12 @@ def job_data_collection(
                         cg_count += BTCKlinesDAO.upsert_klines(conn, klines)
                 except Exception as inner:
                     logger.warning("coinglass klines.%s failed: %s", tf, inner)
+            # Sprint 2.6-B:补 OI + liquidation,之前漏调导致这两组列长期 NULL
             for fn_name in (
-                "fetch_funding_rate_history", "fetch_long_short_ratio_history",
+                "fetch_funding_rate_history",
+                "fetch_open_interest_history",
+                "fetch_long_short_ratio_history",
+                "fetch_liquidation_history",
             ):
                 try:
                     fn = getattr(cg, fn_name, None)

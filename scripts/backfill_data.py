@@ -129,11 +129,18 @@ def backfill_derivatives(conn, *, days: int, dry_run: bool) -> None:
 
     # 用 1d 粒度,够 180 天
     limit = min(days, 500)
+    # Sprint 2.6-B:补 OI + liquidation,之前漏调导致这两组列长期 NULL
     fetches: dict[str, Callable[[], list[dict[str, Any]]]] = {
         "funding_rate": lambda: coll.fetch_funding_rate_history(
             interval="1d", limit=limit,
         ),
+        "open_interest": lambda: coll.fetch_open_interest_history(
+            interval="1d", limit=limit,
+        ),
         "long_short_ratio": lambda: coll.fetch_long_short_ratio_history(
+            interval="1d", limit=limit,
+        ),
+        "liquidation": lambda: coll.fetch_liquidation_history(
             interval="1d", limit=limit,
         ),
     }

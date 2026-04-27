@@ -41,6 +41,9 @@ def _patch_collectors(
         cg_inst.fetch_klines.return_value = cg_klines or []
         cg_inst.fetch_funding_rate_history.return_value = cg_funding or []
         cg_inst.fetch_long_short_ratio_history.return_value = cg_lsr or []
+        # Sprint 2.6-B:补 OI / liquidation 默认空,防 MagicMock 漏到下游
+        cg_inst.fetch_open_interest_history.return_value = []
+        cg_inst.fetch_liquidation_history.return_value = []
         cg_mock.return_value = cg_inst
 
     gn_mock = MagicMock()
@@ -152,6 +155,8 @@ def test_data_collection_partial_collector_failure_does_not_block_others():
     cg_inst.fetch_klines.side_effect = klines_side_effect
     cg_inst.fetch_funding_rate_history.return_value = []
     cg_inst.fetch_long_short_ratio_history.return_value = []
+    cg_inst.fetch_open_interest_history.return_value = []
+    cg_inst.fetch_liquidation_history.return_value = []
     cg_mock = MagicMock(return_value=cg_inst)
 
     with patch("src.data.collectors.fred.FredCollector") as fred_mock, \

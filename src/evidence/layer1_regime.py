@@ -59,6 +59,12 @@ class Layer1Regime(EvidenceLayerBase):
                 swing_stability="insufficient",
                 transition_indicators={},
                 diagnostics={},
+                # Sprint 2.6-C:数据不足时也保持 schema 一致(下游不报 KeyError)
+                adx_14_1d=None,
+                atr_14_1d=None,
+                atr_percentile_180d=None,
+                tf_alignment={"aligned": False, "direction": "unknown",
+                              "score": None},
             )
 
         # ---- 阈值读取 ----
@@ -320,6 +326,14 @@ class Layer1Regime(EvidenceLayerBase):
                 regime, regime_confidence_raw, swing_stability
             ),
             "diagnostics": diagnostics,
+            # Sprint 2.6-C:把 ADX / ATR / 多周期一致性提到顶层,
+            # 让 factor_card_emitter 不再依赖已删的 _compute_adx_latest 函数。
+            "adx_14_1d": _round_or_none(adx_latest, 2),
+            "atr_14_1d": _round_or_none(atr_latest, 2),
+            "atr_percentile_180d": _round_or_none(atr_pct_latest, 1),
+            "tf_alignment": _build_tf_alignment(
+                ema_arrangement, weekly_macd_direction
+            ),
             "confidence_tier": confidence_tier,
             "health_status": "healthy",
             "computation_method": "rule_based",
@@ -415,6 +429,25 @@ def _ema_arrangement(
     if ema20 < ema50 < ema200:
         return "down"
     return "mixed"
+
+
+def _build_tf_alignment(
+    ema_arrangement: Optional[str],
+    weekly_macd_direction: Optional[str],
+) -> dict[str, Any]:
+    """Sprint 2.6-C:简化的多周期一致性结构,供 factor_card_emitter 用。
+
+    - 4H/1D 用 ema_arrangement(up/down/mixed)
+    - 1W 用 weekly_macd_direction(up/down/neutral)
+    - 都 up → aligned up;都 down → aligned down;其它 → mixed
+    """
+    if ema_arrangement is None or weekly_macd_direction is None:
+        return {"aligned": False, "direction": "unknown", "score": None}
+    if ema_arrangement == "up" and weekly_macd_direction == "up":
+        return {"aligned": True, "direction": "up", "score": 3}
+    if ema_arrangement == "down" and weekly_macd_direction == "down":
+        return {"aligned": True, "direction": "down", "score": 3}
+    return {"aligned": False, "direction": "mixed", "score": 1}
 
 
 def _analyze_swing(

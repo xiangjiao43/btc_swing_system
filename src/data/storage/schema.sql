@@ -184,6 +184,10 @@ CREATE TABLE IF NOT EXISTS derivatives_snapshots (
     funding_rate        REAL,
     open_interest       REAL,
     long_short_ratio    REAL,
+    -- Sprint 2.6-B:加 3 列清算数据(对应 migrations/002_add_liquidation_columns.sql)
+    liquidation_long    REAL,
+    liquidation_short   REAL,
+    liquidation_total   REAL,
     full_data_json      TEXT
 );
 

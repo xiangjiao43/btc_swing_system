@@ -390,6 +390,8 @@ class MacroDAO(_MetricLongTableDAO):
 #  * get_series / get_latest / get_at:把宽表反向展开为长式 dict
 _DERIVATIVES_WIDE_COLUMNS: tuple[str, ...] = (
     "funding_rate", "open_interest", "long_short_ratio",
+    # Sprint 2.6-B:三个 liquidation 列(配 migrations/002_add_liquidation_columns.sql)
+    "liquidation_long", "liquidation_short", "liquidation_total",
 )
 
 _DERIVATIVES_LSR_ALIASES: tuple[str, ...] = (
@@ -422,12 +424,17 @@ class DerivativesDAO:
         sql = """
             INSERT INTO derivatives_snapshots
                 (captured_at_utc, funding_rate, open_interest,
-                 long_short_ratio, full_data_json)
-            VALUES (?, ?, ?, ?, ?)
+                 long_short_ratio,
+                 liquidation_long, liquidation_short, liquidation_total,
+                 full_data_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(captured_at_utc) DO UPDATE SET
                 funding_rate = COALESCE(excluded.funding_rate, derivatives_snapshots.funding_rate),
                 open_interest = COALESCE(excluded.open_interest, derivatives_snapshots.open_interest),
                 long_short_ratio = COALESCE(excluded.long_short_ratio, derivatives_snapshots.long_short_ratio),
+                liquidation_long = COALESCE(excluded.liquidation_long, derivatives_snapshots.liquidation_long),
+                liquidation_short = COALESCE(excluded.liquidation_short, derivatives_snapshots.liquidation_short),
+                liquidation_total = COALESCE(excluded.liquidation_total, derivatives_snapshots.liquidation_total),
                 full_data_json = COALESCE(excluded.full_data_json, derivatives_snapshots.full_data_json)
         """
         values = []
@@ -439,6 +446,9 @@ class DerivativesDAO:
                 b.get("funding_rate"),
                 b.get("open_interest"),
                 b.get("long_short_ratio"),
+                b.get("liquidation_long"),
+                b.get("liquidation_short"),
+                b.get("liquidation_total"),
                 full_data,
             ))
         cur = conn.executemany(sql, values)

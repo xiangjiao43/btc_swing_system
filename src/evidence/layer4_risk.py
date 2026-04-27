@@ -420,6 +420,120 @@ def _compose_position_cap(
     return after_l4_event, comp
 
 
+def apply_l5_ai_loopback(
+    layer_4_output: dict[str, Any],
+    layer_5_output: dict[str, Any],
+) -> dict[str, Any]:
+    """Sprint 2.6-E:L5 AI 落地后回写 L4 position_cap + permission(§4.5.5/§4.5.6)。
+
+    在 §3.2.1 顺序下,L4 先于 L5 跑,所以 L4 用的是 composite.macro_headwind 的
+    规则分数。当 L5 AI 给出更精确的 macro_headwind_score(§6.8)+
+    adjustment_guidance 后,本函数:
+
+    1. 用 L5 AI 的 macro_headwind_score 重算 step 4 multiplier,
+       传播到 step 5 后的 final position_cap
+    2. 重新走 _apply_floor_gate(permission 不变)
+    3. 把 adjustment_guidance.permission_adjustment 应用到 final_permission
+       (tighten/loosen → 上下移一档,clamp 到合法边界)
+    4. 在 position_cap_composition 写 'l5_ai_override_applied: true' 审计
+
+    L5 AI 未启用 / 失败(computation_method != 'ai_assisted')→ 原样返回。
+    """
+    if layer_5_output.get("computation_method") != "ai_assisted":
+        return layer_4_output
+
+    ai_score = layer_5_output.get("macro_headwind_score")
+    if ai_score is None:
+        return layer_4_output
+
+    comp = dict(layer_4_output.get("position_cap_composition") or {})
+    if not comp:
+        return layer_4_output
+
+    # ---- 重算 step 4(× 新的 macro multiplier)----
+    new_macro_mult = _score_to_multiplier(
+        float(ai_score), _MACRO_BANDS, default=1.0,
+    )
+    base_after_l4_crowding = float(comp.get("after_l4_crowding") or 0.0)
+    new_after_l5_macro = base_after_l4_crowding * new_macro_mult
+    comp["l5_macro_headwind_multiplier_pre_ai"] = comp.get(
+        "l5_macro_headwind_multiplier"
+    )
+    comp["l5_macro_headwind_multiplier"] = new_macro_mult
+    comp["macro_headwind_score_used"] = float(ai_score)
+    comp["macro_headwind_score_source"] = "l5_ai"
+    comp["after_l5_macro"] = round(new_after_l5_macro, 4)
+
+    # ---- 重算 step 5(× event_risk multiplier,该值不变)----
+    event_mult = float(comp.get("l4_event_risk_multiplier") or 1.0)
+    new_after_l4_event = new_after_l5_macro * event_mult
+    comp["after_l4_event"] = round(new_after_l4_event, 4)
+    comp["final_before_floor_gate"] = round(new_after_l4_event, 4)
+
+    # ---- 重新走 hard floor gate(用现有 permission)----
+    final_permission = (
+        layer_4_output.get("execution_permission_l4")
+        or layer_4_output.get("final_permission")
+        or "cautious_open"
+    )
+    overall_risk = layer_4_output.get("overall_risk_level") or "moderate"
+    hard_floor = float(comp.get("hard_floor_pct") or 15.0)
+    new_final_pct, comp = _apply_floor_gate(
+        cap_pct=new_after_l4_event,
+        composition=comp,
+        final_permission=final_permission,
+        overall_risk_level=overall_risk,
+        hard_floor_pct=hard_floor,
+    )
+    comp["l5_ai_override_applied"] = True
+
+    # ---- adjustment_guidance.permission_adjustment 应用 ----
+    guidance = layer_5_output.get("adjustment_guidance") or {}
+    perm_adj = guidance.get("permission_adjustment")
+    new_permission = final_permission
+    if perm_adj == "tighten":
+        new_permission = _shift_permission(final_permission, direction="tighter")
+    elif perm_adj == "loosen":
+        new_permission = _shift_permission(final_permission, direction="looser")
+
+    # ---- 写回 layer_4_output(浅拷贝)----
+    out = dict(layer_4_output)
+    out["position_cap_composition"] = comp
+    out["position_cap_pct"] = round(new_final_pct, 4)
+    out["position_cap"] = round(new_final_pct / 100.0, 5)
+    if new_permission != final_permission:
+        out["execution_permission_l4_pre_l5_ai"] = final_permission
+        out["execution_permission_l4"] = new_permission
+        if "final_permission" in out:
+            out["final_permission"] = new_permission
+    return out
+
+
+_PERMISSION_LADDER: tuple[str, ...] = (
+    # 最宽 → 最严
+    "can_open", "cautious_open", "ambush_only", "no_chase",
+    "hold_only", "watch", "protective",
+)
+
+
+def _shift_permission(current: str, *, direction: str) -> str:
+    """direction='tighter' → 阶梯下移一档(更严);'looser' → 上移一档(更宽)。
+
+    边界 clamp。未识别 permission 原样返回。
+    """
+    try:
+        idx = _PERMISSION_LADDER.index(current)
+    except ValueError:
+        return current
+    if direction == "tighter":
+        new_idx = min(idx + 1, len(_PERMISSION_LADDER) - 1)
+    elif direction == "looser":
+        new_idx = max(idx - 1, 0)
+    else:
+        return current
+    return _PERMISSION_LADDER[new_idx]
+
+
 def _apply_floor_gate(
     *,
     cap_pct: float,

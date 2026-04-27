@@ -61,7 +61,7 @@ class Layer5Macro(EvidenceLayerBase):
 
         completeness = round(100.0 * len(available) / len(_ALL_MACRO_METRICS), 1)
 
-        # 全部缺 → unclear
+        # 全部缺 → unclear(同时填 §6.8 schema 占位防下游 KeyError)
         if not available:
             return self._insufficient(
                 "no macro data available",
@@ -72,6 +72,21 @@ class Layer5Macro(EvidenceLayerBase):
                 data_completeness_pct=0.0,
                 metrics_available=[], metrics_missing=list(_ALL_MACRO_METRICS),
                 diagnostics={"reason": "macro dict empty or all series empty"},
+                # Sprint 2.6-E §6.8 schema 占位
+                macro_stance="risk_neutral",
+                macro_trend="stable",
+                structured_macro={},
+                active_macro_tags=[],
+                active_event_summaries=[],
+                extreme_event_detected=False,
+                extreme_event_details=None,
+                adjustment_guidance={
+                    "stance_modifier": "neutral",
+                    "position_cap_multiplier": 1.0,
+                    "permission_adjustment": "neutral",
+                    "note": "no macro data — neutral fallback",
+                },
+                macro_headwind_score=0.0,
             )
 
         # ---- 子项计算 ----
@@ -131,7 +146,7 @@ class Layer5Macro(EvidenceLayerBase):
             "confidence_raw": conf_value,
         }
 
-        return {
+        rule_output: dict[str, Any] = {
             "macro_environment": macro_environment,
             "macro_headwind_vs_btc": headwind,
             "dxy_trend": dxy_trend,
@@ -146,7 +161,105 @@ class Layer5Macro(EvidenceLayerBase):
             "health_status": health,
             "confidence_tier": confidence_tier,
             "computation_method": "rule_based",
+            # Sprint 2.6-E:§6.8 schema 占位(规则路径 → 中性默认)
+            # AI 成功后会被覆盖。
+            "macro_stance": _stance_from_environment(macro_environment),
+            "macro_trend": "stable",
+            "structured_macro": {},
+            "active_macro_tags": [],
+            "active_event_summaries": [],
+            "extreme_event_detected": False,
+            "extreme_event_details": None,
+            "adjustment_guidance": {
+                "stance_modifier": "neutral",
+                "position_cap_multiplier": 1.0,
+                "permission_adjustment": "neutral",
+                "note": "rule_based fallback (AI 未启用或不足以判断)",
+            },
+            # §6.8 实施状态行:过渡期规则路径 macro_headwind_score = 0.0
+            # 等价于"无宏观信号"。AI 启用后会覆盖此值。
+            "macro_headwind_score": 0.0,
         }
+
+        # Sprint 2.6-E:§6.8 AI 接入
+        # data_completeness >= 50% 才调 AI(避免数据稀疏时的伪判断)
+        if completeness >= 50.0:
+            ai_out = _try_call_l5_ai(
+                rule_output, context.get("events_upcoming_48h") or [],
+            )
+            if ai_out is not None:
+                # AI 成功:用 §6.8 schema 字段覆盖规则路径的占位
+                rule_output.update({
+                    "macro_stance": ai_out["macro_stance"],
+                    "macro_trend": ai_out["macro_trend"],
+                    "structured_macro": ai_out["structured_macro"],
+                    "active_macro_tags": ai_out["active_macro_tags"],
+                    "active_event_summaries":
+                        ai_out["active_event_summaries"],
+                    "extreme_event_detected":
+                        ai_out["extreme_event_detected"],
+                    "extreme_event_details": ai_out["extreme_event_details"],
+                    "adjustment_guidance": ai_out["adjustment_guidance"],
+                    "macro_headwind_score": ai_out["macro_headwind_score"],
+                    "computation_method": "ai_assisted",
+                })
+                rule_output["diagnostics"]["l5_ai_meta"] = ai_out.get("_meta")
+                rule_output["notes"].append(
+                    "L5 AI assisted (§6.8); macro_headwind_score from AI"
+                )
+
+        return rule_output
+
+
+def _stance_from_environment(env: Optional[str]) -> str:
+    """规则路径 macro_environment → §6.8 macro_stance 的简单映射(降级用)。"""
+    if env == "risk_off":
+        return "risk_off"
+    if env == "risk_on":
+        return "risk_on"
+    return "risk_neutral"
+
+
+def _try_call_l5_ai(
+    rule_output: dict[str, Any],
+    events_72h: list[dict[str, Any]],
+) -> Optional[dict[str, Any]]:
+    """构造 facts → 调 MacroL5Adjudicator → 返回 §6.8 输出或 None。
+
+    AI 失败/不可用全部返回 None,layer5_macro 退回 rule_output 占位。
+    """
+    try:
+        from ..ai.macro_l5_adjudicator import MacroL5Adjudicator
+        adj = MacroL5Adjudicator()
+        facts = {
+            "data_completeness_pct": rule_output["data_completeness_pct"],
+            "metrics_available": rule_output["metrics_available"],
+            "metrics_missing": rule_output["metrics_missing"],
+            "structured_macro": {
+                "dxy_trend": rule_output["dxy_trend"],
+                "yields_trend": rule_output["yields_trend"],
+                "vix_regime": rule_output["vix_regime"],
+                "btc_nasdaq_correlation":
+                    rule_output["btc_nasdaq_correlation"],
+            },
+            "rule_based_macro_environment":
+                rule_output["macro_environment"],
+            "rule_based_headwind_vs_btc":
+                rule_output["macro_headwind_vs_btc"],
+            "upcoming_events_72h": [
+                {
+                    "name": e.get("name") or e.get("event_name"),
+                    "type": e.get("event_type"),
+                    "hours_to": e.get("hours_to"),
+                    "impact_level": e.get("impact_level"),
+                }
+                for e in events_72h if isinstance(e, dict)
+            ],
+        }
+        return adj.adjudicate(facts)
+    except Exception as e:
+        logger.warning("L5 AI exception (non-fatal): %s", e)
+        return None
 
 
 # ============================================================

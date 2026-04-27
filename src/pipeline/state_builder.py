@@ -421,6 +421,20 @@ class StrategyStateBuilder:
         )
         context["layer_5_output"] = layer_5_output
 
+        # === Stage 13b(Sprint 2.6-E):L5 AI loopback to L4 position_cap ===
+        # §6.8 / §4.5.5 / §4.5.6:L4 先于 L5 跑,所以 L4 用的是 composite 规则分。
+        # L5 AI(若启用且成功)给出更精准的 macro_headwind_score + adjustment_guidance
+        # → 回写 L4 position_cap step 4 + permission(tighten/loosen)。
+        # AI 未启用 / 失败 → 原样返回。
+        try:
+            from ..evidence.layer4_risk import apply_l5_ai_loopback
+            layer_4_output = apply_l5_ai_loopback(
+                layer_4_output, layer_5_output,
+            )
+            context["layer_4_output"] = layer_4_output
+        except Exception as e:
+            logger.warning("L5 AI loopback to L4 failed (non-fatal): %s", e)
+
         # === Stage: Observation Classifier(建模 §4.7,在 L3 之后 / 裁决之前)===
         # 先拼一个半成品 state 供 classifier 读取,真实 state 在后面 _assemble_state
         _pre_state_for_observation = {

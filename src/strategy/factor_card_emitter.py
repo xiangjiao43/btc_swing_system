@@ -279,6 +279,8 @@ def emit_factor_cards(
     composite = strategy_state.get("composite_factors") or {}
     l1 = ((strategy_state.get("evidence_reports") or {}).get("layer_1")) or {}
     events = context.get("events_upcoming_48h") or []
+    # Sprint 2.6-M B2:"下次 X 卡"用不限窗口的 lookup,72h 外的 NFP/CPI 也能显示
+    next_events_by_type = context.get("next_events_by_type") or {}
 
     # ========== 组合因子(6 个,tier=composite)==========
     cards.extend(_emit_composite_cards(composite, today))
@@ -308,7 +310,8 @@ def emit_factor_cards(
     cards.extend(_emit_macro_reference(macro, today, klines_1d=klines_1d))
 
     # ========== 事件日历(reference)==========
-    cards.extend(_emit_events_reference(events, today))
+    cards.extend(_emit_events_reference(events, today,
+                                        next_by_type=next_events_by_type))
 
     # Sprint 2.6-J:per-metric inserted_at_utc 回填 fetched_at_bjt(秒级精度)
     _stamp_fetched_at(cards, context.get("metric_inserted_at") or {}, today)
@@ -1611,25 +1614,37 @@ def _compute_corr_60d(
 # 事件 reference
 # ============================================================
 
-def _emit_events_reference(events: list[Any], today: str) -> list[dict[str, Any]]:
+def _emit_events_reference(
+    events: list[Any], today: str,
+    *,
+    next_by_type: Optional[dict[str, Any]] = None,
+) -> list[dict[str, Any]]:
+    """
+    Sprint 2.6-M B2:`next_by_type` 是不限窗口的 {type: row} 映射。
+    若提供,优先用它(72h 外的 CPI/NFP 也能显示);否则退回从 events(72h 内)取。
+    """
     cards: list[dict[str, Any]] = []
-    # 按类型找最近一个
     target_types = ("fomc", "cpi", "nfp")
     type_labels = {"fomc": "FOMC 利率决议", "cpi": "CPI 通胀数据", "nfp": "非农就业数据"}
-    seen: dict[str, dict[str, Any]] = {}
+    next_by_type = next_by_type or {}
+
+    # 兜底:若 next_by_type 未提供,从 events(72h 内)取每类首个
+    fallback_seen: dict[str, dict[str, Any]] = {}
     for ev in events or []:
         if not isinstance(ev, dict):
             continue
         t = (ev.get("event_type") or "").lower()
-        if t in target_types and t not in seen:
-            seen[t] = ev
+        if t in target_types and t not in fallback_seen:
+            fallback_seen[t] = ev
+
     event_descriptions = {
         "fomc": "📍 FOMC = 美联储议息会议,决定基准利率。是月度级别最重要的宏观事件之一,常引发风险资产剧烈波动。",
         "cpi": "📍 CPI = 美国消费者物价指数,衡量通胀。CPI 数据会直接影响美联储加息预期和市场风险情绪。",
         "nfp": "📍 NFP = 美国非农就业数据(每月第一个周五公布)。反映美国就业市场强弱,影响美联储政策预期。",
     }
     for t in target_types:
-        ev = seen.get(t)
+        # 优先用不限窗口的 lookup
+        ev = next_by_type.get(t) or fallback_seen.get(t)
         label = type_labels[t]
         hours_to = ev.get("hours_to") if ev else None
         cards.append(_make_card(

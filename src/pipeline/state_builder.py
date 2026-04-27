@@ -647,6 +647,10 @@ class StrategyStateBuilder:
 
         events = EventsCalendarDAO.get_upcoming_within_hours(
             conn, hours=self.events_window_hours, now_utc=now_utc)
+        # Sprint 2.6-M B2:不限时间窗口,取每类事件最近的 1 个(供 emitter
+        # "下次 X 卡"展示。EventRisk composite 仍用 events_upcoming_48h 的 72h 窗口)
+        next_events_by_type = EventsCalendarDAO.get_next_events_by_type(
+            conn, event_types=["fomc", "cpi", "nfp"], now_utc=now_utc)
 
         # Sprint 2.6-J:per-metric 系统侧写入时间。Sprint 2.6-G 的 data_fetch_log
         # group 级精度被废弃,改成按 metric 聚合。
@@ -679,6 +683,7 @@ class StrategyStateBuilder:
             "klines_1d": klines_1d, "klines_1w": klines_1w,
             "derivatives": derivatives, "onchain": onchain, "macro": macro,
             "events_upcoming_48h": events,
+            "next_events_by_type": next_events_by_type,
             "metric_inserted_at": metric_inserted_at,
         }
 

@@ -774,6 +774,61 @@ class EventsCalendarDAO:
         return _row_to_dict(row)
 
     @staticmethod
+    def get_next_events_by_type(
+        conn: sqlite3.Connection,
+        event_types: list[str],
+        now_utc: Optional[str] = None,
+    ) -> dict[str, Optional[dict[str, Any]]]:
+        """Sprint 2.6-M B2:返回每个 event_type 之后最近的 1 个事件,**不限距离**。
+
+        与 get_upcoming_within_hours 区别:那个只取 N 小时内,本方法不做时间窗口
+        过滤,用于"下次 X 卡"展示(用户想看下一个 FOMC,即便 30 天后也要显示)。
+
+        每条结果附加 'hours_to' 字段(相对 now 的小时数)。
+        Returns {event_type: row_dict | None}。
+        """
+        from datetime import datetime, timezone
+        if now_utc is None:
+            now_dt = datetime.now(timezone.utc)
+        else:
+            s = now_utc.replace("Z", "+00:00")
+            now_dt = datetime.fromisoformat(s)
+            if now_dt.tzinfo is None:
+                now_dt = now_dt.replace(tzinfo=timezone.utc)
+        now_str = now_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        out: dict[str, Optional[dict[str, Any]]] = {t: None for t in event_types}
+        for t in event_types:
+            row = conn.execute(
+                "SELECT * FROM events_calendar "
+                "WHERE event_type = ? "
+                "  AND utc_trigger_time IS NOT NULL "
+                "  AND utc_trigger_time > ? "
+                "ORDER BY utc_trigger_time ASC LIMIT 1",
+                (t, now_str),
+            ).fetchone()
+            if row is None:
+                continue
+            d = dict(row)
+            try:
+                trig = d.get("utc_trigger_time")
+                if trig:
+                    s2 = trig.replace("Z", "+00:00")
+                    t_dt = datetime.fromisoformat(s2)
+                    if t_dt.tzinfo is None:
+                        t_dt = t_dt.replace(tzinfo=timezone.utc)
+                    d["hours_to"] = (t_dt - now_dt).total_seconds() / 3600.0
+                else:
+                    d["hours_to"] = None
+            except Exception:
+                d["hours_to"] = None
+            # event_risk.py 期待 'name' 字段(同 Sprint 2.6-D fix)
+            if "name" not in d and "event_name" in d:
+                d["name"] = d["event_name"]
+            out[t] = d
+        return out
+
+    @staticmethod
     def get_upcoming_within_hours(
         conn: sqlite3.Connection,
         hours: float = 48,

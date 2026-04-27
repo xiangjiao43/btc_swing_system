@@ -1,0 +1,120 @@
+{
+  "_meta": {
+    "version": "2026-04-27",
+    "source": "Manual seed from federalreserve.gov + bls.gov",
+    "next_review_date": "2027-01-15",
+    "notes": "FOMC dates published yearly by Fed; NFP=first Friday; CPI=mid-month. DST: EDT (UTC-4) for Apr-early Nov; EST (UTC-5) for Nov-early Mar."
+  },
+  "events": [
+    {
+      "event_id": "fomc_2026_01_28",
+      "date": "2026-01-28",
+      "timezone": "America/New_York",
+      "local_time": "14:00",
+      "utc_trigger_time": "2026-01-28T19:00:00Z",
+      "event_type": "fomc",
+      "event_name": "FOMC Rate Decision (Jan 27-28)",
+      "impact_level": 5,
+      "notes": "Statement at 14:00 ET, press conference 14:30 ET"
+    },
+    {
+      "event_id": "fomc_2026_03_18",
+      "date": "2026-03-18",
+      "timezone": "America/New_York",
+      "local_time": "14:00",
+      "utc_trigger_time": "2026-03-18T18:00:00Z",
+      "event_type": "fomc",
+      "event_name": "FOMC Rate Decision + SEP (Mar 17-18)",
+      "impact_level": 5,
+      "notes": "Includes Summary of Economic Projections + dot plot"
+    },
+    {
+      "event_id": "fomc_2026_04_29",
+      "date": "2026-04-29",
+      "timezone": "America/New_York",
+      "local_time": "14:00",
+      "utc_trigger_time": "2026-04-29T18:00:00Z",
+      "event_type": "fomc",
+      "event_name": "FOMC Rate Decision (Apr 28-29)",
+      "impact_level": 5,
+      "notes": "No SEP this meeting"
+    },
+    {
+      "event_id": "fomc_2026_06_17",
+      "date": "2026-06-17",
+      "timezone": "America/New_York",
+      "local_time": "14:00",
+      "utc_trigger_time": "2026-06-17T18:00:00Z",
+      "event_type": "fomc",
+      "event_name": "FOMC Rate Decision + SEP (Jun 16-17)",
+      "impact_level": 5,
+      "notes": "Includes Summary of Economic Projections + dot plot"
+    },
+    {
+      "event_id": "fomc_2026_07_29",
+      "date": "2026-07-29",
+      "timezone": "America/New_York",
+      "local_time": "14:00",
+      "utc_trigger_time": "2026-07-29T18:00:00Z",
+      "event_type": "fomc",
+      "event_name": "FOMC Rate Decision (Jul 28-29)",
+      "impact_level": 5,
+      "notes": "No SEP this meeting"
+    },
+    {
+      "event_id": "fomc_2026_09_16",
+      "date": "2026-09-16",
+      "timezone": "America/New_York",
+      "local_time": "14:00",
+      "utc_trigger_time": "2026-09-16T18:00:00Z",
+      "event_type": "fomc",
+      "event_name": "FOMC Rate Decision + SEP (Sept 15-16)",
+      "impact_level": 5,
+      "notes": "Includes Summary of Economic Projections + dot plot"
+    },
+    {
+      "event_id": "fomc_2026_10_28",
+      "date": "2026-10-28",
+      "timezone": "America/New_York",
+      "local_time": "14:00",
+      "utc_trigger_time": "2026-10-28T18:00:00Z",
+      "event_type": "fomc",
+      "event_name": "FOMC Rate Decision (Oct 27-28)",
+      "impact_level": 5,
+      "notes": "No SEP this meeting"
+    },
+    {
+      "event_id": "fomc_2026_12_09",
+      "date": "2026-12-09",
+      "timezone": "America/New_York",
+      "local_time": "14:00",
+      "utc_trigger_time": "2026-12-09T19:00:00Z",
+      "event_type": "fomc",
+      "event_name": "FOMC Rate Decision + SEP (Dec 8-9)",
+      "impact_level": 5,
+      "notes": "Includes Summary of Economic Projections + dot plot. EST winter time."
+    },
+    {
+      "event_id": "nfp_2026_05_01",
+      "date": "2026-05-01",
+      "timezone": "America/New_York",
+      "local_time": "08:30",
+      "utc_trigger_time": "2026-05-01T12:30:00Z",
+      "event_type": "nfp",
+      "event_name": "Non-Farm Payrolls (April data)",
+      "impact_level": 4,
+      "notes": "First Friday of May, releases April employment data"
+    },
+    {
+      "event_id": "cpi_2026_05_13",
+      "date": "2026-05-13",
+      "timezone": "America/New_York",
+      "local_time": "08:30",
+      "utc_trigger_time": "2026-05-13T12:30:00Z",
+      "event_type": "cpi",
+      "event_name": "CPI Release (April data)",
+      "impact_level": 4,
+      "notes": "Mid-month, releases April inflation data"
+    }
+  ]
+}

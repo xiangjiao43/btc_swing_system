@@ -97,6 +97,24 @@ def create_app(
     app.include_router(data_routes.router, prefix="/api")
     app.include_router(alerts_routes.router, prefix="/api")
 
+    # Sprint 2.6-D.1:events_calendar 在 FastAPI startup 时 seed
+    # (systemd 跑的是 uvicorn → src.api.app:app,不会走 scheduler/main.run_forever)
+    @app.on_event("startup")
+    def _seed_events_on_startup_api() -> None:
+        try:
+            from ..data.collectors.events_seeder import seed_events
+            from ..data.storage.connection import get_connection
+            conn = get_connection()
+            try:
+                stats = seed_events(conn)
+                logger.info("[Events] seeded on FastAPI startup: %s", stats)
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.warning(
+                "[Events] seed on startup failed (non-fatal): %s", e,
+            )
+
     # Sprint 2.4:APScheduler 嵌入 lifecycle
     # 只在 SCHEDULER_ENABLED(默认 true)时启动;shutdown 时优雅停止。
     @app.on_event("startup")

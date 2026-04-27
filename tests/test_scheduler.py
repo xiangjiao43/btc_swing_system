@@ -202,3 +202,42 @@ def test_invalid_interval_raises():
     }
     with pytest.raises(JobConfigError):
         build_job_configs(cfg)
+
+
+# ==================================================================
+# 8. Sprint 2.6-D: events seed startup hook never crashes
+# ==================================================================
+
+def test_seed_events_on_startup_swallows_exceptions(monkeypatch):
+    """startup hook 失败也不能让 scheduler 起不来 — 异常必须被吞掉。"""
+    from src.scheduler import main as sched_main
+
+    def boom():
+        raise RuntimeError("DB unavailable")
+    monkeypatch.setattr(
+        "src.data.storage.connection.get_connection", boom,
+    )
+    sched_main._seed_events_on_startup()  # 不应抛
+
+
+def test_seed_events_on_startup_calls_seeder(monkeypatch):
+    """正常路径:get_connection() 拿到 conn → seed_events(conn) 被调到。"""
+    from src.scheduler import main as sched_main
+
+    fake_conn = MagicMock()
+    monkeypatch.setattr(
+        "src.data.storage.connection.get_connection", lambda: fake_conn,
+    )
+    seed_calls: list = []
+
+    def fake_seed(conn):
+        seed_calls.append(conn)
+        return {"valid": 10, "skipped": 0, "total_rows_affected": 10}
+    monkeypatch.setattr(
+        "src.data.collectors.events_seeder.seed_events", fake_seed,
+    )
+
+    sched_main._seed_events_on_startup()
+    assert len(seed_calls) == 1
+    assert seed_calls[0] is fake_conn
+    fake_conn.close.assert_called_once()

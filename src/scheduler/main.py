@@ -74,8 +74,28 @@ def build_scheduler(
     return scheduler
 
 
+def _seed_events_on_startup() -> None:
+    """Sprint 2.6-D:启动时一次性把 events_calendar seed 进 DB。
+
+    seed 文件年级别更新一次,放 build_scheduler() 之外避免影响单测。
+    任何错误都吞掉(scheduler 启动不能因为 seed 失败而 crash)。
+    """
+    try:
+        from ..data.collectors.events_seeder import seed_events
+        from ..data.storage.connection import get_connection
+        conn = get_connection()
+        try:
+            stats = seed_events(conn)
+            logger.info("events_calendar seeded on startup: %s", stats)
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning("events seed on startup failed (non-fatal): %s", e)
+
+
 def run_forever(*, config_path: Optional[str] = None) -> None:
     """用 BlockingScheduler 挂住主线程直到 Ctrl+C。"""
+    _seed_events_on_startup()
     scheduler = build_scheduler(config_path=config_path, blocking=True)
     try:
         scheduler.start()

@@ -29,8 +29,18 @@ from typing import Any, Iterable, Literal, Optional
 # ============================================================
 
 def _utc_now_iso() -> str:
-    """当前 UTC 时间的 ISO 8601 字符串(Z 后缀)。"""
+    """当前 UTC 时间的 ISO 8601 字符串(Z 后缀,秒级)。"""
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _utc_now_iso_ms() -> str:
+    """Sprint 2.6-J:微秒精度的当前 UTC 时间字符串。
+
+    用于 dataclass.fetched_at 默认值,持久化到 *_metrics 表的 inserted_at_utc 列。
+    同一个 collector 一秒内 fetch 多个 metric 时,微秒能区分写入次序。
+    格式:'2026-04-27T14:06:23.456789Z'
+    """
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
 def _row_to_dict(row: Optional[sqlite3.Row]) -> Optional[dict[str, Any]]:
@@ -66,7 +76,7 @@ class KlineRow:
     close: float
     volume_btc: float
     volume_usdt: Optional[float] = None
-    fetched_at: str = field(default_factory=_utc_now_iso)
+    fetched_at: str = field(default_factory=_utc_now_iso_ms)
 
 
 @dataclass(slots=True)
@@ -74,7 +84,7 @@ class DerivativeMetric:
     timestamp: str
     metric_name: str
     metric_value: Optional[float]
-    fetched_at: str = field(default_factory=_utc_now_iso)
+    fetched_at: str = field(default_factory=_utc_now_iso_ms)
 
 
 @dataclass(slots=True)
@@ -83,7 +93,7 @@ class OnchainMetric:
     metric_name: str
     metric_value: Optional[float]
     source: OnchainSource
-    fetched_at: str = field(default_factory=_utc_now_iso)
+    fetched_at: str = field(default_factory=_utc_now_iso_ms)
 
 
 @dataclass(slots=True)
@@ -92,7 +102,7 @@ class MacroMetric:
     metric_name: str
     metric_value: Optional[float]
     source: MacroSource
-    fetched_at: str = field(default_factory=_utc_now_iso)
+    fetched_at: str = field(default_factory=_utc_now_iso_ms)
 
 
 @dataclass(slots=True)
@@ -126,20 +136,25 @@ class BTCKlinesDAO:
 
     @staticmethod
     def upsert_klines(conn: sqlite3.Connection, klines: list[KlineRow]) -> int:
+        # Sprint 2.6-J:把 dataclass.fetched_at(微秒精度系统侧 wall clock)
+        # 写入 inserted_at_utc 列。ON CONFLICT 也更新,反映"最近一次 upsert"。
         sql = """
             INSERT INTO price_candles
-                (symbol, timeframe, open_time_utc, open, high, low, close, volume)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                (symbol, timeframe, open_time_utc, open, high, low, close, volume,
+                 inserted_at_utc)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(symbol, timeframe, open_time_utc) DO UPDATE SET
                 open = excluded.open,
                 high = excluded.high,
                 low = excluded.low,
                 close = excluded.close,
-                volume = excluded.volume
+                volume = excluded.volume,
+                inserted_at_utc = excluded.inserted_at_utc
         """
         rows = [
             (_DEFAULT_SYMBOL, k.timeframe, k.timestamp,
-             k.open, k.high, k.low, k.close, k.volume_btc)
+             k.open, k.high, k.low, k.close, k.volume_btc,
+             k.fetched_at)
             for k in klines
         ]
         cur = conn.executemany(sql, rows)
@@ -212,6 +227,32 @@ class BTCKlinesDAO:
         return int(row["n"])
 
     @staticmethod
+    def get_latest_inserted_at_by_timeframe(
+        conn: sqlite3.Connection,
+    ) -> dict[str, Optional[str]]:
+        """Sprint 2.6-J:每个 timeframe 最新 bar 的 inserted_at_utc。
+
+        Returns {timeframe: inserted_at_utc | None}。
+        """
+        rows = conn.execute(
+            """
+            SELECT pc.timeframe, pc.inserted_at_utc
+              FROM price_candles pc
+             INNER JOIN (
+                SELECT timeframe, MAX(open_time_utc) AS max_t
+                  FROM price_candles
+                 WHERE symbol = ?
+                 GROUP BY timeframe
+             ) latest
+                ON latest.timeframe = pc.timeframe
+               AND latest.max_t     = pc.open_time_utc
+             WHERE pc.symbol = ?
+            """,
+            (_DEFAULT_SYMBOL, _DEFAULT_SYMBOL),
+        ).fetchall()
+        return {r["timeframe"]: r["inserted_at_utc"] for r in rows}
+
+    @staticmethod
     def get_recent_as_df(
         conn: sqlite3.Connection,
         timeframe: TimeFrame,
@@ -252,31 +293,37 @@ class _MetricLongTableDAO:
 
     @classmethod
     def upsert_batch(cls, conn: sqlite3.Connection, rows: list[Any]) -> int:
-        # 新 schema:(metric_name, captured_at_utc, value, source)
+        # 新 schema:(metric_name, captured_at_utc, value, source, inserted_at_utc)
+        # Sprint 2.6-J:写 inserted_at_utc(从 dataclass.fetched_at 取);
+        # ON CONFLICT 时 UPDATE 也覆盖,反映最近一次系统侧写入时刻。
         if cls._has_source:
             sql = f"""
                 INSERT INTO {cls._table}
-                    (metric_name, captured_at_utc, value, source)
-                VALUES (?, ?, ?, ?)
+                    (metric_name, captured_at_utc, value, source, inserted_at_utc)
+                VALUES (?, ?, ?, ?, ?)
                 ON CONFLICT(metric_name, captured_at_utc) DO UPDATE SET
                     value = excluded.value,
-                    source = excluded.source
+                    source = excluded.source,
+                    inserted_at_utc = excluded.inserted_at_utc
             """
             values = [
                 (r.metric_name, r.timestamp, r.metric_value,
-                 getattr(r, "source", cls._default_source))
+                 getattr(r, "source", cls._default_source),
+                 getattr(r, "fetched_at", None))
                 for r in rows
             ]
         else:
             sql = f"""
                 INSERT INTO {cls._table}
-                    (metric_name, captured_at_utc, value)
-                VALUES (?, ?, ?)
+                    (metric_name, captured_at_utc, value, inserted_at_utc)
+                VALUES (?, ?, ?, ?)
                 ON CONFLICT(metric_name, captured_at_utc) DO UPDATE SET
-                    value = excluded.value
+                    value = excluded.value,
+                    inserted_at_utc = excluded.inserted_at_utc
             """
             values = [
-                (r.metric_name, r.timestamp, r.metric_value)
+                (r.metric_name, r.timestamp, r.metric_value,
+                 getattr(r, "fetched_at", None))
                 for r in rows
             ]
         cur = conn.executemany(sql, values)
@@ -335,6 +382,29 @@ class _MetricLongTableDAO:
         )
         rows = conn.execute(sql, params).fetchall()
         return [cls._map_row(dict(r)) for r in rows]
+
+    @classmethod
+    def get_metric_inserted_at_map(
+        cls, conn: sqlite3.Connection,
+    ) -> dict[str, Optional[str]]:
+        """Sprint 2.6-J:每个 metric_name 最近一行的 inserted_at_utc。
+
+        Returns {metric_name: inserted_at_utc | None},legacy NULL 行返回 None。
+        """
+        rows = conn.execute(
+            f"""
+            SELECT m.metric_name, m.inserted_at_utc
+              FROM {cls._table} m
+             INNER JOIN (
+                SELECT metric_name, MAX(captured_at_utc) AS max_ts
+                  FROM {cls._table}
+                 GROUP BY metric_name
+             ) latest
+                ON latest.metric_name = m.metric_name
+               AND latest.max_ts      = m.captured_at_utc
+            """
+        ).fetchall()
+        return {r["metric_name"]: r["inserted_at_utc"] for r in rows}
 
     @classmethod
     def get_distinct_metric_names(
@@ -404,7 +474,11 @@ class DerivativesDAO:
 
     @staticmethod
     def upsert_batch(conn: sqlite3.Connection, rows: list[Any]) -> int:
-        """把 DerivativeMetric 长式行聚合成宽表 upsert。"""
+        """把 DerivativeMetric 长式行聚合成宽表 upsert。
+
+        Sprint 2.6-J:wide 表共享 1 个 inserted_at_utc(snapshot 级精度),
+        取每个 ts 桶内 max(fetched_at) — 该 ts 最近一次写入时刻。
+        """
         # 按 timestamp 分桶
         buckets: dict[str, dict[str, Any]] = {}
         for r in rows:
@@ -420,20 +494,21 @@ class DerivativesDAO:
                 b[name] = val
             else:
                 b.setdefault("_extras", {})[name] = val
+            # snapshot 级 inserted_at_utc:取桶内最新 fetched_at
+            existing_fa = b.get("_inserted_at_utc")
+            cand = getattr(r, "fetched_at", None)
+            if cand and (existing_fa is None or cand > existing_fa):
+                b["_inserted_at_utc"] = cand
 
         # Sprint 2.6-F.4:full_data_json 必须 MERGE 而非 COALESCE。
-        # 此前用 COALESCE(excluded.full_data_json, existing.full_data_json),
-        # 当多个批次都写 extras(例如 batch A 写 funding_rate_aggregated,
-        # batch B 写 long_short_ratio_top alias)→ 后者会**覆盖**前者,
-        # 表现为生产端 derivatives_snapshots 看不到 funding_rate_aggregated。
-        # 用 json_patch(existing, new) 实现键级合并。NULL 用 '{}' 兜底。
+        # Sprint 2.6-J:inserted_at_utc 同样 MERGE — ON CONFLICT 时取 max。
         sql = """
             INSERT INTO derivatives_snapshots
                 (captured_at_utc, funding_rate, open_interest,
                  long_short_ratio,
                  liquidation_long, liquidation_short, liquidation_total,
-                 full_data_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                 full_data_json, inserted_at_utc)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(captured_at_utc) DO UPDATE SET
                 funding_rate = COALESCE(excluded.funding_rate, derivatives_snapshots.funding_rate),
                 open_interest = COALESCE(excluded.open_interest, derivatives_snapshots.open_interest),
@@ -444,6 +519,10 @@ class DerivativesDAO:
                 full_data_json = json_patch(
                     COALESCE(derivatives_snapshots.full_data_json, '{}'),
                     COALESCE(excluded.full_data_json, '{}')
+                ),
+                inserted_at_utc = MAX(
+                    COALESCE(excluded.inserted_at_utc, ''),
+                    COALESCE(derivatives_snapshots.inserted_at_utc, '')
                 )
         """
         values = []
@@ -459,9 +538,25 @@ class DerivativesDAO:
                 b.get("liquidation_short"),
                 b.get("liquidation_total"),
                 full_data,
+                b.get("_inserted_at_utc"),
             ))
         cur = conn.executemany(sql, values)
         return cur.rowcount
+
+    @staticmethod
+    def get_latest_snapshot_inserted_at(
+        conn: sqlite3.Connection,
+    ) -> Optional[str]:
+        """Sprint 2.6-J:最近 snapshot 的 inserted_at_utc(wide 表 snapshot 级精度)。
+
+        emitter 渲染 derivatives 卡时统一用这一个时间戳(funding/OI/LSR
+        因 wide 表共享 1 行,无法 per-metric 区分,这是 schema 固有限制)。
+        """
+        row = conn.execute(
+            "SELECT inserted_at_utc FROM derivatives_snapshots "
+            "ORDER BY captured_at_utc DESC LIMIT 1"
+        ).fetchone()
+        return row["inserted_at_utc"] if row else None
 
     @staticmethod
     def _explode_row(row: dict[str, Any]) -> list[dict[str, Any]]:

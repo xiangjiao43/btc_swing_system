@@ -193,7 +193,10 @@ def backfill_onchain(conn, *, days: int, dry_run: bool) -> None:
         "mvrv": lambda: coll.fetch_mvrv(since_days=days),
         "realized_price": lambda: coll.fetch_realized_price(since_days=days),
         # Sprint 2.6-F.1: + sopr_adjusted (aSOPR)
-        # Sprint 2.6-F.3: lth/sth_realized_price 已删(Glassnode 404)
+        # Sprint 2.6-F.3: lth/sth_realized_price 删除(Glassnode 404)
+        # Sprint 2.6-I: 重新接入 — 通过 /breakdowns/* 客户端聚合
+        "lth_realized_price": lambda: coll.fetch_lth_realized_price(since_days=days),
+        "sth_realized_price": lambda: coll.fetch_sth_realized_price(since_days=days),
         "sopr": lambda: coll.fetch_sopr(since_days=days),
         "sopr_adjusted": lambda: coll.fetch_sopr_adjusted(since_days=days),
         "reserve_risk": lambda: coll.fetch_reserve_risk(since_days=days),

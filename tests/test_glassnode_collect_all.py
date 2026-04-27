@@ -20,9 +20,11 @@ _EXPECTED_METRICS: set[str] = {
     "lth_supply",
     "exchange_net_flow",
     "btc_price_close",
-    # Display 6 (Sprint 2.6-F.3: lth/sth_realized_price 已删,Glassnode 404)
+    # Display 8 (Sprint 2.6-I:lth/sth_realized_price 通过 /breakdowns/* 聚合恢复)
     "mvrv",
     "realized_price",
+    "lth_realized_price",
+    "sth_realized_price",
     "sopr",
     "sopr_adjusted",  # = aSOPR (adjusted SOPR)
     "reserve_risk",
@@ -31,10 +33,10 @@ _EXPECTED_METRICS: set[str] = {
 
 
 def test_collect_and_save_all_registers_all_expected_metrics():
-    """source-level guard:11 个 metric 标签都出现在 collect_and_save_all 函数体里。
+    """source-level guard:13 个 metric 标签都出现在 collect_and_save_all 函数体里。
 
     用 inspect.getsource 读源码,避免真调用 (那会发 HTTP request)。
-    Sprint 2.6-F.3:13 → 11(lth/sth_realized_price 已删,Glassnode 404)。
+    Sprint 2.6-I:lth/sth_realized_price 通过 /breakdowns/* 客户端聚合恢复。
     """
     src = inspect.getsource(GlassnodeCollector.collect_and_save_all)
     missing = sorted(m for m in _EXPECTED_METRICS if f'"{m}"' not in src)
@@ -44,10 +46,13 @@ def test_collect_and_save_all_registers_all_expected_metrics():
     )
 
 
-def test_glassnode_lth_sth_realized_price_methods_removed():
-    """Sprint 2.6-F.3 §X:这 2 个方法/路径必须不存在(Glassnode 404,不留死码)。"""
-    assert not hasattr(GlassnodeCollector, "fetch_lth_realized_price")
-    assert not hasattr(GlassnodeCollector, "fetch_sth_realized_price")
+def test_glassnode_has_lth_sth_realized_price_methods():
+    """Sprint 2.6-I:fetch_lth/sth_realized_price 通过 breakdowns 聚合实现。"""
+    assert hasattr(GlassnodeCollector, "fetch_lth_realized_price")
+    assert hasattr(GlassnodeCollector, "fetch_sth_realized_price")
+    assert hasattr(GlassnodeCollector, "_PATH_PRICE_REALIZED_BY_AGE")
+    assert hasattr(GlassnodeCollector, "_PATH_SUPPLY_BY_AGE")
+    # 老的独立 endpoint(F.3 删除)不应再回来
     assert not hasattr(GlassnodeCollector, "_PATH_LTH_REALIZED_PRICE")
     assert not hasattr(GlassnodeCollector, "_PATH_STH_REALIZED_PRICE")
 

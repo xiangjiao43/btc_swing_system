@@ -78,6 +78,20 @@ class GlassnodeCollector:
     _PATH_RESERVE_RISK       = f"{_BASE_PATH}/indicators/reserve_risk"
     _PATH_PUELL              = f"{_BASE_PATH}/indicators/puell_multiple"
 
+    # Sprint 2.6-I:LTH/STH realized price 通过 breakdowns 客户端聚合得出
+    # (Glassnode 不开放独立的 lth_realized_price / sth_realized_price endpoint,
+    #  但 alphanode 中转支持 Tier 3 的 /breakdowns/* 系列,我们用按年龄分桶的
+    #  realized_price + supply 做加权平均)
+    _PATH_PRICE_REALIZED_BY_AGE  = f"{_BASE_PATH}/breakdowns/price_realized_usd_by_age"
+    _PATH_SUPPLY_BY_AGE          = f"{_BASE_PATH}/breakdowns/supply_by_age"
+
+    # 155 天切分(行业惯例 LTH/STH 阈值)。
+    # 3m_6m 桶包含 90-180 天,桶中点 135 天 < 155 天 → 归 STH(简化处理)
+    _STH_BUCKETS: tuple[str, ...] = ("24h", "1d_1w", "1w_1m", "1m_3m", "3m_6m")
+    _LTH_BUCKETS: tuple[str, ...] = (
+        "6m_12m", "1y_2y", "2y_3y", "3y_5y", "5y_7y", "7y_10y", "more_10y",
+    )
+
     def __init__(self) -> None:
         cfg = load_source_config("glassnode")
         if not cfg["enabled"]:
@@ -276,6 +290,135 @@ class GlassnodeCollector:
         return result
 
     # ==================================================================
+    # Sprint 2.6-I:LTH/STH realized price 客户端聚合
+    # ==================================================================
+
+    def _fetch_breakdown_by_age(
+        self,
+        path: str,
+        label: str,
+        *,
+        interval: str = "24h",
+        since_days: Optional[int] = 180,
+    ) -> list[dict[str, Any]]:
+        """抓 /breakdowns/* 端点(返回 row.o = {bucket: value} dict)。
+
+        Returns list[{timestamp, buckets: dict[bucket→float]}]。
+        """
+        params: dict[str, Any] = {"a": "BTC", "i": interval}
+        if since_days and since_days > 0:
+            params["s"] = since_days_ago_unix(since_days, unit="s")
+        body = self._request("GET", path, params=params)
+        rows = self._unwrap_data(body)
+        self._log_response_shape(label, rows)
+
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            t_raw = row.get("t")
+            if t_raw is None:
+                continue
+            try:
+                ts = to_iso_utc(t_raw, unit="s")
+            except (TypeError, ValueError):
+                continue
+            buckets = row.get("o")
+            if not isinstance(buckets, dict):
+                continue
+            out.append({"timestamp": ts, "buckets": buckets})
+        return out
+
+    @classmethod
+    def _aggregate_lth_sth_realized_price(
+        cls,
+        price_by_age: list[dict[str, Any]],
+        supply_by_age: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """按 supply 加权聚合 → (lth_rows, sth_rows)。
+
+        每个时间点公式:
+            X_realized_price = Σ(price_bucket × supply_bucket) / Σ(supply_bucket)
+            X ∈ {LTH, STH}, bucket ∈ 各自定义的桶集合
+
+        缺数据(任一 bucket 的 price 或 supply 缺)→ 该 bucket 跳过,不影响其他 bucket。
+        denom 为 0(全 bucket 缺数据)→ 该时间点跳过。
+        """
+        price_by_ts = {r["timestamp"]: r["buckets"] for r in price_by_age}
+        supply_by_ts = {r["timestamp"]: r["buckets"] for r in supply_by_age}
+        common_ts = sorted(set(price_by_ts) & set(supply_by_ts))
+
+        lth_rows: list[dict[str, Any]] = []
+        sth_rows: list[dict[str, Any]] = []
+        for ts in common_ts:
+            prices = price_by_ts[ts]
+            supplies = supply_by_ts[ts]
+            for label, bucket_set, out in (
+                ("lth_realized_price", cls._LTH_BUCKETS, lth_rows),
+                ("sth_realized_price", cls._STH_BUCKETS, sth_rows),
+            ):
+                num = 0.0
+                denom = 0.0
+                for b in bucket_set:
+                    p = safe_float(prices.get(b))
+                    s = safe_float(supplies.get(b))
+                    if p is None or s is None or s <= 0:
+                        continue
+                    num += p * s
+                    denom += s
+                if denom > 0:
+                    out.append({
+                        "timestamp": ts,
+                        "metric_name": label,
+                        "metric_value": num / denom,
+                        "source": "glassnode_derived_breakdown_by_age",
+                    })
+        return lth_rows, sth_rows
+
+    def _fetch_lth_sth_realized_price(
+        self, since_days: int = 180,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """单次拉两个 breakdown + 聚合。供 fetch_lth_realized_price /
+        fetch_sth_realized_price 共用,避免重复 HTTP。
+
+        实例级缓存键 (since_days,) — 同一次 collect_and_save_all 内两次调用只 1 组 HTTP。
+        """
+        cache = getattr(self, "_lth_sth_cache", None)
+        if cache is None:
+            cache = {}
+            self._lth_sth_cache = cache  # type: ignore[attr-defined]
+        key = ("lth_sth", int(since_days))
+        if key in cache:
+            return cache[key]
+        price_data = self._fetch_breakdown_by_age(
+            self._PATH_PRICE_REALIZED_BY_AGE,
+            "price_realized_usd_by_age",
+            since_days=since_days,
+        )
+        supply_data = self._fetch_breakdown_by_age(
+            self._PATH_SUPPLY_BY_AGE,
+            "supply_by_age",
+            since_days=since_days,
+        )
+        result = self._aggregate_lth_sth_realized_price(price_data, supply_data)
+        cache[key] = result
+        return result
+
+    def fetch_lth_realized_price(
+        self, interval: str = "24h", since_days: int = 180,
+    ) -> list[dict[str, Any]]:
+        """LTH realized price(supply 加权聚合 ≥ 6m 桶)。"""
+        lth, _ = self._fetch_lth_sth_realized_price(since_days=since_days)
+        return lth
+
+    def fetch_sth_realized_price(
+        self, interval: str = "24h", since_days: int = 180,
+    ) -> list[dict[str, Any]]:
+        """STH realized price(supply 加权聚合 < 6m 桶,含 3m_6m)。"""
+        _, sth = self._fetch_lth_sth_realized_price(since_days=since_days)
+        return sth
+
+    # ==================================================================
     # Primary 5(主裁决)
     # ==================================================================
 
@@ -410,6 +553,10 @@ class GlassnodeCollector:
             # Display 7
             ("mvrv",               self.fetch_mvrv),
             ("realized_price",     self.fetch_realized_price),
+            # Sprint 2.6-I:LTH/STH realized price 通过 breakdowns 聚合,
+            # 共享 HTTP(实例缓存),所以两个注册项实际只产生 2 次 HTTP
+            ("lth_realized_price", self.fetch_lth_realized_price),
+            ("sth_realized_price", self.fetch_sth_realized_price),
             ("sopr",               self.fetch_sopr),
             ("sopr_adjusted",      self.fetch_sopr_adjusted),
             ("reserve_risk",       self.fetch_reserve_risk),

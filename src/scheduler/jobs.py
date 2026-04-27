@@ -255,7 +255,10 @@ def job_data_collection(
                 "fetch_mvrv_z_score", "fetch_nupl", "fetch_lth_supply",
                 "fetch_exchange_net_flow", "fetch_mvrv", "fetch_realized_price",
                 # Sprint 2.6-F.1: + sopr_adjusted (aSOPR)
-                # Sprint 2.6-F.3: lth/sth_realized_price 已删(Glassnode 404)
+                # Sprint 2.6-F.3: lth/sth_realized_price 删除(Glassnode 404)
+                # Sprint 2.6-I: 重新接入 — 通过 /breakdowns/* 客户端聚合
+                #   (实例缓存共享 2 次 HTTP,2 个注册项只产生 2 次 HTTP)
+                "fetch_lth_realized_price", "fetch_sth_realized_price",
                 "fetch_sopr", "fetch_sopr_adjusted",
                 "fetch_reserve_risk", "fetch_puell_multiple",
             ):

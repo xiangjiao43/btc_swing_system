@@ -55,7 +55,10 @@ def _patch_collectors(
         gn_inst = MagicMock()
         for fn in ("fetch_mvrv_z_score", "fetch_nupl", "fetch_lth_supply",
                    "fetch_exchange_net_flow", "fetch_mvrv",
-                   "fetch_realized_price", "fetch_sopr",
+                   "fetch_realized_price",
+                   # Sprint 2.6-I: + LTH/STH realized price(breakdowns 聚合)
+                   "fetch_lth_realized_price", "fetch_sth_realized_price",
+                   "fetch_sopr", "fetch_sopr_adjusted",
                    "fetch_reserve_risk", "fetch_puell_multiple"):
             getattr(gn_inst, fn).return_value = gn_rows or []
         gn_mock.return_value = gn_inst
@@ -170,7 +173,10 @@ def test_data_collection_partial_collector_failure_does_not_block_others():
         gn_mock.return_value = MagicMock()
         for fn in ("fetch_mvrv_z_score", "fetch_nupl", "fetch_lth_supply",
                    "fetch_exchange_net_flow", "fetch_mvrv",
-                   "fetch_realized_price", "fetch_sopr",
+                   "fetch_realized_price",
+                   # Sprint 2.6-I: + LTH/STH realized price(breakdowns 聚合)
+                   "fetch_lth_realized_price", "fetch_sth_realized_price",
+                   "fetch_sopr", "fetch_sopr_adjusted",
                    "fetch_reserve_risk", "fetch_puell_multiple"):
             getattr(gn_mock.return_value, fn).return_value = []
         dao_mock.upsert_klines.return_value = 3

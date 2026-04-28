@@ -16,9 +16,6 @@ import os
 
 import pytest
 
-from src import _env_loader  # noqa: F401
-from src.ai.summary import call_ai_summary
-
 
 pytestmark = pytest.mark.skipif(
     not os.getenv("RUN_AI_SMOKE"),
@@ -27,6 +24,13 @@ pytestmark = pytest.mark.skipif(
 
 
 def test_real_call_returns_summary():
+    # Sprint 2.8-C:lazy-import _env_loader 与 call_ai_summary 进 test body。
+    # 模块顶层 import 会触发 load_dotenv → 把真 OPENAI_API_KEY 灌进 os.environ,
+    # 即便 skipif 跳过了 test 本身,污染也已经发生 → 后续 layer5_macro 测试会
+    # 看到 key,触发 _try_call_l5_ai 真实 HTTP 调用,在本机/网络受限时挂死。
+    from src import _env_loader  # noqa: F401
+    from src.ai.summary import call_ai_summary
+
     evidence = {
         "layer_1": {
             "regime": "trend_up", "volatility_regime": "normal",

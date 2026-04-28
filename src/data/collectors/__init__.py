@@ -12,9 +12,12 @@ Binance / Yahoo Finance 已从架构移除(都因 IP 限速 / 封禁不可用);
 详见 docs/PROJECT_LOG.md 与 docs/cc_reports/sprint_2_6_a*.md。
 """
 
-# 在任何 collector 读 os.getenv 之前自动加载 .env(Sprint 1.2 Envfix)
-from src import _env_loader  # noqa: F401
-
+# Sprint 2.8-C:env 加载移到生产入口(scripts/run_api.py / run_scheduler.py),
+# 不在 collectors 包导入时副作用 load_dotenv。
+# 原因:tests/test_layer5_macro.py 等单测只要 import 了 src.data.collectors.*,
+# 就会触发 _env_loader → 把 OPENAI_API_KEY 灌进 os.environ → 后续 Layer5Macro
+# 走 _try_call_l5_ai 的真实 HTTP 路径,在受限网络下挂死。
+# 生产 OK:run_api.py 和 run_scheduler.py 顶层已显式 `from src import _env_loader`。
 from .coinglass import CoinglassCollector, CoinglassCollectorError
 from .fred import FredCollector, FredCollectorError
 from .glassnode import GlassnodeCollector, GlassnodeCollectorError

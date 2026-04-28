@@ -35,6 +35,16 @@ from src.data.storage.dao import (
 from src.pipeline import StrategyStateBuilder, BuildResult
 
 
+# Sprint 2.8-C:Sprint 2.7-C 的 pre-flight Stage 0 在数据缺失时会真 sleep 300s
+# 重试。本测试文件多个用例只 seed 部分数据,会触发该 sleep 导致 pytest 假死。
+# 用 _sb 工厂函数显式注入 no-op sleep + 0s retry interval,沿用建模已有的
+# preflight_sleep_fn / preflight_retry_after_sec 注入点(非 monkey-patch)。
+def _sb(conn=None, **kwargs) -> StrategyStateBuilder:
+    kwargs.setdefault("preflight_sleep_fn", lambda s: None)
+    kwargs.setdefault("preflight_retry_after_sec", 0.0)
+    return StrategyStateBuilder(conn, **kwargs)
+
+
 # ==================================================================
 # Fixtures / helpers
 # ==================================================================
@@ -141,7 +151,7 @@ def _count_fallback_log(conn) -> int:
 class TestHappyPath:
     def test_run_end_to_end(self, conn):
         _seed_klines(conn, n=260, daily_pct=0.003)
-        builder = StrategyStateBuilder(conn, ai_caller=_ai_ok())
+        builder = _sb(conn, ai_caller=_ai_ok())
         result = builder.run(run_trigger="scheduled")
 
         assert isinstance(result, BuildResult)
@@ -174,9 +184,7 @@ class TestColdStart:
     def test_cold_start_warming_up(self, conn):
         # StrategyStateDAO.get_count() = 0 → warming_up
         _seed_klines(conn, n=260)
-        result = StrategyStateBuilder(
-            conn, ai_caller=_ai_ok(),
-        ).run()
+        result = _sb(conn, ai_caller=_ai_ok()).run()
         cs = result.state["cold_start"]
         assert cs["warming_up"] is True
         assert cs["runs_completed"] == 0
@@ -195,9 +203,7 @@ class TestColdStart:
                 ai_model_actual=None, state={"noop": True},
             )
         conn.commit()
-        result = StrategyStateBuilder(
-            conn, ai_caller=_ai_ok(),
-        ).run()
+        result = _sb(conn, ai_caller=_ai_ok()).run()
         assert result.state["cold_start"]["warming_up"] is False
         assert result.state["cold_start"]["runs_completed"] >= 42
 
@@ -211,7 +217,7 @@ class TestLastStableInjected:
         _seed_klines(conn, n=260)
         _seed_prior_state(conn, cycle_band="late_bear")
 
-        result = StrategyStateBuilder(conn, ai_caller=_ai_ok()).run()
+        result = _sb(conn, ai_caller=_ai_ok()).run()
         cp = result.state["composite_factors"]["cycle_position"]
         # CyclePositionFactor 输出字段名 last_stable_cycle_position
         assert cp.get("last_stable_cycle_position") == "late_bear"
@@ -232,7 +238,7 @@ class TestStageFailure:
             raise RuntimeError("deliberate truth_trend failure")
         monkeypatch.setattr(TruthTrendFactor, "compute", _boom)
 
-        builder = StrategyStateBuilder(conn, ai_caller=_ai_ok())
+        builder = _sb(conn, ai_caller=_ai_ok())
         result = builder.run()
 
         assert result.persisted is True  # 其他 stage 仍然跑完
@@ -253,8 +259,8 @@ class TestStageFailure:
 class TestAIDegradedLogged:
     def test_ai_degraded_marks_stage_and_logs(self, conn):
         _seed_klines(conn, n=100)
-        result = StrategyStateBuilder(
-            conn, ai_caller=_ai_degraded("api timeout")
+        result = _sb(
+            conn, ai_caller=_ai_degraded("api timeout"),
         ).run()
         assert result.persisted is True
         assert result.ai_status == "degraded_error"
@@ -278,9 +284,7 @@ class TestAIDegradedLogged:
 class TestAICallerRaises:
     def test_ai_exception_falls_back(self, conn):
         _seed_klines(conn, n=100)
-        result = StrategyStateBuilder(
-            conn, ai_caller=_ai_throws(),
-        ).run()
+        result = _sb(conn, ai_caller=_ai_throws()).run()
         assert result.persisted is True
         assert "ai_summary" in result.degraded_stages
         cs = result.state["context_summary"]
@@ -297,9 +301,7 @@ class TestAICallerRaises:
 class TestDryRun:
     def test_persist_false_skips_write(self, conn):
         _seed_klines(conn, n=100)
-        result = StrategyStateBuilder(
-            conn, ai_caller=_ai_ok(),
-        ).run(persist=False)
+        result = _sb(conn, ai_caller=_ai_ok()).run(persist=False)
         assert result.persisted is False
         # DB 里应该没有 strategy_state_history 记录
         assert StrategyStateDAO.get_count(conn) == 0
@@ -312,9 +314,7 @@ class TestDryRun:
 class TestPersistenceRoundTrip:
     def test_state_json_roundtrip(self, conn):
         _seed_klines(conn, n=100)
-        result = StrategyStateBuilder(
-            conn, ai_caller=_ai_ok(),
-        ).run()
+        result = _sb(conn, ai_caller=_ai_ok()).run()
         row = conn.execute(
             "SELECT full_state_json AS state_json FROM strategy_runs "
             "WHERE reference_timestamp_utc = ?",
@@ -366,7 +366,7 @@ class TestEventRiskAfterL1:
         sb.Layer1Regime = _FakeL1  # type: ignore
 
         try:
-            result = StrategyStateBuilder(conn, ai_caller=_ai_ok()).run()
+            result = _sb(conn, ai_caller=_ai_ok()).run()
             er = result.state["composite_factors"]["event_risk"]
             # 有事件被计入且应用了 vol bonus
             assert er["upcoming_events_count"] >= 1
@@ -383,7 +383,7 @@ class TestEventRiskAfterL1:
 
 class TestRunWithoutConn:
     def test_run_without_conn_raises(self):
-        builder = StrategyStateBuilder(conn=None, ai_caller=_ai_ok())
+        builder = _sb(conn=None, ai_caller=_ai_ok())
         with pytest.raises(ValueError):
             builder.run()
 
@@ -395,7 +395,7 @@ class TestRunWithoutConn:
 class TestBuildWithoutDB:
     def test_build_no_conn_no_persist(self):
         """没有 DB 也能跑:所有 stage 走 insufficient_data / degraded。"""
-        builder = StrategyStateBuilder(conn=None, ai_caller=_ai_ok())
+        builder = _sb(conn=None, ai_caller=_ai_ok())
         ctx = {
             "reference_timestamp_utc": "2024-02-02T00:00:00Z",
             # 空数据:klines / derivatives / onchain 全缺

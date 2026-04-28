@@ -215,6 +215,8 @@ class StrategyStateBuilder:
         state_machine: Any = None,
         adjudicator: Any = None,
         account_state_provider: Optional[Callable[[], dict[str, Any]]] = None,
+        preflight_retry_after_sec: float = 300.0,
+        preflight_sleep_fn: Optional[Callable[[float], None]] = None,
     ) -> None:
         """
         Args:
@@ -225,6 +227,10 @@ class StrategyStateBuilder:
             klines_lookback:    取多少根 K 线
             macro_lookback_days: MacroDAO.get_all_metrics 的 lookback
             events_window_hours: 事件窗口(默认 72h,和 event_risk 对齐)
+            preflight_retry_after_sec: Sprint 2.7-C pre-flight 重试间隔(默认 300s);
+                                       测试可传 0 立即重试(配合 sleep_fn=lambda s: None)
+            preflight_sleep_fn: 注入的 sleep 函数(默认 time.sleep);测试可传
+                                lambda s: None 跳过等待
         """
         self.conn = conn
         self.rules_version = rules_version
@@ -234,6 +240,8 @@ class StrategyStateBuilder:
         self.macro_lookback_days = macro_lookback_days
         self.events_window_hours = events_window_hours
         self._account_state_provider = account_state_provider
+        self._preflight_retry_after_sec = preflight_retry_after_sec
+        self._preflight_sleep_fn = preflight_sleep_fn or time.sleep
         # 延迟 import 避免循环依赖
         if state_machine is None:
             from ..strategy.state_machine import StateMachine
@@ -323,6 +331,8 @@ class StrategyStateBuilder:
                         self.conn,
                         context.get("metric_inserted_at") or {},
                         run_trigger,
+                        retry_after_sec=self._preflight_retry_after_sec,
+                        sleep_fn=self._preflight_sleep_fn,
                     )
                 )
                 # 用刷新过的 inserted_at 替换(让 emitter / 后续阶段拿到最新)

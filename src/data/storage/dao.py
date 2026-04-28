@@ -883,6 +883,49 @@ class EventsCalendarDAO:
 # StrategyState 历史归档
 # ============================================================
 
+# ============================================================
+# Sprint 2.8-A:latest_factor_cards 单行覆盖表
+# ============================================================
+
+class LatestFactorCardsDAO:
+    """latest_factor_cards 表 DAO(单行 PK=1,每个 collector 跑完后 upsert 覆盖)。"""
+
+    @staticmethod
+    def upsert(
+        conn: sqlite3.Connection,
+        cards: list[dict[str, Any]],
+        refreshed_at_utc: Optional[str] = None,
+    ) -> None:
+        ts = refreshed_at_utc or _utc_now_iso()
+        cards_json = json.dumps(cards, ensure_ascii=False, default=str)
+        conn.execute(
+            "INSERT INTO latest_factor_cards (id, cards_json, refreshed_at_utc) "
+            "VALUES (1, ?, ?) "
+            "ON CONFLICT(id) DO UPDATE SET "
+            "  cards_json = excluded.cards_json, "
+            "  refreshed_at_utc = excluded.refreshed_at_utc",
+            (cards_json, ts),
+        )
+
+    @staticmethod
+    def get_latest(
+        conn: sqlite3.Connection,
+    ) -> Optional[dict[str, Any]]:
+        """返回 {cards: list, refreshed_at_utc: str} 或 None(空表)。"""
+        row = conn.execute(
+            "SELECT cards_json, refreshed_at_utc FROM latest_factor_cards WHERE id = 1"
+        ).fetchone()
+        if row is None:
+            return None
+        cards_json = row[0] if not hasattr(row, "keys") else row["cards_json"]
+        refreshed = row[1] if not hasattr(row, "keys") else row["refreshed_at_utc"]
+        try:
+            cards = json.loads(cards_json)
+        except (TypeError, ValueError):
+            cards = []
+        return {"cards": cards, "refreshed_at_utc": refreshed}
+
+
 def _map_strategy_run_to_legacy(row: dict[str, Any]) -> dict[str, Any]:
     """把 strategy_runs 新 schema 映射回 Sprint 1 老 schema 字段,避免调用方大改。
 

@@ -381,9 +381,11 @@
             <strong class="text-slate-600 dark:text-slate-400">现货用户</strong>:本策略面向合约波段;若用于现货,short = 清仓,long = 加仓。
           </span>
           <span class="font-mono">
+            <!-- Sprint 2.8-A:明确"AI 输出于"标签,与因子卡片"抓取于"区分 -->
+            <span class="text-slate-600 dark:text-slate-400">AI 输出于</span>
             <span x-text="state.meta && state.meta.generated_at_bjt"></span>
-            <span class="text-slate-300 dark:text-slate-600 mx-1">|</span>
-            <span x-text="'由 ' + (state.meta && state.meta.ai_model_actual || 'rule-based') + ' 生成'"></span>
+            <span class="text-slate-300 dark:text-slate-600 mx-1">·</span>
+            <span x-text="(state.meta && state.meta.ai_model_actual) || 'rule-based'"></span>
           </span>
         </div>
       </div>

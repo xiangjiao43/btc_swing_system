@@ -189,8 +189,14 @@ def _wrap_job(
     body: Callable[[Any], dict[str, Any]],
     *,
     conn_factory: Optional[Callable[[], Any]] = None,
+    refresh_cards_on_success: bool = False,
 ) -> dict[str, Any]:
-    """Sprint 2.7-B:job 通用 wrapper。捕获 conn 异常 + 计时,不让 scheduler crash。"""
+    """Sprint 2.7-B:job 通用 wrapper。捕获 conn 异常 + 计时,不让 scheduler crash。
+
+    Sprint 2.8-A:`refresh_cards_on_success=True` 时,body 成功后立即调
+    refresh_factor_cards(conn),把最新 cards 写入 latest_factor_cards 单行表
+    (网页"抓取于"实时刷新)。失败只 log warning,不影响主流程。
+    """
     from ..data.storage.connection import get_connection
     cf = conn_factory or get_connection
     start_ts = time.time()
@@ -200,6 +206,19 @@ def _wrap_job(
         result = body(conn)
         result.setdefault("status", "ok")
         result["duration_ms"] = int((time.time() - start_ts) * 1000)
+        if refresh_cards_on_success and result.get("status") == "ok":
+            try:
+                from ..strategy.factor_cards_refresher import refresh_factor_cards
+                refresh_result = refresh_factor_cards(conn)
+                result["factor_cards_refresh"] = refresh_result
+            except Exception as inner:
+                logger.warning(
+                    "%s: factor_cards_refresh failed (non-fatal): %s",
+                    name, inner,
+                )
+                result["factor_cards_refresh"] = {
+                    "refreshed": False, "error": str(inner)[:200],
+                }
         return result
     except Exception as e:
         logger.exception("%s top-level failed: %s", name, e)
@@ -285,7 +304,8 @@ def job_collect_klines_1h(
             "total_upserted": klines_count + derivatives_count,
             "errors": errors,
         }
-    return _wrap_job("collect_klines_1h", _body, conn_factory=conn_factory)
+    return _wrap_job("collect_klines_1h", _body, conn_factory=conn_factory,
+                     refresh_cards_on_success=True)
 
 
 def job_collect_klines_daily(
@@ -327,7 +347,8 @@ def job_collect_klines_daily(
             "total_upserted": sum(by_tf.values()),
             "errors": errors,
         }
-    return _wrap_job("collect_klines_daily", _body, conn_factory=conn_factory)
+    return _wrap_job("collect_klines_daily", _body, conn_factory=conn_factory,
+                     refresh_cards_on_success=True)
 
 
 def job_collect_klines_weekly(
@@ -359,7 +380,8 @@ def job_collect_klines_weekly(
             logger.warning("collect_klines_weekly failed: %s", e)
             return {"by_collector": {"1w": 0}, "total_upserted": 0,
                     "errors": {"1w": str(e)[:200]}}
-    return _wrap_job("collect_klines_weekly", _body, conn_factory=conn_factory)
+    return _wrap_job("collect_klines_weekly", _body, conn_factory=conn_factory,
+                     refresh_cards_on_success=True)
 
 
 def job_collect_macro(
@@ -385,7 +407,8 @@ def job_collect_macro(
             "errors": {},
             "fred_breakdown": stats,
         }
-    return _wrap_job("collect_macro", _body, conn_factory=conn_factory)
+    return _wrap_job("collect_macro", _body, conn_factory=conn_factory,
+                     refresh_cards_on_success=True)
 
 
 def job_collect_onchain(
@@ -434,7 +457,8 @@ def job_collect_onchain(
             "events_triggered": ["event_onchain"] if total > 0 else [],
             "errors": errors,
         }
-    return _wrap_job("collect_onchain", _body, conn_factory=conn_factory)
+    return _wrap_job("collect_onchain", _body, conn_factory=conn_factory,
+                     refresh_cards_on_success=True)
 
 
 def job_event_listener(

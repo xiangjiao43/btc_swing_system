@@ -260,6 +260,16 @@ CREATE TABLE IF NOT EXISTS event_throttle (
 
 
 -- ============================================================
+-- Sprint 2.8-A:latest_factor_cards(每个 collector job 跑完后覆盖,单行)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS latest_factor_cards (
+    id                INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+    cards_json        TEXT NOT NULL,
+    refreshed_at_utc  TEXT NOT NULL
+);
+
+
+-- ============================================================
 -- Sprint 2.6-G:数据抓取时间记录(配 migrations/004_add_data_fetch_log.sql)
 -- 解决卡片显示 K 线 bar 时间被误解为"系统未刷新"
 -- ============================================================

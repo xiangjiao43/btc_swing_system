@@ -19,7 +19,7 @@ from typing import Any, AsyncIterator
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
-from ...data.storage.dao import StrategyStateDAO
+from ...data.storage.dao import LatestFactorCardsDAO, StrategyStateDAO
 from ..models import HistoryPage, StrategyStateRow
 
 
@@ -64,6 +64,10 @@ def _get_current_impl(request: Request) -> StrategyStateRow:
     conn = ctx.conn_factory()
     try:
         row = StrategyStateDAO.get_latest_state(conn)
+        # Sprint 2.8-A:factor_cards 用 latest_factor_cards(每个 collector 跑完
+        # 立即刷新)覆盖 strategy_state_history 里的 4h 老快照。
+        # latest_factor_cards 表空(冷启动 / 单测)→ 保留 state.factor_cards 兜底。
+        latest_cards = LatestFactorCardsDAO.get_latest(conn)
     finally:
         try:
             conn.close()
@@ -71,6 +75,20 @@ def _get_current_impl(request: Request) -> StrategyStateRow:
             pass
     if row is None:
         raise HTTPException(status_code=404, detail="No strategy state found")
+    if latest_cards is not None and isinstance(row.get("state"), (str, dict)):
+        state = row["state"]
+        if isinstance(state, str):
+            try:
+                state = json.loads(state)
+            except (json.JSONDecodeError, ValueError):
+                state = {}
+            row = dict(row)
+            row["state"] = state
+        if isinstance(state, dict):
+            state["factor_cards"] = latest_cards["cards"]
+            state.setdefault("meta", {})["factor_cards_refreshed_at_utc"] = (
+                latest_cards["refreshed_at_utc"]
+            )
     return _row_to_model(row)
 
 

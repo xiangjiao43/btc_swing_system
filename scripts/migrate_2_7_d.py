@@ -30,10 +30,10 @@ def column_exists(conn: sqlite3.Connection, table: str, column: str) -> bool:
 
 
 def apply_migration(conn: sqlite3.Connection) -> dict[str, str]:
-    """应用 2.7-D 迁移。返回 {step: status} 报告。"""
+    """应用 2.7-D + 2.8-A 迁移。返回 {step: status} 报告。"""
     report: dict[str, str] = {}
 
-    # 1. event_throttle 表
+    # 1. event_throttle 表(2.7-D)
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS event_throttle (
@@ -44,7 +44,7 @@ def apply_migration(conn: sqlite3.Connection) -> dict[str, str]:
     )
     report["event_throttle_table"] = "ok"
 
-    # 2. events_calendar.triggered_at_utc 列(检查 PRAGMA)
+    # 2. events_calendar.triggered_at_utc 列(2.7-D,检查 PRAGMA)
     if column_exists(conn, "events_calendar", "triggered_at_utc"):
         report["triggered_at_utc_column"] = "skipped (already exists)"
     else:
@@ -52,6 +52,18 @@ def apply_migration(conn: sqlite3.Connection) -> dict[str, str]:
             "ALTER TABLE events_calendar ADD COLUMN triggered_at_utc TEXT"
         )
         report["triggered_at_utc_column"] = "added"
+
+    # 3. latest_factor_cards 表(2.8-A,单行覆盖)
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS latest_factor_cards (
+            id                INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+            cards_json        TEXT NOT NULL,
+            refreshed_at_utc  TEXT NOT NULL
+        )
+        """
+    )
+    report["latest_factor_cards_table"] = "ok"
 
     conn.commit()
     return report

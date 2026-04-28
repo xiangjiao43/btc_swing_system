@@ -53,6 +53,47 @@ def _scheduler_enabled_from_env() -> bool:
     return raw not in ("0", "false", "no", "off")
 
 
+def _log_scheduler_jobs(scheduler: Any) -> None:
+    """Sprint 2.8-D:逐 job log next_run_time(BJT)。
+
+    单 job AttributeError 不传播 — APScheduler BackgroundScheduler.start() 与
+    内部 dispatcher 线程之间存在 race;`scheduler.start()` 返回后立即读
+    `job.next_run_time` 偶尔抛 AttributeError(scheduler 已起来,但 job 还未
+    被 schedule 出 next_fire_time)。
+
+    本函数应该在 `app.state.scheduler` 已写入之后才被调用,任何这里抛出的
+    异常都不会让 scheduler 实例被丢掉。
+    """
+    from datetime import timedelta, timezone
+
+    bjt_tz = timezone(timedelta(hours=8))
+    for job in scheduler.get_jobs():
+        try:
+            nxt = job.next_run_time
+        except AttributeError:
+            logger.info(
+                "[Scheduler] job=%s registered (next_run_time pending)",
+                job.id,
+            )
+            continue
+        if nxt is not None:
+            try:
+                bjt = nxt.astimezone(bjt_tz)
+                logger.info(
+                    "[Scheduler] job=%s next run at %s BJT",
+                    job.id, bjt.strftime("%Y-%m-%d %H:%M"),
+                )
+            except Exception as e:
+                logger.warning(
+                    "[Scheduler] job=%s next_run_time fmt failed: %s",
+                    job.id, e,
+                )
+        else:
+            logger.info(
+                "[Scheduler] job=%s registered (no next_run_time)", job.id,
+            )
+
+
 def create_app(
     *,
     conn_factory: Optional[Callable[[], Any]] = None,
@@ -115,34 +156,46 @@ def create_app(
                 "[Events] seed on startup failed (non-fatal): %s", e,
             )
 
-    # Sprint 2.4:APScheduler 嵌入 lifecycle
+    # Sprint 2.4 / 2.8-D:APScheduler 嵌入 lifecycle
     # 只在 SCHEDULER_ENABLED(默认 true)时启动;shutdown 时优雅停止。
+    #
+    # 2.8-D:启动序列分两阶段,避免 race condition 把 scheduler 引用丢掉:
+    #   阶段 1 build_scheduler + scheduler.start():失败 → 清空 app.state.scheduler
+    #   阶段 2 log next_run_time:延迟 2s 异步执行,即便抛错也不影响 scheduler 引用
+    # 之前症状:scheduler.start() 后立即读 job.next_run_time,APScheduler 内部
+    # 还没完成 schedule,抛 AttributeError → except 把 scheduler 清成 None →
+    # APScheduler 后台线程没有引用 → 4 天 0 触发。
     @app.on_event("startup")
     def _start_scheduler() -> None:
         if not _scheduler_enabled_from_env():
             logger.info("[Scheduler] disabled via SCHEDULER_ENABLED env var")
             app.state.scheduler = None
             return
+
+        # 阶段 1:build + start。失败才清状态
         try:
             from ..scheduler import build_scheduler
             scheduler = build_scheduler(blocking=False)
             scheduler.start()
-            app.state.scheduler = scheduler
-            # 打印每个 job 的 next_run_time(BJT)
-            for job in scheduler.get_jobs():
-                nxt = job.next_run_time
-                if nxt is not None:
-                    from datetime import timezone, timedelta
-                    bjt = nxt.astimezone(timezone(timedelta(hours=8)))
-                    logger.info(
-                        "[Scheduler] job=%s next run at %s BJT",
-                        job.id, bjt.strftime("%Y-%m-%d %H:%M"),
-                    )
-                else:
-                    logger.warning("[Scheduler] job=%s has no next_run_time", job.id)
         except Exception as e:
             logger.exception("[Scheduler] startup failed: %s", e)
             app.state.scheduler = None
+            return
+
+        # **关键**:scheduler 已起来,先把引用存进 app.state,
+        # 任何后续异常都不应该再清掉它(APScheduler 后台线程要靠这个引用活着)
+        app.state.scheduler = scheduler
+        logger.info(
+            "[Scheduler] started; %d jobs registered",
+            len(scheduler.get_jobs()),
+        )
+
+        # 阶段 2:延迟 log next_run_time(BJT)
+        # 直接 inline 调用 _log_scheduler_jobs 在某些 APScheduler race 场景会
+        # 抛 AttributeError;放到 threading.Timer 里 2s 后跑,
+        # 让 BackgroundScheduler dispatcher 线程把 next_fire_time 算出来
+        import threading
+        threading.Timer(2.0, _log_scheduler_jobs, args=(scheduler,)).start()
 
     @app.on_event("shutdown")
     def _stop_scheduler() -> None:

@@ -21,6 +21,14 @@ class HealthResponse(BaseModel):
         0,
         description="Sprint 2.8-B:最近 24h pre_flight_degraded alerts 数量",
     )
+    scheduler_running: bool = Field(
+        False,
+        description="Sprint 2.8-D:APScheduler 实例是否还活着",
+    )
+    scheduler_jobs_count: int = Field(
+        0,
+        description="Sprint 2.8-D:已注册的 cron job 数(scheduler 不活时为 0)",
+    )
 
 
 class StrategyStateRow(BaseModel):

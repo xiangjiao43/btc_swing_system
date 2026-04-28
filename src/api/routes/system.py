@@ -38,6 +38,27 @@ def _count_preflight_alerts_24h(conn) -> int:
         return int(row[0]) if row else 0
 
 
+def _scheduler_status(request: Request) -> tuple[bool, int]:
+    """Sprint 2.8-D:返回 (running, jobs_count)。
+
+    任何错误 → (False, 0)。
+    """
+    sched = getattr(request.app.state, "scheduler", None)
+    if sched is None:
+        return False, 0
+    try:
+        running = bool(getattr(sched, "running", False))
+    except Exception:
+        running = False
+    if not running:
+        return False, 0
+    try:
+        jobs_count = len(sched.get_jobs())
+    except Exception:
+        jobs_count = 0
+    return True, jobs_count
+
+
 def _health_impl(request: Request) -> HealthResponse:
     ctx = request.app.state.ctx
     db_ok = False
@@ -58,12 +79,17 @@ def _health_impl(request: Request) -> HealthResponse:
                 pass
     except Exception:
         db_ok = False
+
+    sched_running, sched_jobs = _scheduler_status(request)
+
     return HealthResponse(
         status="ok" if db_ok else "degraded",
         version=ctx.version,
         uptime_seconds=round(time.time() - ctx.started_at, 3),
         db_accessible=db_ok,
         preflight_alerts_24h=preflight_24h,
+        scheduler_running=sched_running,
+        scheduler_jobs_count=sched_jobs,
     )
 
 

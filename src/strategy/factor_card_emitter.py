@@ -394,8 +394,18 @@ def _stamp_fetched_at(
             ts_utc = derivatives_snapshot
 
         elif category == "price_structure":
-            ts_utc = klines_by_tf.get("1d") or klines_by_tf.get("4h") or \
-                     klines_by_tf.get("1h")
+            # Sprint 2.8-E:按卡片真实依赖的 timeframe 取 inserted_at,
+            # 不再让所有 price 卡共用 1d(避免 1h 衍生卡被 1d cron 滞后污染)。
+            tf = _resolve_price_structure_timeframe(c.get("card_id", ""))
+            ts_utc = klines_by_tf.get(tf)
+            if ts_utc is None:
+                # 该 timeframe 暂无数据 → 退回原优先级(legacy fallback)
+                ts_utc = (
+                    klines_by_tf.get("1d")
+                    or klines_by_tf.get("4h")
+                    or klines_by_tf.get("1h")
+                    or klines_by_tf.get("1w")
+                )
 
         elif category in (
             "composite", "ai", "state_machine", "kpi", "lifecycle",
@@ -414,6 +424,55 @@ _DERIVED_SUFFIXES: tuple[str, ...] = (
     "_aggregated", "_drawdown_from_ath", "_percentile_180d",
     "_14_1d", "_14", "_1d", "_4h", "_1h", "_60", "_200",
 )
+
+
+def _resolve_price_structure_timeframe(card_id: str) -> str:
+    """Sprint 2.8-E:从 price_structure 卡的 card_id 推断它依赖的 K 线 timeframe。
+
+    背景:_stamp_fetched_at 之前所有 price 卡共用 'klines_by_tf[1d]',
+    1d cron 一天只跑一次(BJT 08:01),导致 1h 衍生卡(距 ATH / 多周期一致性)
+    被错误地盖上昨天 1d 的 inserted_at,网页"抓取于"显示 stale。
+
+    本 resolver 把每张 price_structure 卡映射到正确 timeframe:
+      - "drawdown_from_ath"        → 1h(随 1h tick 实时刷)
+      - "tf_alignment_*"           → 1h(多周期一致性靠 1h 实时校验)
+      - card_id 含 "_1h" / "_4h"   → 对应 timeframe
+      - card_id 含 "_1d" / ma_*    → 1d
+      - card_id 含 "adx_14" / "atr_*180*" → 1d
+      - 其他 → 默认 1d
+
+    8 个原始 price_structure 卡都有显式匹配规则,不会走 default fallback;
+    新增卡若不在已知模式内,会走 default 1d(后续如需可再加规则)。
+    """
+    s = (card_id or "").lower()
+
+    # 1h 优先级最高:显式 _1h 后缀,以及业务上靠 1h tick 刷新的卡
+    if "_1h" in s:
+        return "1h"
+    if "drawdown_from_ath" in s:
+        return "1h"
+    if "tf_alignment" in s or "multi_period_alignment" in s:
+        return "1h"
+
+    # 4h
+    if "_4h" in s:
+        return "4h"
+
+    # 1w
+    if "_1w" in s:
+        return "1w"
+
+    # 1d 显式或衍生
+    if "_1d" in s:
+        return "1d"
+    if "ma_20" in s or "ma_60" in s or "ma_120" in s or "ma_200" in s:
+        return "1d"
+    if "adx_14" in s:
+        return "1d"
+    if "atr_" in s and ("180" in s or "percentile" in s):
+        return "1d"
+
+    return "1d"
 
 
 def _parse_metric_name_from_card_id(

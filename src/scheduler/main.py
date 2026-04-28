@@ -71,6 +71,10 @@ def build_scheduler(
 
     job_configs = build_job_configs(cfg)
     _register_jobs(scheduler, job_configs)
+    # Sprint 2.7-D:把 scheduler 暴露给 jobs.py 的 _enqueue_pipeline_run,
+    # 让 event_listener / collect_onchain 能动态 add_job(date trigger)
+    from .jobs import set_active_scheduler
+    set_active_scheduler(scheduler)
     return scheduler
 
 

@@ -424,9 +424,14 @@ def job_collect_onchain(
                 errors[fn_name] = str(e)[:200]
 
         conn.commit()
+        # Sprint 2.7-D:onchain 抓完立即 enqueue 一次 pipeline_run(event_onchain)
+        # 无节流(每天 08:35 只跑一次,天然不重复)
+        if total > 0:
+            _enqueue_pipeline_run("event_onchain")
         return {
             "by_collector": {"glassnode": total},
             "total_upserted": total,
+            "events_triggered": ["event_onchain"] if total > 0 else [],
             "errors": errors,
         }
     return _wrap_job("collect_onchain", _body, conn_factory=conn_factory)
@@ -436,10 +441,72 @@ def job_event_listener(
     *,
     conn_factory: Optional[Callable[[], Any]] = None,
 ) -> dict[str, Any]:
-    """Sprint 2.7-A stub:60s 高频常驻,扫 events_calendar + 价格异动 + 失效位。
-    2.7-D 实施。"""
-    logger.info("job_event_listener: stub_pre_2_7_d (no-op)")
-    return {"status": "skipped", "reason": "stub_pre_2_7_d"}
+    """Sprint 2.7-D:60 秒高频常驻,扫 4 类 event。
+
+    流程:
+      1. check_and_trigger_events(conn) → list[event_type]
+      2. 对每个返回的 event_type,调度一次 pipeline_run(run_trigger=event_type)
+         (用 _enqueue_pipeline_run,写 active_scheduler 注入的全局引用)
+    """
+    def _body(conn: Any) -> dict[str, Any]:
+        from .event_listener import check_and_trigger_events
+        triggered = check_and_trigger_events(conn)
+        for evt in triggered:
+            _enqueue_pipeline_run(evt)
+        return {
+            "by_collector": {"events": len(triggered)},
+            "total_upserted": 0,
+            "events_triggered": triggered,
+            "errors": {},
+        }
+    return _wrap_job("event_listener", _body, conn_factory=conn_factory)
+
+
+# Sprint 2.7-D:scheduler 全局引用(由 build_scheduler 在创建后写入)。
+# event_listener / collect_onchain 通过 _enqueue_pipeline_run 调度 event 触发的
+# pipeline_run。无 scheduler 时(单测 / 直调)退化为 logger.info。
+_active_scheduler: Optional[Any] = None
+
+
+def set_active_scheduler(scheduler: Any) -> None:
+    """build_scheduler 在创建后调用,把 scheduler 实例存为全局。"""
+    global _active_scheduler
+    _active_scheduler = scheduler
+
+
+def _enqueue_pipeline_run(run_trigger: str, *, delay_sec: int = 10) -> bool:
+    """把一次 pipeline_run 调度到 _active_scheduler,run_date=now+delay_sec。
+
+    Returns True 表示成功调度,False 表示无 scheduler(单测/直调路径)或失败。
+    delay_sec 默认 10s 让当前 collector job 有时间 commit。
+    """
+    sched = _active_scheduler
+    if sched is None:
+        logger.info(
+            "event triggered but no active scheduler: run_trigger=%s "
+            "(test or direct-invoke path, no enqueue)",
+            run_trigger,
+        )
+        return False
+    try:
+        from datetime import datetime, timedelta, timezone
+        run_date = datetime.now(timezone.utc) + timedelta(seconds=delay_sec)
+        sched.add_job(
+            func=job_pipeline_run,
+            trigger="date",
+            run_date=run_date,
+            kwargs={"run_trigger": run_trigger},
+            id=f"event_pipeline_{run_trigger}_{int(run_date.timestamp())}",
+            replace_existing=True,
+        )
+        logger.info(
+            "enqueued pipeline_run for run_trigger=%s at %s",
+            run_trigger, run_date.isoformat(),
+        )
+        return True
+    except Exception as e:
+        logger.warning("_enqueue_pipeline_run failed: %s", e)
+        return False
 
 
 _JOB_FUNCTIONS: dict[str, Callable[..., Any]] = {

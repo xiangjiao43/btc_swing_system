@@ -217,8 +217,8 @@ common_types:
       notes: "§7.2 Block 1"
 
     run_trigger:
-      values: [scheduled, event_macro, event_onchain, event_funding, event_options, event_price, event_invalidation, manual]
-      notes: "§3.3.3 / M38"
+      values: [scheduled, scheduled_8h_onchain, event_macro, event_onchain, event_funding, event_options, event_price, event_invalidation, manual]
+      notes: "§3.3.3 / M38;Sprint 2.7-C 加 scheduled_8h_onchain(8 点档严格 pre-flight)"
 
     strategy_flavor:
       values: [swing]

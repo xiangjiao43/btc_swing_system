@@ -240,12 +240,23 @@ CREATE TABLE IF NOT EXISTS events_calendar (
     event_type         TEXT NOT NULL,
     event_name         TEXT NOT NULL,
     impact_level       INTEGER CHECK (impact_level BETWEEN 1 AND 5),
-    notes              TEXT
+    notes              TEXT,
+    -- Sprint 2.7-D:event_macro 触发后写入,防同一行重复触发
+    triggered_at_utc   TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_events_date ON events_calendar(date);
 CREATE INDEX IF NOT EXISTS idx_events_utc  ON events_calendar(utc_trigger_time);
 CREATE INDEX IF NOT EXISTS idx_events_type ON events_calendar(event_type);
+
+
+-- ============================================================
+-- Sprint 2.7-D:event_throttle(每种 event_type 的 2h 冷却记录)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS event_throttle (
+    event_type             TEXT PRIMARY KEY,
+    last_triggered_at_utc  TEXT NOT NULL
+);
 
 
 -- ============================================================

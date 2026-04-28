@@ -70,15 +70,20 @@ def test_build_job_configs_returns_8_jobs():
     assert len(out) == 8
 
 
-def test_pipeline_run_dual_entries_share_function():
-    """Sprint 2.7-A:pipeline_run_regular + pipeline_run_8h_onchain 共享同函数。"""
+def test_pipeline_run_dual_entries_have_dedicated_wrappers():
+    """Sprint 2.7-C:pipeline_run_regular + pipeline_run_8h_onchain 各自独立函数,
+    分别传 run_trigger='scheduled' / 'scheduled_8h_onchain' 给 builder.run。"""
     cfg = load_scheduler_config(_CONFIG_PATH)
     out = build_job_configs(cfg)
     by_name = {jc.name: jc for jc in out}
     assert "pipeline_run_regular" in by_name
     assert "pipeline_run_8h_onchain" in by_name
-    # 共享同一 callable
-    assert by_name["pipeline_run_regular"].func is by_name["pipeline_run_8h_onchain"].func
+    # 2.7-C 起 wrapper 各自独立(原 2.7-A 共享 func 的设计已用 §X 删除)
+    from src.scheduler.jobs import (
+        job_pipeline_run_regular, job_pipeline_run_8h_onchain,
+    )
+    assert by_name["pipeline_run_regular"].func is job_pipeline_run_regular
+    assert by_name["pipeline_run_8h_onchain"].func is job_pipeline_run_8h_onchain
 
 
 def test_collect_klines_1h_runs_at_minute_zero():

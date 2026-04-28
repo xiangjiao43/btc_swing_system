@@ -54,6 +54,7 @@ def job_pipeline_run(
     *,
     conn_factory: Optional[Callable[[], Any]] = None,
     builder_factory: Optional[Callable[[Any], Any]] = None,
+    run_trigger: str = "scheduled",
 ) -> dict[str, Any]:
     """
     主 Pipeline 任务。异常捕获后写 FallbackLog 并返回 error dict,不 crash。
@@ -78,7 +79,7 @@ def job_pipeline_run(
             builder = StrategyStateBuilder(conn)
         else:
             builder = builder_factory(conn)
-        result = builder.run(run_trigger="scheduled")
+        result = builder.run(run_trigger=run_trigger)
         return {
             "status": "ok",
             "run_id": result.run_id,
@@ -119,6 +120,33 @@ def job_pipeline_run(
                 conn.close()
             except Exception:
                 pass
+
+
+# Sprint 2.7-C:pipeline_run 拆 2 个 wrapper(对应 yaml 2 个 cron entry)。
+# 不同 wrapper 传不同 run_trigger,state_builder 据此应用不同的 pre-flight 阈值。
+
+def job_pipeline_run_regular(
+    *,
+    conn_factory: Optional[Callable[[], Any]] = None,
+    builder_factory: Optional[Callable[[Any], Any]] = None,
+) -> dict[str, Any]:
+    """常规档(00/04/12/16/20:05 BJT)。pre-flight 阈值宽松,允许 30h 链上 / 30h 宏观。"""
+    return job_pipeline_run(
+        conn_factory=conn_factory, builder_factory=builder_factory,
+        run_trigger="scheduled",
+    )
+
+
+def job_pipeline_run_8h_onchain(
+    *,
+    conn_factory: Optional[Callable[[], Any]] = None,
+    builder_factory: Optional[Callable[[Any], Any]] = None,
+) -> dict[str, Any]:
+    """8 点链上档(08:40 BJT)。pre-flight 强约束:链上 < 10 min,1d/4h K 线 < 30 min。"""
+    return job_pipeline_run(
+        conn_factory=conn_factory, builder_factory=builder_factory,
+        run_trigger="scheduled_8h_onchain",
+    )
 
 
 # Sprint 2.7-B §X:job_data_collection 已完整删除。
@@ -415,7 +443,10 @@ def job_event_listener(
 
 
 _JOB_FUNCTIONS: dict[str, Callable[..., Any]] = {
-    "pipeline_run": job_pipeline_run,
+    "pipeline_run": job_pipeline_run,  # 单测/直调入口,生产 yaml 用下面 2 个 wrapper
+    # Sprint 2.7-C:pipeline 2 个 wrapper(对应 yaml 2 个 cron 条目)
+    "pipeline_run_regular": job_pipeline_run_regular,
+    "pipeline_run_8h_onchain": job_pipeline_run_8h_onchain,
     # Sprint 2.7-A/B:5 个 collector + event_listener(stub,2.7-D 实施)
     "collect_klines_1h": job_collect_klines_1h,
     "collect_klines_daily": job_collect_klines_daily,
@@ -475,14 +506,11 @@ def build_job_configs(
     for name, spec in jobs_cfg.items():
         if not isinstance(spec, dict):
             raise JobConfigError(f"job {name}: spec must be a dict")
-        # Sprint 2.7-A:可选 'func' 字段允许多 yaml 条目共享同一函数
-        # (例如 pipeline_run_regular + pipeline_run_8h_onchain 都跑 pipeline_run)。
-        # 默认 func = name(向后兼容)。
-        func_key = str(spec.get("func") or name)
-        if func_key not in funcs:
-            raise JobConfigError(
-                f"job {name}: no registered function (func={func_key!r})"
-            )
+        # Sprint 2.7-C §X:`func:` 字段(2.7-A 引入用于 pipeline_run 双 cron
+        # 共享函数)已废弃 — 现在 yaml job_name 必须直接命中 _JOB_FUNCTIONS。
+        # pipeline 双档改用 job_pipeline_run_regular / _8h_onchain 两个独立函数。
+        if name not in funcs:
+            raise JobConfigError(f"job {name}: no registered function")
         if "interval" in spec:
             trigger_kind = "interval"
             trigger_kwargs = _parse_interval(spec["interval"])
@@ -499,7 +527,7 @@ def build_job_configs(
         out.append(JobConfig(
             name=name,
             enabled=bool(spec.get("enabled", False)),
-            func=funcs[func_key],
+            func=funcs[name],
             trigger_kind=trigger_kind,
             trigger_kwargs=trigger_kwargs,
             misfire_grace_time=int(spec.get("misfire_grace_time", 300)),

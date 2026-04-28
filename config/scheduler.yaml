@@ -77,21 +77,19 @@ jobs:
 
   pipeline_run_regular:
     enabled: true
-    func: pipeline_run                 # 共享 pipeline_run 函数
     cron: {hour: '0,4,12,16,20', minute: 5}  # 5 档:00/04/12/16/20 :05 BJT
     misfire_grace_time: 300
     coalesce: true
     max_instances: 1
-    description: 'Pipeline 主循环常规档(00/04/12/16/20:05 BJT)'
+    description: 'Pipeline 主循环常规档(00/04/12/16/20:05 BJT,run_trigger=scheduled)'
 
   pipeline_run_8h_onchain:
     enabled: true
-    func: pipeline_run                 # 共享 pipeline_run 函数
     cron: {hour: 8, minute: 40}        # 08:40 BJT(链上 08:35 抓完 + 5 分钟缓冲)
     misfire_grace_time: 300
     coalesce: true
     max_instances: 1
-    description: 'Pipeline 8 点链上档(等链上数据落地后跑)'
+    description: 'Pipeline 8 点链上档(run_trigger=scheduled_8h_onchain,严格 pre-flight)'
 
   # ------------- 高频事件监听 ------------------------
 

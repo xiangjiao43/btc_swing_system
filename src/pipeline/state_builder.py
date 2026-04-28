@@ -313,6 +313,27 @@ class StrategyStateBuilder:
                 degraded_stages=degraded_stages, run_ts_utc=run_ts_utc,
             )
 
+        # === Stage 0(Sprint 2.7-C):pre-flight 数据就绪检查 ===
+        # 根据 run_trigger 选择阈值表(scheduled / scheduled_8h_onchain),
+        # 失败 → sleep 5 min 重试一次 → 仍失败 → 写 degraded_stages 但不阻塞。
+        if persist and self.conn is not None:
+            try:
+                degraded_groups, refreshed_inserted_at = (
+                    _run_pre_flight_freshness_check(
+                        self.conn,
+                        context.get("metric_inserted_at") or {},
+                        run_trigger,
+                    )
+                )
+                # 用刷新过的 inserted_at 替换(让 emitter / 后续阶段拿到最新)
+                if refreshed_inserted_at is not context.get("metric_inserted_at"):
+                    context["metric_inserted_at"] = refreshed_inserted_at
+                for g in degraded_groups:
+                    degraded_stages.append(f"pre_flight.{g}")
+            except Exception as e:
+                logger.warning("pre_flight stage exception: %s", e)
+                degraded_stages.append("pre_flight.exception")
+
         # === Stage 1: cold_start 判定 ===
         cold_start_info = self._run_stage(
             "cold_start_check", failures, degraded_stages, run_ts_utc,
@@ -652,30 +673,8 @@ class StrategyStateBuilder:
         next_events_by_type = EventsCalendarDAO.get_next_events_by_type(
             conn, event_types=["fomc", "cpi", "nfp"], now_utc=now_utc)
 
-        # Sprint 2.6-J:per-metric 系统侧写入时间。Sprint 2.6-G 的 data_fetch_log
-        # group 级精度被废弃,改成按 metric 聚合。
-        # 字典结构:
-        #   {
-        #     "onchain":      {metric_name: inserted_at_iso | None},
-        #     "macro":        {metric_name: inserted_at_iso | None},
-        #     "klines_by_tf": {timeframe:   inserted_at_iso | None},
-        #     "derivatives_snapshot": iso_or_None,
-        #   }
-        try:
-            metric_inserted_at = {
-                "onchain": OnchainDAO.get_metric_inserted_at_map(conn),
-                "macro":   MacroDAO.get_metric_inserted_at_map(conn),
-                "klines_by_tf": BTCKlinesDAO.get_latest_inserted_at_by_timeframe(conn),
-                "derivatives_snapshot": (
-                    DerivativesDAO.get_latest_snapshot_inserted_at(conn)
-                ),
-            }
-        except Exception as e:
-            logger.warning("metric_inserted_at lookup failed: %s", e)
-            metric_inserted_at = {
-                "onchain": {}, "macro": {},
-                "klines_by_tf": {}, "derivatives_snapshot": None,
-            }
+        # Sprint 2.6-J:per-metric 系统侧写入时间(extracted to helper for 2.7-C reuse)
+        metric_inserted_at = _query_metric_inserted_at(conn)
 
         return {
             "reference_timestamp_utc": now_utc or _utc_now_iso(),
@@ -966,6 +965,153 @@ class StrategyStateBuilder:
 # ==================================================================
 # 降级占位符构造
 # ==================================================================
+
+def _query_metric_inserted_at(conn: Any) -> dict[str, Any]:
+    """Sprint 2.7-C:查询所有 metric 的最新 inserted_at_utc(系统侧 wall clock)。
+
+    单点提取自 Sprint 2.6-J 的 _assemble_context,供 pre-flight 重查使用。
+    返回结构:
+      {
+        "onchain":      {metric_name: iso | None},
+        "macro":        {metric_name: iso | None},
+        "klines_by_tf": {timeframe:   iso | None},
+        "derivatives_snapshot": iso | None,
+      }
+    任何失败 → 返回所有空 dict / None,不抛错。
+    """
+    try:
+        return {
+            "onchain": OnchainDAO.get_metric_inserted_at_map(conn),
+            "macro":   MacroDAO.get_metric_inserted_at_map(conn),
+            "klines_by_tf": BTCKlinesDAO.get_latest_inserted_at_by_timeframe(conn),
+            "derivatives_snapshot": (
+                DerivativesDAO.get_latest_snapshot_inserted_at(conn)
+            ),
+        }
+    except Exception as e:
+        logger.warning("_query_metric_inserted_at failed: %s", e)
+        return {
+            "onchain": {}, "macro": {},
+            "klines_by_tf": {}, "derivatives_snapshot": None,
+        }
+
+
+# Sprint 2.7-C:pre-flight 数据就绪阈值(秒)。
+# 常规档(00/04/12/16/20:05 BJT)宽松,允许日级数据 30h 内即可。
+# 8 点链上档(08:40 BJT)严格,要求当天链上 < 10 min 落地。
+_PREFLIGHT_THRESHOLDS_SEC: dict[str, dict[str, int]] = {
+    "scheduled": {
+        "klines_1h":     10 * 60,
+        "derivatives":   10 * 60,
+        "klines_1d_4h":  30 * 3600,
+        "onchain":       30 * 3600,
+        "macro":         30 * 3600,
+    },
+    "scheduled_8h_onchain": {
+        "klines_1h":     10 * 60,
+        "derivatives":   10 * 60,
+        "klines_1d_4h":  30 * 60,
+        "onchain":       10 * 60,
+        "macro":         30 * 3600,
+    },
+}
+
+
+def _latest_iso_for_group(
+    metric_inserted_at: dict[str, Any], group: str,
+) -> Optional[str]:
+    """从 metric_inserted_at dict 中取该 group 的最新 ISO 时间戳。"""
+    onchain = metric_inserted_at.get("onchain") or {}
+    macro = metric_inserted_at.get("macro") or {}
+    klines_by_tf = metric_inserted_at.get("klines_by_tf") or {}
+    deriv_snap = metric_inserted_at.get("derivatives_snapshot")
+
+    if group == "klines_1h":
+        return klines_by_tf.get("1h")
+    if group == "derivatives":
+        return deriv_snap
+    if group == "klines_1d_4h":
+        candidates = [klines_by_tf.get("1d"), klines_by_tf.get("4h")]
+        valid = [c for c in candidates if c]
+        return max(valid) if valid else None
+    if group == "onchain":
+        valid = [v for v in onchain.values() if v]
+        return max(valid) if valid else None
+    if group == "macro":
+        valid = [v for v in macro.values() if v]
+        return max(valid) if valid else None
+    return None
+
+
+def _evaluate_freshness(
+    metric_inserted_at: dict[str, Any],
+    run_trigger: str,
+    *,
+    now_fn: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+) -> list[str]:
+    """Sprint 2.7-C:返回未通过 pre-flight 的 group 名单。"""
+    thresholds = _PREFLIGHT_THRESHOLDS_SEC.get(
+        run_trigger, _PREFLIGHT_THRESHOLDS_SEC["scheduled"],
+    )
+    now = now_fn()
+    failed: list[str] = []
+    for group, max_age_sec in thresholds.items():
+        latest_iso = _latest_iso_for_group(metric_inserted_at, group)
+        if latest_iso is None:
+            failed.append(group)
+            continue
+        try:
+            s = latest_iso.replace("Z", "+00:00")
+            ts = datetime.fromisoformat(s)
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+            age_sec = (now - ts).total_seconds()
+        except Exception:
+            failed.append(group)
+            continue
+        if age_sec > max_age_sec:
+            failed.append(group)
+    return failed
+
+
+def _run_pre_flight_freshness_check(
+    conn: Any,
+    metric_inserted_at: dict[str, Any],
+    run_trigger: str,
+    *,
+    retry_after_sec: float = 300.0,
+    sleep_fn: Callable[[float], None] = time.sleep,
+    now_fn: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+) -> tuple[list[str], dict[str, Any]]:
+    """Sprint 2.7-C 关键函数:Stage 0 数据就绪检查。
+
+    Returns (degraded_groups, refreshed_metric_inserted_at)。
+    - degraded_groups: 重试一次后仍未通过的 group 名(空 list = 全部 OK)
+    - refreshed_metric_inserted_at: 重试后重读的 inserted_at(让上游用最新)
+
+    流程:
+      1. 立即评估 metric_inserted_at vs 阈值
+      2. 全 OK → 返回 ([], 入参)
+      3. 有 failed → sleep retry_after_sec 秒,重读 inserted_at,再评估
+      4. 仍 failed → 返回 (failed_after_retry, refreshed_inserted_at)
+    """
+    failed_first = _evaluate_freshness(metric_inserted_at, run_trigger, now_fn=now_fn)
+    if not failed_first:
+        return [], metric_inserted_at
+
+    logger.warning(
+        "pre_flight: %s failed groups=%s, sleeping %ss and retrying",
+        run_trigger, failed_first, retry_after_sec,
+    )
+    sleep_fn(retry_after_sec)
+    refreshed = _query_metric_inserted_at(conn)
+    failed_after = _evaluate_freshness(refreshed, run_trigger, now_fn=now_fn)
+    if failed_after:
+        logger.warning(
+            "pre_flight: still failed after retry: %s", failed_after,
+        )
+    return failed_after, refreshed
+
 
 def _build_single_factors(onchain: dict[str, Any]) -> dict[str, Any]:
     """Sprint 2.6-M C2:产出 L2 §B5 用的 single_factors 字典。

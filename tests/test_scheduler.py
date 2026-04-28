@@ -66,17 +66,18 @@ def test_pipeline_job_reads_interval_from_config(tmp_path: Path):
 # ==================================================================
 
 def test_scheduler_has_pipeline_job_registered(tmp_path: Path):
+    """Sprint 2.7-A:yaml 用新名(data_collection 已删,改用 collect_klines_1h)。"""
     cfg_path = tmp_path / "scheduler.yaml"
     _write_yaml(cfg_path, {
-        "timezone": "UTC",
+        "timezone": "Asia/Shanghai",
         "jobs": {
             "pipeline_run": {
                 "enabled": True,
-                "interval": "4h",
+                "cron": {"hour": "0,4,12,16,20", "minute": 5},
             },
-            "data_collection": {
+            "collect_klines_1h": {
                 "enabled": False,
-                "interval": "1h",
+                "cron": {"minute": 0},
             },
             "cleanup": {
                 "enabled": False,
@@ -89,11 +90,12 @@ def test_scheduler_has_pipeline_job_registered(tmp_path: Path):
         job_ids = [j.id for j in scheduler.get_jobs()]
         assert "pipeline_run" in job_ids
         # disabled jobs 不应注册
-        assert "data_collection" not in job_ids
+        assert "collect_klines_1h" not in job_ids
         assert "cleanup" not in job_ids
 
         pipeline_job = scheduler.get_job("pipeline_run")
-        assert isinstance(pipeline_job.trigger, IntervalTrigger)
+        # Sprint 2.7-A:pipeline_run 改为 cron(原 interval='4h')
+        assert isinstance(pipeline_job.trigger, CronTrigger)
     finally:
         # 确保 scheduler 不会被 gc 时触发
         scheduler.shutdown(wait=False) if scheduler.running else None

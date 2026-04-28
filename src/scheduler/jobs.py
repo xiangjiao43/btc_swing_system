@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -120,184 +121,64 @@ def job_pipeline_run(
                 pass
 
 
-def job_data_collection(
+# Sprint 2.7-B §X:job_data_collection 已完整删除。
+# 替代:job_collect_klines_1h / job_collect_klines_daily /
+#       job_collect_klines_weekly / job_collect_macro / job_collect_onchain
+# 老 yaml 条目 data_collection 在 Sprint 2.7-A 一并删除。
+# 旧测试 tests/test_data_collection_job.py 同步删除。
+
+
+def job_cleanup() -> dict[str, Any]:
+    """骨架。"""
+    logger.info("job_cleanup: skeleton (no-op)")
+    return {"status": "skipped", "reason": "skeleton_only"}
+
+
+# ============================================================
+# Sprint 2.7-B:5 个独立 collector job(替代老的 job_data_collection)。
+# 衍生品改 1h interval limit=168(每整点抓过去 7 天 168 个小时 bar)。
+# ============================================================
+
+_DERIVATIVES_FETCHERS_1H: tuple[str, ...] = (
+    "fetch_funding_rate_history",
+    "fetch_funding_rate_aggregated",
+    "fetch_open_interest_history",
+    "fetch_long_short_ratio_history",
+    "fetch_liquidation_history",
+)
+
+_GLASSNODE_FETCHERS: tuple[str, ...] = (
+    "fetch_mvrv_z_score", "fetch_nupl", "fetch_lth_supply",
+    "fetch_exchange_net_flow", "fetch_mvrv", "fetch_realized_price",
+    "fetch_lth_realized_price", "fetch_sth_realized_price",
+    "fetch_sopr", "fetch_sopr_adjusted",
+    "fetch_reserve_risk", "fetch_puell_multiple",
+)
+
+
+def _wrap_job(
+    name: str,
+    body: Callable[[Any], dict[str, Any]],
     *,
     conn_factory: Optional[Callable[[], Any]] = None,
-    since_days: int = 7,
 ) -> dict[str, Any]:
-    """Sprint 2.6-A:数据采集主任务,每小时调一次 3 个 collector 把最新数据写入 DB。
-
-    Sprint 2.6-A.4:Yahoo 已弃用(腾讯云 IP 被 Yahoo 全局 429 封禁),
-    macro 数据全部由 FRED 提供。当前 collector 列表:FRED / CoinGlass / Glassnode。
-
-    优雅失败语义:
-    - 单个 collector 抛异常 → 记日志 + by_collector[name]=0 + 继续其他
-    - 全部失败 → 也不抛(scheduler 不能 crash),但 status='all_failed'
-    - FRED key 未配置时 fred 优雅 skip,不算失败
-
-    Returns:
-      {status, total_upserted, by_collector: {fred, coinglass, glassnode},
-       errors: {collector_name: msg}, duration_ms, since_days}
-    """
-    import time
-
+    """Sprint 2.7-B:job 通用 wrapper。捕获 conn 异常 + 计时,不让 scheduler crash。"""
     from ..data.storage.connection import get_connection
-
     cf = conn_factory or get_connection
     start_ts = time.time()
-    by_collector: dict[str, int] = {}
-    errors: dict[str, str] = {}
     conn = None
-
     try:
         conn = cf()
-
-        # ---- FRED(无 key 时优雅 skip)----
-        # Sprint 2.6-J:DataFetchLogDAO.record_fetch 已废弃 — 改由 DAO upsert 时
-        # 直接写 inserted_at_utc 列(per-metric 精度)。
-        try:
-            from ..data.collectors.fred import FredCollector
-            fc = FredCollector()
-            if fc.enabled:
-                fred_stats = fc.collect_and_save_all(conn, since_days=since_days)
-                by_collector["fred"] = sum(
-                    v for k, v in fred_stats.items()
-                    if isinstance(v, int) and not k.startswith("__")
-                )
-                conn.commit()
-            else:
-                by_collector["fred"] = 0
-                logger.info("data_collection.fred skipped (no API key)")
-        except Exception as e:
-            logger.exception("data_collection.fred failed: %s", e)
-            by_collector["fred"] = 0
-            errors["fred"] = str(e)[:200]
-
-        # ---- CoinGlass(增量,只更新最新)----
-        try:
-            from ..data.collectors.coinglass import CoinglassCollector
-            from ..data.storage.dao import (
-                BTCKlinesDAO, DerivativeMetric,
-                DerivativesDAO, KlineRow,
-            )
-            cg = CoinglassCollector()
-            cg_count = 0
-            for tf in ("1h", "4h", "1d"):
-                try:
-                    rows = cg.fetch_klines(interval=tf, limit=24)
-                    if rows:
-                        klines = [
-                            KlineRow(
-                                timeframe=tf, timestamp=r["timestamp"],
-                                open=r["open"], high=r["high"],
-                                low=r["low"], close=r["close"],
-                                volume_btc=r.get("volume", 0.0) or 0.0,
-                            )
-                            for r in rows
-                        ]
-                        cg_count += BTCKlinesDAO.upsert_klines(conn, klines)
-                except Exception as inner:
-                    logger.warning("coinglass klines.%s failed: %s", tf, inner)
-            # Sprint 2.6-B:补 OI + liquidation,之前漏调导致这两组列长期 NULL
-            # Sprint 2.6-F.3:补 funding_rate_aggregated(2.6-F 只动了
-            # collect_and_save_all,jobs.py 自己的列表漏了,生产端从未拉到)
-            for fn_name in (
-                "fetch_funding_rate_history",
-                "fetch_funding_rate_aggregated",
-                "fetch_open_interest_history",
-                "fetch_long_short_ratio_history",
-                "fetch_liquidation_history",
-            ):
-                try:
-                    fn = getattr(cg, fn_name, None)
-                    if fn is None:
-                        continue
-                    rows = fn(interval="1d", limit=7)
-                    if rows:
-                        metrics = [
-                            DerivativeMetric(
-                                timestamp=r["timestamp"],
-                                metric_name=r.get("metric_name"),
-                                metric_value=r.get("metric_value"),
-                            )
-                            for r in rows
-                        ]
-                        cg_count += DerivativesDAO.upsert_batch(conn, metrics)
-                except Exception as inner:
-                    logger.warning("coinglass %s failed: %s", fn_name, inner)
-            by_collector["coinglass"] = cg_count
-            conn.commit()
-        except Exception as e:
-            logger.exception("data_collection.coinglass failed: %s", e)
-            by_collector["coinglass"] = 0
-            errors["coinglass"] = str(e)[:200]
-
-        # ---- Glassnode(增量,9 个指标)----
-        try:
-            from ..data.collectors.glassnode import GlassnodeCollector
-            from ..data.storage.dao import OnchainDAO, OnchainMetric
-            gn = GlassnodeCollector()
-            gn_count = 0
-            for fn_name in (
-                "fetch_mvrv_z_score", "fetch_nupl", "fetch_lth_supply",
-                "fetch_exchange_net_flow", "fetch_mvrv", "fetch_realized_price",
-                # Sprint 2.6-F.1: + sopr_adjusted (aSOPR)
-                # Sprint 2.6-F.3: lth/sth_realized_price 删除(Glassnode 404)
-                # Sprint 2.6-I: 重新接入 — 通过 /breakdowns/* 客户端聚合
-                #   (实例缓存共享 2 次 HTTP,2 个注册项只产生 2 次 HTTP)
-                "fetch_lth_realized_price", "fetch_sth_realized_price",
-                "fetch_sopr", "fetch_sopr_adjusted",
-                "fetch_reserve_risk", "fetch_puell_multiple",
-            ):
-                try:
-                    fn = getattr(gn, fn_name, None)
-                    if fn is None:
-                        continue
-                    rows = fn(since_days=since_days)
-                    if rows:
-                        metrics = [
-                            OnchainMetric(
-                                timestamp=r["timestamp"],
-                                metric_name=r.get("metric_name"),
-                                metric_value=r.get("metric_value"),
-                                source=r.get("source", "glassnode_primary"),
-                            )
-                            for r in rows
-                        ]
-                        gn_count += OnchainDAO.upsert_batch(conn, metrics)
-                except Exception as inner:
-                    logger.warning("glassnode.%s failed: %s", fn_name, inner)
-            by_collector["glassnode"] = gn_count
-            conn.commit()
-        except Exception as e:
-            logger.exception("data_collection.glassnode failed: %s", e)
-            by_collector["glassnode"] = 0
-            errors["glassnode"] = str(e)[:200]
-
-        total = sum(by_collector.values())
-        any_success = any(v > 0 for v in by_collector.values())
-        status = "ok" if any_success else "all_failed"
-
-        logger.info(
-            "data_collection done: status=%s total=%d by=%s errors=%s",
-            status, total, by_collector, list(errors.keys()),
-        )
-
-        return {
-            "status": status,
-            "total_upserted": total,
-            "by_collector": by_collector,
-            "errors": errors,
-            "duration_ms": int((time.time() - start_ts) * 1000),
-            "since_days": since_days,
-        }
+        result = body(conn)
+        result.setdefault("status", "ok")
+        result["duration_ms"] = int((time.time() - start_ts) * 1000)
+        return result
     except Exception as e:
-        logger.exception("data_collection top-level failed: %s", e)
+        logger.exception("%s top-level failed: %s", name, e)
         return {
             "status": "fatal_error",
             "error_type": type(e).__name__,
             "error_message": str(e)[:300],
-            "by_collector": by_collector,
             "duration_ms": int((time.time() - start_ts) * 1000),
         }
     finally:
@@ -308,60 +189,219 @@ def job_data_collection(
                 pass
 
 
-def job_cleanup() -> dict[str, Any]:
-    """骨架。"""
-    logger.info("job_cleanup: skeleton (no-op)")
-    return {"status": "skipped", "reason": "skeleton_only"}
-
-
-# ============================================================
-# Sprint 2.7-A:7 个独立 cron job 的 stub(BJT 整点对齐 + 衍生品 1h)。
-# 真实实施在 Sprint 2.7-B 替换这 6 个 stub。
-# ============================================================
-
 def job_collect_klines_1h(
     *,
     conn_factory: Optional[Callable[[], Any]] = None,
 ) -> dict[str, Any]:
-    """Sprint 2.7-A stub:每整点 :00 抓 1h K 线 + 衍生品。2.7-B 实施。"""
-    logger.info("job_collect_klines_1h: stub_pre_2_7_b (no-op)")
-    return {"status": "skipped", "reason": "stub_pre_2_7_b"}
+    """每整点 :00 抓 CoinGlass 1h K 线(limit=24)+ 5 衍生品端点(1h interval, limit=168)。
+
+    衍生品 1h interval 是 Sprint 2.7-B 关键变更:之前 interval='1d' limit=7
+    导致衍生品被强制日级 → 用户永远看不到小时级精度。
+    """
+    def _body(conn: Any) -> dict[str, Any]:
+        from ..data.collectors.coinglass import CoinglassCollector
+        from ..data.storage.dao import (
+            BTCKlinesDAO, DerivativeMetric, DerivativesDAO, KlineRow,
+        )
+        cg = CoinglassCollector()
+        klines_count = 0
+        derivatives_count = 0
+        errors: dict[str, str] = {}
+
+        # ---- K 线 1h(limit=24,过去 24 小时)----
+        try:
+            rows = cg.fetch_klines(interval="1h", limit=24)
+            if rows:
+                klines = [
+                    KlineRow(
+                        timeframe="1h", timestamp=r["timestamp"],
+                        open=r["open"], high=r["high"],
+                        low=r["low"], close=r["close"],
+                        volume_btc=r.get("volume", 0.0) or 0.0,
+                    )
+                    for r in rows
+                ]
+                klines_count = BTCKlinesDAO.upsert_klines(conn, klines)
+        except Exception as e:
+            logger.warning("collect_klines_1h klines.1h failed: %s", e)
+            errors["klines_1h"] = str(e)[:200]
+
+        # ---- 衍生品 5 端点 1h interval limit=168(过去 7 天的 1h bar)----
+        for fn_name in _DERIVATIVES_FETCHERS_1H:
+            try:
+                fn = getattr(cg, fn_name, None)
+                if fn is None:
+                    continue
+                rows = fn(interval="1h", limit=168)
+                if rows:
+                    metrics = [
+                        DerivativeMetric(
+                            timestamp=r["timestamp"],
+                            metric_name=r.get("metric_name"),
+                            metric_value=r.get("metric_value"),
+                        )
+                        for r in rows
+                    ]
+                    derivatives_count += DerivativesDAO.upsert_batch(conn, metrics)
+            except Exception as e:
+                logger.warning("collect_klines_1h derivatives.%s failed: %s",
+                               fn_name, e)
+                errors[fn_name] = str(e)[:200]
+
+        conn.commit()
+        return {
+            "by_collector": {
+                "klines_1h": klines_count,
+                "derivatives_1h": derivatives_count,
+            },
+            "total_upserted": klines_count + derivatives_count,
+            "errors": errors,
+        }
+    return _wrap_job("collect_klines_1h", _body, conn_factory=conn_factory)
 
 
 def job_collect_klines_daily(
     *,
     conn_factory: Optional[Callable[[], Any]] = None,
 ) -> dict[str, Any]:
-    """Sprint 2.7-A stub:每天 08:01 抓 1d/4h K 线。2.7-B 实施。"""
-    logger.info("job_collect_klines_daily: stub_pre_2_7_b (no-op)")
-    return {"status": "skipped", "reason": "stub_pre_2_7_b"}
+    """每天 08:01 BJT 抓 CoinGlass 1d + 4h K 线(各 limit=24,覆盖 24 天 / 4 天)。"""
+    def _body(conn: Any) -> dict[str, Any]:
+        from ..data.collectors.coinglass import CoinglassCollector
+        from ..data.storage.dao import BTCKlinesDAO, KlineRow
+        cg = CoinglassCollector()
+        by_tf: dict[str, int] = {}
+        errors: dict[str, str] = {}
+
+        for tf in ("1d", "4h"):
+            try:
+                rows = cg.fetch_klines(interval=tf, limit=24)
+                if not rows:
+                    by_tf[tf] = 0
+                    continue
+                klines = [
+                    KlineRow(
+                        timeframe=tf, timestamp=r["timestamp"],
+                        open=r["open"], high=r["high"],
+                        low=r["low"], close=r["close"],
+                        volume_btc=r.get("volume", 0.0) or 0.0,
+                    )
+                    for r in rows
+                ]
+                by_tf[tf] = BTCKlinesDAO.upsert_klines(conn, klines)
+            except Exception as e:
+                logger.warning("collect_klines_daily klines.%s failed: %s", tf, e)
+                errors[tf] = str(e)[:200]
+                by_tf[tf] = 0
+
+        conn.commit()
+        return {
+            "by_collector": by_tf,
+            "total_upserted": sum(by_tf.values()),
+            "errors": errors,
+        }
+    return _wrap_job("collect_klines_daily", _body, conn_factory=conn_factory)
 
 
 def job_collect_klines_weekly(
     *,
     conn_factory: Optional[Callable[[], Any]] = None,
 ) -> dict[str, Any]:
-    """Sprint 2.7-A stub:每周一 08:01 抓 1w K 线。2.7-B 实施。"""
-    logger.info("job_collect_klines_weekly: stub_pre_2_7_b (no-op)")
-    return {"status": "skipped", "reason": "stub_pre_2_7_b"}
+    """每周一 08:01 BJT 抓 1w K 线(limit=12,覆盖 ~3 个月)。"""
+    def _body(conn: Any) -> dict[str, Any]:
+        from ..data.collectors.coinglass import CoinglassCollector
+        from ..data.storage.dao import BTCKlinesDAO, KlineRow
+        cg = CoinglassCollector()
+        try:
+            rows = cg.fetch_klines(interval="1w", limit=12)
+            if not rows:
+                return {"by_collector": {"1w": 0}, "total_upserted": 0, "errors": {}}
+            klines = [
+                KlineRow(
+                    timeframe="1w", timestamp=r["timestamp"],
+                    open=r["open"], high=r["high"],
+                    low=r["low"], close=r["close"],
+                    volume_btc=r.get("volume", 0.0) or 0.0,
+                )
+                for r in rows
+            ]
+            n = BTCKlinesDAO.upsert_klines(conn, klines)
+            conn.commit()
+            return {"by_collector": {"1w": n}, "total_upserted": n, "errors": {}}
+        except Exception as e:
+            logger.warning("collect_klines_weekly failed: %s", e)
+            return {"by_collector": {"1w": 0}, "total_upserted": 0,
+                    "errors": {"1w": str(e)[:200]}}
+    return _wrap_job("collect_klines_weekly", _body, conn_factory=conn_factory)
 
 
 def job_collect_macro(
     *,
     conn_factory: Optional[Callable[[], Any]] = None,
+    since_days: int = 30,
 ) -> dict[str, Any]:
-    """Sprint 2.7-A stub:每天 06:00 抓 FRED 宏观。2.7-B 实施。"""
-    logger.info("job_collect_macro: stub_pre_2_7_b (no-op)")
-    return {"status": "skipped", "reason": "stub_pre_2_7_b"}
+    """每天 06:00 BJT 抓 FRED 9 个 series。无 key 时优雅 skip。"""
+    def _body(conn: Any) -> dict[str, Any]:
+        from ..data.collectors.fred import FredCollector
+        fc = FredCollector()
+        if not fc.enabled:
+            logger.info("collect_macro: FRED key not configured, skipping")
+            return {"by_collector": {"fred": 0}, "total_upserted": 0,
+                    "errors": {"fred": "FRED_API_KEY not set"}, "status": "skipped"}
+        stats = fc.collect_and_save_all(conn, since_days=since_days)
+        n = sum(v for k, v in stats.items()
+                if isinstance(v, int) and not k.startswith("__"))
+        conn.commit()
+        return {
+            "by_collector": {"fred": n},
+            "total_upserted": n,
+            "errors": {},
+            "fred_breakdown": stats,
+        }
+    return _wrap_job("collect_macro", _body, conn_factory=conn_factory)
 
 
 def job_collect_onchain(
     *,
     conn_factory: Optional[Callable[[], Any]] = None,
+    since_days: int = 30,
 ) -> dict[str, Any]:
-    """Sprint 2.7-A stub:每天 08:35 抓 Glassnode 链上。2.7-B 实施。"""
-    logger.info("job_collect_onchain: stub_pre_2_7_b (no-op)")
-    return {"status": "skipped", "reason": "stub_pre_2_7_b"}
+    """每天 08:35 BJT 抓 Glassnode 12 个 fetcher(primary 5 + display 7 含
+    LTH/STH realized price + aSOPR)。"""
+    def _body(conn: Any) -> dict[str, Any]:
+        from ..data.collectors.glassnode import GlassnodeCollector
+        from ..data.storage.dao import OnchainDAO, OnchainMetric
+        gn = GlassnodeCollector()
+        total = 0
+        errors: dict[str, str] = {}
+
+        for fn_name in _GLASSNODE_FETCHERS:
+            try:
+                fn = getattr(gn, fn_name, None)
+                if fn is None:
+                    continue
+                rows = fn(since_days=since_days)
+                if rows:
+                    metrics = [
+                        OnchainMetric(
+                            timestamp=r["timestamp"],
+                            metric_name=r.get("metric_name"),
+                            metric_value=r.get("metric_value"),
+                            source=r.get("source", "glassnode_primary"),
+                        )
+                        for r in rows
+                    ]
+                    total += OnchainDAO.upsert_batch(conn, metrics)
+            except Exception as e:
+                logger.warning("collect_onchain.%s failed: %s", fn_name, e)
+                errors[fn_name] = str(e)[:200]
+
+        conn.commit()
+        return {
+            "by_collector": {"glassnode": total},
+            "total_upserted": total,
+            "errors": errors,
+        }
+    return _wrap_job("collect_onchain", _body, conn_factory=conn_factory)
 
 
 def job_event_listener(
@@ -376,15 +416,13 @@ def job_event_listener(
 
 _JOB_FUNCTIONS: dict[str, Callable[..., Any]] = {
     "pipeline_run": job_pipeline_run,
-    # Sprint 2.7-A:7 个新 job 注册(stub,2.7-B/D 实施)
+    # Sprint 2.7-A/B:5 个 collector + event_listener(stub,2.7-D 实施)
     "collect_klines_1h": job_collect_klines_1h,
     "collect_klines_daily": job_collect_klines_daily,
     "collect_klines_weekly": job_collect_klines_weekly,
     "collect_macro": job_collect_macro,
     "collect_onchain": job_collect_onchain,
     "event_listener": job_event_listener,
-    # 老 job(2.7-B 删 data_collection,cleanup 仍是 skeleton)
-    "data_collection": job_data_collection,
     "cleanup": job_cleanup,
 }
 

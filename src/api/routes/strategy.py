@@ -59,15 +59,42 @@ def _row_to_model(row: dict[str, Any]) -> StrategyStateRow:
 # GET /current(建模 §9.10 #1)+ /latest alias(老路径)
 # ==================================================================
 
+def _overlay_latest_factor_cards(
+    row: dict[str, Any], conn: Any,
+) -> dict[str, Any]:
+    """Sprint 2.8-A.1:把 latest_factor_cards 覆盖到 row.state.factor_cards。
+
+    /current 和 /stream 共用此 helper(§X 不允许两路重复实现)。
+    latest_factor_cards 表为空(冷启动 / 单测)→ 原样返回 row。
+    state 可能是 str(JSON)或 dict;两种都处理。
+    """
+    if row is None:
+        return row
+    latest = LatestFactorCardsDAO.get_latest(conn)
+    if latest is None:
+        return row
+    state = row.get("state")
+    if isinstance(state, str):
+        try:
+            state = json.loads(state)
+        except (json.JSONDecodeError, ValueError):
+            state = {}
+        row = dict(row)
+        row["state"] = state
+    if isinstance(state, dict):
+        state["factor_cards"] = latest["cards"]
+        state.setdefault("meta", {})["factor_cards_refreshed_at_utc"] = (
+            latest["refreshed_at_utc"]
+        )
+    return row
+
+
 def _get_current_impl(request: Request) -> StrategyStateRow:
     ctx = request.app.state.ctx
     conn = ctx.conn_factory()
     try:
         row = StrategyStateDAO.get_latest_state(conn)
-        # Sprint 2.8-A:factor_cards 用 latest_factor_cards(每个 collector 跑完
-        # 立即刷新)覆盖 strategy_state_history 里的 4h 老快照。
-        # latest_factor_cards 表空(冷启动 / 单测)→ 保留 state.factor_cards 兜底。
-        latest_cards = LatestFactorCardsDAO.get_latest(conn)
+        row = _overlay_latest_factor_cards(row, conn)
     finally:
         try:
             conn.close()
@@ -75,20 +102,6 @@ def _get_current_impl(request: Request) -> StrategyStateRow:
             pass
     if row is None:
         raise HTTPException(status_code=404, detail="No strategy state found")
-    if latest_cards is not None and isinstance(row.get("state"), (str, dict)):
-        state = row["state"]
-        if isinstance(state, str):
-            try:
-                state = json.loads(state)
-            except (json.JSONDecodeError, ValueError):
-                state = {}
-            row = dict(row)
-            row["state"] = state
-        if isinstance(state, dict):
-            state["factor_cards"] = latest_cards["cards"]
-            state.setdefault("meta", {})["factor_cards_refreshed_at_utc"] = (
-                latest_cards["refreshed_at_utc"]
-            )
     return _row_to_model(row)
 
 
@@ -125,6 +138,9 @@ async def strategy_stream(request: Request) -> StreamingResponse:
             conn = ctx.conn_factory()
             try:
                 row = StrategyStateDAO.get_latest_state(conn)
+                # Sprint 2.8-A.1:SSE 推送也走 latest_factor_cards 覆盖,
+                # 与 /current 行为一致(避免 push 把前端硬刷拿到的新卡 revert 回旧值)
+                row = _overlay_latest_factor_cards(row, conn)
             finally:
                 try:
                     conn.close()
@@ -147,6 +163,8 @@ async def strategy_stream(request: Request) -> StreamingResponse:
                 conn = ctx.conn_factory()
                 try:
                     row = StrategyStateDAO.get_latest_state(conn)
+                    # Sprint 2.8-A.1:轮询推送也覆盖
+                    row = _overlay_latest_factor_cards(row, conn)
                 finally:
                     try:
                         conn.close()

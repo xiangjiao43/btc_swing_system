@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import time
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException, Request
 
@@ -19,14 +20,37 @@ router = APIRouter(prefix="/system", tags=["system"])
 
 # ---------- GET /api/system/health ----------
 
+def _count_preflight_alerts_24h(conn) -> int:
+    """Sprint 2.8-B:最近 24h pre_flight_degraded alerts 数量。"""
+    since = (datetime.now(timezone.utc) - timedelta(hours=24)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+    row = conn.execute(
+        "SELECT COUNT(*) AS n FROM alerts "
+        "WHERE alert_type = 'pre_flight_degraded' AND raised_at_utc >= ?",
+        (since,),
+    ).fetchone()
+    if row is None:
+        return 0
+    try:
+        return int(row["n"])
+    except (TypeError, KeyError, IndexError):
+        return int(row[0]) if row else 0
+
+
 def _health_impl(request: Request) -> HealthResponse:
     ctx = request.app.state.ctx
     db_ok = False
+    preflight_24h = 0
     try:
         conn = ctx.conn_factory()
         try:
             conn.execute("SELECT 1").fetchone()
             db_ok = True
+            try:
+                preflight_24h = _count_preflight_alerts_24h(conn)
+            except Exception:
+                preflight_24h = 0
         finally:
             try:
                 conn.close()
@@ -39,6 +63,7 @@ def _health_impl(request: Request) -> HealthResponse:
         version=ctx.version,
         uptime_seconds=round(time.time() - ctx.started_at, 3),
         db_accessible=db_ok,
+        preflight_alerts_24h=preflight_24h,
     )
 
 

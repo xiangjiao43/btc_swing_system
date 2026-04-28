@@ -17,6 +17,10 @@ class HealthResponse(BaseModel):
     version: str
     uptime_seconds: float
     db_accessible: bool
+    preflight_alerts_24h: int = Field(
+        0,
+        description="Sprint 2.8-B:最近 24h pre_flight_degraded alerts 数量",
+    )
 
 
 class StrategyStateRow(BaseModel):

@@ -628,6 +628,19 @@ class StrategyStateBuilder:
             except Exception as e:
                 logger.warning("final commit failed: %s", e)
 
+            # Sprint 2.8-B:pre-flight degraded → 写一条 alerts 行,
+            # 让用户能在 /api/system/health 和 show_preflight_alerts.py 里查到。
+            try:
+                _write_preflight_degraded_alert(
+                    self.conn,
+                    run_id=run_id,
+                    run_ts_utc=run_ts_utc,
+                    degraded_stages=degraded_stages,
+                    metric_inserted_at=context.get("metric_inserted_at") or {},
+                )
+            except Exception as e:
+                logger.warning("write_preflight_degraded_alert failed: %s", e)
+
         return BuildResult(
             run_id=run_id,
             run_timestamp_utc=run_ts_utc,
@@ -994,6 +1007,52 @@ def _query_metric_inserted_at(conn: Any) -> dict[str, Any]:
             "onchain": {}, "macro": {},
             "klines_by_tf": {}, "derivatives_snapshot": None,
         }
+
+
+def _write_preflight_degraded_alert(
+    conn: Any,
+    *,
+    run_id: str,
+    run_ts_utc: str,
+    degraded_stages: list[str],
+    metric_inserted_at: dict[str, Any],
+) -> bool:
+    """Sprint 2.8-B:把 pre_flight degraded 写成一条 alerts 行。
+
+    只在 degraded_stages 至少有一个 'pre_flight.<group>' 时写;无则返回 False。
+    message 含 group 列表 + 每 group 最新 inserted_at,便于事后排查。
+    任何 DB 错误只 log warning,不抛(本函数是 pipeline 末尾的最佳努力诊断)。
+    """
+    pf_groups = [
+        s.split(".", 1)[1] for s in degraded_stages
+        if s.startswith("pre_flight.") and "." in s
+    ]
+    if not pf_groups:
+        return False
+
+    inserted_map: dict[str, Optional[str]] = {}
+    for g in pf_groups:
+        # exception 这种伪 group 没法查 inserted_at,跳过
+        if g == "exception":
+            inserted_map[g] = None
+            continue
+        try:
+            inserted_map[g] = _latest_iso_for_group(metric_inserted_at, g)
+        except Exception:
+            inserted_map[g] = None
+
+    msg = (
+        f"pre-flight degraded for groups: {pf_groups}; "
+        f"latest inserted_at per group: {inserted_map}"
+    )
+    conn.execute(
+        "INSERT INTO alerts "
+        "(alert_type, severity, message, raised_at_utc, related_run_id) "
+        "VALUES (?, ?, ?, ?, ?)",
+        ("pre_flight_degraded", "warning", msg, run_ts_utc, run_id),
+    )
+    conn.commit()
+    return True
 
 
 # Sprint 2.7-C:pre-flight 数据就绪阈值(秒)。

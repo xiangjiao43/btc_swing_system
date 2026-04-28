@@ -1,46 +1,104 @@
 # ============================================================
-# scheduler.yaml — APScheduler 任务配置(Sprint 1.15b)
+# scheduler.yaml — APScheduler 任务配置(Sprint 2.7-A 重写)
 # ============================================================
-# 每个 job 声明:
-#   enabled:             true/false。关掉即不注册到 scheduler。
-#   interval:            '4h' / '1h' / '30m' 等 interval trigger;或
-#                        cron 字段(day, hour, minute)用 cron trigger。
-#   misfire_grace_time:  错过触发时间后仍允许补跑的秒数。
-#   coalesce:            多个错过的触发是否合并成一次。
-#   max_instances:       同一 job 并发上限(默认 1)。
+# 时区改为 BJT(Asia/Shanghai),所有 cron 时间都按北京时间。
+# 7 个独立 cron job + 1 个 60s 常驻 event_listener:
+#   collect_klines_1h        每整点 :00,衍生品 1h + K 线 1h
+#   collect_klines_daily     每天 08:01,1d/4h K 线
+#   collect_klines_weekly    每周一 08:01,1w K 线
+#   collect_macro            每天 06:00,FRED 9 个 series
+#   collect_onchain          每天 08:35,Glassnode + sopr_adjusted + LTH 等
+#   pipeline_run             6 档:00:05/04:05/12:05/16:05/20:05 + 08:40
+#   event_listener           60 秒高频,4 种 event 触发
 #
-# job 列表:
-#   pipeline_run         主 pipeline,每 4 小时
-#   data_collection      数据采集任务(骨架,默认 disabled)
-#   cleanup              过期数据清理(骨架,默认 disabled)
+# yaml 字段:
+#   enabled              true/false。关掉即不注册到 scheduler。
+#   func                 可选,默认 = job 名;允许多 yaml 条目共享同一函数
+#                       (pipeline_run_regular + pipeline_run_8h_onchain
+#                       都跑 pipeline_run)
+#   interval             '60s' / '5m' / '1h' / '1d' interval trigger
+#   cron                 dict,key 用 APScheduler CronTrigger kwargs
+#                       (hour / minute / day / day_of_week)。
+#   misfire_grace_time   错过触发的允许补跑秒数
+#   coalesce             多次错过合并为一次
+#   max_instances        并发上限(默认 1)
+#
+# Sprint 2.6-A 老配置(pipeline_run interval 4h + data_collection interval 1h)
+# 已删除,Sprint 2.7-B 删除老的 job_data_collection 函数。
 # ============================================================
 
-timezone: 'UTC'
+timezone: 'Asia/Shanghai'
 
 jobs:
-  pipeline_run:
+
+  # ------------- 数据采集 ----------------------------
+
+  collect_klines_1h:
     enabled: true
-    interval: '4h'
-    misfire_grace_time: 600        # 10 分钟
+    cron: {minute: 0}                  # 每整点 :00 BJT
+    misfire_grace_time: 240            # 4 分钟,不影响下个整点
     coalesce: true
     max_instances: 1
-    description: 'Pipeline 主循环,每 4 小时执行一次 StrategyStateBuilder.run()'
+    description: '1h K 线 + 5 衍生品端点(1h interval, limit=168)'
 
-  data_collection:
-    enabled: true                  # Sprint 2.6-A:实施完成,每小时增量采集
-    interval: '1h'
+  collect_klines_daily:
+    enabled: true
+    cron: {hour: 8, minute: 1}         # 08:01 BJT
+    misfire_grace_time: 600
+    coalesce: true
+    max_instances: 1
+    description: '1d / 4h K 线日级抓取'
+
+  collect_klines_weekly:
+    enabled: true
+    cron: {day_of_week: 'mon', hour: 8, minute: 1}  # 周一 08:01 BJT
+    misfire_grace_time: 1800
+    coalesce: true
+    max_instances: 1
+    description: '1w K 线周级抓取'
+
+  collect_macro:
+    enabled: true
+    cron: {hour: 6, minute: 0}         # 06:00 BJT
+    misfire_grace_time: 1800
+    coalesce: true
+    max_instances: 1
+    description: 'FRED 9 个 series + alias(DGS10/DFF/CPI/UNRATE/SP500/NASDAQ/VIX/DXY/gold_price)'
+
+  collect_onchain:
+    enabled: true
+    cron: {hour: 8, minute: 35}        # 08:35 BJT(在 daily K 线后,pipeline 8 点档前)
+    misfire_grace_time: 600
+    coalesce: true
+    max_instances: 1
+    description: 'Glassnode 13 个 metric(primary 5 + display 8 含 LTH/STH realized + aSOPR)'
+
+  # ------------- 主 pipeline(2 个 cron entry,共享 pipeline_run 函数)-------
+
+  pipeline_run_regular:
+    enabled: true
+    func: pipeline_run                 # 共享 pipeline_run 函数
+    cron: {hour: '0,4,12,16,20', minute: 5}  # 5 档:00/04/12/16/20 :05 BJT
     misfire_grace_time: 300
     coalesce: true
     max_instances: 1
-    description: '数据采集:Yahoo / FRED / CoinGlass / Glassnode 增量采集(since_days=7)'
+    description: 'Pipeline 主循环常规档(00/04/12/16/20:05 BJT)'
 
-  cleanup:
-    enabled: false
-    # 每天 UTC 03:00 跑一次
-    cron:
-      hour: 3
-      minute: 0
-    misfire_grace_time: 1800       # 30 分钟
+  pipeline_run_8h_onchain:
+    enabled: true
+    func: pipeline_run                 # 共享 pipeline_run 函数
+    cron: {hour: 8, minute: 40}        # 08:40 BJT(链上 08:35 抓完 + 5 分钟缓冲)
+    misfire_grace_time: 300
     coalesce: true
     max_instances: 1
-    description: '过期降级日志 / 旧 history 清理;骨架默认关闭'
+    description: 'Pipeline 8 点链上档(等链上数据落地后跑)'
+
+  # ------------- 高频事件监听 ------------------------
+
+  event_listener:
+    enabled: true
+    interval: '60s'                    # 60 秒高频常驻
+    misfire_grace_time: 30
+    coalesce: true
+    max_instances: 1
+    description: '事件触发器:macro(events_calendar 命中)/ price ±3% / invalidation 跌破失效位'

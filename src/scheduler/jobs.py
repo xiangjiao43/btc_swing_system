@@ -314,8 +314,76 @@ def job_cleanup() -> dict[str, Any]:
     return {"status": "skipped", "reason": "skeleton_only"}
 
 
+# ============================================================
+# Sprint 2.7-A:7 个独立 cron job 的 stub(BJT 整点对齐 + 衍生品 1h)。
+# 真实实施在 Sprint 2.7-B 替换这 6 个 stub。
+# ============================================================
+
+def job_collect_klines_1h(
+    *,
+    conn_factory: Optional[Callable[[], Any]] = None,
+) -> dict[str, Any]:
+    """Sprint 2.7-A stub:每整点 :00 抓 1h K 线 + 衍生品。2.7-B 实施。"""
+    logger.info("job_collect_klines_1h: stub_pre_2_7_b (no-op)")
+    return {"status": "skipped", "reason": "stub_pre_2_7_b"}
+
+
+def job_collect_klines_daily(
+    *,
+    conn_factory: Optional[Callable[[], Any]] = None,
+) -> dict[str, Any]:
+    """Sprint 2.7-A stub:每天 08:01 抓 1d/4h K 线。2.7-B 实施。"""
+    logger.info("job_collect_klines_daily: stub_pre_2_7_b (no-op)")
+    return {"status": "skipped", "reason": "stub_pre_2_7_b"}
+
+
+def job_collect_klines_weekly(
+    *,
+    conn_factory: Optional[Callable[[], Any]] = None,
+) -> dict[str, Any]:
+    """Sprint 2.7-A stub:每周一 08:01 抓 1w K 线。2.7-B 实施。"""
+    logger.info("job_collect_klines_weekly: stub_pre_2_7_b (no-op)")
+    return {"status": "skipped", "reason": "stub_pre_2_7_b"}
+
+
+def job_collect_macro(
+    *,
+    conn_factory: Optional[Callable[[], Any]] = None,
+) -> dict[str, Any]:
+    """Sprint 2.7-A stub:每天 06:00 抓 FRED 宏观。2.7-B 实施。"""
+    logger.info("job_collect_macro: stub_pre_2_7_b (no-op)")
+    return {"status": "skipped", "reason": "stub_pre_2_7_b"}
+
+
+def job_collect_onchain(
+    *,
+    conn_factory: Optional[Callable[[], Any]] = None,
+) -> dict[str, Any]:
+    """Sprint 2.7-A stub:每天 08:35 抓 Glassnode 链上。2.7-B 实施。"""
+    logger.info("job_collect_onchain: stub_pre_2_7_b (no-op)")
+    return {"status": "skipped", "reason": "stub_pre_2_7_b"}
+
+
+def job_event_listener(
+    *,
+    conn_factory: Optional[Callable[[], Any]] = None,
+) -> dict[str, Any]:
+    """Sprint 2.7-A stub:60s 高频常驻,扫 events_calendar + 价格异动 + 失效位。
+    2.7-D 实施。"""
+    logger.info("job_event_listener: stub_pre_2_7_d (no-op)")
+    return {"status": "skipped", "reason": "stub_pre_2_7_d"}
+
+
 _JOB_FUNCTIONS: dict[str, Callable[..., Any]] = {
     "pipeline_run": job_pipeline_run,
+    # Sprint 2.7-A:7 个新 job 注册(stub,2.7-B/D 实施)
+    "collect_klines_1h": job_collect_klines_1h,
+    "collect_klines_daily": job_collect_klines_daily,
+    "collect_klines_weekly": job_collect_klines_weekly,
+    "collect_macro": job_collect_macro,
+    "collect_onchain": job_collect_onchain,
+    "event_listener": job_event_listener,
+    # 老 job(2.7-B 删 data_collection,cleanup 仍是 skeleton)
     "data_collection": job_data_collection,
     "cleanup": job_cleanup,
 }
@@ -369,8 +437,14 @@ def build_job_configs(
     for name, spec in jobs_cfg.items():
         if not isinstance(spec, dict):
             raise JobConfigError(f"job {name}: spec must be a dict")
-        if name not in funcs:
-            raise JobConfigError(f"job {name}: no registered function")
+        # Sprint 2.7-A:可选 'func' 字段允许多 yaml 条目共享同一函数
+        # (例如 pipeline_run_regular + pipeline_run_8h_onchain 都跑 pipeline_run)。
+        # 默认 func = name(向后兼容)。
+        func_key = str(spec.get("func") or name)
+        if func_key not in funcs:
+            raise JobConfigError(
+                f"job {name}: no registered function (func={func_key!r})"
+            )
         if "interval" in spec:
             trigger_kind = "interval"
             trigger_kwargs = _parse_interval(spec["interval"])
@@ -387,7 +461,7 @@ def build_job_configs(
         out.append(JobConfig(
             name=name,
             enabled=bool(spec.get("enabled", False)),
-            func=funcs[name],
+            func=funcs[func_key],
             trigger_kind=trigger_kind,
             trigger_kwargs=trigger_kwargs,
             misfire_grace_time=int(spec.get("misfire_grace_time", 300)),

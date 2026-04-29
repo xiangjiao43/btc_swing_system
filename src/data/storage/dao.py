@@ -1312,25 +1312,6 @@ class FallbackLogDAO:
             details=details,
         )
 
-    @staticmethod
-    def count_consecutive_level_1_ending_at(
-        conn: sqlite3.Connection,
-        run_timestamp_utc: str,
-    ) -> int:
-        count = 0
-        rows = conn.execute(
-            "SELECT fallback_level FROM fallback_events "
-            "WHERE triggered_at_utc <= ? "
-            "ORDER BY triggered_at_utc DESC",
-            (run_timestamp_utc,),
-        ).fetchall()
-        for r in rows:
-            if r["fallback_level"] == "level_1":
-                count += 1
-            else:
-                break
-        return count
-
     # ------------------------------------------------------------------
     # Auto-escalation (Sprint 1.16c)
     # ------------------------------------------------------------------

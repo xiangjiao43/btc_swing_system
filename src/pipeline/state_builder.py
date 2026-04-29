@@ -257,6 +257,10 @@ class StrategyStateBuilder:
         else:
             self._adjudicator = adjudicator
 
+        # Sprint 1.5b-B:lifecycle_manager 单例(无状态,可共享)
+        from ..strategy.lifecycle_manager import LifecycleManager
+        self._lifecycle_manager = LifecycleManager()
+
         self._base_cfg = _load_base_cfg()
 
     # ------------------------------------------------------------------
@@ -587,6 +591,24 @@ class StrategyStateBuilder:
             if "adjudicator" not in degraded_stages:
                 degraded_stages.append("adjudicator")
 
+        # === Sprint 1.5b-B:lifecycle pre-SM(让 state_machine_inputs 拿到真实 PnL/hours/tp)===
+        prev_state_str = self._read_previous_state_machine_state()
+        prev_lifecycle = self._read_previous_lifecycle()
+        lifecycle_pre = self._run_stage(
+            "lifecycle_pre_sm", failures, degraded_stages, run_ts_utc,
+            lambda: self._lifecycle_manager.compute_pre_sm(
+                prev_state=prev_state_str,
+                prev_lifecycle=prev_lifecycle,
+                strategy_state=state,
+                context=context,
+                now_utc=run_ts_utc,
+            ),
+            default=None,
+        )
+        # state_machine_inputs.build_state_machine_fields 会读 state["lifecycle"];
+        # pre_sm 返回 None(FLAT/无活跃 lc)→ 给空 dict 让 inputs 走 fallback 路径
+        state["lifecycle"] = lifecycle_pre or {}
+
         # === Stage: State Machine(建模 §5 14 档 —— Sprint 1.5a 对齐)===
         sm_block = self._run_stage(
             "state_machine", failures, degraded_stages, run_ts_utc,
@@ -597,11 +619,23 @@ class StrategyStateBuilder:
         )
         state["state_machine"] = sm_block
 
-        # lifecycle 字段保留占位,Sprint 1.5b 由 lifecycle_manager 写入真实值
-        state["lifecycle"] = {
-            "current_lifecycle": "pending_lifecycle_manager",
-            "managed_by": "sprint_1_5b_pending",
-        }
+        # === Sprint 1.5b-B:lifecycle post-SM(状态过渡副作用)===
+        current_state_str = sm_block.get("current_state") if isinstance(sm_block, dict) else "FLAT"
+        lifecycle_post = self._run_stage(
+            "lifecycle_post_sm", failures, degraded_stages, run_ts_utc,
+            lambda: self._lifecycle_manager.compute_post_sm(
+                prev_state=prev_state_str,
+                current_state=current_state_str or "FLAT",
+                lifecycle=lifecycle_pre,  # pre_sm 已更新的 lc
+                strategy_state=state,
+                context=context,
+                run_id=run_id,
+                now_utc=run_ts_utc,
+            ),
+            default=lifecycle_pre,
+        )
+        # post_sm 返回 None(FLAT 期 / FLIP_WATCH 期)= 写空 dict 占位
+        state["lifecycle"] = lifecycle_post if lifecycle_post is not None else {}
 
         # === Stage: persist ===
         persisted = False
@@ -947,6 +981,30 @@ class StrategyStateBuilder:
         except Exception as e:
             logger.warning("read previous state_machine failed: %s", e)
             return "FLAT"
+
+    def _read_previous_lifecycle(self) -> Optional[dict[str, Any]]:
+        """Sprint 1.5b-B:从 DB 最近一条 strategy_state 读 lifecycle dict。
+
+        冷启动 / 失败 / 占位 → 返回 None(LifecycleManager.compute_pre_sm 会
+        据此判断"无活跃 lc")。
+        """
+        if self.conn is None:
+            return None
+        try:
+            row = StrategyStateDAO.get_latest_state(self.conn)
+            if not row:
+                return None
+            state = row.get("state") or {}
+            lc = state.get("lifecycle")
+            if not isinstance(lc, dict) or not lc:
+                return None
+            # 1.5b-B 之前的占位 → 视为无 lc
+            if lc.get("managed_by") == "sprint_1_5b_pending":
+                return None
+            return lc
+        except Exception as e:
+            logger.warning("read previous lifecycle failed: %s", e)
+            return None
 
     def _run_observation_classifier(
         self,

@@ -89,9 +89,18 @@ def build_state_machine_fields(
     is_planned = prev_state in {"LONG_PLANNED", "SHORT_PLANNED"}
     is_holding = prev_state in _HOLDING_STATES
 
-    hours_since_open = _hours_since_open(lifecycle, now_iso) if is_holding else 0.0
+    # Sprint 1.5b-B:优先读 lifecycle_manager.compute_pre_sm 已写入的字段
+    hours_since_open = (
+        _as_float(lifecycle.get("hours_held"))
+        if is_holding and lifecycle.get("hours_held") is not None
+        else (_hours_since_open(lifecycle, now_iso) if is_holding else 0.0)
+    )
+    if hours_since_open is None:
+        hours_since_open = 0.0
     floating_pnl_pct = (
-        _floating_pnl_pct(lifecycle, klines_1h, side) if is_holding else None
+        _as_float(lifecycle.get("current_floating_pnl_pct"))
+        if is_holding and lifecycle.get("current_floating_pnl_pct") is not None
+        else (_floating_pnl_pct(lifecycle, klines_1h, side) if is_holding else None)
     )
 
     # ---------- 入场区 1H 收盘确认 ----------
@@ -137,15 +146,23 @@ def build_state_machine_fields(
     positions_flat = not (account_has_long or account_has_short)
 
     # ---------- 减仓档(LONG_TRIM / LONG_HOLD)----------
-    next_trim_triggered = (
-        _next_trim_triggered(trade_plan, last_1d_high, last_1d_low, side)
-        if prev_state in {"LONG_HOLD", "SHORT_HOLD", "LONG_TRIM", "SHORT_TRIM"}
-        else False
-    )
-    current_trim_completed = (
-        _current_trim_completed_v1(prev_state, hours_since_open)
-        if prev_state in {"LONG_TRIM", "SHORT_TRIM"} else False
-    )
+    # Sprint 1.5b-B:优先读 lifecycle.tp_target_hit_this_run(LifecycleManager.pre_sm 写入)
+    if lifecycle.get("tp_target_hit_this_run") is True:
+        next_trim_triggered = True
+    else:
+        next_trim_triggered = (
+            _next_trim_triggered(trade_plan, last_1d_high, last_1d_low, side)
+            if prev_state in {"LONG_HOLD", "SHORT_HOLD", "LONG_TRIM", "SHORT_TRIM"}
+            else False
+        )
+    # current_trim_completed 优先读 lifecycle(pre_sm 已基于 cumulative_trim_pct 计算)
+    if isinstance(lifecycle.get("current_trim_completed"), bool):
+        current_trim_completed = lifecycle["current_trim_completed"]
+    else:
+        current_trim_completed = (
+            _current_trim_completed_v1(prev_state, hours_since_open)
+            if prev_state in {"LONG_TRIM", "SHORT_TRIM"} else False
+        )
 
     # ---------- FLIP_WATCH 时间界 ----------
     flip_min_passed, flip_max_exceeded = _flip_watch_bounds_state(
@@ -166,7 +183,8 @@ def build_state_machine_fields(
         "floating_pnl_pct": floating_pnl_pct,
         "hard_invalidation_breached": hard_invalidation_breached,
         "stop_loss_hit": stop_loss_hit,
-        "tp_target_hit": False,  # 1.5b-A 阶段 lifecycle 占位 → 留 False;1.5b-B 接通
+        # Sprint 1.5b-B:LifecycleManager.compute_pre_sm 写入 tp_target_hit_this_run
+        "tp_target_hit": bool(lifecycle.get("tp_target_hit_this_run", False)),
         "l2_stance": l2_stance,
         "l2_stance_flipped": l2_stance_flipped,
         "l2_stance_confidence": l2_stance_confidence,

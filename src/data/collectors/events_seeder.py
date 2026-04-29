@@ -64,9 +64,48 @@ class EventsSeeder:
     ) -> dict[str, int]:
         """转 EventRow 后调 EventsCalendarDAO.upsert_events(已有的 ON CONFLICT 路径)。
 
+        Sprint 1.5d.1 §X 孤儿清理:同 (event_type, date) 但 event_id 不一致的
+        旧记录在 upsert 之前先 DELETE。修补"重命名 event_id 留脏"事故
+        (1.5d 把 options_expiry_2026_XX 改名 options_expiry_major_2026_XX
+        导致 24 条并存)。
+
         Returns:
-            {valid, skipped, total_rows_affected}
+            {valid, skipped, total_rows_affected, orphans_removed}
         """
+        # 阶段 1:孤儿清理 — 按 (event_type, date) 找新旧 id 不一致的
+        seed_map: dict[tuple[str, str], str] = {}
+        for ev in events:
+            etype = ev.get("event_type")
+            edate = ev.get("date")
+            eid = ev.get("event_id")
+            if etype and edate and eid:
+                seed_map[(etype, edate)] = eid
+
+        orphans_removed = 0
+        if seed_map:
+            cur = conn.cursor()
+            existing = cur.execute(
+                "SELECT event_type, date, event_id FROM events_calendar"
+            ).fetchall()
+            for r in existing:
+                etype = r[0] if not isinstance(r, sqlite3.Row) else r["event_type"]
+                edate = r[1] if not isinstance(r, sqlite3.Row) else r["date"]
+                eid = r[2] if not isinstance(r, sqlite3.Row) else r["event_id"]
+                key = (etype, edate)
+                target_id = seed_map.get(key)
+                if target_id is not None and eid != target_id:
+                    cur.execute(
+                        "DELETE FROM events_calendar WHERE event_id = ?", (eid,)
+                    )
+                    logger.info(
+                        "events_seeder: removed stale event_id=%s "
+                        "(replaced by %s for type=%s date=%s)",
+                        eid, target_id, etype, edate,
+                    )
+                    orphans_removed += 1
+            if orphans_removed:
+                conn.commit()
+
         rows: list[EventRow] = []
         skipped = 0
         for ev in events:
@@ -112,6 +151,7 @@ class EventsSeeder:
             "valid": len(rows),
             "skipped": skipped,
             "total_rows_affected": affected,
+            "orphans_removed": orphans_removed,
         }
         logger.info("EventsSeeder: %s", result)
         return result

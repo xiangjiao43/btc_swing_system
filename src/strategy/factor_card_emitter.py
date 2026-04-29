@@ -1688,8 +1688,15 @@ def _emit_events_reference(
     若提供,优先用它(72h 外的 CPI/NFP 也能显示);否则退回从 events(72h 内)取。
     """
     cards: list[dict[str, Any]] = []
-    target_types = ("fomc", "cpi", "nfp")
-    type_labels = {"fomc": "FOMC 利率决议", "cpi": "CPI 通胀数据", "nfp": "非农就业数据"}
+    # Sprint 1.5d.1:加 pce + options_expiry_major(后端 1.5d 已接通,前端补齐)
+    target_types = ("fomc", "cpi", "pce", "nfp", "options_expiry_major")
+    type_labels = {
+        "fomc": "FOMC 利率决议",
+        "cpi": "CPI 通胀数据",
+        "pce": "PCE 通胀指标",
+        "nfp": "非农就业数据",
+        "options_expiry_major": "期权大到期",
+    }
     next_by_type = next_by_type or {}
 
     # 兜底:若 next_by_type 未提供,从 events(72h 内)取每类首个
@@ -1704,7 +1711,9 @@ def _emit_events_reference(
     event_descriptions = {
         "fomc": "📍 FOMC = 美联储议息会议,决定基准利率。是月度级别最重要的宏观事件之一,常引发风险资产剧烈波动。",
         "cpi": "📍 CPI = 美国消费者物价指数,衡量通胀。CPI 数据会直接影响美联储加息预期和市场风险情绪。",
+        "pce": "📍 PCE = 美联储偏好的通胀指标(每月最后一周公布),含 headline 和 core PCE。Pinchuk (2024) 实证证据:1σ 通胀意外 → BTC -24bps,与 CPI 等量级。",
         "nfp": "📍 NFP = 美国非农就业数据(每月第一个周五公布)。反映美国就业市场强弱,影响美联储政策预期。",
+        "options_expiry_major": "📍 BTC 期权大到期(Deribit 月度/季度)。季度到期(Q1=3月/Q2=6月/Q3=9月/Q4=12月)规模显著放大,可能引发 24h 内 gamma hedging 波动放大。",
     }
     for t in target_types:
         # 优先用不限窗口的 lookup

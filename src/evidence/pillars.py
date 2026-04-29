@@ -151,22 +151,35 @@ def _pillars_l2(l2: dict[str, Any]) -> dict[str, Any]:
         struct_status = "missing"
 
     # 支柱二:相对位置(扩展比率 + phase)
+    # Sprint 1.5c.3:phase=unclear 是"已算出多档评分并列"的结果,不是 missing;
+    # phase=n_a 才是 stance 中性根本没算波段(真 missing)。
     tp = l2.get("trend_position") or {}
     phase = l2.get("phase") or "unclear"
     pct_of_move = tp.get("estimated_pct_of_move") if isinstance(tp, dict) else None
+    pct_pct = (pct_of_move * 100.0) if isinstance(pct_of_move, (int, float)) else None
     phase_labels = {
         "early": "早期(<50%)", "mid": "中期(50-100%)",
         "late": "晚期(100-138%)", "exhausted": "衰竭期(>138%)",
-        "unclear": "不明确", "n_a": "无明显波段",
+        "unclear": "不明确(多档并列)", "n_a": "无明显波段",
     }
-    if phase and phase != "unclear" and phase != "n_a":
+    if phase and phase not in ("unclear", "n_a"):
         pos_interp = phase_labels.get(phase, phase)
-        if pct_of_move is not None:
-            pos_interp += f",扩展 {pct_of_move:.0f}%"
+        if pct_pct is not None:
+            pos_interp += f",扩展 {pct_pct:.0f}%"
         pos_status = "ok"
+    elif phase == "unclear":
+        # 真算了但结果是 unclear(多档并列)— 不是 missing
+        if pct_pct is not None:
+            pos_interp = f"波段位置不明确(扩展 {pct_pct:.0f}%,多档并列)"
+        else:
+            pos_interp = "波段位置不明确(多档评分并列)"
+        pos_status = "ok"
+    elif phase == "n_a":
+        pos_interp = "无明显波段(数据不足以识别波段结构)"
+        pos_status = "missing"
     else:
-        pos_interp = "波段位置未确定"
-        pos_status = "missing" if phase in ("unclear", "n_a") else "ok"
+        pos_interp = "波段位置未输出"
+        pos_status = "missing"
 
     # 支柱三:长周期背景
     lcc = l2.get("long_cycle_context") or {}
@@ -358,8 +371,11 @@ def _pillars_l3(l3: dict[str, Any], l1: dict[str, Any], l2: dict[str, Any]) -> d
 def _pillars_l4(
     l4: dict[str, Any],
     composite: dict[str, Any],
+    l2_stance: Optional[str] = None,
 ) -> dict[str, Any]:
     # 角度一:结构性失效位
+    # Sprint 1.5c.3:neutral 时建模 §4.5.4 设计不挂硬失效位 → status=ok;
+    # 有明确 stance 但仍空 → 真 missing(swing 数据不足)
     his = l4.get("hard_invalidation_levels") or []
     if his:
         p1 = [h for h in his if h.get("priority") == 1]
@@ -369,8 +385,13 @@ def _pillars_l4(
             hi_interp = f"{len(his)} 条失效位已计算"
         hi_value = his
         hi_status = "ok"
+    elif l2_stance in ("neutral", None):
+        # neutral 时建模 §4.5.4 设计:不挂硬止损位
+        hi_interp = "方向中性,系统不挂硬止损位(等 stance 明确为多/空才生效)"
+        hi_value = []
+        hi_status = "ok"
     else:
-        hi_interp = "失效位未计算(需明确 stance 和 swing 结构)"
+        hi_interp = f"方向 {l2_stance} 但失效位未计算(swing 结构不足)"
         hi_value = None
         hi_status = "missing"
 
@@ -461,11 +482,12 @@ def _pillars_l5(l5: dict[str, Any]) -> dict[str, Any]:
         ec_interp = "72h 内无登记事件"
         ec_status = "ok"
 
-    qual_interp = (
-        f"AI 定性摘要 {len(event_summaries)} 条" if event_summaries
-        else "定性事件摘要 v0.5 启用(当前不产出)"
-    )
-    qual_status = "ok" if event_summaries else "missing"
+    # Sprint 1.5c.3:无 AI 摘要不算 missing(规则路径按建模 §6.8 v0.5 设计不产出)
+    if event_summaries:
+        qual_interp = f"AI 定性摘要 {len(event_summaries)} 条"
+    else:
+        qual_interp = "AI 定性事件摘要为 v0.5 启用功能,规则路径不产出(设计行为)"
+    qual_status = "ok"
 
     extreme_interp = (
         "已检测到极端事件,触发 PROTECTION 流程" if extreme
@@ -526,7 +548,10 @@ def inject_pillars(state: dict[str, Any]) -> None:
         if isinstance(l3, dict):
             l3.update(_pillars_l3(l3, l1, l2))
         if isinstance(l4, dict):
-            l4.update(_pillars_l4(l4, composite))
+            # Sprint 1.5c.3:把 L2.stance 传给 L4 pillars,让 neutral 时
+            # 空 hard_invalidation_levels 显示 "方向中性,不挂硬止损"
+            l2_stance = l2.get("stance") if isinstance(l2, dict) else None
+            l4.update(_pillars_l4(l4, composite, l2_stance=l2_stance))
         if isinstance(l5, dict):
             l5.update(_pillars_l5(l5))
     except Exception as e:  # pragma: no cover

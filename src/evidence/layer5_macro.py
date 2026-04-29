@@ -165,7 +165,17 @@ class Layer5Macro(EvidenceLayerBase):
             # AI 成功后会被覆盖。
             "macro_stance": _stance_from_environment(macro_environment),
             "macro_trend": "stable",
-            "structured_macro": {},
+            # Sprint 1.5c.3:规则路径填基础 structured_macro(原 = {} 占位被
+            # 前端误标 missing)。AI 启用后 rule_output.update 仍会覆盖。
+            "structured_macro": _build_structured_macro_rule(
+                dxy_trend=dxy_trend,
+                yields_trend=yields_trend,
+                yields_series=yields_series,
+                vix_regime=vix_regime,
+                btc_nasdaq_corr=btc_nasdaq_corr,
+                macro=macro,
+                completeness=completeness,
+            ),
             "active_macro_tags": [],
             "active_event_summaries": [],
             "extreme_event_detected": False,
@@ -209,6 +219,56 @@ class Layer5Macro(EvidenceLayerBase):
                 )
 
         return rule_output
+
+
+def _build_structured_macro_rule(
+    *,
+    dxy_trend: Optional[dict[str, Any]],
+    yields_trend: Optional[dict[str, Any]],
+    yields_series: Optional[pd.Series],
+    vix_regime: Optional[dict[str, Any]],
+    btc_nasdaq_corr: Optional[dict[str, Any]],
+    macro: dict[str, Any],
+    completeness: float,
+) -> dict[str, Any]:
+    """Sprint 1.5c.3:规则路径下从已计算的 trend/regime/corr 汇总 structured_macro。
+
+    AI 启用后 rule_output.update(...) 会覆盖本字段;无 AI 时前端能直接展示
+    DXY / US10Y / VIX / 相关性,而不是 structured_macro={} → missing。
+    """
+    sm: dict[str, Any] = {}
+    if dxy_trend:
+        sm["DXY"] = {
+            "trend": dxy_trend.get("direction"),
+            "magnitude_30d_pct": dxy_trend.get("magnitude_30d_pct"),
+            "latest": _last_valid(macro.get("dxy")) if macro.get("dxy") is not None else None,
+        }
+    elif macro.get("dxy") is not None:
+        sm["DXY"] = {"latest": _last_valid(macro.get("dxy"))}
+
+    if yields_trend:
+        sm["US10Y"] = {
+            "trend": yields_trend.get("direction"),
+            "magnitude_30d_pct": yields_trend.get("magnitude_30d_pct"),
+            "latest": _last_valid(yields_series) if yields_series is not None else None,
+        }
+    elif yields_series is not None:
+        sm["US10Y"] = {"latest": _last_valid(yields_series)}
+
+    if vix_regime:
+        sm["VIX"] = {
+            "regime": vix_regime.get("regime") or vix_regime.get("level"),
+            "latest": vix_regime.get("latest_value") or vix_regime.get("latest"),
+        }
+
+    if btc_nasdaq_corr:
+        sm["btc_nasdaq_corr"] = {
+            "value": btc_nasdaq_corr.get("correlation_60d"),
+            "amplified": btc_nasdaq_corr.get("amplified"),
+        }
+
+    sm["data_completeness_pct"] = completeness
+    return sm
 
 
 def _stance_from_environment(env: Optional[str]) -> str:

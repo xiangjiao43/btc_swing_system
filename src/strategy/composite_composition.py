@@ -405,20 +405,25 @@ def _event_risk(er: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
     composition = [
         {"factor_id": "event_fomc_next", "name": "下次 FOMC 距离",
          "value": _hours_to("fomc"),
-         "weight": 0.35,
+         "weight": 0.30,
          "role": "重要度 4;24h 内 × 1.5 / 24-48h × 1.0 / 48-72h × 0.5"},
         {"factor_id": "event_cpi_next", "name": "下次 CPI 距离",
          "value": _hours_to("cpi"),
-         "weight": 0.25, "role": "重要度 3;时间衰减同上"},
+         "weight": 0.20, "role": "重要度 3;时间衰减同上"},
+        # Sprint 1.5d:PCE(Fed 偏好通胀指标,等量级 CPI)
+        {"factor_id": "event_pce_next", "name": "下次 PCE 距离",
+         "value": _hours_to("pce"),
+         "weight": 0.20,
+         "role": "重要度 4;Fed 偏好通胀(headline + core);时间衰减同上"},
         {"factor_id": "event_nfp_next", "name": "下次 NFP 距离",
          "value": _hours_to("nfp"),
-         "weight": 0.20, "role": "重要度 3;时间衰减同上"},
+         "weight": 0.15, "role": "重要度 3;时间衰减同上"},
         {"factor_id": "event_options_expiry", "name": "期权大到期",
          "value": _hours_to("options_expiry_major"),
-         "weight": 0.10, "role": "重要度 2"},
+         "weight": 0.10, "role": "重要度 2(月度)/ 4(季度)"},
         {"factor_id": "event_vol_extreme_bonus",
          "name": "波动率 extreme 额外加分",
-         "value": None, "weight": 0.10, "role": "vol_extreme +1"},
+         "value": None, "weight": 0.05, "role": "vol_extreme +1"},
     ]
     if score is None:
         interp = "未就绪"

@@ -741,7 +741,12 @@ event_risk_scoring:
     fomc: 4
     cpi:  3
     nfp:  3
-    options_expiry_major: 2     # 大到期(月 / 季)
+    pce:  4                     # Sprint 1.5d:Fed 偏好通胀指标(NY Fed
+                                # Pinchuk 2024 实证 1σ 通胀意外 → BTC -24bps,
+                                # 与 CPI 等量级,但 PCE 是 Fed 决策核心输入)
+    options_expiry_major: 2     # 月度兜底;季度通过 events_calendar
+                                # impact_level=4 单条标记(影响 _emit /
+                                # narrative,evaluator 仍按 type 一档)
     other: 1                    # 兜底;应尽量少用
 
   # 距离窗口加权

@@ -23,7 +23,8 @@ from ._base import CompositeFactorBase, reduce_metadata
 
 
 # 被视为"美国宏观事件"的 event_type 集合(相关性加权目标)
-_US_MACRO_TYPES: set[str] = {"fomc", "cpi", "nfp"}
+# Sprint 1.5d:加 pce(Fed 偏好通胀指标,与 CPI 等量级)
+_US_MACRO_TYPES: set[str] = {"fomc", "cpi", "nfp", "pce"}
 
 
 class EventRiskFactor(CompositeFactorBase):

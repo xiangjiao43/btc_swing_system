@@ -752,7 +752,8 @@ class StrategyStateBuilder:
         # EventRisk composite 仍用 events_upcoming_48h 的 72h 窗口算分)
         next_events_by_type = EventsCalendarDAO.get_next_events_by_type(
             conn,
-            event_types=["fomc", "cpi", "nfp", "options_expiry_major"],
+            # Sprint 1.5d:加 pce(Fed 偏好通胀指标)
+            event_types=["fomc", "cpi", "nfp", "pce", "options_expiry_major"],
             now_utc=now_utc,
         )
 

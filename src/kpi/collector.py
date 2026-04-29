@@ -131,12 +131,6 @@ class KPICollector:
         rows = self._fetch_states_in_window(lookback_days)
         return self._compute_state_distribution(rows)
 
-    def compute_adjudicator_distribution(
-        self, lookback_days: int = 7,
-    ) -> dict[str, Any]:
-        rows = self._fetch_states_in_window(lookback_days)
-        return self._compute_decision(rows)
-
     def compute_fallback_stats(
         self, lookback_days: int = 7,
     ) -> dict[str, Any]:

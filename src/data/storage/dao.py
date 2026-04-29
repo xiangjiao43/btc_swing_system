@@ -935,8 +935,8 @@ def _map_strategy_run_to_legacy(row: dict[str, Any]) -> dict[str, Any]:
 class StrategyStateDAO:
     """strategy_runs 表 DAO(建模 §10.4,替代 Sprint 1 的 strategy_state_history)。
 
-    API 保持不变(insert_state / get_state / get_latest_state / ...),
-    但 SQL 内部操作的是 strategy_runs 表;v1.2 新字段从 state dict 抽取。
+    API: insert_state / get_latest_state / ...,SQL 内部操作 strategy_runs 表;
+    v1.2 新字段从 state dict 抽取。
     """
 
     @staticmethod
@@ -1015,20 +1015,6 @@ class StrategyStateDAO:
             ),
         )
         return cur.rowcount
-
-    @staticmethod
-    def get_state(
-        conn: sqlite3.Connection, run_timestamp_utc: str
-    ) -> Optional[dict[str, Any]]:
-        """根据 reference_timestamp_utc(或 run_id)获取一条 strategy_run。"""
-        row = conn.execute(
-            "SELECT * FROM strategy_runs WHERE reference_timestamp_utc = ? "
-            "ORDER BY generated_at_utc DESC LIMIT 1",
-            (run_timestamp_utc,),
-        ).fetchone()
-        if row is None:
-            return None
-        return _map_strategy_run_to_legacy(dict(row))
 
     @staticmethod
     def get_latest_state(

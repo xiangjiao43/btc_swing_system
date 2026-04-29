@@ -1,0 +1,24 @@
+-- Sprint 1.5b-C.1 hotfix:把生产 DB 残留的 Sprint 1 老版 review_reports schema
+-- 对齐建模 §10.4 新版。
+--
+-- 生产 DB 漂移情况:
+--   migrations/001_align_to_modeling_schema.sql 写了 DROP + recreate,但显然
+--   没在真实生产 DB 跑过。schema.sql 的 CREATE TABLE IF NOT EXISTS 不会修
+--   已存在的旧 schema,导致 ReviewReportsDAO.insert_report 真触发时写表失败。
+--
+-- 实际修复路径:src/data/storage/connection.py::init_db 的
+-- _fix_legacy_review_reports_schema(Python 侧)做条件检测 + DROP + recreate。
+-- 本 .sql 仅作为 audit trail,记录"曾经做过这个迁移"。
+--
+-- 跑法:scripts/fix_review_reports_schema.py(自动调 init_db,Python 修)
+--
+-- 老 schema(被替换):
+--   review_id_legacy_TEXT_NOT_NULL  ← 注:实际 schema 漂移检测看 run_timestamp_utc 列
+--   run_timestamp_utc, lifecycle_id, outcome_type, report_json, created_at
+--
+-- 新 schema(目标):
+--   review_id (PK), lifecycle_id, generated_at_utc, outcome_type,
+--   rules_version_at_review, full_report_json
+
+-- no-op marker(实际逻辑在 connection.py)
+SELECT 1;

@@ -13,7 +13,7 @@ from src.evidence.layer5_macro import _ALL_MACRO_METRICS
 def _all_writable_metrics() -> set[str]:
     """SERIES_TO_METRIC 直接映射 + _METRIC_ALIASES 别名。"""
     out = set(SERIES_TO_METRIC.values())
-    for primary, aliases in _METRIC_ALIASES.items():
+    for _, aliases in _METRIC_ALIASES.items():
         out.update(aliases)
     return out
 

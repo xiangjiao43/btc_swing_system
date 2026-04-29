@@ -536,6 +536,12 @@ class DerivativesDAO:
                 b.get("_inserted_at_utc"),
             ))
         cur = conn.executemany(sql, values)
+        # Sprint 1.5h.1:加 summary log 让计数变成可观测信号
+        if rejected_hourly > 0:
+            logger.warning(
+                "DerivativesDAO.upsert_batch: rejected %d hourly rows in batch",
+                rejected_hourly,
+            )
         return cur.rowcount
 
     @staticmethod

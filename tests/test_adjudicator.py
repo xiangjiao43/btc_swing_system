@@ -75,14 +75,6 @@ def _mock_ai_response(
     return r
 
 
-def _attach_ai(client: MagicMock, response=None, side_effect=None) -> None:
-    """把 mock response / side_effect 挂到 client.messages.create(anthropic 路径)。"""
-    if side_effect is not None:
-        client.messages.create.side_effect = side_effect
-    else:
-        client.messages.create.return_value = response
-
-
 def _state(
     *,
     l1_regime: str = "trend_up",

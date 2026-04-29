@@ -42,19 +42,6 @@ def _load_thresholds_full() -> dict[str, Any]:
         return yaml.safe_load(f)
 
 
-def get_thresholds_block(key: str) -> dict[str, Any]:
-    """
-    读取 thresholds.yaml 顶层某一块。
-    未定义时返回 {},调用方自行判断 default 行为。
-    """
-    full = _load_thresholds_full()
-    block = full.get(key)
-    if block is None:
-        logger.warning("thresholds.yaml key %r not found", key)
-        return {}
-    return block
-
-
 def confidence_tier_from_value(value: float) -> str:
     """
     schemas.yaml common_types.enums.confidence_tier + confidence_tier_bands。

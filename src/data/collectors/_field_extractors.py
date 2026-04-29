@@ -148,11 +148,3 @@ def extract_value(row: dict[str, Any], keys: list[str]) -> Optional[float]:
     return None
 
 
-def extract_raw(row: dict[str, Any], keys: list[str]) -> Any:
-    """
-    extract_value 的"不转 float"版本,用于 string / dict 等非数值字段。
-    """
-    for k in keys:
-        if k in row and row[k] is not None:
-            return row[k]
-    return None

@@ -32,6 +32,18 @@ def _lookup(d: Any, key: str, default=None) -> Any:
     return default
 
 
+def _round_or_none(v: Any, n: int = 2) -> Any:
+    """Sprint 1.5c.2:数值四舍五入,None / 非数值原样返回 None。"""
+    f = _as_float(v)
+    return None if f is None else round(f, n)
+
+
+def _to_pct(v: Any) -> Any:
+    """Sprint 1.5c.2:小数 → 百分比(0.025 → 2.5)。None / 非数值 → None。"""
+    f = _as_float(v)
+    return None if f is None else round(f * 100.0, 2)
+
+
 # ============================================================
 # TruthTrend(§3.8.1,L1+L2,0-9 分)
 # ============================================================
@@ -201,7 +213,12 @@ def _cycle_position(cp: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
          "value": _latest("nupl"), "weight": 0.30,
          "role": "主(< 0 底 / 0.5-0.65 晚牛 / > 0.65 分发)"},
         {"factor_id": "onchain_lth_supply", "name": "LTH Supply 90d 变化",
-         "value": None, "weight": 0.25,
+         # Sprint 1.5c.2:cycle_position 已暴露 lth_90d_chg_pct(顶层 + diagnostics)
+         "value": (
+             cp.get("lth_90d_chg_pct")
+             or _lookup(cp.get("diagnostics"), "lth_90d_chg_pct")
+         ),
+         "weight": 0.25,
          "role": "主(> +2% 增持 / < -3% 减持)"},
         {"factor_id": "price_drawdown_from_ath", "name": "距 ATH 跌幅",
          "value": (round(ath_dd, 2) if ath_dd is not None else None),
@@ -260,10 +277,14 @@ def _crowding(cr: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
          "value": _latest("funding_rate"), "weight": 0.30,
          "role": "> 0.03% 连续 3 次 → +2"},
         {"factor_id": "derivatives_funding_rate_30d_pctile",
-         "name": "资金费率 30 日分位", "value": None, "weight": 0.20,
+         "name": "资金费率 30 日分位",
+         # Sprint 1.5c.2:crowding 已暴露到 diagnostics
+         "value": _lookup(cr.get("diagnostics"), "funding_rate_30d_pctile"),
+         "weight": 0.20,
          "role": "> 85 分位 → +2"},
         {"factor_id": "derivatives_oi_24h_change", "name": "OI 24h 变化",
-         "value": None, "weight": 0.15,
+         "value": _lookup(cr.get("diagnostics"), "oi_24h_change_pct"),
+         "weight": 0.15,
          "role": "> +15% → +1"},
         {"factor_id": "derivatives_top_long_short_ratio",
          "name": "大户多空比", "value": _latest("long_short_ratio"), "weight": 0.15,
@@ -315,19 +336,26 @@ def _macro_headwind(mh: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
         except Exception:
             return None
 
+    # Sprint 1.5c.2:macro_headwind 的 diagnostics 已含 dxy_20d_change /
+    # us10y_30d_change_bp / nasdaq_20d_change / btc_nasdaq_corr。
+    diag = mh.get("diagnostics") or {}
     composition = [
         {"factor_id": "macro_dxy_20d_change", "name": "DXY 20 日变化",
-         "value": None, "weight": 0.30, "role": "> +2% → -2 分"},
+         "value": _to_pct(diag.get("dxy_20d_change")),
+         "weight": 0.30, "role": "> +2% → -2 分"},
         {"factor_id": "macro_us10y_30d_change", "name": "US10Y 30 日变化",
-         "value": None, "weight": 0.25, "role": "> +30bp → -2 分"},
+         "value": _round_or_none(diag.get("us10y_30d_change_bp"), 2),
+         "weight": 0.25, "role": "> +30bp → -2 分"},
         {"factor_id": "macro_vix_current", "name": "VIX 当前",
          "value": _latest("vix"), "weight": 0.25,
          "role": "> 25 → -2 / < 15 → 加分"},
         {"factor_id": "macro_nasdaq_20d", "name": "纳指 20 日变化",
-         "value": None, "weight": 0.20,
+         "value": _to_pct(diag.get("nasdaq_20d_change")),
+         "weight": 0.20,
          "role": "< -5% → -2 / > +5% → +2"},
         {"factor_id": "macro_btc_nasdaq_corr", "name": "BTC-纳指 60d 相关性",
-         "value": None, "weight": 0,
+         "value": _round_or_none(diag.get("btc_nasdaq_corr"), 3),
+         "weight": 0,
          "role": "权重乘数(> 0.7 时美宏影响 × 1.5)"},
     ]
     if score is None:

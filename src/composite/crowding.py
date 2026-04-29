@@ -60,9 +60,11 @@ class CrowdingFactor(CompositeFactorBase):
 
         # ---- 指标 2: funding_rate_30d_percentile > 85 ----
         # 我们没有现成的百分位;从 funding_rate 90 天数据算
+        funding_30d_pctile: Optional[float] = None  # Sprint 1.5c.2:暴露给 diagnostics
         if fr_series is not None and not fr_series.empty and len(fr_series) >= 30:
             last_val = float(fr_series.dropna().iloc[-1])
             pct = (fr_series.dropna().tail(30) < last_val).sum() / min(30, len(fr_series.dropna()))
+            funding_30d_pctile = round(float(pct) * 100.0, 1)
             pct_threshold = float(
                 thresholds_l4.get("funding_rate_30d_percentile_alert", 85)
             ) / 100.0
@@ -79,12 +81,14 @@ class CrowdingFactor(CompositeFactorBase):
         oi_change_threshold = float(
             thresholds_l4.get("oi_change_24h_alert_pct", 0.15)
         )
+        oi_24h_change_pct: Optional[float] = None  # Sprint 1.5c.2:暴露给 diagnostics
         if oi_series is not None and len(oi_series.dropna()) >= 2:
             clean = oi_series.dropna()
             oi_now = float(clean.iloc[-1])
             oi_prev = float(clean.iloc[-2])
             if oi_prev > 0:
                 chg = (oi_now - oi_prev) / oi_prev
+                oi_24h_change_pct = round(float(chg) * 100.0, 2)
                 if abs(chg) > oi_change_threshold:
                     name = "oi_spike"
                     if name in points_map:
@@ -167,6 +171,11 @@ class CrowdingFactor(CompositeFactorBase):
             "position_cap_multiplier": cap_multiplier,
             "items_triggered": items_triggered,
             "items_skipped": items_skipped,
+            # Sprint 1.5c.2:暴露中间计算给 composite_composition / 前端展示
+            "diagnostics": {
+                "funding_rate_30d_pctile": funding_30d_pctile,
+                "oi_24h_change_pct": oi_24h_change_pct,
+            },
             **reduce_metadata(health_status=health),
         }
 

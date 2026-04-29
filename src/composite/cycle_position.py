@@ -183,6 +183,14 @@ class CyclePositionFactor(CompositeFactorBase):
         if last_stable is None:
             last_stable = _lookup_last_stable(state_history_dao)
 
+        # Sprint 1.5c.2:lth_90d_chg 是 0.0234 这种小数;暴露百分比版到顶层 +
+        # diagnostics(composite_composition 直接读)
+        lth_90d_chg_pct = (
+            round(float(lth_90d_chg) * 100.0, 2)
+            if lth_90d_chg is not None else None
+        )
+        diagnostics["lth_90d_chg_pct"] = lth_90d_chg_pct
+
         return {
             "factor": self.name,
             "cycle_position": cycle,
@@ -193,6 +201,7 @@ class CyclePositionFactor(CompositeFactorBase):
             "last_stable_cycle_position": last_stable,
             "halving_window_active": halving_active,
             "mvrv_z_stabilizing_check_result": stabilizing_check_result,
+            "lth_90d_chg_pct": lth_90d_chg_pct,
             **reduce_metadata(
                 health_status=_health_status(mvrv_z, nupl, lth_90d_chg),
                 notes=_build_notes(mvrv_z, nupl, lth_90d_chg, ath_drawdown),

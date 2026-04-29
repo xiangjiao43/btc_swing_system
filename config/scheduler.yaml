@@ -41,37 +41,74 @@ jobs:
     max_instances: 1
     description: '1h K 线 + 5 衍生品端点(1h interval, limit=168)'
 
+  # Sprint 2.8-F:低频 collector 改多档 cron(主时刻 + 多个补救时刻),
+  # 任一档成功后,job 入口 _has_today_* 检查会让后续档 status='skipped'。
+  # 目的:API key 临时失效 / 网络抖动覆盖单个 cron 时,不再等下个周期。
+
   collect_klines_daily:
     enabled: true
-    cron: {hour: 8, minute: 1}         # 08:01 BJT
+    cron:                              # 08:01 主 + 9 个补救档(BJT)
+      - {hour: 8, minute: 1}
+      - {hour: 9, minute: 1}
+      - {hour: 10, minute: 1}
+      - {hour: 11, minute: 1}
+      - {hour: 12, minute: 1}
+      - {hour: 14, minute: 1}
+      - {hour: 16, minute: 1}
+      - {hour: 18, minute: 1}
+      - {hour: 20, minute: 1}
     misfire_grace_time: 600
     coalesce: true
     max_instances: 1
-    description: '1d / 4h K 线日级抓取'
+    description: '1d / 4h K 线日级抓取(多档自动补救)'
 
   collect_klines_weekly:
     enabled: true
-    cron: {day_of_week: 'mon', hour: 8, minute: 1}  # 周一 08:01 BJT
+    cron:                              # 周一主 + 周一/二/三 补救档
+      - {day_of_week: 'mon', hour: 8, minute: 1}
+      - {day_of_week: 'mon', hour: 12, minute: 1}
+      - {day_of_week: 'mon', hour: 16, minute: 1}
+      - {day_of_week: 'mon', hour: 20, minute: 1}
+      - {day_of_week: 'tue', hour: 8, minute: 1}
+      - {day_of_week: 'tue', hour: 12, minute: 1}
+      - {day_of_week: 'wed', hour: 8, minute: 1}
     misfire_grace_time: 1800
     coalesce: true
     max_instances: 1
-    description: '1w K 线周级抓取'
+    description: '1w K 线周级抓取(本周内多档补救)'
 
   collect_macro:
     enabled: true
-    cron: {hour: 6, minute: 0}         # 06:00 BJT
+    cron:                              # 06:00 主 + 06-12 每小时补救档(BJT)
+      - {hour: 6, minute: 0}
+      - {hour: 7, minute: 0}
+      - {hour: 8, minute: 0}
+      - {hour: 9, minute: 0}
+      - {hour: 10, minute: 0}
+      - {hour: 11, minute: 0}
+      - {hour: 12, minute: 0}
     misfire_grace_time: 1800
     coalesce: true
     max_instances: 1
-    description: 'FRED 9 个 series + alias(DGS10/DFF/CPI/UNRATE/SP500/NASDAQ/VIX/DXY/gold_price)'
+    description: 'FRED 9 个 series + alias(多档补救)'
 
   collect_onchain:
     enabled: true
-    cron: {hour: 8, minute: 35}        # 08:35 BJT(在 daily K 线后,pipeline 8 点档前)
+    cron:                              # 08:35 主 + 多个补救档(BJT)
+      - {hour: 8, minute: 35}
+      - {hour: 9, minute: 5}
+      - {hour: 9, minute: 35}
+      - {hour: 10, minute: 35}
+      - {hour: 11, minute: 35}
+      - {hour: 12, minute: 35}
+      - {hour: 14, minute: 0}
+      - {hour: 16, minute: 0}
+      - {hour: 18, minute: 0}
+      - {hour: 20, minute: 0}
     misfire_grace_time: 600
     coalesce: true
     max_instances: 1
-    description: 'Glassnode 13 个 metric(primary 5 + display 8 含 LTH/STH realized + aSOPR)'
+    description: 'Glassnode 13 个 metric(多档补救)'
 
   # ------------- 主 pipeline(2 个 cron entry,共享 pipeline_run 函数)-------
 

@@ -184,6 +184,76 @@ _GLASSNODE_FETCHERS: tuple[str, ...] = (
 )
 
 
+def _today_utc_iso_midnight() -> str:
+    """今天 UTC 0 点的 ISO 字符串(LIKE 比较起点)。"""
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).date().isoformat() + "T00:00:00Z"
+
+
+def _current_iso_monday_utc_midnight() -> str:
+    """本 ISO 周周一 UTC 0 点的 ISO 字符串。"""
+    from datetime import datetime, timedelta, timezone
+    today = datetime.now(timezone.utc).date()
+    monday = today - timedelta(days=today.weekday())  # weekday: Mon=0
+    return monday.isoformat() + "T00:00:00Z"
+
+
+def _has_today_inserted_in_metric_table(
+    conn: Any, table_name: str,
+) -> bool:
+    """Sprint 2.8-F:metric 表(macro_metrics / onchain_metrics)今天 UTC
+    内是否有 inserted_at_utc(== 今天有过成功收集)。
+
+    用 inserted_at_utc 而非 captured_at_utc:FRED CPI 可能 lag 月级,
+    Glassnode 有些 metric 滞后,但 inserted_at_utc 是写入 wall clock,
+    严格反映"今天的 collection 是否跑过"。
+    """
+    today = _today_utc_iso_midnight()
+    cur = conn.execute(
+        f"SELECT 1 FROM {table_name} "  # noqa: S608 — table_name 来自代码常量
+        "WHERE inserted_at_utc IS NOT NULL AND inserted_at_utc >= ? LIMIT 1",
+        (today,),
+    )
+    return cur.fetchone() is not None
+
+
+def _has_today_kline_1d(conn: Any) -> bool:
+    """1d K 线今天 UTC 是否已存在(open_time_utc 落在今天 00:00 之后)。"""
+    today = _today_utc_iso_midnight()
+    cur = conn.execute(
+        "SELECT 1 FROM price_candles "
+        "WHERE timeframe='1d' AND open_time_utc >= ? LIMIT 1",
+        (today,),
+    )
+    return cur.fetchone() is not None
+
+
+def _has_this_week_kline_1w(conn: Any) -> bool:
+    """1w K 线本 ISO 周(周一 UTC 0 点)是否已存在。"""
+    monday = _current_iso_monday_utc_midnight()
+    cur = conn.execute(
+        "SELECT 1 FROM price_candles "
+        "WHERE timeframe='1w' AND open_time_utc >= ? LIMIT 1",
+        (monday,),
+    )
+    return cur.fetchone() is not None
+
+
+def _skipped_today_payload(reason: str, name: str) -> dict[str, Any]:
+    """Sprint 2.8-F:多档 cron 跳过今天补救档时的统一返回 dict。
+
+    不调 refresh_factor_cards(没有新数据 → 刷新无意义);
+    返回 status='skipped' 让 _wrap_job 不再额外标 'ok'。
+    """
+    return {
+        "status": "skipped",
+        "reason": reason,
+        "by_collector": {name: 0},
+        "total_upserted": 0,
+        "errors": {},
+    }
+
+
 def _wrap_job(
     name: str,
     body: Callable[[Any], dict[str, Any]],
@@ -312,8 +382,16 @@ def job_collect_klines_daily(
     *,
     conn_factory: Optional[Callable[[], Any]] = None,
 ) -> dict[str, Any]:
-    """每天 08:01 BJT 抓 CoinGlass 1d + 4h K 线(各 limit=24,覆盖 24 天 / 4 天)。"""
+    """每天 08:01 BJT 抓 CoinGlass 1d + 4h K 线(各 limit=24,覆盖 24 天 / 4 天)。
+
+    Sprint 2.8-F:多档 cron 补救;入口若发现今天已有 1d 候,直接 skipped。
+    """
     def _body(conn: Any) -> dict[str, Any]:
+        if _has_today_kline_1d(conn):
+            logger.info("collect_klines_daily: today's 1d candle already exists, skip")
+            return _skipped_today_payload(
+                "already_have_today_1d_candle", "klines_daily",
+            )
         from ..data.collectors.coinglass import CoinglassCollector
         from ..data.storage.dao import BTCKlinesDAO, KlineRow
         cg = CoinglassCollector()
@@ -355,8 +433,16 @@ def job_collect_klines_weekly(
     *,
     conn_factory: Optional[Callable[[], Any]] = None,
 ) -> dict[str, Any]:
-    """每周一 08:01 BJT 抓 1w K 线(limit=12,覆盖 ~3 个月)。"""
+    """每周一 08:01 BJT 抓 1w K 线(limit=12,覆盖 ~3 个月)。
+
+    Sprint 2.8-F:周一/二/三 多档 cron 补救;入口若发现本周已有 1w 候,直接 skipped。
+    """
     def _body(conn: Any) -> dict[str, Any]:
+        if _has_this_week_kline_1w(conn):
+            logger.info("collect_klines_weekly: this week's 1w candle already exists, skip")
+            return _skipped_today_payload(
+                "already_have_this_week_1w_candle", "klines_weekly",
+            )
         from ..data.collectors.coinglass import CoinglassCollector
         from ..data.storage.dao import BTCKlinesDAO, KlineRow
         cg = CoinglassCollector()
@@ -389,8 +475,17 @@ def job_collect_macro(
     conn_factory: Optional[Callable[[], Any]] = None,
     since_days: int = 30,
 ) -> dict[str, Any]:
-    """每天 06:00 BJT 抓 FRED 9 个 series。无 key 时优雅 skip。"""
+    """每天 06:00 BJT 抓 FRED 9 个 series。无 key 时优雅 skip。
+
+    Sprint 2.8-F:06-12 BJT 多档 cron 补救;入口若发现今天 macro_metrics 已写过,
+    直接 skipped 不浪费 FRED API quota。
+    """
     def _body(conn: Any) -> dict[str, Any]:
+        if _has_today_inserted_in_metric_table(conn, "macro_metrics"):
+            logger.info("collect_macro: today's macro_metrics already written, skip")
+            return _skipped_today_payload(
+                "already_have_today_macro_inserted", "fred",
+            )
         from ..data.collectors.fred import FredCollector
         fc = FredCollector()
         if not fc.enabled:
@@ -417,8 +512,17 @@ def job_collect_onchain(
     since_days: int = 30,
 ) -> dict[str, Any]:
     """每天 08:35 BJT 抓 Glassnode 12 个 fetcher(primary 5 + display 7 含
-    LTH/STH realized price + aSOPR)。"""
+    LTH/STH realized price + aSOPR)。
+
+    Sprint 2.8-F:08:35-20:00 BJT 多档 cron 补救;入口若发现今天 onchain_metrics
+    已写过,直接 skipped。注意:skip 不调 _enqueue_pipeline_run(没有新数据)。
+    """
     def _body(conn: Any) -> dict[str, Any]:
+        if _has_today_inserted_in_metric_table(conn, "onchain_metrics"):
+            logger.info("collect_onchain: today's onchain_metrics already written, skip")
+            return _skipped_today_payload(
+                "already_have_today_onchain_inserted", "glassnode",
+            )
         from ..data.collectors.glassnode import GlassnodeCollector
         from ..data.storage.dao import OnchainDAO, OnchainMetric
         gn = GlassnodeCollector()
@@ -607,10 +711,26 @@ def build_job_configs(
             trigger_kwargs = _parse_interval(spec["interval"])
         elif "cron" in spec:
             cron = spec["cron"]
-            if not isinstance(cron, dict):
-                raise JobConfigError(f"job {name}: 'cron' must be a dict")
-            trigger_kind = "cron"
-            trigger_kwargs = dict(cron)
+            if isinstance(cron, dict):
+                trigger_kind = "cron"
+                trigger_kwargs = dict(cron)
+            elif isinstance(cron, list):
+                # Sprint 2.8-F:多档 cron → OrTrigger,单 job_id
+                if not cron:
+                    raise JobConfigError(
+                        f"job {name}: 'cron' list must not be empty"
+                    )
+                for entry in cron:
+                    if not isinstance(entry, dict):
+                        raise JobConfigError(
+                            f"job {name}: each cron list entry must be a dict"
+                        )
+                trigger_kind = "cron_or"
+                trigger_kwargs = {"cron_list": [dict(c) for c in cron]}
+            else:
+                raise JobConfigError(
+                    f"job {name}: 'cron' must be a dict or list of dicts"
+                )
         else:
             raise JobConfigError(
                 f"job {name}: must provide either 'interval' or 'cron'"

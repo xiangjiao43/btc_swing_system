@@ -12,6 +12,7 @@ from typing import Any, Optional
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.schedulers.blocking import BlockingScheduler
+from apscheduler.triggers.combining import OrTrigger
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
@@ -26,6 +27,10 @@ def _build_trigger(kind: str, kwargs: dict[str, Any]):
         return IntervalTrigger(**kwargs)
     if kind == "cron":
         return CronTrigger(**kwargs)
+    if kind == "cron_or":
+        # Sprint 2.8-F:多档 cron 并联 → OrTrigger;单 job_id
+        cron_list = kwargs.get("cron_list", [])
+        return OrTrigger([CronTrigger(**c) for c in cron_list])
     raise ValueError(f"unsupported trigger kind: {kind}")
 
 

@@ -95,27 +95,34 @@ def test_collect_klines_1h_runs_at_minute_zero():
 
 
 def test_collect_klines_daily_at_0801_bjt():
+    """Sprint 2.8-F:multi-cron 后,主时刻仍是 08:01,但 trigger_kind=cron_or。"""
     out = {jc.name: jc for jc in build_job_configs(load_scheduler_config(_CONFIG_PATH))}
     spec = out["collect_klines_daily"]
-    assert spec.trigger_kwargs == {"hour": 8, "minute": 1}
+    assert spec.trigger_kind == "cron_or"
+    assert spec.trigger_kwargs["cron_list"][0] == {"hour": 8, "minute": 1}
 
 
 def test_collect_klines_weekly_monday_0801_bjt():
     out = {jc.name: jc for jc in build_job_configs(load_scheduler_config(_CONFIG_PATH))}
     spec = out["collect_klines_weekly"]
-    assert spec.trigger_kwargs == {"day_of_week": "mon", "hour": 8, "minute": 1}
+    assert spec.trigger_kind == "cron_or"
+    assert spec.trigger_kwargs["cron_list"][0] == {
+        "day_of_week": "mon", "hour": 8, "minute": 1,
+    }
 
 
 def test_collect_macro_at_0600_bjt():
     out = {jc.name: jc for jc in build_job_configs(load_scheduler_config(_CONFIG_PATH))}
     spec = out["collect_macro"]
-    assert spec.trigger_kwargs == {"hour": 6, "minute": 0}
+    assert spec.trigger_kind == "cron_or"
+    assert spec.trigger_kwargs["cron_list"][0] == {"hour": 6, "minute": 0}
 
 
 def test_collect_onchain_at_0835_bjt():
     out = {jc.name: jc for jc in build_job_configs(load_scheduler_config(_CONFIG_PATH))}
     spec = out["collect_onchain"]
-    assert spec.trigger_kwargs == {"hour": 8, "minute": 35}
+    assert spec.trigger_kind == "cron_or"
+    assert spec.trigger_kwargs["cron_list"][0] == {"hour": 8, "minute": 35}
 
 
 def test_pipeline_run_regular_cron_5_hours():
@@ -167,12 +174,13 @@ def test_build_scheduler_uses_bjt_timezone(monkeypatch):
 
 
 def test_all_cron_jobs_have_cron_trigger():
-    """除 event_listener 外,所有 7 logical job 都用 cron。"""
+    """除 event_listener 外,所有 7 logical job 都用 cron。
+    Sprint 2.8-F:低频 4 job 多档 cron → trigger_kind='cron_or'(也是 cron 类)。"""
     out = build_job_configs(load_scheduler_config(_CONFIG_PATH))
     for jc in out:
         if jc.name == "event_listener":
             assert jc.trigger_kind == "interval"
         else:
-            assert jc.trigger_kind == "cron", (
-                f"{jc.name} should use cron, not {jc.trigger_kind}"
+            assert jc.trigger_kind in ("cron", "cron_or"), (
+                f"{jc.name} should use cron / cron_or, not {jc.trigger_kind}"
             )

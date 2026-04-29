@@ -1,0 +1,5 @@
+scripts/check_coinglass_endpoints.py:19: unused import 'traceback' (90% confidence)
+src/ai/summary.py:22: unused import '_CLIENT_DEFAULT_MODEL' (90% confidence)
+tests/test_ai_summary.py:171: unused variable 'mock_sleep' (100% confidence)
+tests/test_ai_summary.py:185: unused variable 'mock_sleep' (100% confidence)
+tests/test_ai_summary.py:198: unused variable 'mock_sleep' (100% confidence)

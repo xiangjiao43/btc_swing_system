@@ -707,6 +707,23 @@ class StrategyStateBuilder:
             except Exception as e:
                 logger.warning("write_preflight_degraded_alert failed: %s", e)
 
+            # Sprint 1.5e.1:每次 pipeline.run 后同步 latest_factor_cards 单行表
+            # 让 /api/strategy/current 立即拿到本次 run 的真值,而不是上次 cron 的旧快照
+            try:
+                cards_in_state = state.get("factor_cards") or []
+                if cards_in_state:
+                    from ..data.storage.dao import LatestFactorCardsDAO
+                    LatestFactorCardsDAO.upsert(
+                        self.conn,
+                        cards_in_state,
+                        refreshed_at_utc=run_ts_utc,
+                    )
+                    self.conn.commit()
+            except Exception as e:
+                logger.warning(
+                    "post-run latest_factor_cards refresh failed: %s", e,
+                )
+
         return BuildResult(
             run_id=run_id,
             run_timestamp_utc=run_ts_utc,

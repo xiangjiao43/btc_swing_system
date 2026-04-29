@@ -1048,24 +1048,6 @@ class StrategyStateDAO:
         return int(row["n"])
 
     @staticmethod
-    def get_latest_with_state_in(
-        conn: sqlite3.Connection,
-        state_names: list[str],
-    ) -> Optional[dict[str, Any]]:
-        """返回最近一条 action_state ∈ state_names 的 run。"""
-        if not state_names:
-            return None
-        placeholders = ",".join(["?"] * len(state_names))
-        sql = (
-            f"SELECT * FROM strategy_runs WHERE action_state IN ({placeholders}) "
-            f"ORDER BY reference_timestamp_utc DESC LIMIT 1"
-        )
-        row = conn.execute(sql, tuple(state_names)).fetchone()
-        if row is None:
-            return None
-        return _map_strategy_run_to_legacy(dict(row))
-
-    @staticmethod
     def get_latest_non_unclear_cycle(
         conn: sqlite3.Connection,
     ) -> Optional[str]:

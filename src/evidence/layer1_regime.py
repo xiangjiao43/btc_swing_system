@@ -76,6 +76,11 @@ class Layer1Regime(EvidenceLayerBase):
                     "ma_20": None, "ma_60": None, "ma_120": None, "ma_200": None,
                     "direction": None, "is_aligned": False,
                 },
+                # Sprint 1.5c.1:数据不足时同 schema 占位
+                ma_200_relation={
+                    "ma_200": None, "current_close": None,
+                    "above": None, "distance_pct": None,
+                },
             )
 
         # ---- 阈值读取 ----
@@ -391,8 +396,18 @@ class Layer1Regime(EvidenceLayerBase):
                 "ma_60": _round_or_none(ma60, 2),
                 "ma_120": _round_or_none(ma120, 2),
                 "ma_200": _round_or_none(ma200, 2),
-                "direction": ma_dir,
-                "is_aligned": ma_dir is not None,
+                "direction": ma_dir,                       # "up" / "down" / "mixed" / None
+                "is_aligned": ma_dir in ("up", "down"),    # mixed 不算 aligned
+            },
+            # Sprint 1.5c.1:价格相对 MA-200(长期趋势确认 — composite_composition 已读)
+            "ma_200_relation": {
+                "ma_200": _round_or_none(ma200, 2),
+                "current_close": _round_or_none(last_close, 2),
+                "above": (last_close > ma200) if ma200 else None,
+                "distance_pct": (
+                    round((last_close - ma200) / ma200 * 100.0, 2)
+                    if (ma200 and ma200 > 0) else None
+                ),
             },
             "confidence_tier": confidence_tier,
             "health_status": "healthy",
@@ -526,7 +541,8 @@ def _ma_alignment_direction(
 
     上行排列:ma20 > ma60 > ma120 > ma200(短期均线在上)→ "up"
     下行排列:ma20 < ma60 < ma120 < ma200 → "down"
-    任一缺失或不严格单调 → None(不算 aligned)
+    Sprint 1.5c.1:不严格单调但 4 条均存在 → "mixed"(明确字符串,不让前端显示 "—")
+    任一缺失 → None(数据不足,前端 "—")
     """
     vals = [ma20, ma60, ma120, ma200]
     if any(v is None for v in vals):
@@ -535,7 +551,7 @@ def _ma_alignment_direction(
         return "up"
     if ma20 < ma60 < ma120 < ma200:
         return "down"
-    return None
+    return "mixed"
 
 
 def _analyze_swing(

@@ -747,10 +747,14 @@ class StrategyStateBuilder:
 
         events = EventsCalendarDAO.get_upcoming_within_hours(
             conn, hours=self.events_window_hours, now_utc=now_utc)
-        # Sprint 2.6-M B2:不限时间窗口,取每类事件最近的 1 个(供 emitter
-        # "下次 X 卡"展示。EventRisk composite 仍用 events_upcoming_48h 的 72h 窗口)
+        # Sprint 2.6-M B2 / 1.5c.1:不限时间窗口,取每类事件最近的 1 个
+        # (供 emitter / composite_composition._event_risk "下次 X 距离"展示。
+        # EventRisk composite 仍用 events_upcoming_48h 的 72h 窗口算分)
         next_events_by_type = EventsCalendarDAO.get_next_events_by_type(
-            conn, event_types=["fomc", "cpi", "nfp"], now_utc=now_utc)
+            conn,
+            event_types=["fomc", "cpi", "nfp", "options_expiry_major"],
+            now_utc=now_utc,
+        )
 
         # Sprint 2.6-J:per-metric 系统侧写入时间(extracted to helper for 2.7-C reuse)
         metric_inserted_at = _query_metric_inserted_at(conn)

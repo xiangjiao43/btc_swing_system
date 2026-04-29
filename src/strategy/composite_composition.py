@@ -357,22 +357,36 @@ def _macro_headwind(mh: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
 
 def _event_risk(er: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
     score = _as_float(er.get("score"))
-    events = er.get("contributing_events") or []
-    nearest = events[0] if events else {}
+
+    # Sprint 1.5c.1:per-type 距离查找
+    # 优先 1:contributing_events(72h 窗口内 EventRisk 评分用)— 找到该 type 的最早一个
+    # 优先 2:next_events_by_type(全年 lookahead,即便 30 天后也显示)
+    # 之前 bug:只取 events[0],type 不匹配则全部 None
+    contributing = er.get("contributing_events") or []
+    next_by_type: dict[str, Any] = ctx.get("next_events_by_type") or {}
+
+    def _hours_to(t: str) -> Any:
+        for ev in contributing:
+            if (ev.get("type") or ev.get("event_type") or "").lower() == t:
+                return ev.get("hours_to")
+        nxt = next_by_type.get(t)
+        if isinstance(nxt, dict):
+            return nxt.get("hours_to")
+        return None
 
     composition = [
         {"factor_id": "event_fomc_next", "name": "下次 FOMC 距离",
-         "value": nearest.get("hours_to") if nearest.get("type") == "fomc" else None,
+         "value": _hours_to("fomc"),
          "weight": 0.35,
          "role": "重要度 4;24h 内 × 1.5 / 24-48h × 1.0 / 48-72h × 0.5"},
         {"factor_id": "event_cpi_next", "name": "下次 CPI 距离",
-         "value": nearest.get("hours_to") if nearest.get("type") == "cpi" else None,
+         "value": _hours_to("cpi"),
          "weight": 0.25, "role": "重要度 3;时间衰减同上"},
         {"factor_id": "event_nfp_next", "name": "下次 NFP 距离",
-         "value": nearest.get("hours_to") if nearest.get("type") == "nfp" else None,
+         "value": _hours_to("nfp"),
          "weight": 0.20, "role": "重要度 3;时间衰减同上"},
         {"factor_id": "event_options_expiry", "name": "期权大到期",
-         "value": nearest.get("hours_to") if nearest.get("type") == "options_expiry_major" else None,
+         "value": _hours_to("options_expiry_major"),
          "weight": 0.10, "role": "重要度 2"},
         {"factor_id": "event_vol_extreme_bonus",
          "name": "波动率 extreme 额外加分",
@@ -844,6 +858,8 @@ def inject_composite_composition(
         "derivatives": context.get("derivatives") or {},
         "macro": context.get("macro") or {},
         "klines_1d": context.get("klines_1d"),
+        # Sprint 1.5c.1:_event_risk 读这里取"下次 X 距离"(全年 lookahead)
+        "next_events_by_type": context.get("next_events_by_type") or {},
     }
     for key, fn in _SPECS.items():
         c = composite.get(key)

@@ -330,16 +330,6 @@ class _MetricLongTableDAO:
         return out
 
     @classmethod
-    def get_at(
-        cls, conn: sqlite3.Connection, timestamp: str
-    ) -> list[dict[str, Any]]:
-        rows = conn.execute(
-            f"SELECT * FROM {cls._table} WHERE captured_at_utc = ? ORDER BY metric_name",
-            (timestamp,),
-        ).fetchall()
-        return [cls._map_row(dict(r)) for r in rows]
-
-    @classmethod
     def get_latest(
         cls, conn: sqlite3.Connection, metric_name: str
     ) -> Optional[dict[str, Any]]:

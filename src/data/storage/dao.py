@@ -1453,15 +1453,6 @@ class RunMetadataDAO:
         return 0
 
     @staticmethod
-    def get_run(
-        conn: sqlite3.Connection, run_id: str
-    ) -> Optional[dict[str, Any]]:
-        row = conn.execute(
-            "SELECT * FROM strategy_runs WHERE run_id = ?", (run_id,)
-        ).fetchone()
-        return _row_to_dict(row)
-
-    @staticmethod
     def get_recent_runs(
         conn: sqlite3.Connection, limit: int = 10
     ) -> list[dict[str, Any]]:

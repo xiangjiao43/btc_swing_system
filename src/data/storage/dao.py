@@ -1452,13 +1452,3 @@ class RunMetadataDAO:
     ) -> int:
         return 0
 
-    @staticmethod
-    def get_recent_runs(
-        conn: sqlite3.Connection, limit: int = 10
-    ) -> list[dict[str, Any]]:
-        rows = conn.execute(
-            "SELECT * FROM strategy_runs "
-            "ORDER BY generated_at_utc DESC LIMIT ?",
-            (limit,),
-        ).fetchall()
-        return _rows_to_dicts(rows)

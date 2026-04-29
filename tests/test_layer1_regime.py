@@ -66,16 +66,6 @@ def _build_weekly_from_daily(klines_1d: pd.DataFrame) -> pd.DataFrame:
     return weekly
 
 
-def _build_ranging_at(
-    n: int = 180, level: float = 50_000.0,
-    noise_pct: float = 0.01, seed: int = 7,
-) -> pd.DataFrame:
-    """围绕 level 震荡。"""
-    rng = np.random.default_rng(seed)
-    closes = [level * (1 + rng.normal(0, noise_pct)) for _ in range(n)]
-    return _build_klines(closes)
-
-
 def _assert_common_fields(out: dict) -> None:
     """所有 output 必须有的通用字段。"""
     for key in (

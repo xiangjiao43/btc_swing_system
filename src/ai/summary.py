@@ -21,7 +21,7 @@ from typing import Any, Optional
 # Sprint 1.5c C6:改用 anthropic SDK(建模 §10.1 / §10.2)
 from .client import (
     build_anthropic_client, effective_model, extract_text, extract_usage,
-    extract_model as _extract_model, DEFAULT_MODEL as _CLIENT_DEFAULT_MODEL,
+    extract_model as _extract_model,
 )
 
 

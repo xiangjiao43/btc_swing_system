@@ -175,9 +175,12 @@ def _seed_fresh_data(db_conn, ts_iso: str = "2026-04-27T07:59:30Z"):
         MacroMetric(timestamp=ts_iso, metric_name="y",
                     metric_value=1.0, source="fred"),
     ])
+    # Sprint 1.5f-revised:DerivativesDAO 只接受 daily ts(T00:00:00Z),
+    # 把测试 fixture 的 hourly ts 截断为当天 daily(语义上 derivatives daily bar)。
+    derivatives_daily_ts = ts_iso[:10] + "T00:00:00Z"
     DerivativesDAO.upsert_batch(db_conn, [
-        DerivativeMetric(timestamp=ts_iso, metric_name="funding_rate",
-                         metric_value=0.0001),
+        DerivativeMetric(timestamp=derivatives_daily_ts,
+                         metric_name="funding_rate", metric_value=0.0001),
     ])
     BTCKlinesDAO.upsert_klines(db_conn, [
         KlineRow(timeframe="1h", timestamp=ts_iso, open=1, high=2, low=1, close=1.5,

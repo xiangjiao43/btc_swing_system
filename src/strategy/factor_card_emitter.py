@@ -1000,10 +1000,12 @@ def _emit_derivatives_primary(
     ))
 
     # OI 24h 变化率
-    # Sprint 1.5e.1:衍生品是 hourly 时序,`_pct_change(series, 1)` 是 1h 变化,
-    # 名字"24h"撒谎。改为 24 个 hourly 点 → 真 24h 变化。
+    # Sprint 1.5f-revised:衍生品 series 是 daily(jobs.py interval='1d'),
+    # 24h 变化 = _pct_change(series, days=1)= 今 daily / 昨 daily - 1。
+    # 1.5e.1 假设 hourly 用了 days=24,经 SSH 真 DB 复检证实 hourly 行只是
+    # 调试遗留污染(已清),生产路径全 daily。
     series = derivatives.get("open_interest") if isinstance(derivatives, dict) else None
-    change_24h = _pct_change(series, 24)
+    change_24h = _pct_change(series, 1)
     val_oi, ts_oi = _latest(series)
     cards.append(_make_card(
         card_id=f"derivatives_oi_24h_change_{today}",
@@ -1390,46 +1392,32 @@ def _emit_derivatives_reference(
             if v is not None:
                 liq_series = v
                 break
-    # Sprint 1.5e.1:卡名说"24h",算法应是 24 个 hourly 行的累计 sum,
-    # 老代码 `_latest(liq_series)` 只取最近 1h 值 — 名字撒谎。
-    sum_24h: Optional[float] = None
-    coverage_h = 0
-    ts: Optional[str] = None
-    if isinstance(liq_series, pd.Series):
-        s = liq_series.dropna()
-        if len(s) >= 1:
-            last_24 = s.iloc[-24:]
-            coverage_h = len(last_24)
-            sum_24h = float(last_24.sum())
-            ts = _to_bjt(s.index[-1])
+    # Sprint 1.5f-revised:衍生品 series 是 daily,liquidation 单 daily bar
+    # 本身就是当天 0-24h 累计 USD,直接 `_latest(liq_series)` 即可。
+    # 1.5e.1 的"24 行 sum"假设 hourly 是错的(经 SSH 真 DB 复检后发现 hourly 行
+    # 是调试遗留污染)。
+    val, ts = _latest(liq_series)
     cards.append(_make_card(
         card_id=f"derivatives_liquidation_24h_{today}",
         category="derivatives", tier="reference",
         # Sprint 1.5e:CoinGlass v4 liquidation 单交易所端点,源 = Binance
         name="Binance 24h 清算总额", name_en="Liquidation 24h (Binance)",
-        # 数据不足 24 行 → 返回 None;前端显示 "—" 而不是误导的"1h 累计"
-        current_value=(
-            round(sum_24h, 2) if sum_24h is not None and coverage_h >= 24
-            else None
-        ),
+        current_value=round(val, 2) if val is not None else None,
         value_unit="USD",
         captured_at_bjt=ts,
         plain_interpretation=(
-            (f"📊 过去 24 小时币安累计清算 ${sum_24h:,.0f}\n"
-             f"🔍 极端单日清算(数十亿美元)常伴随急涨急跌的反向行情结束")
-            if sum_24h is not None and coverage_h >= 24
-            else (f"📊 数据不足(仅 {coverage_h}/24 小时;过去 {coverage_h}h 累计 ${sum_24h:,.0f})\n"
-                  f"🔍 等待历史 24h 数据补全后才能给出有效结论")
-            if sum_24h is not None
+            f"📊 过去 24 小时币安累计清算 ${val:,.0f}\n"
+            f"🔍 极端单日清算(数十亿美元)常伴随急涨急跌的反向行情结束"
+            if val is not None
             else "📊 数据不足\n🔍 极端清算事件是去杠杆信号"
         ),
-        strategy_impact="📍 币安过去 24 小时被强制平仓的合约总额(美元,24 个 hourly 累计)。极端值往往是市场情绪反转的信号(瀑布式清算后常出现反弹)。",
+        strategy_impact="📍 币安过去 24 小时被强制平仓的合约总额(美元,daily bar 即 24h 累计)。极端值往往是市场情绪反转的信号(瀑布式清算后常出现反弹)。",
         impact_direction="neutral", impact_weight=0.4,
         linked_layer="L4", source="CoinGlass (Binance)",
     ))
 
     # 多空比变化率(24h 变化)— 同上
-    # Sprint 1.5e.1:hourly 序列 → 24 个点回看,1 个点是 1h 变化(老 bug)
+    # Sprint 1.5f-revised:daily series → days=1 = 今 daily / 昨 daily - 1
     lsr_series = None
     if isinstance(derivatives, dict):
         for k in ("long_short_ratio", "long_short_ratio_top",
@@ -1438,7 +1426,7 @@ def _emit_derivatives_reference(
             if v is not None:
                 lsr_series = v
                 break
-    lsr_24h_change = _pct_change(lsr_series, 24)
+    lsr_24h_change = _pct_change(lsr_series, 1)
     val, ts = _latest(lsr_series)
     cards.append(_make_card(
         card_id=f"derivatives_lsr_change_24h_{today}",

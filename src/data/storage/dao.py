@@ -18,10 +18,14 @@ DAO 类名保持 Sprint 1 的命名(BTCKlinesDAO / StrategyStateDAO / 等),
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable, Literal, Optional
+
+
+logger = logging.getLogger(__name__)
 
 
 # ============================================================
@@ -478,11 +482,26 @@ class DerivativesDAO:
 
         Sprint 2.6-J:wide 表共享 1 个 inserted_at_utc(snapshot 级精度),
         取每个 ts 桶内 max(fetched_at) — 该 ts 最近一次写入时刻。
+
+        Sprint 1.5f-revised §X 防再污染:**只接受 daily timestamp**
+        ('YYYY-MM-DDT00:00:00Z')。生产 jobs.py 已用 interval='1d',hourly
+        timestamp 一律 logger.warning + 跳过(避免 SSH 调试遗留再次混存到表)。
         """
         # 按 timestamp 分桶
         buckets: dict[str, dict[str, Any]] = {}
+        rejected_hourly = 0
         for r in rows:
             ts = r.timestamp
+            # Sprint 1.5f-revised:hourly timestamp 拒绝
+            if not isinstance(ts, str) or not ts.endswith("T00:00:00Z"):
+                logger.warning(
+                    "DerivativesDAO.upsert_batch: rejecting non-daily ts=%s "
+                    "(metric=%s value=%s) — only daily ts allowed for "
+                    "derivatives_snapshots; check caller's interval=",
+                    ts, r.metric_name, r.metric_value,
+                )
+                rejected_hourly += 1
+                continue
             name = r.metric_name
             val = r.metric_value
             b = buckets.setdefault(ts, {})

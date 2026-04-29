@@ -100,8 +100,10 @@ def test_collect_klines_1h_writes_klines_and_derivatives(db_path, conn_factory):
     assert _row_count(db_path, "derivatives_snapshots") >= 1
 
 
-def test_collect_klines_1h_uses_1h_interval_for_derivatives(db_path, conn_factory):
-    """关键:衍生品调用必须用 interval='1h' limit=168(不是 1d/7)。"""
+def test_collect_klines_1h_uses_1d_interval_for_derivatives(db_path, conn_factory):
+    """Sprint 1.5f-revised:衍生品反转回 daily(interval='1d', limit=7)。
+    Sprint 2.7-B 一度改 1h limit=168 是误判,SSH 真 DB 复检后定位 hourly 入库
+    导致 series 平均间隔混乱、派生 tail(N) 行数语义全错(详见 sprint_1_5f_revised.md)。"""
     cg_inst = MagicMock()
     cg_inst.fetch_klines.return_value = []
     for fn in ("fetch_funding_rate_history", "fetch_funding_rate_aggregated",
@@ -113,15 +115,15 @@ def test_collect_klines_1h_uses_1h_interval_for_derivatives(db_path, conn_factor
                return_value=cg_inst):
         jobs_mod.job_collect_klines_1h(conn_factory=conn_factory)
 
-    # 验证每个衍生品 fn 都被以 (interval='1h', limit=168) 调用
+    # 验证每个衍生品 fn 都被以 (interval='1d', limit=7) 调用
     for fn in ("fetch_funding_rate_history", "fetch_funding_rate_aggregated",
                "fetch_open_interest_history", "fetch_long_short_ratio_history",
                "fetch_liquidation_history"):
         m = getattr(cg_inst, fn)
         assert m.called, f"{fn} not called"
         kw = m.call_args.kwargs
-        assert kw.get("interval") == "1h", f"{fn} interval={kw.get('interval')}"
-        assert kw.get("limit") == 168, f"{fn} limit={kw.get('limit')}"
+        assert kw.get("interval") == "1d", f"{fn} interval={kw.get('interval')}"
+        assert kw.get("limit") == 7, f"{fn} limit={kw.get('limit')}"
 
 
 def test_collect_klines_1h_handles_partial_failure(db_path, conn_factory):

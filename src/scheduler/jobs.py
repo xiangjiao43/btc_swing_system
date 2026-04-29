@@ -310,10 +310,13 @@ def job_collect_klines_1h(
     *,
     conn_factory: Optional[Callable[[], Any]] = None,
 ) -> dict[str, Any]:
-    """每整点 :00 抓 CoinGlass 1h K 线(limit=24)+ 5 衍生品端点(1h interval, limit=168)。
+    """每整点 :00 抓 CoinGlass 1h K 线(limit=24)+ 5 衍生品端点(daily, limit=7)。
 
-    衍生品 1h interval 是 Sprint 2.7-B 关键变更:之前 interval='1d' limit=7
-    导致衍生品被强制日级 → 用户永远看不到小时级精度。
+    Sprint 1.5f-revised:衍生品**反转回 daily**(interval='1d', limit=7)。
+    Sprint 2.7-B 一度改 1h limit=168 是误判;实际派生因子算法(7d 均 / 30d 分位 /
+    90d Z)以及网页"24h 卡"语义都是基于 daily bar 设计的。hourly 入库导致 series
+    平均间隔混乱,派生 tail(N) 行数语义全错(详见 Sprint 1.5f-revised 报告)。
+    daily limit=7 + 每小时 cron 让"今天进行中的 daily bar"持续刷新。
     """
     def _body(conn: Any) -> dict[str, Any]:
         from ..data.collectors.coinglass import CoinglassCollector
@@ -343,13 +346,13 @@ def job_collect_klines_1h(
             logger.warning("collect_klines_1h klines.1h failed: %s", e)
             errors["klines_1h"] = str(e)[:200]
 
-        # ---- 衍生品 5 端点 1h interval limit=168(过去 7 天的 1h bar)----
+        # ---- Sprint 1.5f-revised:衍生品 5 端点 daily limit=7(每小时 cron 刷新今天 bar)----
         for fn_name in _DERIVATIVES_FETCHERS_1H:
             try:
                 fn = getattr(cg, fn_name, None)
                 if fn is None:
                     continue
-                rows = fn(interval="1h", limit=168)
+                rows = fn(interval="1d", limit=7)
                 if rows:
                     metrics = [
                         DerivativeMetric(

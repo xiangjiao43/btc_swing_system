@@ -6,12 +6,9 @@ structure.py — 价格结构类指标(Swing Highs / Lows / 振幅)
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any
 
 import pandas as pd
-
-
-SwingType = Literal["high", "low"]
 
 
 def swing_points(

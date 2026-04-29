@@ -951,7 +951,9 @@ def _emit_derivatives_primary(
     cards.append(_make_card(
         card_id=f"derivatives_funding_rate_current_{today}",
         category="derivatives", tier="primary",
-        name="资金费率 · 当前", name_en="Funding Rate Current",
+        # Sprint 1.5e:CoinGlass v4 单交易所端点,数据源 = Binance(币安体量第一)
+        name="Binance 资金费率 · 当前",
+        name_en="Funding Rate Current (Binance)",
         current_value=round(val * 100, 4) if val is not None else None,
         value_unit="%",
         historical_percentile=pct,
@@ -968,10 +970,10 @@ def _emit_derivatives_primary(
                   ) if val is not None
             else "📊 数据不足\n🔍 > 0.03% 连续 3 次 = 多头过度拥挤;-0.01% ~ 0.01% = 正常;< -0.05% = 空头过度拥挤"
         ),
-        strategy_impact="📍 永续合约多空双方互付的费率。正值=多头付空头(多头愿意为多头仓位付溢价),负值=空头付多头。极端值反映市场情绪和拥挤度。",
+        strategy_impact="📍 永续合约多空双方互付的费率(币安数据,体量第一)。正值=多头付空头(多头愿意为多头仓位付溢价),负值=空头付多头。极端值反映市场情绪和拥挤度。",
         impact_direction=_impact_direction_from_value(val, bear_above=0.0003, bull_below=-0.0002),
         impact_weight=0.9,
-        linked_layer="L4", source="CoinGlass",
+        linked_layer="L4", source="CoinGlass (Binance)",
     ))
 
     # 资金费率 30 日分位(就是上面 percentile)
@@ -1037,7 +1039,8 @@ def _emit_derivatives_primary(
     cards.append(_make_card(
         card_id=f"derivatives_top_long_short_ratio_{today}",
         category="derivatives", tier="primary",
-        name="大户多空比", name_en="Top Long/Short Ratio",
+        # Sprint 1.5e:CoinGlass v4 LSR 单交易所端点,源 = Binance
+        name="Binance 大户多空比", name_en="Top Long/Short Ratio (Binance)",
         current_value=round(val, 3) if val is not None else None,
         captured_at_bjt=ts,
         plain_interpretation=(
@@ -1049,10 +1052,10 @@ def _emit_derivatives_primary(
                   ) if val is not None
             else "📊 数据不足\n🔍 > 2.5 = 多头过度拥挤;0.7 ~ 2.0 = 正常;< 0.5 = 空头过度拥挤"
         ),
-        strategy_impact="📍 大户(高净值合约账户)中持有多头仓位 / 持有空头仓位的比值。极端值往往是反向信号,因为聪明钱的拥挤往往不持续。",
+        strategy_impact="📍 币安大户(高净值合约账户)中持有多头仓位 / 持有空头仓位的比值。极端值往往是反向信号,因为聪明钱的拥挤往往不持续。",
         impact_direction=_impact_direction_from_value(val, bear_above=2.5),
         impact_weight=0.6,
-        linked_layer="L4", source="CoinGlass",
+        linked_layer="L4", source="CoinGlass (Binance)",
     ))
 
     return cards
@@ -1389,19 +1392,20 @@ def _emit_derivatives_reference(
     cards.append(_make_card(
         card_id=f"derivatives_liquidation_24h_{today}",
         category="derivatives", tier="reference",
-        name="24h 清算总额", name_en="Liquidation 24h",
+        # Sprint 1.5e:CoinGlass v4 liquidation 单交易所端点,源 = Binance
+        name="Binance 24h 清算总额", name_en="Liquidation 24h (Binance)",
         current_value=round(val, 2) if val is not None else None,
         value_unit="USD",
         captured_at_bjt=ts,
         plain_interpretation=(
-            f"📊 过去 24 小时全市场清算总额 ${val:,.0f}\n"
+            f"📊 过去 24 小时币安清算总额 ${val:,.0f}\n"
             f"🔍 极端单日清算(数十亿美元)常伴随急涨急跌的反向行情结束"
             if val is not None
             else "📊 数据不足\n🔍 极端清算事件是去杠杆信号"
         ),
-        strategy_impact="📍 过去 24 小时被强制平仓的合约总额(美元)。极端值往往是市场情绪反转的信号(瀑布式清算后常出现反弹)。",
+        strategy_impact="📍 币安过去 24 小时被强制平仓的合约总额(美元)。极端值往往是市场情绪反转的信号(瀑布式清算后常出现反弹)。",
         impact_direction="neutral", impact_weight=0.4,
-        linked_layer="L4", source="CoinGlass",
+        linked_layer="L4", source="CoinGlass (Binance)",
     ))
 
     # 多空比变化率(24h 变化)— 同上
@@ -1418,19 +1422,21 @@ def _emit_derivatives_reference(
     cards.append(_make_card(
         card_id=f"derivatives_lsr_change_24h_{today}",
         category="derivatives", tier="reference",
-        name="多空比 24h 变化", name_en="LSR 24h Change",
+        # Sprint 1.5e:LSR 单交易所端点,源 = Binance
+        name="Binance 多空比 24h 变化",
+        name_en="LSR 24h Change (Binance)",
         current_value=round(lsr_24h_change, 2) if lsr_24h_change is not None else None,
         value_unit="%",
         captured_at_bjt=ts,
         plain_interpretation=(
-            f"📊 大户多空比 24h 变化 {lsr_24h_change:+.1f}%\n"
+            f"📊 币安大户多空比 24h 变化 {lsr_24h_change:+.1f}%\n"
             f"🔍 短时间剧烈变化常意味着大户立场转变,值得留意"
             if lsr_24h_change is not None
             else "📊 数据不足\n🔍 短时间剧烈变化常反映大户情绪转向"
         ),
-        strategy_impact="📍 大户多空比的 24 小时变化速度。跟踪大户情绪变化的快慢,配合绝对值看是趋势性还是噪声。",
+        strategy_impact="📍 币安大户多空比的 24 小时变化速度。跟踪大户情绪变化的快慢,配合绝对值看是趋势性还是噪声。",
         impact_direction="neutral", impact_weight=0.3,
-        linked_layer="L4", source="CoinGlass",
+        linked_layer="L4", source="CoinGlass (Binance)",
     ))
 
     # 全交易所加权资金费率(若有)

@@ -417,15 +417,21 @@ class CoinglassCollector:
         GET /v4/api/futures/funding-rate/history
         响应是 OHLC 格式;取 close 作为 metric_value(该时段末 funding rate)。
 
+        Sprint 1.5e:CoinGlass v4 单交易所端点必填 exchange,Binance 主用,
+        Bybit 兜底(SSH 端点体检验证可用)。
+
         Returns:
             list[{timestamp, metric_name='funding_rate', metric_value}]
         """
-        body = self._request(
-            "GET", self._PATH_FUNDING,
-            params={"symbol": symbol, "exchange": exchange,
-                    "interval": interval, "limit": limit},
-        )
+        variants: list[dict[str, Any]] = [
+            {"symbol": symbol, "exchange": exchange,
+             "interval": interval, "limit": limit},
+            {"symbol": symbol, "exchange": "Bybit",
+             "interval": interval, "limit": limit},
+        ]
+        body, used_params = self._try_request_variants(self._PATH_FUNDING, variants)
         rows = self._unwrap_data(body)
+        logger.info("  funding_rate: used params=%s", used_params)
         self._log_response_shape("funding_rate", rows)
 
         result: list[dict[str, Any]] = []
@@ -557,12 +563,16 @@ class CoinglassCollector:
         Returns:
             list[{timestamp, metric_name='long_short_ratio', metric_value}]
         """
-        body = self._request(
-            "GET", self._PATH_LONG_SHORT,
-            params={"symbol": symbol, "exchange": exchange,
-                    "interval": interval, "limit": limit},
-        )
+        # Sprint 1.5e:CoinGlass v4 LSR 端点必填 exchange,Binance 主 / Bybit 兜底
+        variants: list[dict[str, Any]] = [
+            {"symbol": symbol, "exchange": exchange,
+             "interval": interval, "limit": limit},
+            {"symbol": symbol, "exchange": "Bybit",
+             "interval": interval, "limit": limit},
+        ]
+        body, used_params = self._try_request_variants(self._PATH_LONG_SHORT, variants)
         rows = self._unwrap_data(body)
+        logger.info("  long_short_ratio: used params=%s", used_params)
         self._log_response_shape("long_short_ratio", rows)
 
         result: list[dict[str, Any]] = []
@@ -606,11 +616,13 @@ class CoinglassCollector:
         """
         GET /v4/api/futures/liquidation/history
 
-        Params 变体(按旧系统验证过的兜底顺序):
-          1. symbol=BTCUSDT, exchange=Binance, interval, limit
-          2. pair=BTCUSDT,   exchange=Binance, interval, limit
-          3. symbol=BTCUSDT,                    interval, limit
-          4. pair=BTCUSDT,                      interval, limit
+        Sprint 1.5e:CoinGlass v4 liquidation/history 必填 exchange + symbol=BTCUSDT。
+        Params 变体:
+          1. symbol=BTCUSDT, exchange=Binance(主)
+          2. symbol=BTCUSDT, exchange=Bybit(兜底)
+
+        删除老的 pair=/无 exchange variant — v4 已证明都不工作,
+        留着只会消耗中转站限速预算。
 
         Returns:
             每个时间戳最多 3 行(long / short / total):
@@ -620,10 +632,8 @@ class CoinglassCollector:
         variants: list[dict[str, Any]] = [
             {"symbol": "BTCUSDT", "exchange": "Binance",
              "interval": interval, "limit": limit},
-            {"pair": "BTCUSDT", "exchange": "Binance",
+            {"symbol": "BTCUSDT", "exchange": "Bybit",
              "interval": interval, "limit": limit},
-            {"symbol": "BTCUSDT", "interval": interval, "limit": limit},
-            {"pair": "BTCUSDT", "interval": interval, "limit": limit},
         ]
         body, used_params = self._try_request_variants(self._PATH_LIQUIDATION, variants)
         rows = self._unwrap_data(body)
@@ -661,13 +671,20 @@ class CoinglassCollector:
                     "metric_name": "liquidation_short",
                     "metric_value": short_val,
                 })
-            # total = long + short(都 None 的上面已跳过;单边 None 算 0 进入总)
-            total = (long_val or 0.0) + (short_val or 0.0)
-            result.append({
-                "timestamp": ts,
-                "metric_name": "liquidation_total",
-                "metric_value": total,
-            })
+            # Sprint 1.5e:**仅当两边都拿到真值才 emit total**(老 bug:
+            # `(long_val or 0.0) + (short_val or 0.0)` 单边 None 时 total=另一侧
+            # 写入 DB 假数据,污染历史分位计算)。
+            if long_val is not None and short_val is not None:
+                result.append({
+                    "timestamp": ts,
+                    "metric_name": "liquidation_total",
+                    "metric_value": long_val + short_val,
+                })
+            else:
+                logger.warning(
+                    "Partial liquidation at %s: missing %s side, total skipped",
+                    ts, "short" if short_val is None else "long",
+                )
         return result
 
     # ---- B.5 净持仓变化(long / short 两个 metric) -----------------
@@ -686,12 +703,16 @@ class CoinglassCollector:
             list[{timestamp, metric_name=net_position_long|net_position_short,
                   metric_value}]
         """
-        body = self._request(
-            "GET", self._PATH_NET_POSITION,
-            params={"symbol": symbol, "exchange": exchange,
-                    "interval": interval, "limit": limit},
-        )
+        # Sprint 1.5e:CoinGlass v4 net-position 必填 exchange,Binance 主 / Bybit 兜底
+        variants: list[dict[str, Any]] = [
+            {"symbol": symbol, "exchange": exchange,
+             "interval": interval, "limit": limit},
+            {"symbol": symbol, "exchange": "Bybit",
+             "interval": interval, "limit": limit},
+        ]
+        body, used_params = self._try_request_variants(self._PATH_NET_POSITION, variants)
         rows = self._unwrap_data(body)
+        logger.info("  net_position: used params=%s", used_params)
         self._log_response_shape("net_position", rows)
 
         result: list[dict[str, Any]] = []

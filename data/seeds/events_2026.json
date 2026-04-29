@@ -1,11 +1,33 @@
 {
   "_meta": {
-    "version": "2026-04-27",
-    "source": "Manual seed from federalreserve.gov + bls.gov",
-    "next_review_date": "2027-01-15",
-    "notes": "FOMC dates published yearly by Fed; NFP=first Friday; CPI=mid-month. DST: EDT (UTC-4) for Apr-early Nov; EST (UTC-5) for Nov-early Mar."
+    "version": "2026-04-29",
+    "source": "Manual seed: federalreserve.gov + bls.gov + Deribit options calendar",
+    "next_review_date": "2026-12-15",
+    "notes": "FOMC dates published yearly by Fed; NFP=first Friday; CPI=mid-month (estimated 13th, verify on bls.gov); options_expiry=last Friday of month at 08:00 UTC (Deribit BTC monthly). DST: EDT (UTC-4) for Mar 8-Nov 1; EST (UTC-5) for Nov 1-Mar 8."
   },
   "events": [
+    {
+      "event_id": "nfp_2026_01_02",
+      "date": "2026-01-02",
+      "timezone": "America/New_York",
+      "local_time": "08:30",
+      "utc_trigger_time": "2026-01-02T13:30:00Z",
+      "event_type": "nfp",
+      "event_name": "Non-Farm Payrolls (January 2026: prior month data)",
+      "impact_level": 4,
+      "notes": "First Friday; EST → UTC 13:30"
+    },
+    {
+      "event_id": "cpi_2026_01_13",
+      "date": "2026-01-13",
+      "timezone": "America/New_York",
+      "local_time": "08:30",
+      "utc_trigger_time": "2026-01-13T13:30:00Z",
+      "event_type": "cpi",
+      "event_name": "CPI Release (January 2026: prior month data)",
+      "impact_level": 4,
+      "notes": "estimated mid-month; verify on bls.gov/schedule/news_release/cpi.htm; EST"
+    },
     {
       "event_id": "fomc_2026_01_28",
       "date": "2026-01-28",
@@ -16,6 +38,72 @@
       "event_name": "FOMC Rate Decision (Jan 27-28)",
       "impact_level": 5,
       "notes": "Statement at 14:00 ET, press conference 14:30 ET"
+    },
+    {
+      "event_id": "options_expiry_2026_01",
+      "date": "2026-01-30",
+      "timezone": "UTC",
+      "local_time": "08:00",
+      "utc_trigger_time": "2026-01-30T08:00:00Z",
+      "event_type": "options_expiry_major",
+      "event_name": "Crypto monthly options expiry (January)",
+      "impact_level": 2,
+      "notes": "Deribit BTC monthly options expire 08:00 UTC (last Friday)"
+    },
+    {
+      "event_id": "nfp_2026_02_06",
+      "date": "2026-02-06",
+      "timezone": "America/New_York",
+      "local_time": "08:30",
+      "utc_trigger_time": "2026-02-06T13:30:00Z",
+      "event_type": "nfp",
+      "event_name": "Non-Farm Payrolls (February 2026: prior month data)",
+      "impact_level": 4,
+      "notes": "First Friday; EST → UTC 13:30"
+    },
+    {
+      "event_id": "cpi_2026_02_13",
+      "date": "2026-02-13",
+      "timezone": "America/New_York",
+      "local_time": "08:30",
+      "utc_trigger_time": "2026-02-13T13:30:00Z",
+      "event_type": "cpi",
+      "event_name": "CPI Release (February 2026: prior month data)",
+      "impact_level": 4,
+      "notes": "estimated mid-month; verify on bls.gov/schedule/news_release/cpi.htm; EST"
+    },
+    {
+      "event_id": "options_expiry_2026_02",
+      "date": "2026-02-27",
+      "timezone": "UTC",
+      "local_time": "08:00",
+      "utc_trigger_time": "2026-02-27T08:00:00Z",
+      "event_type": "options_expiry_major",
+      "event_name": "Crypto monthly options expiry (February)",
+      "impact_level": 2,
+      "notes": "Deribit BTC monthly options expire 08:00 UTC (last Friday)"
+    },
+    {
+      "event_id": "nfp_2026_03_06",
+      "date": "2026-03-06",
+      "timezone": "America/New_York",
+      "local_time": "08:30",
+      "utc_trigger_time": "2026-03-06T13:30:00Z",
+      "event_type": "nfp",
+      "event_name": "Non-Farm Payrolls (March 2026: prior month data)",
+      "impact_level": 4,
+      "notes": "First Friday; EST → UTC 13:30"
+    },
+    {
+      "event_id": "cpi_2026_03_13",
+      "date": "2026-03-13",
+      "timezone": "America/New_York",
+      "local_time": "08:30",
+      "utc_trigger_time": "2026-03-13T12:30:00Z",
+      "event_type": "cpi",
+      "event_name": "CPI Release (March 2026: prior month data)",
+      "impact_level": 4,
+      "notes": "estimated mid-month; verify on bls.gov/schedule/news_release/cpi.htm; EDT"
     },
     {
       "event_id": "fomc_2026_03_18",
@@ -29,6 +117,50 @@
       "notes": "Includes Summary of Economic Projections + dot plot"
     },
     {
+      "event_id": "options_expiry_2026_03",
+      "date": "2026-03-27",
+      "timezone": "UTC",
+      "local_time": "08:00",
+      "utc_trigger_time": "2026-03-27T08:00:00Z",
+      "event_type": "options_expiry_major",
+      "event_name": "Crypto monthly options expiry (March)",
+      "impact_level": 3,
+      "notes": "Q1 季度到期(规模放大)"
+    },
+    {
+      "event_id": "nfp_2026_04_03",
+      "date": "2026-04-03",
+      "timezone": "America/New_York",
+      "local_time": "08:30",
+      "utc_trigger_time": "2026-04-03T12:30:00Z",
+      "event_type": "nfp",
+      "event_name": "Non-Farm Payrolls (April 2026: prior month data)",
+      "impact_level": 4,
+      "notes": "First Friday; EDT → UTC 12:30"
+    },
+    {
+      "event_id": "cpi_2026_04_13",
+      "date": "2026-04-13",
+      "timezone": "America/New_York",
+      "local_time": "08:30",
+      "utc_trigger_time": "2026-04-13T12:30:00Z",
+      "event_type": "cpi",
+      "event_name": "CPI Release (April 2026: prior month data)",
+      "impact_level": 4,
+      "notes": "estimated mid-month; verify on bls.gov/schedule/news_release/cpi.htm; EDT"
+    },
+    {
+      "event_id": "options_expiry_2026_04",
+      "date": "2026-04-24",
+      "timezone": "UTC",
+      "local_time": "08:00",
+      "utc_trigger_time": "2026-04-24T08:00:00Z",
+      "event_type": "options_expiry_major",
+      "event_name": "Crypto monthly options expiry (April)",
+      "impact_level": 2,
+      "notes": "Deribit BTC monthly options expire 08:00 UTC (last Friday)"
+    },
+    {
       "event_id": "fomc_2026_04_29",
       "date": "2026-04-29",
       "timezone": "America/New_York",
@@ -38,6 +170,61 @@
       "event_name": "FOMC Rate Decision (Apr 28-29)",
       "impact_level": 5,
       "notes": "No SEP this meeting"
+    },
+    {
+      "event_id": "nfp_2026_05_01",
+      "date": "2026-05-01",
+      "timezone": "America/New_York",
+      "local_time": "08:30",
+      "utc_trigger_time": "2026-05-01T12:30:00Z",
+      "event_type": "nfp",
+      "event_name": "Non-Farm Payrolls (May 2026: prior month data)",
+      "impact_level": 4,
+      "notes": "First Friday; EDT → UTC 12:30"
+    },
+    {
+      "event_id": "cpi_2026_05_13",
+      "date": "2026-05-13",
+      "timezone": "America/New_York",
+      "local_time": "08:30",
+      "utc_trigger_time": "2026-05-13T12:30:00Z",
+      "event_type": "cpi",
+      "event_name": "CPI Release (May 2026: prior month data)",
+      "impact_level": 4,
+      "notes": "estimated mid-month; verify on bls.gov/schedule/news_release/cpi.htm; EDT"
+    },
+    {
+      "event_id": "options_expiry_2026_05",
+      "date": "2026-05-29",
+      "timezone": "UTC",
+      "local_time": "08:00",
+      "utc_trigger_time": "2026-05-29T08:00:00Z",
+      "event_type": "options_expiry_major",
+      "event_name": "Crypto monthly options expiry (May)",
+      "impact_level": 2,
+      "notes": "Deribit BTC monthly options expire 08:00 UTC (last Friday)"
+    },
+    {
+      "event_id": "nfp_2026_06_05",
+      "date": "2026-06-05",
+      "timezone": "America/New_York",
+      "local_time": "08:30",
+      "utc_trigger_time": "2026-06-05T12:30:00Z",
+      "event_type": "nfp",
+      "event_name": "Non-Farm Payrolls (June 2026: prior month data)",
+      "impact_level": 4,
+      "notes": "First Friday; EDT → UTC 12:30"
+    },
+    {
+      "event_id": "cpi_2026_06_13",
+      "date": "2026-06-13",
+      "timezone": "America/New_York",
+      "local_time": "08:30",
+      "utc_trigger_time": "2026-06-13T12:30:00Z",
+      "event_type": "cpi",
+      "event_name": "CPI Release (June 2026: prior month data)",
+      "impact_level": 4,
+      "notes": "estimated mid-month; verify on bls.gov/schedule/news_release/cpi.htm; EDT"
     },
     {
       "event_id": "fomc_2026_06_17",
@@ -51,6 +238,39 @@
       "notes": "Includes Summary of Economic Projections + dot plot"
     },
     {
+      "event_id": "options_expiry_2026_06",
+      "date": "2026-06-26",
+      "timezone": "UTC",
+      "local_time": "08:00",
+      "utc_trigger_time": "2026-06-26T08:00:00Z",
+      "event_type": "options_expiry_major",
+      "event_name": "Crypto monthly options expiry (June)",
+      "impact_level": 3,
+      "notes": "Q2 季度到期(规模放大)"
+    },
+    {
+      "event_id": "nfp_2026_07_03",
+      "date": "2026-07-03",
+      "timezone": "America/New_York",
+      "local_time": "08:30",
+      "utc_trigger_time": "2026-07-03T12:30:00Z",
+      "event_type": "nfp",
+      "event_name": "Non-Farm Payrolls (July 2026: prior month data)",
+      "impact_level": 4,
+      "notes": "First Friday; EDT → UTC 12:30"
+    },
+    {
+      "event_id": "cpi_2026_07_13",
+      "date": "2026-07-13",
+      "timezone": "America/New_York",
+      "local_time": "08:30",
+      "utc_trigger_time": "2026-07-13T12:30:00Z",
+      "event_type": "cpi",
+      "event_name": "CPI Release (July 2026: prior month data)",
+      "impact_level": 4,
+      "notes": "estimated mid-month; verify on bls.gov/schedule/news_release/cpi.htm; EDT"
+    },
+    {
       "event_id": "fomc_2026_07_29",
       "date": "2026-07-29",
       "timezone": "America/New_York",
@@ -60,6 +280,72 @@
       "event_name": "FOMC Rate Decision (Jul 28-29)",
       "impact_level": 5,
       "notes": "No SEP this meeting"
+    },
+    {
+      "event_id": "options_expiry_2026_07",
+      "date": "2026-07-31",
+      "timezone": "UTC",
+      "local_time": "08:00",
+      "utc_trigger_time": "2026-07-31T08:00:00Z",
+      "event_type": "options_expiry_major",
+      "event_name": "Crypto monthly options expiry (July)",
+      "impact_level": 2,
+      "notes": "Deribit BTC monthly options expire 08:00 UTC (last Friday)"
+    },
+    {
+      "event_id": "nfp_2026_08_07",
+      "date": "2026-08-07",
+      "timezone": "America/New_York",
+      "local_time": "08:30",
+      "utc_trigger_time": "2026-08-07T12:30:00Z",
+      "event_type": "nfp",
+      "event_name": "Non-Farm Payrolls (August 2026: prior month data)",
+      "impact_level": 4,
+      "notes": "First Friday; EDT → UTC 12:30"
+    },
+    {
+      "event_id": "cpi_2026_08_13",
+      "date": "2026-08-13",
+      "timezone": "America/New_York",
+      "local_time": "08:30",
+      "utc_trigger_time": "2026-08-13T12:30:00Z",
+      "event_type": "cpi",
+      "event_name": "CPI Release (August 2026: prior month data)",
+      "impact_level": 4,
+      "notes": "estimated mid-month; verify on bls.gov/schedule/news_release/cpi.htm; EDT"
+    },
+    {
+      "event_id": "options_expiry_2026_08",
+      "date": "2026-08-28",
+      "timezone": "UTC",
+      "local_time": "08:00",
+      "utc_trigger_time": "2026-08-28T08:00:00Z",
+      "event_type": "options_expiry_major",
+      "event_name": "Crypto monthly options expiry (August)",
+      "impact_level": 2,
+      "notes": "Deribit BTC monthly options expire 08:00 UTC (last Friday)"
+    },
+    {
+      "event_id": "nfp_2026_09_04",
+      "date": "2026-09-04",
+      "timezone": "America/New_York",
+      "local_time": "08:30",
+      "utc_trigger_time": "2026-09-04T12:30:00Z",
+      "event_type": "nfp",
+      "event_name": "Non-Farm Payrolls (September 2026: prior month data)",
+      "impact_level": 4,
+      "notes": "First Friday; EDT → UTC 12:30"
+    },
+    {
+      "event_id": "cpi_2026_09_13",
+      "date": "2026-09-13",
+      "timezone": "America/New_York",
+      "local_time": "08:30",
+      "utc_trigger_time": "2026-09-13T12:30:00Z",
+      "event_type": "cpi",
+      "event_name": "CPI Release (September 2026: prior month data)",
+      "impact_level": 4,
+      "notes": "estimated mid-month; verify on bls.gov/schedule/news_release/cpi.htm; EDT"
     },
     {
       "event_id": "fomc_2026_09_16",
@@ -73,6 +359,39 @@
       "notes": "Includes Summary of Economic Projections + dot plot"
     },
     {
+      "event_id": "options_expiry_2026_09",
+      "date": "2026-09-25",
+      "timezone": "UTC",
+      "local_time": "08:00",
+      "utc_trigger_time": "2026-09-25T08:00:00Z",
+      "event_type": "options_expiry_major",
+      "event_name": "Crypto monthly options expiry (September)",
+      "impact_level": 3,
+      "notes": "Q3 季度到期(规模放大)"
+    },
+    {
+      "event_id": "nfp_2026_10_02",
+      "date": "2026-10-02",
+      "timezone": "America/New_York",
+      "local_time": "08:30",
+      "utc_trigger_time": "2026-10-02T12:30:00Z",
+      "event_type": "nfp",
+      "event_name": "Non-Farm Payrolls (October 2026: prior month data)",
+      "impact_level": 4,
+      "notes": "First Friday; EDT → UTC 12:30"
+    },
+    {
+      "event_id": "cpi_2026_10_13",
+      "date": "2026-10-13",
+      "timezone": "America/New_York",
+      "local_time": "08:30",
+      "utc_trigger_time": "2026-10-13T12:30:00Z",
+      "event_type": "cpi",
+      "event_name": "CPI Release (October 2026: prior month data)",
+      "impact_level": 4,
+      "notes": "estimated mid-month; verify on bls.gov/schedule/news_release/cpi.htm; EDT"
+    },
+    {
       "event_id": "fomc_2026_10_28",
       "date": "2026-10-28",
       "timezone": "America/New_York",
@@ -82,6 +401,61 @@
       "event_name": "FOMC Rate Decision (Oct 27-28)",
       "impact_level": 5,
       "notes": "No SEP this meeting"
+    },
+    {
+      "event_id": "options_expiry_2026_10",
+      "date": "2026-10-30",
+      "timezone": "UTC",
+      "local_time": "08:00",
+      "utc_trigger_time": "2026-10-30T08:00:00Z",
+      "event_type": "options_expiry_major",
+      "event_name": "Crypto monthly options expiry (October)",
+      "impact_level": 2,
+      "notes": "Deribit BTC monthly options expire 08:00 UTC (last Friday)"
+    },
+    {
+      "event_id": "nfp_2026_11_06",
+      "date": "2026-11-06",
+      "timezone": "America/New_York",
+      "local_time": "08:30",
+      "utc_trigger_time": "2026-11-06T13:30:00Z",
+      "event_type": "nfp",
+      "event_name": "Non-Farm Payrolls (November 2026: prior month data)",
+      "impact_level": 4,
+      "notes": "First Friday; EST → UTC 13:30"
+    },
+    {
+      "event_id": "cpi_2026_11_13",
+      "date": "2026-11-13",
+      "timezone": "America/New_York",
+      "local_time": "08:30",
+      "utc_trigger_time": "2026-11-13T13:30:00Z",
+      "event_type": "cpi",
+      "event_name": "CPI Release (November 2026: prior month data)",
+      "impact_level": 4,
+      "notes": "estimated mid-month; verify on bls.gov/schedule/news_release/cpi.htm; EST"
+    },
+    {
+      "event_id": "options_expiry_2026_11",
+      "date": "2026-11-27",
+      "timezone": "UTC",
+      "local_time": "08:00",
+      "utc_trigger_time": "2026-11-27T08:00:00Z",
+      "event_type": "options_expiry_major",
+      "event_name": "Crypto monthly options expiry (November)",
+      "impact_level": 2,
+      "notes": "Deribit BTC monthly options expire 08:00 UTC (last Friday)"
+    },
+    {
+      "event_id": "nfp_2026_12_04",
+      "date": "2026-12-04",
+      "timezone": "America/New_York",
+      "local_time": "08:30",
+      "utc_trigger_time": "2026-12-04T13:30:00Z",
+      "event_type": "nfp",
+      "event_name": "Non-Farm Payrolls (December 2026: prior month data)",
+      "impact_level": 4,
+      "notes": "First Friday; EST → UTC 13:30"
     },
     {
       "event_id": "fomc_2026_12_09",
@@ -95,26 +469,26 @@
       "notes": "Includes Summary of Economic Projections + dot plot. EST winter time."
     },
     {
-      "event_id": "nfp_2026_05_01",
-      "date": "2026-05-01",
+      "event_id": "cpi_2026_12_13",
+      "date": "2026-12-13",
       "timezone": "America/New_York",
       "local_time": "08:30",
-      "utc_trigger_time": "2026-05-01T12:30:00Z",
-      "event_type": "nfp",
-      "event_name": "Non-Farm Payrolls (April data)",
+      "utc_trigger_time": "2026-12-13T13:30:00Z",
+      "event_type": "cpi",
+      "event_name": "CPI Release (December 2026: prior month data)",
       "impact_level": 4,
-      "notes": "First Friday of May, releases April employment data"
+      "notes": "estimated mid-month; verify on bls.gov/schedule/news_release/cpi.htm; EST"
     },
     {
-      "event_id": "cpi_2026_05_13",
-      "date": "2026-05-13",
-      "timezone": "America/New_York",
-      "local_time": "08:30",
-      "utc_trigger_time": "2026-05-13T12:30:00Z",
-      "event_type": "cpi",
-      "event_name": "CPI Release (April data)",
-      "impact_level": 4,
-      "notes": "Mid-month, releases April inflation data"
+      "event_id": "options_expiry_2026_12",
+      "date": "2026-12-25",
+      "timezone": "UTC",
+      "local_time": "08:00",
+      "utc_trigger_time": "2026-12-25T08:00:00Z",
+      "event_type": "options_expiry_major",
+      "event_name": "Crypto monthly options expiry (December)",
+      "impact_level": 3,
+      "notes": "Q4 季度到期(规模放大); 圣诞节附近 Deribit 可能调整到稍前一个周五"
     }
   ]
 }

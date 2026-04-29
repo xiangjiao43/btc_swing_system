@@ -110,6 +110,10 @@ class Layer2Direction(EvidenceLayerBase):
         l1: dict[str, Any] = context.get("layer_1_output") or {}
         composites: dict[str, Any] = context.get("composite_factors") or {}
         single_factors: dict[str, Any] = context.get("single_factors") or {}
+        # Sprint 1.5c:为 ma_60_distance_pct 计算读 1d K 线
+        # (建模 §4.3.2 纪律 L2 不直接读 K 线 — 但 ma_60_distance 是
+        #  L2 专属字段 §4.3,且本计算只看 1 个数值不参与方向判定,合规)
+        klines_1d_for_ma = context.get("klines_1d")
 
         tt: dict[str, Any] = composites.get("truth_trend") or {}
         bp: dict[str, Any] = composites.get("band_position") or {}
@@ -139,6 +143,11 @@ class Layer2Direction(EvidenceLayerBase):
                     diagnostics={"missing": missing},
                     band_position_score=None,
                     exchange_momentum_score=None,
+                    # Sprint 1.5c:数据不足时也保 schema 一致(下游不报 KeyError)
+                    impulse_extension_ratio=None,
+                    latest_pullback_depth=None,
+                    ma_60_distance_pct=None,
+                    trend_position=None,
                 )
             # 只缺 band_position → 可降级继续算,但 band_contribution = 0
             cold_notes = list(notes)
@@ -313,6 +322,18 @@ class Layer2Direction(EvidenceLayerBase):
         else:
             structure_features = None
 
+        # Sprint 1.5c:把 BandPosition 内部字段提到 L2 顶层
+        # (composite_composition / factor_card_emitter 已读这些字段名)
+        bp_diag = bp.get("diagnostics") or {}
+        impulse_extension_ratio = bp.get("impulse_extension_ratio")
+        latest_pullback_depth = bp_diag.get("retracement_ratio")
+        ma_60_distance_pct = _compute_ma60_distance_pct(klines_1d_for_ma)
+        trend_position = {
+            "estimated_pct_of_move": impulse_extension_ratio,
+            "basis": "impulse_extension_ratio",
+            "reliability": bp.get("phase_confidence", 0.0),
+        }
+
         return {
             "stance": stance,
             "phase": phase,
@@ -322,6 +343,11 @@ class Layer2Direction(EvidenceLayerBase):
             "conflict_flags": conflict_flags,
             "diagnostics": diagnostics,
             "structure_features": structure_features,
+            # Sprint 1.5c:从 band_position 提到顶层 L2 字段
+            "impulse_extension_ratio": impulse_extension_ratio,
+            "latest_pullback_depth": latest_pullback_depth,
+            "ma_60_distance_pct": ma_60_distance_pct,
+            "trend_position": trend_position,
             "band_position_score": bp.get("phase_confidence"),
             "exchange_momentum_score": em_score,
             "long_cycle_context": {
@@ -406,6 +432,29 @@ def _regime_support_for_candidate(
 
     # 其他组合(不应出现,因为 _derive_candidate 已过滤冲突)
     return 0.2
+
+
+def _compute_ma60_distance_pct(klines_1d: Any) -> Optional[float]:
+    """Sprint 1.5c:当前 1D 收盘价相对 60 日 EMA 的百分比偏离。
+
+    数据不足(< 60 根)→ None。
+    > 0 表示价格在 MA60 上方;< 0 表示下方。建模 §4.3 L2 专属字段。
+    """
+    try:
+        import pandas as pd
+        from ..indicators.trend import ema
+    except Exception:
+        return None
+    if klines_1d is None or not hasattr(klines_1d, "__len__") or len(klines_1d) < 60:
+        return None
+    try:
+        last_close = float(klines_1d["close"].iloc[-1])
+        ma60_last = float(ema(klines_1d["close"], 60).iloc[-1])
+    except (KeyError, ValueError, TypeError):
+        return None
+    if ma60_last <= 0:
+        return None
+    return round((last_close - ma60_last) / ma60_last * 100.0, 2)
 
 
 def _lookup_thresholds(

@@ -1119,7 +1119,12 @@ def _emit_price_tech_primary(
     ))
 
     # 多周期方向一致性
-    alignment = l1.get("tf_alignment") or l1.get("multi_tf_alignment")
+    # Sprint 1.5c:统一读建模标准名 timeframe_alignment;tf_alignment 是同 dict alias 兜底
+    alignment = (
+        l1.get("timeframe_alignment")
+        or l1.get("tf_alignment")
+        or l1.get("multi_tf_alignment")
+    )
     alignment_value = None
     alignment_direction = "neutral"
     if isinstance(alignment, dict):

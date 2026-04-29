@@ -43,11 +43,16 @@ class Layer1Regime(EvidenceLayerBase):
 
     def _compute_specific(self, context: dict[str, Any]) -> dict[str, Any]:
         klines_1d: Optional[pd.DataFrame] = context.get("klines_1d")
+        klines_4h: Optional[pd.DataFrame] = context.get("klines_4h")
         klines_1w: Optional[pd.DataFrame] = context.get("klines_1w")
 
         # ---- 数据完整度检查 ----
         if klines_1d is None or not isinstance(klines_1d, pd.DataFrame) \
                 or len(klines_1d) < self._MIN_1D_BARS:
+            insufficient_alignment = {
+                "tf_4h": None, "tf_1d": None, "tf_1w": None,
+                "aligned": False, "direction": "unknown", "score": None,
+            }
             return self._insufficient(
                 f"klines_1d insufficient (need ≥{self._MIN_1D_BARS}, "
                 f"got {0 if klines_1d is None else len(klines_1d)})",
@@ -63,8 +68,14 @@ class Layer1Regime(EvidenceLayerBase):
                 adx_14_1d=None,
                 atr_14_1d=None,
                 atr_percentile_180d=None,
-                tf_alignment={"aligned": False, "direction": "unknown",
-                              "score": None},
+                # Sprint 1.5c:对齐建模标准名 + 老 alias 同 dict
+                adx_14_4h=None,
+                timeframe_alignment=insufficient_alignment,
+                tf_alignment=insufficient_alignment,
+                ma_alignment={
+                    "ma_20": None, "ma_60": None, "ma_120": None, "ma_200": None,
+                    "direction": None, "is_aligned": False,
+                },
             )
 
         # ---- 阈值读取 ----
@@ -125,6 +136,39 @@ class Layer1Regime(EvidenceLayerBase):
 
         # ---- 周线 MACD 方向 ----
         weekly_macd_direction: Optional[str] = _weekly_macd_direction(klines_1w)
+
+        # ---- Sprint 1.5c:4H 维度的 ADX + EMA 排列方向 ----
+        adx_4h_latest: Optional[float] = None
+        dir_4h: Optional[str] = None
+        if (
+            klines_4h is not None and isinstance(klines_4h, pd.DataFrame)
+            and len(klines_4h) >= 30
+        ):
+            try:
+                h4 = klines_4h
+                adx_4h_series = adx(h4["high"], h4["low"], h4["close"], period=14)
+                adx_4h_latest = _last_valid(adx_4h_series)
+                ema20_4h = _last_valid(ema(h4["close"], 20))
+                ema50_4h = _last_valid(ema(h4["close"], 50))
+                ema200_4h = _last_valid(ema(h4["close"], 200))
+                dir_4h = _ema_arrangement(ema20_4h, ema50_4h, ema200_4h)
+            except Exception as e:
+                logger.warning("L1 4h compute failed: %s", e)
+
+        # ---- Sprint 1.5c:简单 MA(20/60/120/200)排列 ----
+        ma20: Optional[float] = (
+            float(close.tail(20).mean()) if len(close) >= 20 else None
+        )
+        ma60: Optional[float] = (
+            float(close.tail(60).mean()) if len(close) >= 60 else None
+        )
+        ma120: Optional[float] = (
+            float(close.tail(120).mean()) if len(close) >= 120 else None
+        )
+        ma200: Optional[float] = (
+            float(close.tail(200).mean()) if len(close) >= 200 else None
+        )
+        ma_dir = _ma_alignment_direction(ma20, ma60, ma120, ma200)
 
         # ---- Swing 分析 ----
         swing_events = swing_points(high, low, lookback=swing_window)
@@ -335,9 +379,21 @@ class Layer1Regime(EvidenceLayerBase):
             "adx_14_1d": _round_or_none(adx_latest, 2),
             "atr_14_1d": _round_or_none(atr_latest, 2),
             "atr_percentile_180d": _round_or_none(atr_pct_latest, 1),
-            "tf_alignment": _build_tf_alignment(
-                ema_arrangement, weekly_macd_direction
+            # Sprint 1.5c:对齐建模标准名,timeframe_alignment 是真名,tf_alignment 是同 dict alias
+            **_build_timeframe_alignment_pair(
+                dir_4h=dir_4h,
+                dir_1d=ema_arrangement,        # 1d EMA20/50/200 排列
+                dir_1w=weekly_macd_direction,
             ),
+            "adx_14_4h": _round_or_none(adx_4h_latest, 2),
+            "ma_alignment": {
+                "ma_20": _round_or_none(ma20, 2),
+                "ma_60": _round_or_none(ma60, 2),
+                "ma_120": _round_or_none(ma120, 2),
+                "ma_200": _round_or_none(ma200, 2),
+                "direction": ma_dir,
+                "is_aligned": ma_dir is not None,
+            },
             "confidence_tier": confidence_tier,
             "health_status": "healthy",
             "computation_method": "rule_based",
@@ -435,23 +491,51 @@ def _ema_arrangement(
     return "mixed"
 
 
-def _build_tf_alignment(
-    ema_arrangement: Optional[str],
-    weekly_macd_direction: Optional[str],
+def _build_timeframe_alignment_pair(
+    *, dir_4h: Optional[str], dir_1d: Optional[str], dir_1w: Optional[str],
 ) -> dict[str, Any]:
-    """Sprint 2.6-C:简化的多周期一致性结构,供 factor_card_emitter 用。
+    """Sprint 1.5c:统一构造 timeframe_alignment 字典 + tf_alignment alias。
 
-    - 4H/1D 用 ema_arrangement(up/down/mixed)
-    - 1W 用 weekly_macd_direction(up/down/neutral)
-    - 都 up → aligned up;都 down → aligned down;其它 → mixed
+    返回 {"timeframe_alignment": dict, "tf_alignment": dict}(同 dict 引用)。
+    建模标准名是 timeframe_alignment;tf_alignment 是 Sprint 2.6-C 已有 alias,
+    保留以兼容已编写的 factor_card_emitter / 前端代码。
+
+    aligned 判定:三档(若有数据)同向。多周期某档 None 不参与判定但仍在 dict 里。
     """
-    if ema_arrangement is None or weekly_macd_direction is None:
-        return {"aligned": False, "direction": "unknown", "score": None}
-    if ema_arrangement == "up" and weekly_macd_direction == "up":
-        return {"aligned": True, "direction": "up", "score": 3}
-    if ema_arrangement == "down" and weekly_macd_direction == "down":
-        return {"aligned": True, "direction": "down", "score": 3}
-    return {"aligned": False, "direction": "mixed", "score": 1}
+    valid = [d for d in (dir_4h, dir_1d, dir_1w) if d in {"up", "down"}]
+    if valid and all(d == "up" for d in valid) and len(valid) >= 2:
+        aligned, direction, score = True, "up", round(len(valid) / 3.0, 2)
+    elif valid and all(d == "down" for d in valid) and len(valid) >= 2:
+        aligned, direction, score = True, "down", round(len(valid) / 3.0, 2)
+    elif not valid:
+        aligned, direction, score = False, "unknown", None
+    else:
+        aligned, direction, score = False, "mixed", round(len(valid) / 6.0, 2)
+    payload = {
+        "tf_4h": dir_4h, "tf_1d": dir_1d, "tf_1w": dir_1w,
+        "aligned": aligned, "direction": direction, "score": score,
+    }
+    return {"timeframe_alignment": payload, "tf_alignment": payload}
+
+
+def _ma_alignment_direction(
+    ma20: Optional[float], ma60: Optional[float],
+    ma120: Optional[float], ma200: Optional[float],
+) -> Optional[str]:
+    """Sprint 1.5c:MA-20/60/120/200 严格升降序判定。
+
+    上行排列:ma20 > ma60 > ma120 > ma200(短期均线在上)→ "up"
+    下行排列:ma20 < ma60 < ma120 < ma200 → "down"
+    任一缺失或不严格单调 → None(不算 aligned)
+    """
+    vals = [ma20, ma60, ma120, ma200]
+    if any(v is None for v in vals):
+        return None
+    if ma20 > ma60 > ma120 > ma200:
+        return "up"
+    if ma20 < ma60 < ma120 < ma200:
+        return "down"
+    return None
 
 
 def _analyze_swing(

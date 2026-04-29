@@ -16,7 +16,6 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
-import traceback
 from pathlib import Path
 from typing import Any
 

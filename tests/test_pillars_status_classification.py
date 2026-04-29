@@ -44,13 +44,15 @@ def test_l2_relative_position_unclear_is_ok_status():
     assert "扩展 103%" in rel_pos["interpretation"], rel_pos["interpretation"]
 
 
-def test_l2_relative_position_n_a_is_missing():
-    """phase=n_a(L2 stance=neutral 时)→ status=missing(真没算波段)。"""
+def test_l2_relative_position_n_a_is_ok():
+    """Sprint 1.5c.4:phase=n_a 是 layer2_direction 在 stance=neutral 时主动设的
+    标准枚举(设计行为,不是数据缺) → status=ok。"""
     l2 = {"stance": "neutral", "phase": "n_a",
           "trend_position": None}
     out = _pillars_l2(l2)
     rel_pos = next(p for p in out["pillars"] if p["id"] == "relative_position")
-    assert rel_pos["status"] == "missing"
+    assert rel_pos["status"] == "ok"
+    assert "n/a" in rel_pos["interpretation"] or "中性" in rel_pos["interpretation"]
 
 
 def test_l2_relative_position_ok_with_clear_phase():

@@ -175,8 +175,10 @@ def _pillars_l2(l2: dict[str, Any]) -> dict[str, Any]:
             pos_interp = "波段位置不明确(多档评分并列)"
         pos_status = "ok"
     elif phase == "n_a":
-        pos_interp = "无明显波段(数据不足以识别波段结构)"
-        pos_status = "missing"
+        # Sprint 1.5c.4:n_a 是 layer2_direction 在 stance=neutral 时主动设的
+        # 标准枚举(设计行为,跟 L4 失效位 neutral 同思路)— 不是数据缺
+        pos_interp = "波段位置 n/a(方向中性时不输出阶段)"
+        pos_status = "ok"
     else:
         pos_interp = "波段位置未输出"
         pos_status = "missing"
@@ -463,16 +465,33 @@ def _pillars_l5(l5: dict[str, Any]) -> dict[str, Any]:
     completeness = _as_float(l5.get("data_completeness_pct"))
 
     # 四类
-    if structured:
+    # Sprint 1.5c.4:filter "伪空"——只有 data_completeness_pct sentinel 就算空。
+    real_keys = [
+        k for k in structured
+        if k != "data_completeness_pct" and structured.get(k) is not None
+    ]
+    if real_keys:
         pieces = []
-        for k in ("DXY", "US10Y", "VIX", "sp500", "nasdaq"):
+        # 优先展示 latest 数值
+        for k in ("DXY", "US10Y", "VIX"):
             v = structured.get(k) or structured.get(k.lower())
-            if v is not None:
+            if isinstance(v, dict):
+                latest = v.get("latest")
+                if latest is not None:
+                    pieces.append(f"{k}={latest}")
+            elif v is not None:
                 pieces.append(f"{k}={v}")
-        sm_interp = "; ".join(pieces) if pieces else "已就绪但字段未命名"
+        # BTC-纳指相关性
+        corr = structured.get("btc_nasdaq_corr")
+        if isinstance(corr, dict) and corr.get("value") is not None:
+            try:
+                pieces.append(f"BTC-NDX corr={float(corr['value']):.2f}")
+            except (TypeError, ValueError):
+                pass
+        sm_interp = "; ".join(pieces) if pieces else f"已就绪({len(real_keys)} 项)"
         sm_status = "ok"
     else:
-        sm_interp = "结构化宏观指标未就绪"
+        sm_interp = "结构化宏观指标未就绪(macro 数据 0 项可用)"
         sm_status = "missing"
 
     if event_summaries:

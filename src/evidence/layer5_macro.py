@@ -236,37 +236,55 @@ def _build_structured_macro_rule(
     AI 启用后 rule_output.update(...) 会覆盖本字段;无 AI 时前端能直接展示
     DXY / US10Y / VIX / 相关性,而不是 structured_macro={} → missing。
     """
+    # Sprint 1.5c.4:每个字段独立判断,只要有任一可用就填(放松过滤,
+    # 不再"必须 dxy_trend 才填 DXY"— 哪怕只有 latest 数也填)
     sm: dict[str, Any] = {}
-    if dxy_trend:
-        sm["DXY"] = {
-            "trend": dxy_trend.get("direction"),
-            "magnitude_30d_pct": dxy_trend.get("magnitude_30d_pct"),
-            "latest": _last_valid(macro.get("dxy")) if macro.get("dxy") is not None else None,
-        }
-    elif macro.get("dxy") is not None:
-        sm["DXY"] = {"latest": _last_valid(macro.get("dxy"))}
 
-    if yields_trend:
-        sm["US10Y"] = {
-            "trend": yields_trend.get("direction"),
-            "magnitude_30d_pct": yields_trend.get("magnitude_30d_pct"),
-            "latest": _last_valid(yields_series) if yields_series is not None else None,
-        }
-    elif yields_series is not None:
-        sm["US10Y"] = {"latest": _last_valid(yields_series)}
+    # DXY:有 trend 或 series 任一即填
+    dxy_series = macro.get("dxy")
+    dxy_latest = _last_valid(dxy_series) if dxy_series is not None else None
+    if dxy_trend is not None or dxy_latest is not None:
+        entry: dict[str, Any] = {}
+        if dxy_trend is not None:
+            entry["trend"] = dxy_trend.get("direction")
+            entry["magnitude_30d_pct"] = dxy_trend.get("magnitude_30d_pct")
+        if dxy_latest is not None:
+            entry["latest"] = dxy_latest
+        if entry:
+            sm["DXY"] = entry
 
-    if vix_regime:
-        sm["VIX"] = {
-            "regime": vix_regime.get("regime") or vix_regime.get("level"),
-            "latest": vix_regime.get("latest_value") or vix_regime.get("latest"),
-        }
+    # US10Y:同
+    us10y_latest = _last_valid(yields_series) if yields_series is not None else None
+    if yields_trend is not None or us10y_latest is not None:
+        entry = {}
+        if yields_trend is not None:
+            entry["trend"] = yields_trend.get("direction")
+            entry["magnitude_30d_pct"] = yields_trend.get("magnitude_30d_pct")
+        if us10y_latest is not None:
+            entry["latest"] = us10y_latest
+        if entry:
+            sm["US10Y"] = entry
 
-    if btc_nasdaq_corr:
+    # VIX:vix_regime 内部 dict 可能为 None
+    if vix_regime is not None:
+        entry = {}
+        regime_val = vix_regime.get("regime") or vix_regime.get("level")
+        if regime_val:
+            entry["regime"] = regime_val
+        latest_val = vix_regime.get("latest_value") or vix_regime.get("latest")
+        if latest_val is not None:
+            entry["latest"] = latest_val
+        if entry:
+            sm["VIX"] = entry
+
+    # BTC-纳指相关性
+    if btc_nasdaq_corr is not None:
         sm["btc_nasdaq_corr"] = {
             "value": btc_nasdaq_corr.get("correlation_60d"),
             "amplified": btc_nasdaq_corr.get("amplified"),
         }
 
+    # data_completeness_pct 总是写入(给 _pillars_l5 提示用)
     sm["data_completeness_pct"] = completeness
     return sm
 

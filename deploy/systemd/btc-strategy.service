@@ -1,0 +1,28 @@
+[Unit]
+Description=BTC Swing Trading Strategy System (FastAPI + APScheduler)
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/btc_swing_system
+Environment="PATH=/home/ubuntu/btc_swing_system/.venv/bin:/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="SCHEDULER_ENABLED=true"
+EnvironmentFile=/home/ubuntu/btc_swing_system/.env
+ExecStart=/home/ubuntu/btc_swing_system/.venv/bin/uvicorn src.api.app:app --host 127.0.0.1 --port 8000
+
+# Sprint 1.5d.2:确保 systemctl restart 真 kill 旧进程
+# - KillMode=mixed:主进程 SIGTERM,子进程 SIGKILL
+# - KillSignal=SIGINT:uvicorn 对 SIGINT 响应快(graceful shutdown 路径)
+# - TimeoutStopSec=15:15s 没退完就 SIGKILL(默认 90s 太长,导致部署看起来"没生效")
+# - SendSIGKILLToProcessGroup=true:保险,杀整个进程组
+KillMode=mixed
+KillSignal=SIGINT
+TimeoutStopSec=15
+SendSIGKILLToProcessGroup=true
+
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

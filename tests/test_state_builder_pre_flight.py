@@ -165,8 +165,14 @@ def db_conn():
     conn.close()
 
 
-def _seed_fresh_data(db_conn, ts_iso: str = "2026-04-27T07:59:30Z"):
-    """All 4 groups have 1 row, inserted_at = ts_iso (microsecond format)."""
+def _seed_fresh_data(db_conn, ts_iso: str | None = None):
+    """All 4 groups have 1 row, inserted_at = ts_iso (microsecond format).
+
+    Sprint 1.5g:默认 ts 用真实当前 UTC,这样 derivatives captured_at_utc
+    = 当天 daily bar,不会被 30h 阈值打回。
+    """
+    if ts_iso is None:
+        ts_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     OnchainDAO.upsert_batch(db_conn, [
         OnchainMetric(timestamp=ts_iso, metric_name="x",
                       metric_value=1.0, source="glassnode_primary"),

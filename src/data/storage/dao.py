@@ -578,6 +578,23 @@ class DerivativesDAO:
         return row["inserted_at_utc"] if row else None
 
     @staticmethod
+    def get_latest_snapshot_captured_at(
+        conn: sqlite3.Connection,
+    ) -> Optional[str]:
+        """Sprint 1.5g:最近 snapshot 的 captured_at_utc(数据点本身的时间)。
+
+        与 inserted_at(系统抓取 wall clock)不同:captured_at 是数据点
+        语义时间,daily bar 的 captured_at 永远是当天 00:00:00Z,即便系统
+        每小时重抓也不变。pre_flight 用这个判 daily 数据点新鲜度更直观
+        (建模 §3.2.3 "数据点 vs 系统侧"区分)。
+        """
+        row = conn.execute(
+            "SELECT captured_at_utc FROM derivatives_snapshots "
+            "ORDER BY captured_at_utc DESC LIMIT 1"
+        ).fetchone()
+        return row["captured_at_utc"] if row else None
+
+    @staticmethod
     def _explode_row(row: dict[str, Any]) -> list[dict[str, Any]]:
         """把宽表一行反向展开为长式 dict 列表(供 get_* 老调用)。"""
         ts = row.get("captured_at_utc")

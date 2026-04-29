@@ -248,12 +248,6 @@ def _pct_change(series: Optional[pd.Series], days: int) -> Optional[float]:
         return None
 
 
-def _series_from_df(df: Any, col: str) -> Optional[pd.Series]:
-    if df is None or not isinstance(df, pd.DataFrame) or col not in df.columns:
-        return None
-    return df[col]
-
-
 # ============================================================
 # 主入口
 # ============================================================

@@ -199,10 +199,13 @@ class Layer5Macro(EvidenceLayerBase):
             )
             if ai_out is not None:
                 # AI 成功:用 §6.8 schema 字段覆盖规则路径的占位
+                # Sprint 1.5c.6:structured_macro **不无条件覆盖** —
+                # AI prompt v0 阶段没要求填 structured_macro,返回 {} 也合规。
+                # 老代码 update {"structured_macro": ai_out["structured_macro"]}
+                # 把 _build_structured_macro_rule 填好的 DXY/US10Y/VIX/corr 全清空。
                 rule_output.update({
                     "macro_stance": ai_out["macro_stance"],
                     "macro_trend": ai_out["macro_trend"],
-                    "structured_macro": ai_out["structured_macro"],
                     "active_macro_tags": ai_out["active_macro_tags"],
                     "active_event_summaries":
                         ai_out["active_event_summaries"],
@@ -213,6 +216,12 @@ class Layer5Macro(EvidenceLayerBase):
                     "macro_headwind_score": ai_out["macro_headwind_score"],
                     "computation_method": "ai_assisted",
                 })
+                # structured_macro:AI 非空时 merge(AI 覆盖同名 key);
+                # AI 空时保留规则路径已填的(§2.5 双轨原则:规则是基础,AI 是修饰)
+                ai_sm = ai_out.get("structured_macro") or {}
+                if isinstance(ai_sm, dict) and ai_sm:
+                    base_sm = rule_output.get("structured_macro") or {}
+                    rule_output["structured_macro"] = {**base_sm, **ai_sm}
                 rule_output["diagnostics"]["l5_ai_meta"] = ai_out.get("_meta")
                 rule_output["notes"].append(
                     "L5 AI assisted (§6.8); macro_headwind_score from AI"

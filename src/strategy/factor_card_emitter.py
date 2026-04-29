@@ -1000,7 +1000,7 @@ def _emit_derivatives_primary(
     # 调试遗留污染(已清),生产路径全 daily。
     series = derivatives.get("open_interest") if isinstance(derivatives, dict) else None
     change_24h = _pct_change(series, 1)
-    val_oi, ts_oi = _latest(series)
+    _, ts_oi = _latest(series)
     cards.append(_make_card(
         card_id=f"derivatives_oi_24h_change_{today}",
         category="derivatives", tier="primary",

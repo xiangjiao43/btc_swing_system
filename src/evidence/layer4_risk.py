@@ -632,9 +632,7 @@ def _merge_permissions(
     composition["override_reason"] = override_reason
 
     if buffer_eligible and override_reason is None:
-        # 抬升到 cautious_open(不得更严)
-        loosened = merge_permissions(merged, _A_GRADE_BUFFER_FLOOR)
-        # merge 返回"更严",我们要"不严于 cautious_open"——取严格度较低者
+        # 抬升到 cautious_open(不得更严):取严格度较低者
         final = _min_strict(merged, _A_GRADE_BUFFER_FLOOR)
         if final != merged:
             composition["a_grade_buffer_applied"] = True

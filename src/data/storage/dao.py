@@ -604,18 +604,6 @@ class DerivativesDAO:
         return out
 
     @staticmethod
-    def get_at(
-        conn: sqlite3.Connection, timestamp: str,
-    ) -> list[dict[str, Any]]:
-        row = conn.execute(
-            "SELECT * FROM derivatives_snapshots WHERE captured_at_utc = ?",
-            (timestamp,),
-        ).fetchone()
-        if row is None:
-            return []
-        return DerivativesDAO._explode_row(dict(row))
-
-    @staticmethod
     def get_latest(
         conn: sqlite3.Connection, metric_name: str,
     ) -> Optional[dict[str, Any]]:

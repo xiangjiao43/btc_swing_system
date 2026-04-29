@@ -202,20 +202,6 @@ class BTCKlinesDAO:
         return [BTCKlinesDAO._map_row(dict(r)) for r in rows]
 
     @staticmethod
-    def get_latest_kline(
-        conn: sqlite3.Connection, timeframe: TimeFrame
-    ) -> Optional[dict[str, Any]]:
-        row = conn.execute(
-            "SELECT * FROM price_candles "
-            "WHERE symbol = ? AND timeframe = ? "
-            "ORDER BY open_time_utc DESC LIMIT 1",
-            (_DEFAULT_SYMBOL, timeframe),
-        ).fetchone()
-        if row is None:
-            return None
-        return BTCKlinesDAO._map_row(dict(row))
-
-    @staticmethod
     def count(conn: sqlite3.Connection, timeframe: Optional[TimeFrame] = None) -> int:
         if timeframe is None:
             row = conn.execute(

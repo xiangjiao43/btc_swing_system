@@ -150,7 +150,7 @@ def test_full_long_to_short_reversal():
                   "trade_plan": {"entry_zones": [{"price_low": 67000, "price_high": 68000}],
                                  "stop_loss": 65000},
                   "adjudicator": {"narrative": "BTC 趋势 up,L2 bullish"}}
-        sm1, lc1, st1 = _step(
+        _, lc1, st1 = _step(
             sm, lc_mgr,
             prev_state="FLAT", prev_strategy_state=None,
             prev_lifecycle=None,
@@ -168,7 +168,7 @@ def test_full_long_to_short_reversal():
         state2 = {"evidence_reports": _bullish_evidence(),
                   "trade_plan": {"entry_zones": [{"price_low": 67000, "price_high": 68000}],
                                  "stop_loss": 65000}}
-        sm2, lc2, st2 = _step(
+        _, lc2, st2 = _step(
             sm, lc_mgr,
             prev_state="LONG_PLANNED",
             prev_strategy_state={"state": state1},
@@ -185,7 +185,7 @@ def test_full_long_to_short_reversal():
         # ---- Tick 3: LONG_OPEN → LONG_HOLD(25h + 3% PnL)----
         state3 = {"evidence_reports": _bullish_evidence(),
                   "trade_plan": {"stop_loss": 65000}}
-        sm3, lc3, st3 = _step(
+        _, lc3, st3 = _step(
             sm, lc_mgr,
             prev_state="LONG_OPEN",
             prev_strategy_state={"state": state2},
@@ -203,7 +203,7 @@ def test_full_long_to_short_reversal():
                   "trade_plan": {"take_profit_plan": [
                       {"tp_id": "tp1", "target_price": 80000, "size_pct": 0.3},
                   ]}}
-        sm4, lc4, st4 = _step(
+        _, lc4, st4 = _step(
             sm, lc_mgr,
             prev_state="LONG_HOLD",
             prev_strategy_state={"state": state3},
@@ -234,7 +234,7 @@ def test_full_long_to_short_reversal():
                   "trade_plan": {}}
         # state_machine 读 lifecycle.is_final_trim_or_exhausted via _build_field_snapshot
         state5["lifecycle"] = prev_lc_with_final
-        sm5, lc5, st5 = _step(
+        _, lc5, st5 = _step(
             sm, lc_mgr,
             prev_state="LONG_TRIM",
             prev_strategy_state={"state": state4},
@@ -296,7 +296,7 @@ def test_full_long_to_short_reversal():
         # state6 的 lifecycle = lc6 closed dict,direction=long,
         # _prev_cycle_side 兜底用 direction → "long"
         prev_flip = sm6["flip_watch_bounds"]
-        sm7, lc7, st7 = _step(
+        _, lc7, st7 = _step(
             sm, lc_mgr,
             prev_state="FLIP_WATCH",
             prev_strategy_state={"state": state6},

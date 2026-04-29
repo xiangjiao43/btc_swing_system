@@ -59,11 +59,6 @@ def _klines_flat(n: int = 100, price: float = 50_000.0) -> pd.DataFrame:
     }, index=idx)
 
 
-def _klines_trending_down(n: int = 100, start: float = 60_000.0,
-                          slope: float = -0.01) -> pd.DataFrame:
-    return _klines_trending_up(n=n, start=start, slope=slope)
-
-
 # ==================================================================
 # TruthTrend
 # ==================================================================

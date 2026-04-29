@@ -1280,19 +1280,6 @@ class FallbackLogDAO:
         return cur.rowcount
 
     @staticmethod
-    def count_recent_at_level(
-        conn: sqlite3.Connection,
-        fallback_level: FallbackLevel,
-        since_utc: str,
-    ) -> int:
-        row = conn.execute(
-            "SELECT COUNT(*) AS n FROM fallback_events "
-            "WHERE fallback_level = ? AND triggered_at_utc >= ?",
-            (fallback_level, since_utc),
-        ).fetchone()
-        return int(row["n"])
-
-    @staticmethod
     def log_stage_error(
         conn: sqlite3.Connection,
         run_timestamp_utc: str,

@@ -458,7 +458,6 @@ def _pillars_l4(
 
 def _pillars_l5(l5: dict[str, Any]) -> dict[str, Any]:
     structured = l5.get("structured_macro") or {}
-    active_tags = l5.get("active_macro_tags") or []
     event_summaries = l5.get("active_event_summaries") or []
     extreme = bool(l5.get("extreme_event_detected", False))
     stance = l5.get("macro_stance") or l5.get("macro_environment")

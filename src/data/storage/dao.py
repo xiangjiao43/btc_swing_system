@@ -1317,45 +1317,6 @@ class FallbackLogDAO:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def get_by_stage_frequency(
-        conn: sqlite3.Connection,
-        since_utc: str,
-        limit: int = 10,
-    ) -> list[dict[str, Any]]:
-        rows = conn.execute(
-            """
-            SELECT reason AS triggered_by,
-                   COUNT(*) AS cnt,
-                   SUM(CASE WHEN fallback_level='level_1' THEN 1 ELSE 0 END) AS c1,
-                   SUM(CASE WHEN fallback_level='level_2' THEN 1 ELSE 0 END) AS c2,
-                   SUM(CASE WHEN fallback_level='level_3' THEN 1 ELSE 0 END) AS c3,
-                   MIN(triggered_at_utc) AS first_seen,
-                   MAX(triggered_at_utc) AS last_seen
-              FROM fallback_events
-             WHERE triggered_at_utc >= ?
-          GROUP BY reason
-          ORDER BY cnt DESC
-             LIMIT ?
-            """,
-            (since_utc, limit),
-        ).fetchall()
-        out: list[dict[str, Any]] = []
-        for r in rows:
-            trig = r["triggered_by"] or ""
-            stage = trig.split(".", 1)[1] if "." in trig else trig
-            out.append({
-                "stage": stage,
-                "triggered_by": trig,
-                "count": int(r["cnt"]),
-                "level_1": int(r["c1"] or 0),
-                "level_2": int(r["c2"] or 0),
-                "level_3": int(r["c3"] or 0),
-                "first_seen": r["first_seen"],
-                "last_seen": r["last_seen"],
-            })
-        return out
-
-    @staticmethod
     def count_for_triggered_by_since(
         conn: sqlite3.Connection,
         triggered_by: str,

@@ -760,20 +760,6 @@ class EventsCalendarDAO:
         return _rows_to_dicts(rows)
 
     @staticmethod
-    def get_next_event(
-        conn: sqlite3.Connection, reference_utc: str
-    ) -> Optional[dict[str, Any]]:
-        """返回距 reference_utc 之后最近一个事件;无则 None。"""
-        row = conn.execute(
-            "SELECT * FROM events_calendar "
-            "WHERE utc_trigger_time IS NOT NULL "
-            "AND utc_trigger_time > ? "
-            "ORDER BY utc_trigger_time ASC LIMIT 1",
-            (reference_utc,),
-        ).fetchone()
-        return _row_to_dict(row)
-
-    @staticmethod
     def get_next_events_by_type(
         conn: sqlite3.Connection,
         event_types: list[str],

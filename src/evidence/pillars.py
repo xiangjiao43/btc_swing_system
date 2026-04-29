@@ -481,13 +481,21 @@ def _pillars_l5(l5: dict[str, Any]) -> dict[str, Any]:
                     pieces.append(f"{k}={latest}")
             elif v is not None:
                 pieces.append(f"{k}={v}")
-        # BTC-纳指相关性
+        # BTC-纳指相关性 — 1.5c.5 起 helper 展开为 float;兼容老 dict 形态
         corr = structured.get("btc_nasdaq_corr")
-        if isinstance(corr, dict) and corr.get("value") is not None:
+        corr_val = None
+        if isinstance(corr, (int, float)):
+            corr_val = float(corr)
+        elif isinstance(corr, dict):
+            cv = corr.get("coefficient")
+            if cv is None:
+                cv = corr.get("value")
             try:
-                pieces.append(f"BTC-NDX corr={float(corr['value']):.2f}")
+                corr_val = float(cv) if cv is not None else None
             except (TypeError, ValueError):
-                pass
+                corr_val = None
+        if corr_val is not None:
+            pieces.append(f"BTC-NDX corr={corr_val:.2f}")
         sm_interp = "; ".join(pieces) if pieces else f"已就绪({len(real_keys)} 项)"
         sm_status = "ok"
     else:

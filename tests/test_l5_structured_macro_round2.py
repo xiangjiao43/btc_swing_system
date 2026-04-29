@@ -39,11 +39,18 @@ def test_build_structured_macro_partial_dxy_only():
 
 
 def test_build_structured_macro_full_data():
-    """4 个数据全有 → 4 个 key 都填。"""
-    dxy_trend = {"direction": "rising", "magnitude_30d_pct": 1.5}
-    yields_trend = {"direction": "rising", "magnitude_30d_pct": 0.8}
-    vix_regime = {"regime": "normal", "level": "normal", "latest_value": 18.0}
-    btc_nasdaq_corr = {"correlation_60d": 0.45, "amplified": False}
+    """4 个数据全有 → 4 个 key 都填。
+    Sprint 1.5c.5:用 layer5_macro 真实输出字段名(_compute_trend 返回
+    direction/magnitude_30d_pct;_compute_vix_regime 返回 level/latest_value;
+    _compute_btc_nasdaq_correlation 返回 coefficient)。"""
+    dxy_trend = {"direction": "rising", "magnitude_30d_pct": 0.015,
+                 "ema_alignment": "up"}
+    yields_trend = {"direction": "rising", "magnitude_30d_pct": 0.028,
+                    "ema_alignment": "up"}
+    vix_regime = {"level": "normal", "latest_value": 18.0,
+                  "recent_change_pct": 0.005, "is_spike": False}
+    btc_nasdaq_corr = {"coefficient": 0.45, "strength_label": "moderately_correlated",
+                       "lookback_days": 30, "n_samples": 30}
     sm = _build_structured_macro_rule(
         dxy_trend=dxy_trend, yields_trend=yields_trend,
         yields_series=pd.Series([4.0, 4.2, 4.3]),
@@ -57,10 +64,14 @@ def test_build_structured_macro_full_data():
     assert "US10Y" in sm
     assert sm["US10Y"]["latest"] == 4.3
     assert "VIX" in sm
+    # 1.5c.5:VIX entry 含 regime(从 level 映射)+ latest(从 latest_value)
     assert sm["VIX"]["regime"] == "normal"
     assert sm["VIX"]["latest"] == 18.0
+    assert sm["VIX"]["is_spike"] is False
+    # 1.5c.5:btc_nasdaq_corr 展开为 float(老 1.5c.4 是 dict {value, amplified})
     assert "btc_nasdaq_corr" in sm
-    assert sm["btc_nasdaq_corr"]["value"] == 0.45
+    assert sm["btc_nasdaq_corr"] == 0.45
+    assert isinstance(sm["btc_nasdaq_corr"], float)
 
 
 def test_build_structured_macro_all_none_returns_only_sentinel():

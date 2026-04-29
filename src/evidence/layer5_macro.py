@@ -265,24 +265,31 @@ def _build_structured_macro_rule(
         if entry:
             sm["US10Y"] = entry
 
-    # VIX:vix_regime 内部 dict 可能为 None
-    if vix_regime is not None:
+    # VIX:_compute_vix_regime 真实字段是 level / latest_value / is_spike;
+    # regime / latest 是兼容 alias
+    if isinstance(vix_regime, dict):
         entry = {}
-        regime_val = vix_regime.get("regime") or vix_regime.get("level")
+        regime_val = vix_regime.get("level") or vix_regime.get("regime")
         if regime_val:
             entry["regime"] = regime_val
         latest_val = vix_regime.get("latest_value") or vix_regime.get("latest")
         if latest_val is not None:
             entry["latest"] = latest_val
+        if vix_regime.get("is_spike") is not None:
+            entry["is_spike"] = vix_regime.get("is_spike")
         if entry:
             sm["VIX"] = entry
 
-    # BTC-纳指相关性
-    if btc_nasdaq_corr is not None:
-        sm["btc_nasdaq_corr"] = {
-            "value": btc_nasdaq_corr.get("correlation_60d"),
-            "amplified": btc_nasdaq_corr.get("amplified"),
-        }
+    # BTC-纳指相关性 — _compute_btc_nasdaq_correlation 真实返回
+    # {coefficient, strength_label, lookback_days, n_samples}。
+    # Sprint 1.5c.5:展开为 float(老 1.5c.4 helper 读不存在的 correlation_60d / amplified
+    # 导致整个 entry 全是 None 经典字段名 mismatch 翻车)
+    if isinstance(btc_nasdaq_corr, dict):
+        coef = btc_nasdaq_corr.get("coefficient")
+        if coef is not None:
+            sm["btc_nasdaq_corr"] = float(coef)
+    elif isinstance(btc_nasdaq_corr, (int, float)):
+        sm["btc_nasdaq_corr"] = float(btc_nasdaq_corr)
 
     # data_completeness_pct 总是写入(给 _pillars_l5 提示用)
     sm["data_completeness_pct"] = completeness

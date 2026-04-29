@@ -590,7 +590,7 @@ class StrategyStateBuilder:
         # === Stage: State Machine(建模 §5 14 档 —— Sprint 1.5a 对齐)===
         sm_block = self._run_stage(
             "state_machine", failures, degraded_stages, run_ts_utc,
-            lambda: self._run_state_machine(state, run_ts_utc),
+            lambda: self._run_state_machine(state, run_ts_utc, context),
             default=_state_machine_fallback(
                 "state_machine stage failed", run_ts_utc,
             ),
@@ -966,17 +966,62 @@ class StrategyStateBuilder:
         self,
         state: dict[str, Any],
         run_ts_utc: str,
+        context: Optional[dict[str, Any]] = None,
     ) -> dict[str, Any]:
-        """查上一条 state + 调 StateMachine.compute_next(建模 §5 14 档)。"""
+        """查上一条 state + 调 StateMachine.compute_next(建模 §5 14 档)。
+
+        Sprint 1.5b-A:在调 compute_next 之前,先用 build_state_machine_fields
+        计算所有触发字段并 apply 到 state(trade_plan / lifecycle / layer_2/4),
+        让 state_machine 的内部 _build_field_snapshot 拿到真实数据,而非空 dict。
+        """
+        from ..strategy.state_machine_inputs import (
+            apply_inputs_to_strategy_state,
+            build_state_machine_fields,
+            derive_account_state,
+        )
+
         previous_record = None
         if self.conn is not None:
             previous_record = StrategyStateDAO.get_latest_state(self.conn)
+
+        # 解析 prev_state 字符串(state_machine 子块的 current_state)
+        prev_state_str: Optional[str] = None
+        prev_strategy_state: Optional[dict[str, Any]] = None
+        if previous_record:
+            prev_full = previous_record.get("state")
+            if isinstance(prev_full, dict):
+                prev_strategy_state = prev_full
+                sm_block = prev_full.get("state_machine") or {}
+                if isinstance(sm_block, dict):
+                    prev_state_str = sm_block.get("current_state")
+
+        # Sprint 1.5b-A:计算并填充触发字段(in-place 修改 state)
+        try:
+            sm_fields = build_state_machine_fields(
+                prev_state=prev_state_str,
+                prev_strategy_state=prev_strategy_state,
+                current_strategy_state=state,
+                context=context or {},
+                lifecycle=(state.get("lifecycle") or {}),
+                now_utc=run_ts_utc,
+            )
+            apply_inputs_to_strategy_state(state, sm_fields)
+            derived_account = derive_account_state(sm_fields)
+        except Exception as e:
+            logger.warning("build_state_machine_fields failed (non-fatal): %s", e)
+            sm_fields = {}
+            derived_account = {}
+
+        # account_state 优先级:外部 provider > sm_fields 推断 > 空 dict
         account_state: Optional[dict[str, Any]] = state.get("account_state")
         if account_state is None and self._account_state_provider is not None:
             try:
                 account_state = self._account_state_provider()
             except Exception as e:
                 logger.warning("account_state_provider failed: %s", e)
+        if account_state is None:
+            account_state = derived_account
+
         return self._state_machine.compute_next(
             state,
             previous_record=previous_record,

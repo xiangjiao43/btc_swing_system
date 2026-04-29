@@ -36,6 +36,21 @@ def _iso(dt: datetime) -> str:
     return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _to_bjt_pretty(utc_iso: str) -> Optional[str]:
+    """Sprint 1.5b-C:ISO UTC → 'YYYY-MM-DD HH:MM (BJT)'。"""
+    try:
+        from zoneinfo import ZoneInfo
+        s = utc_iso[:-1] + "+00:00" if utc_iso.endswith("Z") else utc_iso
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(ZoneInfo("Asia/Shanghai")).strftime(
+            "%Y-%m-%d %H:%M (BJT)"
+        )
+    except Exception:
+        return None
+
+
 def _parse_iso(s: Optional[str]) -> Optional[datetime]:
     if not s:
         return None
@@ -102,6 +117,195 @@ class ReviewReportGenerator:
             events=events,
             ai_narrative=ai_narrative,
         )
+
+    # ------------------------------------------------------------------
+    # Sprint 1.5b-C:per-lifecycle 复盘(归档时触发)
+    # ------------------------------------------------------------------
+
+    def generate_for_lifecycle(
+        self,
+        lifecycle_id: str,
+        *,
+        lifecycle_dict: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
+        """为单个 lifecycle 生成 ReviewReport(建模 §8.3 v1 简化版)。
+
+        - lifecycle_id 必填
+        - lifecycle_dict 可选(归档时由 LifecycleManager 已产出,直接传入避免再查 DB)
+        """
+        if lifecycle_dict is None:
+            from ..data.storage.dao import LifecyclesDAO
+            row = LifecyclesDAO.get_lifecycle(self.conn, lifecycle_id)
+            if row is None:
+                raise ValueError(f"lifecycle_id {lifecycle_id} not found")
+            lifecycle_dict = row.get("full_data") or {}
+
+        gen_at_utc = _iso(self._now)
+        gen_at_bjt = _to_bjt_pretty(gen_at_utc)
+
+        entry_utc = lifecycle_dict.get("origin_time_utc")
+        exit_utc = lifecycle_dict.get("exit_time_utc")
+        duration_h: Optional[float] = None
+        if entry_utc and exit_utc:
+            try:
+                a = _parse_iso(entry_utc)
+                b = _parse_iso(exit_utc)
+                duration_h = round((b - a).total_seconds() / 3600.0, 2) if (a and b) else None
+            except Exception:
+                duration_h = None
+
+        runs_in_lc = self._count_runs_during_lifecycle(entry_utc, exit_utc)
+
+        # v1 简化:dimensional_assessment 4 个 dict 字段返回固定模板,
+        # 留 v1.x 真实分维度评估
+        dim = {
+            "macro_environment": {"contribution": "neutral", "note": "v1 unevaluated"},
+            "structural_truth":  {"contribution": "neutral", "note": "v1 unevaluated"},
+            "decision_layer":    {"contribution": "neutral", "note": "v1 unevaluated"},
+            "execution":         {"contribution": "neutral", "note": "v1 unevaluated"},
+        }
+
+        # key_moments_replay:从 position_adjustments 转换
+        adjustments = lifecycle_dict.get("position_adjustments") or []
+        key_moments = []
+        for adj in adjustments:
+            if not isinstance(adj, dict):
+                continue
+            key_moments.append({
+                "at_bjt": adj.get("at_bjt"),
+                "type": adj.get("adjustment_type"),
+                "size_pct": adj.get("size_pct_of_total"),
+                "price": adj.get("price"),
+                "reason": adj.get("reason"),
+                "related_run_id": adj.get("related_run_id"),
+            })
+
+        outcome_type = lifecycle_dict.get("final_outcome_type")
+        report: dict[str, Any] = {
+            "review_id": f"{lifecycle_id}_{gen_at_utc}",
+            "lifecycle_id": lifecycle_id,
+            "generated_at_utc": gen_at_utc,
+            "generated_at_bjt": gen_at_bjt,
+            "generated_by": "rule",
+            "direction": lifecycle_dict.get("direction"),
+            "entry_time_bjt": lifecycle_dict.get("origin_time_bjt"),
+            "exit_time_bjt": lifecycle_dict.get("exit_time_bjt"),
+            "duration_hours": duration_h,
+            "entry_price_avg": lifecycle_dict.get("average_entry_price"),
+            "exit_price_avg": lifecycle_dict.get("average_entry_price"),  # v1:同入场价占位
+            "max_favorable_pct": lifecycle_dict.get("max_favorable_pct"),
+            "max_adverse_pct": lifecycle_dict.get("max_adverse_pct"),
+            "realized_pnl_pct": lifecycle_dict.get("realized_pnl_pct"),
+            "total_runs_during_lifecycle": runs_in_lc,
+            "outcome_type": outcome_type,
+            "root_cause_layers": [],   # v1 simplified
+            "feedback_to_system": "复盘结果不自动反哺,人工参考",
+            "dimensional_assessment": dim,
+            "improvements": [],
+            "human_review": None,
+            "key_moments_replay": key_moments,
+            "ai_models_used_in_lifecycle": (
+                lifecycle_dict.get("ai_models_used_in_lifecycle") or []
+            ),
+            "rules_versions_used": lifecycle_dict.get("rules_versions_used") or [],
+        }
+
+        # 写入 review_reports 表
+        if self.conn is not None:
+            try:
+                from ..data.storage.dao import ReviewReportsDAO
+                ReviewReportsDAO.insert_report(
+                    self.conn,
+                    run_timestamp_utc=gen_at_utc,
+                    lifecycle_id=lifecycle_id,
+                    outcome_type=outcome_type,
+                    report=report,
+                    review_id=report["review_id"],
+                    rules_version_at_review=(
+                        (lifecycle_dict.get("rules_versions_used") or [None])[-1]
+                    ),
+                )
+                self.conn.commit()
+            except Exception as e:
+                logger.warning(
+                    "ReviewReportsDAO.insert_report failed (non-fatal): %s", e,
+                )
+        return report
+
+    def maybe_generate_for_closed_lifecycle(
+        self,
+        prev_lifecycle: Optional[dict[str, Any]],
+        current_lifecycle: Optional[dict[str, Any]],
+    ) -> Optional[dict[str, Any]]:
+        """检测"上一次 active 这次 closed"并自动触发。
+
+        判定:
+          - prev_lifecycle.status == "active"(且有 lifecycle_id)
+          - 且(current_lifecycle is None / 不同 lc / status="closed")
+        """
+        if not isinstance(prev_lifecycle, dict):
+            return None
+        if prev_lifecycle.get("status") != "active":
+            return None
+        prev_id = prev_lifecycle.get("lifecycle_id")
+        if not prev_id:
+            return None
+
+        # 当前 lc 已 closed 且是同一 id → 用当前的(含 exit_time_utc / realized_pnl_pct)
+        archived: dict[str, Any]
+        if (
+            isinstance(current_lifecycle, dict)
+            and current_lifecycle.get("lifecycle_id") == prev_id
+            and current_lifecycle.get("status") == "closed"
+        ):
+            archived = current_lifecycle
+        elif current_lifecycle is None or current_lifecycle == {}:
+            # post_sm 返回 None(LONG_EXIT 已归档但 LifecycleManager 已写库)
+            # 从 DB 反查 closed lc;若查不到退回 prev_lifecycle
+            archived = prev_lifecycle
+            if self.conn is not None:
+                try:
+                    from ..data.storage.dao import LifecyclesDAO
+                    row = LifecyclesDAO.get_lifecycle(self.conn, prev_id)
+                    if row and row.get("full_data"):
+                        archived = row["full_data"]
+                except Exception:
+                    pass
+        else:
+            # 其他场景(已切到新 lc):归档查 DB
+            archived = prev_lifecycle
+            if self.conn is not None:
+                try:
+                    from ..data.storage.dao import LifecyclesDAO
+                    row = LifecyclesDAO.get_lifecycle(self.conn, prev_id)
+                    if row and row.get("full_data"):
+                        archived = row["full_data"]
+                except Exception:
+                    pass
+        return self.generate_for_lifecycle(prev_id, lifecycle_dict=archived)
+
+    def _count_runs_during_lifecycle(
+        self, entry_utc: Optional[str], exit_utc: Optional[str],
+    ) -> int:
+        """SELECT COUNT(*) FROM strategy_runs WHERE entry <= ts <= exit。"""
+        if self.conn is None or not entry_utc:
+            return 0
+        try:
+            if exit_utc:
+                row = self.conn.execute(
+                    "SELECT COUNT(*) AS n FROM strategy_runs "
+                    "WHERE reference_timestamp_utc BETWEEN ? AND ?",
+                    (entry_utc, exit_utc),
+                ).fetchone()
+            else:
+                row = self.conn.execute(
+                    "SELECT COUNT(*) AS n FROM strategy_runs "
+                    "WHERE reference_timestamp_utc >= ?",
+                    (entry_utc,),
+                ).fetchone()
+            return int(row["n"]) if row else 0
+        except Exception:
+            return 0
 
     def generate_and_save(
         self,

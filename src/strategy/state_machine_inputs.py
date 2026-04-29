@@ -169,12 +169,20 @@ def build_state_machine_fields(
         prev_state, prev_strategy_state, now_iso,
     )
 
-    # ---------- thesis_invalidated(v1:看 thesis_still_valid)----------
-    long_thesis_inv = (side == "long" and thesis == "invalidated")
-    short_thesis_inv = (side == "short" and thesis == "invalidated")
-
     # ---------- prev_cycle_side(FLIP_WATCH 用)----------
     prev_cycle_side = _prev_cycle_side(prev_state, prev_strategy_state)
+
+    # ---------- thesis_invalidated ----------
+    # 持仓期看当前 side;FLIP_WATCH/POST_PROTECTION_REASSESS 期 side=None,
+    # 看 prev_cycle_side(state_machine FLIP_WATCH → *_PLANNED 路径需要)。
+    # lifecycle 显式写入的值优先(LifecycleManager 归档时可能已写入)。
+    inv_side = side or prev_cycle_side
+    long_thesis_inv = bool(lifecycle.get("long_thesis_invalidated")) or (
+        inv_side == "long" and thesis == "invalidated"
+    )
+    short_thesis_inv = bool(lifecycle.get("short_thesis_invalidated")) or (
+        inv_side == "short" and thesis == "invalidated"
+    )
 
     return {
         # state_machine.py field-snapshot 兼容字段名
@@ -538,12 +546,25 @@ def _prev_cycle_side(
     prev_strategy_state: Optional[dict[str, Any]],
 ) -> Optional[str]:
     """FLIP_WATCH / POST_PROTECTION_REASSESS 时,从 prev lifecycle 持久值取;
-    否则按 prev_state 推断。"""
+    否则按 prev_state 推断。
+
+    prev_strategy_state 可以是 {"state": {...}}(DAO row 形态)或直接 {...}。
+    """
     if prev_state in {"FLIP_WATCH", "POST_PROTECTION_REASSESS"}:
-        prev_lc = (prev_strategy_state or {}).get("lifecycle") or {}
-        side = prev_lc.get("prev_cycle_side")
-        if side in {"long", "short"}:
-            return side
+        if prev_strategy_state:
+            outer = (
+                prev_strategy_state.get("state")
+                if isinstance(prev_strategy_state.get("state"), dict)
+                else prev_strategy_state
+            )
+            prev_lc = (outer or {}).get("lifecycle") or {}
+            side = prev_lc.get("prev_cycle_side")
+            if side in {"long", "short"}:
+                return side
+            # fallback:用归档 lifecycle 的 direction
+            direction = prev_lc.get("direction")
+            if direction in {"long", "short"}:
+                return direction
     return _side_from_state(prev_state)
 
 

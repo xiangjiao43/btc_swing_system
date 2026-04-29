@@ -257,9 +257,19 @@ class StrategyStateBuilder:
         else:
             self._adjudicator = adjudicator
 
-        # Sprint 1.5b-B:lifecycle_manager 单例(无状态,可共享)
+        # Sprint 1.5b-B/C:lifecycle_manager 单例;1.5b-C 起接 conn 写 lifecycles 表
         from ..strategy.lifecycle_manager import LifecycleManager
-        self._lifecycle_manager = LifecycleManager()
+        self._lifecycle_manager = LifecycleManager(conn=self.conn)
+        # Sprint 1.5b-C:自动复盘生成器(归档时触发)
+        from ..review.generator import ReviewReportGenerator
+        try:
+            self._review_generator = (
+                ReviewReportGenerator(conn=self.conn)
+                if self.conn is not None else None
+            )
+        except Exception as e:
+            logger.warning("ReviewReportGenerator init failed: %s", e)
+            self._review_generator = None
 
         self._base_cfg = _load_base_cfg()
 
@@ -636,6 +646,18 @@ class StrategyStateBuilder:
         )
         # post_sm 返回 None(FLAT 期 / FLIP_WATCH 期)= 写空 dict 占位
         state["lifecycle"] = lifecycle_post if lifecycle_post is not None else {}
+
+        # === Sprint 1.5b-C:lifecycle 归档时自动生成 ReviewReport ===
+        # 检测 prev_lifecycle.status="active" → current 已 closed/None,自动复盘归档
+        if self._review_generator is not None:
+            self._safe(
+                lambda: self._review_generator.maybe_generate_for_closed_lifecycle(
+                    prev_lifecycle, lifecycle_post,
+                ),
+                stage="auto_review_on_close",
+                failures=failures, degraded_stages=degraded_stages,
+                run_ts_utc=run_ts_utc,
+            )
 
         # === Stage: persist ===
         persisted = False

@@ -59,7 +59,15 @@ _HOLDING_STATES: frozenset[str] = (
 class LifecycleManager:
     """建模 §5.5 + §7.2 Block 6 + §8.2 lifecycle 本体。"""
 
-    def __init__(self, *, planned_expiry_hours: float = 72.0) -> None:
+    def __init__(
+        self,
+        conn: Optional[Any] = None,
+        *,
+        planned_expiry_hours: float = 72.0,
+    ) -> None:
+        # Sprint 1.5b-C:conn 用于 LifecyclesDAO upsert。conn=None 时(单测 / dry-run)
+        # 不写表,仅返回 in-memory dict
+        self.conn = conn
         self._planned_expiry_hours = planned_expiry_hours
 
     # ------------------------------------------------------------------
@@ -188,16 +196,48 @@ class LifecycleManager:
     ) -> Optional[dict[str, Any]]:
         """在 state_machine.compute_next 之后跑;按 prev → current 过渡做副作用。
 
+        Sprint 1.5b-C:产出非 None 时,自动 upsert 到 lifecycles 表(conn 可用时)。
+
         Returns:
           - dict — 当前活跃 lifecycle(包含本次 run 完成的过渡)
           - None — FLAT(stable / 归档完成)/ FLIP_WATCH(stable)无活跃 lc 期
         """
+        result = self._dispatch_post_sm(
+            prev_state=prev_state, current_state=current_state,
+            lifecycle=lifecycle, strategy_state=strategy_state,
+            context=context, run_id=run_id, now_utc=now_utc,
+        )
+        if result is not None and self.conn is not None:
+            try:
+                from ..data.storage.dao import LifecyclesDAO
+                LifecyclesDAO.upsert_lifecycle(self.conn, result)
+            except Exception as e:
+                logger.warning(
+                    "LifecyclesDAO.upsert_lifecycle failed (non-fatal): %s", e,
+                )
+        return result
+
+    def _dispatch_post_sm(
+        self,
+        *,
+        prev_state: Optional[str],
+        current_state: str,
+        lifecycle: Optional[dict[str, Any]],
+        strategy_state: dict[str, Any],
+        context: dict[str, Any],
+        run_id: str,
+        now_utc: str,
+    ) -> Optional[dict[str, Any]]:
+        """compute_post_sm 的内部分派(纯逻辑,不触 DB)。"""
         # FLAT(无任何过渡):没有活跃 lc
         if current_state == "FLAT" and prev_state in (None, "FLAT"):
             return None
 
-        # FLAT → *_PLANNED:创建 pending_open 草稿
-        if (prev_state in (None, "FLAT")) and current_state in _PLANNED_STATES:
+        # FLAT → *_PLANNED 或 FLIP_WATCH → *_PLANNED(反向切换):创建 pending_open 草稿
+        if (
+            prev_state in (None, "FLAT", "FLIP_WATCH", "POST_PROTECTION_REASSESS")
+            and current_state in _PLANNED_STATES
+        ):
             return self._create_pending_lifecycle(
                 current_state=current_state,
                 strategy_state=strategy_state,
@@ -463,6 +503,10 @@ class LifecycleManager:
         lc["exit_time_utc"] = now_utc
         lc["exit_time_bjt"] = _to_bjt(now_utc)
         lc["exit_run_id"] = run_id
+        # Sprint 1.5b-C:archive 时把 direction 镜像到 prev_cycle_side,
+        # 让 state_machine FLIP_WATCH → *_PLANNED 路径能读到
+        if lc.get("direction") in {"long", "short"}:
+            lc["prev_cycle_side"] = lc["direction"]
 
         # realized_pnl_pct:用 max_favorable / max_adverse 简化推断
         # v1:用 current_floating_pnl_pct(归档时的最新值)作为兑现 PnL

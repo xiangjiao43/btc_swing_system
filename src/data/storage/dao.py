@@ -1128,6 +1128,114 @@ class StrategyStateDAO:
 # ReviewReport
 # ============================================================
 
+class LifecyclesDAO:
+    """Sprint 1.5b-C:lifecycles 表 DAO(§10.4 / §8.2)。
+
+    每次 LifecycleManager.compute_post_sm 产出非 None lifecycle 时 upsert,
+    active 中的 lifecycle 也会实时反映;归档(status=closed)时 exit_time_utc
+    自动写入。
+    """
+
+    @staticmethod
+    def upsert_lifecycle(
+        conn: sqlite3.Connection, lifecycle_dict: dict[str, Any],
+    ) -> int:
+        """从 lifecycle_manager 输出的 dict 写入 lifecycles 表。
+
+        字段映射:
+          lifecycle_id        → PRIMARY KEY
+          direction           → direction
+          origin_time_utc     → entry_time_utc(active 之前为 None)
+          exit_time_utc       → exit_time_utc(active 时为 None)
+          status              → status
+          origin_thesis(<=500)→ origin_thesis
+          ai_models_used_in_lifecycle → ai_models_used(逗号分隔)
+          rules_versions_used → rules_versions_used(逗号分隔)
+          整个 dict          → full_data_json
+        """
+        if not isinstance(lifecycle_dict, dict):
+            return 0
+        lid = lifecycle_dict.get("lifecycle_id")
+        if not lid:
+            return 0
+        thesis = (lifecycle_dict.get("origin_thesis") or "")[:500]
+        ai_models = lifecycle_dict.get("ai_models_used_in_lifecycle") or []
+        rules_used = lifecycle_dict.get("rules_versions_used") or []
+        sql = """
+            INSERT INTO lifecycles
+                (lifecycle_id, direction, entry_time_utc, exit_time_utc,
+                 status, origin_thesis, ai_models_used, rules_versions_used,
+                 full_data_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(lifecycle_id) DO UPDATE SET
+                direction = excluded.direction,
+                entry_time_utc = excluded.entry_time_utc,
+                exit_time_utc = excluded.exit_time_utc,
+                status = excluded.status,
+                origin_thesis = excluded.origin_thesis,
+                ai_models_used = excluded.ai_models_used,
+                rules_versions_used = excluded.rules_versions_used,
+                full_data_json = excluded.full_data_json
+        """
+        cur = conn.execute(
+            sql,
+            (
+                lid,
+                lifecycle_dict.get("direction"),
+                lifecycle_dict.get("origin_time_utc"),
+                lifecycle_dict.get("exit_time_utc"),
+                lifecycle_dict.get("status"),
+                thesis,
+                ",".join(str(m) for m in ai_models if m),
+                ",".join(str(r) for r in rules_used if r),
+                json.dumps(lifecycle_dict, ensure_ascii=False, default=str),
+            ),
+        )
+        return cur.rowcount
+
+    @staticmethod
+    def get_lifecycle(
+        conn: sqlite3.Connection, lifecycle_id: str,
+    ) -> Optional[dict[str, Any]]:
+        row = conn.execute(
+            "SELECT * FROM lifecycles WHERE lifecycle_id = ?",
+            (lifecycle_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        d = dict(row)
+        raw = d.pop("full_data_json", None)
+        d["full_data"] = json.loads(raw) if raw else {}
+        return d
+
+    @staticmethod
+    def list_lifecycles(
+        conn: sqlite3.Connection,
+        *,
+        status: Optional[str] = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        if status:
+            rows = conn.execute(
+                "SELECT * FROM lifecycles WHERE status = ? "
+                "ORDER BY entry_time_utc DESC NULLS LAST LIMIT ?",
+                (status, limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM lifecycles "
+                "ORDER BY entry_time_utc DESC NULLS LAST LIMIT ?",
+                (limit,),
+            ).fetchall()
+        items: list[dict[str, Any]] = []
+        for r in rows:
+            d = dict(r)
+            raw = d.pop("full_data_json", None)
+            d["full_data"] = json.loads(raw) if raw else {}
+            items.append(d)
+        return items
+
+
 class ReviewReportsDAO:
     """review_reports 表 DAO(§10.4:PK=review_id,v1.2 新增 rules_version_at_review)。"""
 

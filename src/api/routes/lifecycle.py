@@ -42,6 +42,14 @@ def get_current_lifecycle(request: Request) -> dict[str, Any]:
         return {"lifecycle": None, "message": "No strategy run yet"}
     state = json.loads(row["full_state_json"])
     lifecycle = state.get("lifecycle") or {}
+    # Sprint 1.5b-C:1.5b-B 之前部署留下的 legacy 占位 → 降级返回 None
+    if isinstance(lifecycle, dict) and lifecycle.get("managed_by") == "sprint_1_5b_pending":
+        return {
+            "lifecycle": None,
+            "run_id": row["run_id"],
+            "reference_timestamp_utc": row["reference_timestamp_utc"],
+            "message": "Legacy placeholder filtered (pre-1.5b-B run)",
+        }
     return {
         "lifecycle": lifecycle,
         "run_id": row["run_id"],

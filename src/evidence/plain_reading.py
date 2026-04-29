@@ -298,7 +298,6 @@ def plain_reading_l5(layer_5_output: dict[str, Any]) -> str:
         or layer_5_output.get("macro_environment")
         or "unclear"
     )
-    headwind_val = layer_5_output.get("macro_headwind_score")
     extreme = bool(layer_5_output.get("extreme_event_detected", False))
     completeness = layer_5_output.get("data_completeness_pct")
 

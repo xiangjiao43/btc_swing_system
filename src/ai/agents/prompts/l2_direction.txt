@@ -110,24 +110,43 @@ none: 无任何方向证据,等同 neutral
 
 # 六、phase 6 档(定性定义)
 
-phase 是当前波段在整个上涨/下跌段中走到第几步:
+phase 是当前波段在整个上涨/下跌段中走到第几步。看 K 线图的几何特征 +
+价格行为综合判断,不机械计算扩展百分比。
 
-early — 波段早期:从 swing 转折点开始,新方向刚启动,从最近一次主要 swing low(若 stance=bullish)或 swing high(若 stance=bearish)算起,扩展不深。
+early — 波段早期:
+价格刚从 swing 转折点出发,新方向刚启动。K 线呈"开始抬升 / 开始下移"
+的几何特征,扩展浅。回撤被快速买回(若 bullish)/ 反弹被快速卖出
+(若 bearish),表明力量集中。EMA 排列刚刚对齐。
 
-mid — 波段中段:扩展至前一段同方向幅度的 50-100% 区间,趋势确立中。
+mid — 波段中段:
+趋势确立中。连续多个 HH+HL(若 bullish)或 LL+LH(若 bearish),
+价格围绕 EMA-20 / EMA-50 推进,EMA 斜率稳定向上 / 向下,趋势在自我
+强化。无力竭信号。
 
-late — 波段后段:扩展至前一段幅度的 100-138%,接近力竭区,但仍在强势区间。
+late — 波段后段:
+扩展已深,但还在强势区间。K 线仍按方向推进,但开始出现细微变化:
+swing 抬升 / 下移幅度变小,K 线实体相对前期变短,ADX 见顶迹象,
+成交量略缩。趋势仍未失败,但已不像 mid 那么有力。
 
-exhausted — 衰竭期:扩展超过前一段 138% 以上,价格行为出现衰竭迹象(成交量背离 / Swing 高点抬升乏力 / 长持有者开始派发)。
+exhausted — 衰竭期:
+出现明确的力竭信号。例如:
+- swing 创新高 / 创新低乏力(对比前几次幅度明显缩小)
+- 出现孤岛反转 / 顶背离 / 底背离结构
+- 长持有者(LTH)开始派发(若 bullish)/ 累积(若 bearish)
+- 资金费率 / 持仓量异常放大,显示交易拥挤
+价格行为提示反转或大幅回撤可能。
 
-unclear — 阶段不明:数据不足判断,或当前处于 swing 转折期难以划分。
+unclear — 阶段不明:
+数据不足判断,或处于 swing 转折期难以划分。
 
-n_a — 不适用:仅当 stance=neutral 时使用。
+n_a — 不适用:
+仅当 stance=neutral 时使用。
 
 # 七、key_levels(支撑阻力)
 
 从图上 + swing_5_recent 数值识别:
-- nearest_support: 当前价格下方最近的支撑(EMA / Swing low / 心理整数)
+- nearest_support: 当前价格下方最近的支撑位(从图上和 swing 数值识别;
+  可能是 EMA、前期 swing 低点、或前期重要价格区域)
 - nearest_resistance: 当前价格上方最近的阻力
 - major_support: 中长期主要支撑(LTH realized price / EMA-200 / 主要前期低点)
 - major_resistance: 中长期主要阻力
@@ -199,7 +218,9 @@ rationale: 一句话说明你的判断理由
 
 3. 不能在 stance=neutral 时给非 n_a 的 phase。
 
-4. 不能给 stance_confidence_tier=high 但只有 1 项证据。
+4. 不能给 stance_confidence_tier=high 除非多个独立维度都强烈支持
+   (如 K 线结构 + 多周期一致 + 链上数据 + 长周期判断 同向)。
+   单一维度强但其他维度模糊不能给 high。
 
 5. 不能输出枚举之外的值。不知道时:stance=neutral / phase=unclear。
 
@@ -256,7 +277,7 @@ chart_l2.png:[图描述]1d 主图 K 线最近 30 天连续 3 个 HH+HL,价格站
   "stance": "bullish",
   "stance_confidence_tier": "high",
   "phase": "early",
-  "phase_evidence": "扩展从最近 swing low 79200 到当前 75749 仅 -4.6%,处波段早期回撤,未越过前一波同方向幅度 50%",
+  "phase_evidence": "K 线刚从最近 swing low 79200 出发不久,当前 75749 处波段早期回撤,趋势刚启动,无力竭信号",
   "structure_observations": [
     "1d 与 4h 双周期都形成 HH+HL 连续序列,方向一致看多",
     "Swing 高点 78500→80100→82100 持续抬升,自我强化中",

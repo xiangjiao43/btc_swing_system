@@ -110,7 +110,11 @@ def get_system_health(request: Request) -> HealthResponse:
 
 _BJT = ZoneInfo("Asia/Shanghai")
 
-# 数据源新鲜度阈值(分钟)— 后续可挪 thresholds.yaml,留 1.5n.1
+# 数据源新鲜度阈值(分钟)— 后续可挪 thresholds.yaml,留 1.5p.1
+# Sprint 1.5p:Yahoo 数据源已在 Sprint 2.6-A.3 决议 STOPPED(服务器 IP 被 Yahoo
+# 全面 429 封禁,batch + per-symbol 两路径都不通);FRED 已扩展为 sole macro source,
+# 覆盖 DXY/VIX/SP500/Nasdaq/US10Y。删除 yahoo_macro entry。
+# FRED 是 daily cadence,30h warn / 72h critical(跟 Glassnode 链上同档)。
 _SOURCE_CADENCE: dict[str, dict[str, Any]] = {
     "binance_kline_1h": {
         "label": "Binance K 线 (1h)", "warn": 120, "critical": 360,
@@ -124,13 +128,9 @@ _SOURCE_CADENCE: dict[str, dict[str, Any]] = {
         "label": "Glassnode 链上",     "warn": 30 * 60, "critical": 72 * 60,
         "expected_cadence": "每日 (daily bar)",
     },
-    "yahoo_macro": {
-        "label": "Yahoo 宏观",         "warn": 120, "critical": 24 * 60,
-        "expected_cadence": "交易日每小时",
-    },
     "fred_macro": {
-        "label": "FRED 宏观",          "warn": 120, "critical": 24 * 60,
-        "expected_cadence": "交易日每小时",
+        "label": "FRED 宏观",          "warn": 30 * 60, "critical": 72 * 60,
+        "expected_cadence": "每日 (daily bar)",
     },
 }
 
@@ -174,10 +174,7 @@ def _query_data_source_freshness(conn) -> list[HealthDetailDataSource]:
          "SELECT MAX(inserted_at_utc) AS ts FROM derivatives_snapshots"),
         ("glassnode_onchain",
          "SELECT MAX(inserted_at_utc) AS ts FROM onchain_metrics"),
-        # 宏观源:macro_metrics 用 source 字段(yfinance / fred)区分
-        ("yahoo_macro",
-         "SELECT MAX(inserted_at_utc) AS ts FROM macro_metrics "
-         "WHERE source LIKE 'yfinance%' OR source LIKE 'yahoo%'"),
+        # Sprint 1.5p:Yahoo 已 STOPPED(2.6-A.3),FRED 是唯一 macro source。
         ("fred_macro",
          "SELECT MAX(inserted_at_utc) AS ts FROM macro_metrics "
          "WHERE source = 'fred'"),

@@ -128,19 +128,22 @@ def test_endpoint_returns_5_evidence_layers(client: TestClient, db_path: Path):
     assert ids == [1, 2, 3, 4, 5]
 
 
-def test_endpoint_returns_5_data_sources(client: TestClient, db_path: Path):
+def test_endpoint_returns_4_data_sources(client: TestClient, db_path: Path):
+    """Sprint 1.5p:Yahoo 已 STOPPED(2.6-A.3),只剩 4 个 source。"""
     r = client.get("/api/system/health-detail")
     body = r.json()
     sources = body["data_sources"]
-    # binance_kline_1h / coinglass_derivatives / glassnode_onchain /
-    # yahoo_macro / fred_macro
-    assert len(sources) == 5
+    # binance_kline_1h / coinglass_derivatives / glassnode_onchain / fred_macro
+    assert len(sources) == 4
     names = [s["name"] for s in sources]
     assert any("Binance" in n for n in names)
     assert any("CoinGlass" in n for n in names)
     assert any("Glassnode" in n for n in names)
-    assert any("Yahoo" in n for n in names)
     assert any("FRED" in n for n in names)
+    # Yahoo 不应再出现
+    assert not any("Yahoo" in n for n in names), (
+        "Yahoo 数据源应已删除(2.6-A.3 STOPPED)"
+    )
 
 
 # ============================================================

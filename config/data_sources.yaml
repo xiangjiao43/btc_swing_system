@@ -135,35 +135,13 @@ sources:
       链上数据多为日级;采集计划 08:15-08:30(北京)事件触发,
       见 base.yaml → runtime.event_driven.types.event_onchain。
 
-  # ---- 4. Yahoo Finance(宏观,直连)------------------------------
-  # §3.6.4:DXY / US10Y / VIX / 美股指数。yfinance 库直连,无 API key。
-  yahoo_finance:
-    enabled: true
-    name: "Yahoo Finance (direct)"
-    purpose: "Macro series: DXY, US10Y, VIX, SPX, NDX"
-    # 直连而非中转;留 env 名方便将来改成中转(值留空即代表直连默认)
-    base_url_env: "YAHOO_FINANCE_BASE_URL"   # 可选,未设置时 yfinance 走默认
-    auth_type: "none"
-    auth_method: null
-    api_key_env: null
-    api_key_header_name: null
-    api_key_query_name: null
-    timeout_sec: 15
-    retry:
-      max_attempts: 3
-      backoff_sec: 2
-      backoff_strategy: "exponential"
-      retry_on_status: [408, 429, 500, 502, 503, 504]
-    rate_limit:
-      # yfinance 无官方上限,但太快易被限流;保守 30/min
-      requests_per_minute: 30
-      on_exceed: "queue"
-    freshness_class: "macro"   # > 36 h 视为 stale
-    notes: >
-      v1 使用 yfinance 库调用;v1.0 上云后可切 Yahoo 官方 REST 或 FRED 主源。
+  # ---- 4. (Yahoo Finance 已在 Sprint 2.6-A.3 决议 STOPPED;
+  # 服务器 IP 被 Yahoo 全面 429 封禁,batch + per-symbol 两路径都不通。
+  # FRED 已扩展为 sole macro source,覆盖 DXY/VIX/SP500/Nasdaq/US10Y。
+  # 配置块整段删除,Sprint 1.5p Task §X 清理。)
 
-  # ---- 5. FRED(宏观,直连,备用)-----------------------------------
-  # §3.6.4:Yahoo 缺失或停更时的备用宏观源(美联储公开数据)。
+  # ---- 5. FRED(宏观,直连;Sprint 2.6-A.3 起为 sole macro source)----
+  # §3.6.4:DXY / VIX / SP500 / Nasdaq / DGS10(美联储公开数据)。
   fred:
     enabled: true
     name: "FRED (direct)"

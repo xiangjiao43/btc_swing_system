@@ -352,16 +352,8 @@ sources:
     role_in_v1: display
     serves: [asopr]
 
-  # Sprint 1.7:glassnode_reserve_risk 已删除(噪音因子,无 L 层引用)。
-
-  - name: glassnode_puell_multiple
-    platform: glassnode
-    endpoint: /v1/metrics/indicators/puell_multiple
-    params: { a: BTC }
-    frequency: daily
-    freshness_class: onchain
-    role_in_v1: display
-    serves: [puell_multiple]
+  # Sprint 1.7:glassnode_reserve_risk + glassnode_puell_multiple 已删除
+  # (噪音因子,无 L 层引用)。
 
   # ---- 第三类:延后到 v1.x(§3.6.3 明确列出)----
   # 这些在 v1 不抓;登记在此仅作 v1.x 启用时的 TODO 清单。
@@ -713,14 +705,7 @@ single_factors:
     role_in_v1: primary
     notes: "喂给 ExchangeMomentum(L2 内部修正项)"
 
-  # Sprint 1.7:reserve_risk 已删除(噪音因子)。
-
-  - name: puell_multiple
-    depends_on: [glassnode_puell_multiple]
-    formula_ref: src/indicators/onchain.py::read_glassnode_direct
-    frequency: daily
-    layer: L2
-    role_in_v1: display
+  # Sprint 1.7:reserve_risk + puell_multiple 已删除(噪音因子)。
 
   - name: sopr
     depends_on: [glassnode_sopr]

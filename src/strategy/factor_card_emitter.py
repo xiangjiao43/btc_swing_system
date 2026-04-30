@@ -1231,10 +1231,7 @@ def _emit_onchain_reference(onchain: dict[str, Any], today: str) -> list[dict[st
          "Adjusted SOPR",
          "📍 调整后的 SOPR,排除 1 小时内的交易(去噪声)。比 SOPR 更稳定。",
          "🔍 > 1 = 盈利卖出主导;= 1 = 关键支撑/阻力位;< 1 = 投降"),
-        ("puell_multiple", "onchain_puell_multiple", "Puell Multiple",
-         "Puell Multiple",
-         "📍 矿工日收入 / 365 日均收入。极高 = 矿工抛压高(顶部);极低 = 矿工惜售(底部)。",
-         "🔍 > 4 = 历史顶部区间;0.5 ~ 4 = 正常;< 0.5 = 历史底部区间"),
+        # Sprint 1.7:puell_multiple 卡已删除(噪音因子)。
     ]
     for key, card_slug, name_cn, name_en, impact_desc, threshold_desc in _ref_specs:
         series = onchain.get(key) if isinstance(onchain, dict) else None

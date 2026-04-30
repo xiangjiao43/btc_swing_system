@@ -13,9 +13,8 @@ glassnode.py — Glassnode 链上数据采集器(走 api.alphanode.work 中转)
 覆盖建模 §3.6.3:
   - 第一类(primary 5):mvrv_z_score / nupl / lth_supply / exchange_net_flow /
     btc_price_close(后三者 + price 用于 indicators 层算 LTH 90d 变化 / ATH 跌幅)
-  - 第二类(display,Sprint 1.7 后):mvrv / realized_price / sopr_adjusted /
-    puell_multiple
-    (Sprint 1.7 删除 sopr / reserve_risk:噪音因子,无 L 层引用)
+  - 第二类(display,Sprint 1.7 后):mvrv / realized_price / sopr_adjusted
+    (Sprint 1.7 删除 sopr / reserve_risk / puell_multiple:噪音因子,无 L 层引用)
   - Sprint 2.6-F.3:lth_realized_price / sth_realized_price 已删
     (Glassnode 不开放独立 endpoint,/v1/metrics/supply/{lth,sth}_realized_price
      皆 404,见 docs/cc_reports/sprint_2_6_chain_verify.md backlog)
@@ -76,7 +75,6 @@ class GlassnodeCollector:
     _PATH_REALIZED_PRICE     = f"{_BASE_PATH}/market/price_realized_usd"
     _PATH_SOPR               = f"{_BASE_PATH}/indicators/sopr"
     _PATH_SOPR_ADJUSTED      = f"{_BASE_PATH}/indicators/sopr_adjusted"
-    _PATH_PUELL              = f"{_BASE_PATH}/indicators/puell_multiple"
 
     # Sprint 2.6-I:LTH/STH realized price 通过 breakdowns 客户端聚合得出
     # (Glassnode 不开放独立的 lth_realized_price / sth_realized_price endpoint,
@@ -632,16 +630,8 @@ class GlassnodeCollector:
             source="glassnode_display",
         )
 
-    # Sprint 1.7:fetch_reserve_risk 已删除(噪音因子,无 L 层引用)。
-
-    def fetch_puell_multiple(
-        self, interval: str = "24h", since_days: int = 180
-    ) -> list[dict[str, Any]]:
-        return self._fetch_series(
-            self._PATH_PUELL, "puell_multiple",
-            interval=interval, since_days=since_days,
-            source="glassnode_display",
-        )
+    # Sprint 1.7:fetch_reserve_risk / fetch_puell_multiple 已删除
+    # (噪音因子,无 L 层引用)。
 
     # ==================================================================
     # 高层组合抓取
@@ -673,7 +663,6 @@ class GlassnodeCollector:
             ("sth_realized_price", self.fetch_sth_realized_price),
             ("sopr",               self.fetch_sopr),
             ("sopr_adjusted",      self.fetch_sopr_adjusted),
-            ("puell_multiple",     self.fetch_puell_multiple),
             # Sprint 1.6(建模 v1.3 §2.4):4 个新链上端点
             ("sth_supply",         self.fetch_sth_supply),
             ("ssr",                self.fetch_ssr),

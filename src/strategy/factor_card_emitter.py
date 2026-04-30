@@ -885,34 +885,7 @@ def _emit_onchain_primary(
         linked_layer="L2", source="Binance klines",
     ))
 
-    # Reserve Risk
-    series = onchain.get("reserve_risk") if isinstance(onchain, dict) else None
-    val, ts = _latest(series)
-    pct = _percentile_180d(series, val)
-    cards.append(_make_card(
-        card_id=f"onchain_reserve_risk_{today}",
-        category="onchain", tier="primary",
-        name="储备风险 Reserve Risk", name_en="Reserve Risk",
-        current_value=round(val, 6) if val is not None else None,
-        historical_percentile=pct,
-        captured_at_bjt=ts,
-        plain_interpretation=(
-            (f"📊 当前 {val:.4f},储备风险偏高,长期持有者倾向抛售(顶部信号)\n"
-             f"🔍 < 0.002 = 历史底部区间(惜售,买入性价比高);0.002 ~ 0.02 = 正常;> 0.02 = 顶部区间(抛售意愿高)"
-             ) if val is not None and val > 0.02
-            else (f"📊 当前 {val:.4f},储备风险偏低,长期持有者惜售(底部信号,买入性价比高)\n"
-                  f"🔍 < 0.002 = 历史底部区间;0.002 ~ 0.02 = 正常;> 0.02 = 顶部区间"
-                  ) if val is not None and val < 0.002
-            else (f"📊 当前 {val:.4f},储备风险处于正常区间\n"
-                  f"🔍 < 0.002 = 历史底部区间;0.002 ~ 0.02 = 正常;> 0.02 = 顶部区间"
-                  ) if val is not None
-            else "📊 数据不足\n🔍 < 0.002 = 历史底部区间;0.002 ~ 0.02 = 正常;> 0.02 = 顶部区间"
-        ),
-        strategy_impact="📍 长期持有者抛售意愿与价格的比值,反映底部信号强度。极低值常出现在历史大底,极高值常出现在大顶。",
-        impact_direction=_impact_direction_from_value(val, bear_above=0.02, bull_below=0.002),
-        impact_weight=0.7,
-        linked_layer="L2", source="Glassnode",
-    ))
+    # Sprint 1.7:Reserve Risk 卡已删除(噪音因子,无 L 层引用)。
     return cards
 
 

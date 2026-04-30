@@ -20,14 +20,12 @@ _EXPECTED_METRICS: set[str] = {
     "lth_supply",
     "exchange_net_flow",
     "btc_price_close",
-    # Display 8 (Sprint 2.6-I:lth/sth_realized_price 通过 /breakdowns/* 聚合恢复)
+    # Display(Sprint 1.7 后):删除 sopr / reserve_risk
     "mvrv",
     "realized_price",
     "lth_realized_price",
     "sth_realized_price",
-    "sopr",
-    "sopr_adjusted",  # = aSOPR (adjusted SOPR)
-    "reserve_risk",
+    "sopr_adjusted",  # = aSOPR (1.6 升级 primary)
     "puell_multiple",
 }
 

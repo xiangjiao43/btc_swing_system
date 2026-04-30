@@ -22,6 +22,13 @@ function app() {
         livePriceData: null,
         _priceTimer: null,
 
+        // Sprint 1.5n:系统自检面板数据(每 5 分钟刷一次)
+        systemHealth: null,
+        _healthTimer: null,
+        // 用户主动展开后保留状态(避免后续刷新自动折叠)
+        _selfCheckUserToggled: false,
+        selfCheckExpanded: false,
+
         // ============== 初始化 ==============
         async init() {
             this._initDarkMode();
@@ -32,6 +39,78 @@ function app() {
             await this._refreshLivePrice();
             // Sprint 1.5k:轮询 30 秒(后端切到现货 1m 数据,1 分钟太慢)
             this._priceTimer = setInterval(() => this._refreshLivePrice(), 30000);
+            // Sprint 1.5n:系统自检面板,首次拉 + 5 分钟刷新
+            await this._refreshSystemHealth();
+            this._healthTimer = setInterval(
+                () => this._refreshSystemHealth(), 5 * 60 * 1000,
+            );
+        },
+
+        async _refreshSystemHealth() {
+            try {
+                const r = await fetch('/api/system/health-detail',
+                                      { cache: 'no-cache' });
+                if (r.ok) {
+                    this.systemHealth = await r.json();
+                    // 有 degraded/critical 且用户未手动 toggle 过 → 自动展开
+                    if (!this._selfCheckUserToggled
+                        && this.systemHealth.overall_status !== 'all_healthy') {
+                        this.selfCheckExpanded = true;
+                    }
+                }
+            } catch (e) { /* 静默失败 */ }
+        },
+        toggleSelfCheck() {
+            this.selfCheckExpanded = !this.selfCheckExpanded;
+            this._selfCheckUserToggled = true;
+        },
+        selfCheckBadgeLabel() {
+            const s = this.systemHealth && this.systemHealth.overall_status;
+            if (s === 'all_healthy') return '全部正常 ✅';
+            if (s === 'partial_degraded') return '⚠️ 部分降级';
+            if (s === 'critical') return '❌ 数据中断 / 关键缺失';
+            return '检测中…';
+        },
+        selfCheckBadgeClass() {
+            const s = this.systemHealth && this.systemHealth.overall_status;
+            if (s === 'all_healthy')
+                return 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300';
+            if (s === 'partial_degraded')
+                return 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300';
+            if (s === 'critical')
+                return 'bg-rose-100 dark:bg-rose-900/30 text-rose-700 dark:text-rose-300';
+            return 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400';
+        },
+        layerHealthDot(h) {
+            if (h === 'healthy') return 'bg-emerald-500';
+            if (h === 'degraded') return 'bg-amber-500';
+            return 'bg-rose-500';
+        },
+        sourceStatusDot(s) {
+            if (s === 'ok') return 'bg-emerald-500';
+            if (s === 'warn') return 'bg-amber-500';
+            if (s === 'critical') return 'bg-rose-500';
+            return 'bg-slate-400';  // no_data
+        },
+        sourceAgeLabel(s) {
+            if (s.age_minutes == null) return '无数据';
+            const m = s.age_minutes;
+            if (m < 60) return `${m.toFixed(1)} 分钟前`;
+            if (m < 1440) return `${(m/60).toFixed(1)} 小时前`;
+            return `${(m/1440).toFixed(1)} 天前`;
+        },
+        sourceTextClass(s) {
+            if (s === 'ok') return 'text-slate-500 dark:text-slate-400';
+            if (s === 'warn') return 'text-amber-600 dark:text-amber-400';
+            if (s === 'critical')
+                return 'text-rose-600 dark:text-rose-400 font-semibold';
+            return 'text-slate-400 dark:text-slate-500';
+        },
+        // 持仓预览占位框是否显示(FLAT / FLIP_WATCH 状态下显示)
+        showPositionPreviewPlaceholder() {
+            const st = this.state && this.state.main_strategy
+                && this.state.main_strategy.action_state;
+            return ['FLAT', 'FLIP_WATCH'].includes(st);
         },
 
         async _refreshLivePrice() {

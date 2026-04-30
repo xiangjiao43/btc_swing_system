@@ -156,6 +156,87 @@
     </section>
 
     <!-- ============================================================ -->
+    <!-- 🩺 系统自检面板(Sprint 1.5n):顶栏正下方,默认折叠;          -->
+    <!-- 有 degraded/critical 时自动展开。                              -->
+    <!-- ============================================================ -->
+    <section class="audit-card px-3 py-2"
+             :class="systemHealth && systemHealth.overall_status === 'critical'
+                     ? 'border-rose-300 dark:border-rose-700'
+                     : systemHealth && systemHealth.overall_status === 'partial_degraded'
+                       ? 'border-amber-300 dark:border-amber-700'
+                       : ''">
+      <button type="button"
+              class="w-full flex items-center gap-2 text-[12px] cursor-pointer"
+              @click="toggleSelfCheck()">
+        <span class="font-semibold">🩺 系统自检</span>
+        <span class="text-[11px] px-1.5 py-0.5 rounded font-mono"
+              :class="selfCheckBadgeClass()"
+              x-text="selfCheckBadgeLabel()"></span>
+        <span class="ml-auto text-[10px] text-slate-500"
+              x-text="selfCheckExpanded ? '收起 ▲' : '展开 ▼'"></span>
+      </button>
+
+      <div x-show="selfCheckExpanded && systemHealth"
+           x-transition.opacity
+           class="mt-3 grid grid-cols-1 md:grid-cols-2 gap-4 text-[12px]">
+        <!-- 左列:5 层证据健康状态 -->
+        <div>
+          <h3 class="subheading mb-1.5">5 层证据健康</h3>
+          <ul class="space-y-1">
+            <template x-for="layer in (systemHealth?.evidence_layers || [])"
+                      :key="layer.layer_id">
+              <li class="flex items-start gap-2 leading-snug">
+                <span class="w-1.5 h-1.5 rounded-full mt-1.5 shrink-0"
+                      :class="layerHealthDot(layer.health)"></span>
+                <span class="font-mono w-7 text-slate-500"
+                      x-text="'L' + layer.layer_id"></span>
+                <span class="font-medium" x-text="layer.name"></span>
+                <span class="ml-auto text-slate-500"
+                      x-text="layer.pillars_summary"></span>
+              </li>
+            </template>
+          </ul>
+          <template x-if="(systemHealth?.evidence_layers || []).some(
+                            l => l.missing_reasons && l.missing_reasons.length)">
+            <div class="mt-2 text-[11px] text-amber-600 dark:text-amber-400 space-y-0.5">
+              <template x-for="layer in (systemHealth?.evidence_layers || [])"
+                        :key="'reasons-' + layer.layer_id">
+                <template x-if="layer.missing_reasons && layer.missing_reasons.length">
+                  <div>
+                    <span class="font-mono"
+                          x-text="'L' + layer.layer_id + ':'"></span>
+                    <span x-text="layer.missing_reasons.join(' / ')"></span>
+                  </div>
+                </template>
+              </template>
+            </div>
+          </template>
+        </div>
+
+        <!-- 右列:数据源新鲜度 -->
+        <div>
+          <h3 class="subheading mb-1.5">数据源新鲜度</h3>
+          <ul class="space-y-1">
+            <template x-for="src in (systemHealth?.data_sources || [])"
+                      :key="src.name">
+              <li class="flex items-start gap-2 leading-snug">
+                <span class="w-1.5 h-1.5 rounded-full mt-1.5 shrink-0"
+                      :class="sourceStatusDot(src.status)"></span>
+                <span class="flex-1" x-text="src.name"></span>
+                <span class="font-mono tabular-nums shrink-0"
+                      :class="sourceTextClass(src.status)"
+                      x-text="sourceAgeLabel(src)"></span>
+              </li>
+            </template>
+          </ul>
+          <p class="mt-2 text-[10px] text-slate-400">
+            刷新 5 分钟一次;阈值见 sprint_1_5n 报告
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================ -->
     <!-- 🎯 核心建议与高阶信号:区域 1(60% 左)+ 区域 3(40% 右)     -->
     <!-- Sprint 2.3 R4:lg:grid-cols-5 · 3/2 分栏;手机端自然上下堆叠。-->
     <!-- ============================================================ -->

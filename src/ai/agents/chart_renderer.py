@@ -193,6 +193,187 @@ class ChartRenderer:
         return base64.b64encode(png_bytes).decode("ascii")
 
 
+    @staticmethod
+    def render_l2_chart(
+        klines_1d: pd.DataFrame,
+        klines_4h: Optional[pd.DataFrame] = None,
+        *,
+        ema_20_1d: Optional[pd.Series] = None,
+        ema_50_1d: Optional[pd.Series] = None,
+        ema_20_4h: Optional[pd.Series] = None,
+        ema_50_4h: Optional[pd.Series] = None,
+        swing_points_1d: Optional[list[dict[str, Any]]] = None,
+        key_levels: Optional[dict[str, float]] = None,
+        days_1d: int = 90,
+        days_4h_in_bars: int = 180,  # 30 天 × 6 bar/天 = 180
+    ) -> Optional[str]:
+        """L2 Direction 用图。返回 base64 PNG 字符串(失败返回 None)。
+
+        图规格:
+          - 主图(高 5 in):1d K 线 90 天 + EMA-20(蓝)/EMA-50(橙)+
+            Swing(red ▼ / green ▲)+ key_levels 水平线
+          - 副图(高 2.5 in):4h K 线 30 天 + EMA-20(蓝)/EMA-50(橙)
+          - 总图 12 × 8.5 in,DPI 100 → 1200×850 px
+
+        key_levels:可选 dict {"nearest_support": float, "nearest_resistance":
+          float, "major_support": float, "major_resistance": float}。
+          画为水平线(支撑实线绿,阻力实线红)。
+        """
+        if klines_1d is None or klines_1d.empty:
+            logger.warning("render_l2_chart: klines_1d empty/None")
+            return None
+
+        try:
+            df_1d = _prepare_ohlc_df(klines_1d, days=days_1d)
+        except Exception as e:
+            logger.warning("render_l2_chart prepare 1d failed: %s", e)
+            return None
+        if df_1d.empty or len(df_1d) < 5:
+            logger.warning("render_l2_chart: 1d insufficient (%d)", len(df_1d))
+            return None
+
+        # 主图叠加
+        addplots: list[Any] = []
+        for ema_series, color, name in (
+            (ema_20_1d, "#1f77b4", "EMA-20-1d"),
+            (ema_50_1d, "#ff7f0e", "EMA-50-1d"),
+        ):
+            if ema_series is None:
+                continue
+            try:
+                aligned = _align_to_index(ema_series, df_1d.index)
+                if aligned.notna().sum() >= 2:
+                    addplots.append(mpf.make_addplot(
+                        aligned, color=color, width=1.2,
+                    ))
+            except Exception as e:
+                logger.warning("render_l2_chart EMA %s skip: %s", name, e)
+
+        if swing_points_1d:
+            try:
+                swing_high_y, swing_low_y = _build_swing_markers(
+                    df_1d, swing_points_1d,
+                )
+                if swing_high_y.notna().sum() > 0:
+                    addplots.append(mpf.make_addplot(
+                        swing_high_y, type="scatter", marker="v",
+                        color="#d62728", markersize=80,
+                    ))
+                if swing_low_y.notna().sum() > 0:
+                    addplots.append(mpf.make_addplot(
+                        swing_low_y, type="scatter", marker="^",
+                        color="#2ca02c", markersize=80,
+                    ))
+            except Exception as e:
+                logger.warning("render_l2_chart swing skip: %s", e)
+
+        # key_levels 水平线 — 用常量 series 实现
+        if key_levels:
+            for level_name, color in (
+                ("nearest_support", "#2ca02c"),
+                ("major_support", "#1a661a"),
+                ("nearest_resistance", "#d62728"),
+                ("major_resistance", "#7d1414"),
+            ):
+                v = key_levels.get(level_name)
+                if v is None:
+                    continue
+                try:
+                    line = pd.Series(
+                        [float(v)] * len(df_1d), index=df_1d.index, dtype=float,
+                    )
+                    addplots.append(mpf.make_addplot(
+                        line, color=color, width=0.8,
+                        linestyle="--" if "major" in level_name else "-",
+                    ))
+                except (TypeError, ValueError):
+                    continue
+
+        # 4h 副图 — 用副 panel 画 K 线
+        df_4h = None
+        panel_ratios: tuple[float, ...] = (5.0,)
+        if klines_4h is not None and not klines_4h.empty:
+            try:
+                df_4h_full = _prepare_ohlc_df(klines_4h, days=999)  # 不裁剪
+                if len(df_4h_full) > days_4h_in_bars:
+                    df_4h = df_4h_full.iloc[-days_4h_in_bars:]
+                else:
+                    df_4h = df_4h_full
+            except Exception as e:
+                logger.warning("render_l2_chart 4h prepare skip: %s", e)
+                df_4h = None
+
+        # 4h 副图改用 mpf 子图(panel=1)— 但 mpf addplot 只画线,
+        # 4h K 线无法直接画副图。简化:把 4h close 作为线图画在副图。
+        if df_4h is not None and not df_4h.empty:
+            try:
+                close_4h = df_4h["Close"].rename("close_4h")
+                # 用整数 x 索引,放副图(panel=1)
+                # 由于 mpf 限制,副图 series 必须对齐主图索引;
+                # 我们改为把最近 30 天 4h close 重新采样到 1d 频率
+                close_4h_resampled = close_4h.resample("1D").last()
+                close_4h_aligned = _align_to_index(
+                    close_4h_resampled, df_1d.index,
+                )
+                if close_4h_aligned.notna().sum() >= 2:
+                    addplots.append(mpf.make_addplot(
+                        close_4h_aligned, panel=1, color="#7f7f7f",
+                        width=1.0, ylabel="4h close (1d resample)",
+                    ))
+                    # 4h EMA-20 / 50(同样 1d 重采样)
+                    for ema_4h, color_, name_ in (
+                        (ema_20_4h, "#1f77b4", "EMA-20-4h"),
+                        (ema_50_4h, "#ff7f0e", "EMA-50-4h"),
+                    ):
+                        if ema_4h is None:
+                            continue
+                        try:
+                            ema_4h_resampled = ema_4h.resample("1D").last()
+                            ema_4h_aligned = _align_to_index(
+                                ema_4h_resampled, df_1d.index,
+                            )
+                            if ema_4h_aligned.notna().sum() >= 2:
+                                addplots.append(mpf.make_addplot(
+                                    ema_4h_aligned, panel=1, color=color_,
+                                    width=1.0,
+                                ))
+                        except Exception:
+                            continue
+                    panel_ratios = (5.0, 2.5)
+            except Exception as e:
+                logger.warning("render_l2_chart 4h panel skip: %s", e)
+
+        try:
+            buf = io.BytesIO()
+            mpf.plot(
+                df_1d,
+                type="candle",
+                style="charles",
+                addplot=addplots if addplots else None,
+                panel_ratios=panel_ratios,
+                figsize=(12, 8.5),
+                figratio=(12, 8.5),
+                figscale=1.0,
+                returnfig=False,
+                savefig=dict(fname=buf, dpi=100, bbox_inches="tight"),
+                title=(
+                    f"BTC L2 1d 90d + 4h 30d  ({df_1d.index[0].date()}"
+                    f" → {df_1d.index[-1].date()})"
+                ),
+                ylabel="Price (USDT)",
+            )
+            buf.seek(0)
+            png_bytes = buf.read()
+            buf.close()
+        except Exception as e:
+            logger.warning("render_l2_chart plot failed: %s", e)
+            plt.close("all")
+            return None
+
+        plt.close("all")
+        return base64.b64encode(png_bytes).decode("ascii")
+
+
 # ============================================================
 # 内部 helper
 # ============================================================

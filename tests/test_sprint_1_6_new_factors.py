@@ -398,3 +398,137 @@ def test_onchain_source_literal_includes_computed():
     assert "computed" in args, (
         f"OnchainSource 应含 'computed',实际 {args}"
     )
+
+
+# ============================================================
+# Sprint 1.6.1 任务 B:细粒度今日门 §X 反退化
+# ============================================================
+
+def test_onchain_expected_metrics_today_includes_new_fetchers():
+    """1.6.1:_ONCHAIN_EXPECTED_METRICS_TODAY 必须含 1.6 新 4 fetcher 名。"""
+    from src.scheduler.jobs import _ONCHAIN_EXPECTED_METRICS_TODAY
+    for name in ("sth_supply", "ssr", "cdd"):
+        assert name in _ONCHAIN_EXPECTED_METRICS_TODAY, (
+            f"missing 1.6 new metric in expected today: {name}"
+        )
+
+
+def test_onchain_today_complete_returns_false_when_missing(tmp_path: Path):
+    """关键反退化:onchain 表里只有部分老 metric 时,_onchain_today_complete=False
+    (不再"任意一个写过即 skip")。"""
+    from src.scheduler.jobs import _onchain_today_complete
+    from datetime import datetime, timezone
+    db = tmp_path / "complete.db"
+    init_db(db_path=db, verbose=False)
+    conn = sqlite3.connect(db)
+    conn.row_factory = sqlite3.Row
+    try:
+        # 仅写 mvrv_z_score(1 个老 metric)— 不应触发 skip
+        today_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        OnchainDAO.upsert_batch(conn, [OnchainMetric(
+            timestamp=today_iso, metric_name="mvrv_z_score",
+            metric_value=1.5, source="glassnode_primary",
+        )])
+        conn.commit()
+        assert _onchain_today_complete(conn) is False
+    finally:
+        conn.close()
+
+
+def test_onchain_today_complete_returns_true_when_all_present(tmp_path: Path):
+    """期望集合都今天写过 → True(skip)。"""
+    from src.scheduler.jobs import (
+        _ONCHAIN_EXPECTED_METRICS_TODAY, _onchain_today_complete,
+    )
+    from datetime import datetime, timezone
+    db = tmp_path / "all_present.db"
+    init_db(db_path=db, verbose=False)
+    conn = sqlite3.connect(db)
+    conn.row_factory = sqlite3.Row
+    try:
+        today_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        metrics = []
+        for name in _ONCHAIN_EXPECTED_METRICS_TODAY:
+            metrics.append(OnchainMetric(
+                timestamp=today_iso, metric_name=name,
+                metric_value=1.0, source="glassnode_primary",
+            ))
+        # hodl_waves 任一 bucket
+        metrics.append(OnchainMetric(
+            timestamp=today_iso, metric_name="hodl_waves_1y_2y",
+            metric_value=0.1, source="glassnode_primary",
+        ))
+        OnchainDAO.upsert_batch(conn, metrics)
+        conn.commit()
+        assert _onchain_today_complete(conn) is True
+    finally:
+        conn.close()
+
+
+def test_onchain_today_complete_treats_hodl_prefix_as_one(tmp_path: Path):
+    """hodl_waves_<bucket> 任一存在视为 'hodl_waves' 已抓。"""
+    from src.scheduler.jobs import (
+        _ONCHAIN_EXPECTED_METRICS_TODAY, _onchain_today_complete,
+    )
+    from datetime import datetime, timezone
+    db = tmp_path / "hodl.db"
+    init_db(db_path=db, verbose=False)
+    conn = sqlite3.connect(db)
+    conn.row_factory = sqlite3.Row
+    try:
+        today_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        # 全部 expected + hodl_waves_<one>
+        metrics = []
+        for name in _ONCHAIN_EXPECTED_METRICS_TODAY:
+            metrics.append(OnchainMetric(
+                timestamp=today_iso, metric_name=name,
+                metric_value=1.0, source="glassnode_primary",
+            ))
+        # 只一个 bucket
+        metrics.append(OnchainMetric(
+            timestamp=today_iso, metric_name="hodl_waves_24h",
+            metric_value=0.01, source="glassnode_primary",
+        ))
+        OnchainDAO.upsert_batch(conn, metrics)
+        conn.commit()
+        assert _onchain_today_complete(conn) is True  # 仅 1 bucket 视为齐
+    finally:
+        conn.close()
+
+
+def test_has_today_btc_dominance_or_etf_flow_detects_extras(tmp_path: Path):
+    """derivatives_snapshots full_data_json 含 btc_dominance/etf_flow → True。"""
+    import json
+    from src.scheduler.jobs import _has_today_btc_dominance_or_etf_flow
+    from datetime import datetime, timezone
+    db = tmp_path / "deriv.db"
+    init_db(db_path=db, verbose=False)
+    conn = sqlite3.connect(db)
+    conn.row_factory = sqlite3.Row
+    try:
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        ts = today + "T00:00:00Z"
+        # 写一行带 btc_dominance 的 snapshot
+        conn.execute(
+            "INSERT INTO derivatives_snapshots "
+            "(captured_at_utc, full_data_json, inserted_at_utc) "
+            "VALUES (?, ?, ?)",
+            (ts, json.dumps({"btc_dominance": 60.36}), ts),
+        )
+        conn.commit()
+        assert _has_today_btc_dominance_or_etf_flow(conn) is True
+    finally:
+        conn.close()
+
+
+def test_has_today_btc_dominance_or_etf_flow_false_when_missing(tmp_path: Path):
+    """空 derivatives_snapshots → False(继续 fetch)。"""
+    from src.scheduler.jobs import _has_today_btc_dominance_or_etf_flow
+    db = tmp_path / "deriv_empty.db"
+    init_db(db_path=db, verbose=False)
+    conn = sqlite3.connect(db)
+    conn.row_factory = sqlite3.Row
+    try:
+        assert _has_today_btc_dominance_or_etf_flow(conn) is False
+    finally:
+        conn.close()

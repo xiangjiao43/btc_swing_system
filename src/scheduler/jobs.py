@@ -219,6 +219,84 @@ def _has_today_inserted_in_metric_table(
     return cur.fetchone() is not None
 
 
+# Sprint 1.6.1 任务 B:onchain "今日完整性"门(细粒度,按 metric 集合判断)。
+# 老 _has_today_inserted_in_metric_table 是"任意一个 metric 今天写过即 skip",
+# 但 onchain_metrics 是宽表 — 任一旧 metric 今天写过就 skip,导致 1.6 新 fetcher
+# (sth_supply / ssr / cdd / hodl_waves) 永远不被调用。
+_ONCHAIN_EXPECTED_METRICS_TODAY: tuple[str, ...] = (
+    # 旧的(Sprint 1.6 之前已有,12 个 fetcher)
+    "mvrv_z_score", "nupl", "lth_supply", "exchange_net_flow",
+    "btc_price_close", "mvrv", "realized_price",
+    "lth_realized_price", "sth_realized_price",
+    "sopr", "sopr_adjusted", "reserve_risk", "puell_multiple",
+    # Sprint 1.6 新增 4 个(hodl_waves 用前缀匹配,见下)
+    "sth_supply", "ssr", "cdd",
+)
+_ONCHAIN_HODL_WAVES_PREFIX = "hodl_waves_"
+
+
+def _onchain_today_complete(conn: Any) -> bool:
+    """Sprint 1.6.1:今天是否所有期望 onchain metric 都已写过。
+
+    判定:
+      - 期望集合 = _ONCHAIN_EXPECTED_METRICS_TODAY ∪ {"hodl_waves"}
+      - "今天写过的 metric" = onchain_metrics 表 captured_at_utc LIKE 'YYYY-MM-DD%'
+      - hodl_waves_* 任一 bucket 出现即视为 "hodl_waves 已抓"
+    全部 metric 都在写过集合中 → True(skip);否则 False(继续 fetch)。
+    """
+    from datetime import datetime, timezone
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    written_today: set[str] = set()
+    try:
+        rows = conn.execute(
+            "SELECT DISTINCT metric_name FROM onchain_metrics "
+            "WHERE captured_at_utc LIKE ?",
+            (f"{today}%",),
+        ).fetchall()
+    except Exception:
+        return False
+
+    for r in rows:
+        name = r[0] if not hasattr(r, "keys") else r["metric_name"]
+        if isinstance(name, str) and name.startswith(_ONCHAIN_HODL_WAVES_PREFIX):
+            written_today.add("hodl_waves")
+        elif name:
+            written_today.add(name)
+
+    expected_set = set(_ONCHAIN_EXPECTED_METRICS_TODAY) | {"hodl_waves"}
+    missing = expected_set - written_today
+    if missing:
+        logger.info(
+            "_onchain_today_complete: still missing today: %s "
+            "(written: %s)",
+            sorted(missing), sorted(written_today),
+        )
+    return len(missing) == 0
+
+
+def _has_today_btc_dominance_or_etf_flow(conn: Any) -> bool:
+    """Sprint 1.6.1:derivatives_snapshots 今天是否已有 btc_dominance / etf_flow。
+
+    本 sprint 这两个 metric 通过 DerivativesDAO.upsert_batch 进 wide 表的
+    full_data_json extras。直接 LIKE 匹配 full_data_json 里出现的字段名。
+    """
+    from datetime import datetime, timezone
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    try:
+        cur = conn.execute(
+            "SELECT 1 FROM derivatives_snapshots "
+            "WHERE captured_at_utc LIKE ? "
+            "  AND (full_data_json LIKE '%btc_dominance%' "
+            "       OR full_data_json LIKE '%etf_flow%') "
+            "LIMIT 1",
+            (f"{today}%",),
+        )
+    except Exception:
+        return False
+    return cur.fetchone() is not None
+
+
 def _has_today_kline_1d(conn: Any) -> bool:
     """1d K 线今天 UTC 是否已存在(open_time_utc 落在今天 00:00 之后)。"""
     today = _today_utc_iso_midnight()
@@ -392,10 +470,17 @@ def job_collect_klines_daily(
     Sprint 2.8-F:多档 cron 补救;入口若发现今天已有 1d 候,直接 skipped。
     """
     def _body(conn: Any) -> dict[str, Any]:
-        if _has_today_kline_1d(conn):
-            logger.info("collect_klines_daily: today's 1d candle already exists, skip")
+        # Sprint 1.6.1 任务 B.2:细粒度门 — 1d 候 + 1.6 新 CoinGlass 2 metric
+        # 都今天写过才 skip;否则继续(K 线 upsert 幂等,不重复抓)。
+        kline_done = _has_today_kline_1d(conn)
+        cg_metrics_done = _has_today_btc_dominance_or_etf_flow(conn)
+        if kline_done and cg_metrics_done:
+            logger.info(
+                "collect_klines_daily: today's 1d candle + btc_dominance/etf_flow "
+                "all written, skip",
+            )
             return _skipped_today_payload(
-                "already_have_today_1d_candle", "klines_daily",
+                "already_have_today_1d_and_cg_metrics", "klines_daily",
             )
         from ..data.collectors.coinglass import CoinglassCollector
         from ..data.storage.dao import BTCKlinesDAO, KlineRow
@@ -550,10 +635,15 @@ def job_collect_onchain(
     已写过,直接 skipped。注意:skip 不调 _enqueue_pipeline_run(没有新数据)。
     """
     def _body(conn: Any) -> dict[str, Any]:
-        if _has_today_inserted_in_metric_table(conn, "onchain_metrics"):
-            logger.info("collect_onchain: today's onchain_metrics already written, skip")
+        # Sprint 1.6.1 任务 B:细粒度"今日完整性"门 — 期望集合(老 12 + 1.6 新 4)
+        # 全在 onchain_metrics 今天写过才 skip;否则继续 fetch 缺的部分
+        if _onchain_today_complete(conn):
+            logger.info(
+                "collect_onchain: today's all expected onchain metrics "
+                "already written, skip",
+            )
             return _skipped_today_payload(
-                "already_have_today_onchain_inserted", "glassnode",
+                "already_have_today_onchain_complete", "glassnode",
             )
         from ..data.collectors.glassnode import GlassnodeCollector
         from ..data.storage.dao import OnchainDAO, OnchainMetric

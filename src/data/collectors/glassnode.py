@@ -85,6 +85,12 @@ class GlassnodeCollector:
     _PATH_PRICE_REALIZED_BY_AGE  = f"{_BASE_PATH}/breakdowns/price_realized_usd_by_age"
     _PATH_SUPPLY_BY_AGE          = f"{_BASE_PATH}/breakdowns/supply_by_age"
 
+    # Sprint 1.6 (建模 v1.3 §2.4):新增 4 个链上端点
+    _PATH_STH_SUPPLY             = f"{_BASE_PATH}/supply/sth_sum"
+    _PATH_SSR                    = f"{_BASE_PATH}/indicators/ssr"
+    _PATH_CDD                    = f"{_BASE_PATH}/indicators/cdd"
+    _PATH_HODL_WAVES             = f"{_BASE_PATH}/supply/hodl_waves"
+
     # 155 天切分(行业惯例 LTH/STH 阈值)。
     # 3m_6m 桶包含 90-180 天,桶中点 135 天 < 155 天 → 归 STH(简化处理)
     _STH_BUCKETS: tuple[str, ...] = ("24h", "1d_1w", "1w_1m", "1m_3m", "3m_6m")
@@ -458,6 +464,121 @@ class GlassnodeCollector:
             source="glassnode_primary",
         )
 
+    # ==================================================================
+    # Sprint 1.6:链上 4 个新端点(建模 v1.3 §2.4)
+    # ==================================================================
+
+    def fetch_sth_supply(
+        self, interval: str = "24h", since_days: int = 720,
+    ) -> list[dict[str, Any]]:
+        """STH(短持有者)总持仓 BTC,scalar v 单值。"""
+        return self._fetch_series(
+            self._PATH_STH_SUPPLY, "sth_supply",
+            interval=interval, since_days=since_days,
+            source="glassnode_primary",
+        )
+
+    def fetch_ssr(
+        self, interval: str = "24h", since_days: int = 720,
+    ) -> list[dict[str, Any]]:
+        """Stablecoin Supply Ratio,OHLC 取 close。
+
+        响应:row.o = {"o": open, "h": high, "l": low, "c": close} 或 row.o = scalar。
+        实测 alphanode 返回 row.o 是 dict {"v": close} — 取 v;若为 scalar 直接返回。
+        """
+        body = self._request(
+            "GET", self._PATH_SSR,
+            params={"a": "BTC", "i": interval,
+                    **({"s": since_days_ago_unix(since_days, unit="s")}
+                       if since_days else {})},
+        )
+        rows = self._unwrap_data(body)
+        self._log_response_shape("ssr", rows)
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            t_raw = row.get("t")
+            if t_raw is None:
+                continue
+            try:
+                ts = to_iso_utc(t_raw, unit="s")
+            except (TypeError, ValueError):
+                continue
+            o = row.get("o")
+            if isinstance(o, dict):
+                # OHLC 字典:优先取 'c'(close),若无再取 'v'
+                value = safe_float(o.get("c") if "c" in o else o.get("v"))
+            else:
+                value = safe_float(o if o is not None else row.get("v"))
+            if value is None:
+                continue
+            out.append({
+                "timestamp": ts, "metric_name": "ssr",
+                "metric_value": value, "source": "glassnode_primary",
+            })
+        return out
+
+    def fetch_cdd(
+        self, interval: str = "24h", since_days: int = 720,
+    ) -> list[dict[str, Any]]:
+        """Coin Days Destroyed,scalar v。"""
+        return self._fetch_series(
+            self._PATH_CDD, "cdd",
+            interval=interval, since_days=since_days,
+            source="glassnode_primary",
+        )
+
+    # Sprint 1.6 任务 A.2:HODL Waves 入库方案 a — 拆 11+ 个独立 metric。
+    # 理由:查询简单,不改 schema;1 行 / bucket / 时间戳,跟其他链上 metric
+    # 同形态,前端 / picker / L 层都不需要特殊处理。
+    _HODL_WAVES_BUCKETS: tuple[str, ...] = (
+        "24h", "1d_1w", "1w_1m", "1m_3m", "3m_6m", "6m_12m",
+        "1y_2y", "2y_3y", "3y_5y", "5y_7y", "7y_10y", "more_10y",
+    )
+
+    def fetch_hodl_waves(
+        self, interval: str = "24h", since_days: int = 720,
+    ) -> list[dict[str, Any]]:
+        """HODL Waves:row.o 是 11+ bucket 的 dict。展开为多 metric。
+
+        每个 bucket → metric_name=hodl_waves_<bucket>。response 中可能没有
+        "more_10y"(早期数据),缺失时跳过该 bucket。
+        """
+        body = self._request(
+            "GET", self._PATH_HODL_WAVES,
+            params={"a": "BTC", "i": interval,
+                    **({"s": since_days_ago_unix(since_days, unit="s")}
+                       if since_days else {})},
+        )
+        rows = self._unwrap_data(body)
+        self._log_response_shape("hodl_waves", rows)
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            t_raw = row.get("t")
+            if t_raw is None:
+                continue
+            try:
+                ts = to_iso_utc(t_raw, unit="s")
+            except (TypeError, ValueError):
+                continue
+            buckets = row.get("o")
+            if not isinstance(buckets, dict):
+                continue
+            for bucket in self._HODL_WAVES_BUCKETS:
+                v = safe_float(buckets.get(bucket))
+                if v is None:
+                    continue  # 早期数据某些 bucket 可能不存在
+                out.append({
+                    "timestamp": ts,
+                    "metric_name": f"hodl_waves_{bucket}",
+                    "metric_value": v,
+                    "source": "glassnode_primary",
+                })
+        return out
+
     def fetch_btc_price_and_ath(
         self, interval: str = "24h", since_days: int = 720
     ) -> list[dict[str, Any]]:
@@ -561,6 +682,11 @@ class GlassnodeCollector:
             ("sopr_adjusted",      self.fetch_sopr_adjusted),
             ("reserve_risk",       self.fetch_reserve_risk),
             ("puell_multiple",     self.fetch_puell_multiple),
+            # Sprint 1.6(建模 v1.3 §2.4):4 个新链上端点
+            ("sth_supply",         self.fetch_sth_supply),
+            ("ssr",                self.fetch_ssr),
+            ("cdd",                self.fetch_cdd),
+            ("hodl_waves",         self.fetch_hodl_waves),
         ]
 
         stats: dict[str, int] = {}

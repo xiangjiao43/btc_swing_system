@@ -56,7 +56,10 @@ def _rows_to_dicts(rows: Iterable[sqlite3.Row]) -> list[dict[str, Any]]:
 
 
 TimeFrame = Literal["1h", "4h", "1d", "1w"]
-OnchainSource = Literal["glassnode_primary", "glassnode_display", "glassnode_delayed"]
+# Sprint 1.6:加 'computed' — LTH/STH-MVRV 本地计算(price/realized_price 比率)
+OnchainSource = Literal[
+    "glassnode_primary", "glassnode_display", "glassnode_delayed", "computed",
+]
 # Sprint 2.6-A.4:Yahoo 已弃用,FRED 是当前唯一可用 macro 主源。
 # 历史 DB 中可能仍有 source='yahoo_finance' 的旧行(Sprint 2.4 backfill 残留),
 # 不影响读取;新写入只会用 'fred'。

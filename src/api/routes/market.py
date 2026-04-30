@@ -150,7 +150,12 @@ def _compute_changes(rows: list[dict[str, Any]]) -> tuple[
 
 def _try_fetch_spot_1m() -> tuple[Optional[float], Optional[datetime]]:
     """Sprint 1.5k:取现货 1m 最新 close + bar 时间。
-    失败返回 (None, None),由调用方 fallback 到 K 线路径。"""
+    失败返回 (None, None),由调用方 fallback 到 K 线路径。
+
+    Sprint 1.5k.1:limit 2 → 10 防 alphanode 小批量限流(SSH 验证 limit=2
+    在 30s 轮询下大部分请求 data=[],被误判 fallback)。仍取 rows[-1] 作为
+    最新分钟现价。
+    """
     try:
         from ...data.collectors.coinglass import CoinglassCollector
     except Exception as e:
@@ -159,7 +164,7 @@ def _try_fetch_spot_1m() -> tuple[Optional[float], Optional[datetime]]:
     try:
         coll = CoinglassCollector()
         rows = coll.fetch_spot_price_history(
-            symbol="BTCUSDT", exchange="Binance", interval="1m", limit=2,
+            symbol="BTCUSDT", exchange="Binance", interval="1m", limit=10,
         )
         if not rows:
             return None, None

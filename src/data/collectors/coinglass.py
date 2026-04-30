@@ -412,13 +412,17 @@ class CoinglassCollector:
         symbol: str = "BTCUSDT",
         exchange: str = "Binance",
         interval: str = "1m",
-        limit: int = 2,
+        limit: int = 10,
     ) -> list[dict[str, Any]]:
         """Sprint 1.5k:现货 BTCUSDT 1m close 价,供顶栏分钟级现价。
 
         GET /api/spot/price/history (params: symbol, exchange, interval, limit)
         与 fetch_klines 区别:1) 现货不是期货 2) 颗粒度可到 1m
         (策略层不动,继续用 fetch_klines 的 1h)。
+
+        Sprint 1.5k.1:默认 limit 2 → 10。生产 SSH 验证 limit=2 触发 alphanode
+        中转的小批量限流(1 秒内连续多次返回空 data),limit=10 同一刻完全稳定。
+        调用方仍取 rows[-1] 作为最新分钟现价。
 
         Returns:
             list[{timestamp, open, high, low, close, volume_usd, volume_btc}]

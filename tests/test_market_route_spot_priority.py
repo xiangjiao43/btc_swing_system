@@ -173,6 +173,31 @@ def test_spot_exception_falls_back_to_kline(client: TestClient, db_path: Path):
 # Schema 不变
 # ============================================================
 
+def test_spot_path_uses_limit_10(client: TestClient, db_path: Path):
+    """Sprint 1.5k.1 反退化:_try_fetch_spot_1m 调 fetch_spot_price_history
+    时必须 limit=10(spec 校验,防 alphanode 小批量限流)。"""
+    _seed_klines_25h(db_path)
+    now = datetime.now(timezone.utc)
+    spot_rows = [{
+        "timestamp": now.strftime("%Y-%m-%dT%H:%M:00Z"),
+        "open": 76200.0, "high": 76400.0, "low": 76100.0,
+        "close": 76300.50, "volume_usd": 1000.0, "volume_btc": 0.013,
+    }]
+    with patch(
+        "src.data.collectors.coinglass.CoinglassCollector.fetch_spot_price_history",
+        return_value=spot_rows,
+    ) as mock_spot:
+        client.get("/api/market/btc-price")
+    assert mock_spot.called
+    # 关键 spec:limit=10(不是 2)
+    kwargs = mock_spot.call_args.kwargs
+    assert kwargs.get("limit") == 10, (
+        f"_try_fetch_spot_1m must pass limit=10, got {kwargs.get('limit')} — "
+        "1.5k.1 防退回 limit=2"
+    )
+    assert kwargs.get("interval") == "1m"
+
+
 def test_response_schema_unchanged(client: TestClient, db_path: Path):
     """BtcPriceResponse 字段未删未改名(只是 source 多了一种枚举值)。"""
     _seed_klines_25h(db_path)

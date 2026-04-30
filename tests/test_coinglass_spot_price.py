@@ -81,13 +81,26 @@ def test_fetch_spot_price_passes_correct_params():
     body = {"code": "0", "data": []}
     cg = _make_collector_with_fake_request(body)
     cg.fetch_spot_price_history(
-        symbol="BTCUSDT", exchange="Binance", interval="1m", limit=2,
+        symbol="BTCUSDT", exchange="Binance", interval="1m", limit=10,
     )
     params = cg._request.call_args.kwargs["params"]
     assert params["symbol"] == "BTCUSDT"
     assert params["exchange"] == "Binance"
     assert params["interval"] == "1m"
-    assert params["limit"] == 2
+    assert params["limit"] == 10
+
+
+def test_fetch_default_limit_is_10():
+    """Sprint 1.5k.1 反退化:默认 limit 必须是 10 防 alphanode 小批量限流
+    (limit=2 在 30s 轮询下生产 SSH 验证大部分返回 data=[])。"""
+    body = {"code": "0", "data": []}
+    cg = _make_collector_with_fake_request(body)
+    cg.fetch_spot_price_history()  # 不显式传 limit
+    params = cg._request.call_args.kwargs["params"]
+    assert params["limit"] == 10, (
+        f"default limit should be 10, got {params['limit']} — "
+        "1.5k.1 防退回 limit=2"
+    )
 
 
 # ============================================================

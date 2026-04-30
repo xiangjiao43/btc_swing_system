@@ -62,7 +62,11 @@ class BaseAgent:
     def analyze(self, context: dict[str, Any]) -> dict[str, Any]:
         """主入口。读 context → 调 AI → 解析 → 返回结构化 dict。
 
-        失败时返回 _fallback_output(),状态字段 status='degraded' / 'fallback'。
+        v5(Sprint 1.8):支持 multi-modal — context 可含 'chart_b64' 字段
+        (base64 PNG)。BaseAgent 自动构造 anthropic 多模态 message
+        (image content block + text content block)。子类不需要管。
+
+        失败时返回 _fallback_output(),status='degraded' / 'fallback'。
         绝不抛异常。
         """
         if not self.AGENT_NAME or not self.PROMPT_FILE:
@@ -100,8 +104,9 @@ class BaseAgent:
             out["status"] = "degraded_client_unavailable"
             return out
 
+        chart_b64 = context.get("chart_b64") if context else None
         return self._call_ai_with_retry(
-            client, system_prompt, user_prompt,
+            client, system_prompt, user_prompt, chart_b64=chart_b64,
         )
 
     # ------------------------------------------------------------------
@@ -138,14 +143,36 @@ class BaseAgent:
         client: Any,
         system_prompt: str,
         user_prompt: str,
+        *,
+        chart_b64: Optional[str] = None,
     ) -> dict[str, Any]:
-        """两次重试:温度 0.2 → 0.4。任一次解析成功即返回。"""
+        """两次重试:温度 0.2 → 0.4。任一次解析成功即返回。
+
+        v5:chart_b64 不为空时,user content 是 [image, text] list
+        (anthropic multi-modal);否则纯 text。
+        """
         model = effective_model(self._model_override)
         last_error: Optional[str] = None
         total_tokens_in = 0
         total_tokens_out = 0
         total_latency_ms = 0
         last_model_used = model
+
+        # 构造 user content(纯文本 vs multi-modal)
+        if chart_b64:
+            user_content: Any = [
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "image/png",
+                        "data": chart_b64,
+                    },
+                },
+                {"type": "text", "text": user_prompt},
+            ]
+        else:
+            user_content = user_prompt
 
         for attempt, temperature in enumerate(
             (_DEFAULT_TEMPERATURE, _RETRY_TEMPERATURE), start=1,
@@ -155,7 +182,7 @@ class BaseAgent:
                 resp = client.messages.create(
                     model=model,
                     system=system_prompt,
-                    messages=[{"role": "user", "content": user_prompt}],
+                    messages=[{"role": "user", "content": user_content}],
                     max_tokens=self._max_tokens,
                     temperature=temperature,
                 )

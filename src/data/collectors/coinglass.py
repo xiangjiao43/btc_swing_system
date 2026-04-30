@@ -164,6 +164,8 @@ class CoinglassCollector:
     _PATH_LONG_SHORT    = f"{_PATH_PREFIX}/futures/global-long-short-account-ratio/history"
     _PATH_LIQUIDATION   = f"{_PATH_PREFIX}/futures/liquidation/history"
     _PATH_NET_POSITION  = f"{_PATH_PREFIX}/futures/net-position/history"
+    # Sprint 1.5k:现货 1m 价格端点(顶栏分钟级现价,非策略层 K 线)
+    _PATH_SPOT_PRICE    = f"{_PATH_PREFIX}/spot/price/history"
 
     def __init__(self) -> None:
         cfg = load_source_config("coinglass")
@@ -397,6 +399,49 @@ class CoinglassCollector:
                 logger.warning(
                     "Skipping malformed kline row on %s: keys=%s (error: %s)",
                     interval, list(row)[:10] if isinstance(row, dict) else type(row), e,
+                )
+                continue
+        return result
+
+    # ------------------------------------------------------------------
+    # A.1) 现货 1m 价(顶栏分钟级现价,Sprint 1.5k)
+    # ------------------------------------------------------------------
+
+    def fetch_spot_price_history(
+        self,
+        symbol: str = "BTCUSDT",
+        exchange: str = "Binance",
+        interval: str = "1m",
+        limit: int = 2,
+    ) -> list[dict[str, Any]]:
+        """Sprint 1.5k:现货 BTCUSDT 1m close 价,供顶栏分钟级现价。
+
+        GET /api/spot/price/history (params: symbol, exchange, interval, limit)
+        与 fetch_klines 区别:1) 现货不是期货 2) 颗粒度可到 1m
+        (策略层不动,继续用 fetch_klines 的 1h)。
+
+        Returns:
+            list[{timestamp, open, high, low, close, volume_usd, volume_btc}]
+            timestamp 为 ISO UTC。失败抛 CoinglassCollectorError(由调用方捕获)。
+        """
+        body = self._request(
+            "GET", self._PATH_SPOT_PRICE,
+            params={"symbol": symbol, "exchange": exchange,
+                    "interval": interval, "limit": limit},
+        )
+        rows = self._unwrap_data(body)
+        self._log_response_shape(f"spot_price[{interval}]", rows)
+
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            try:
+                result.append(_normalize_ohlc_row(row))
+            except (KeyError, ValueError, TypeError) as e:
+                logger.warning(
+                    "Skipping malformed spot row on %s: keys=%s (error: %s)",
+                    interval,
+                    list(row)[:10] if isinstance(row, dict) else type(row),
+                    e,
                 )
                 continue
         return result

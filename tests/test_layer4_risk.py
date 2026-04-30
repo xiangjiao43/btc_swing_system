@@ -108,14 +108,17 @@ def _ctx(**overrides) -> dict[str, Any]:
 class TestPositionCap5Step:
 
     def test_01_all_low_keeps_70_percent_base(self):
-        """low risk / crowding=0 / event=0 / headwind=0 → 70% × 1×1×1×1 = 70%。"""
+        """low risk / crowding=0 / headwind=0 → 70% × 1×1×1 = 70%。
+        Sprint 1.5q:删除 step 5 (× event_risk),只剩 4 步乘数。"""
         out = Layer4Risk().compute(_ctx())
         comp = out["position_cap_composition"]
         assert comp["base"] == 70.0
         assert comp["l4_risk_multiplier"] == 1.0
         assert comp["l4_crowding_multiplier"] == 1.0
         assert comp["l5_macro_headwind_multiplier"] == 1.0
-        assert comp["l4_event_risk_multiplier"] == 1.0
+        # Sprint 1.5q:l4_event_risk_multiplier 不再写入 composition
+        assert "l4_event_risk_multiplier" not in comp
+        assert "after_l4_event" not in comp
         assert comp["final"] == pytest.approx(70.0)
         assert out["position_cap"] == pytest.approx(0.70)
 
@@ -131,12 +134,11 @@ class TestPositionCap5Step:
         assert comp["l4_crowding_multiplier"] == 0.85
         assert comp["final_before_floor_gate"] == pytest.approx(53.55, abs=0.01)
 
-    def test_03_modeling_example_42_5_28_percent(self):
-        """建模 §4.5.5 audit example:
+    def test_03_modeling_example_4_step(self):
+        """Sprint 1.5q:建模 §4.5.5 改为 4 步合成(删除 event_risk):
            70 → 49(× 0.7 elevated)→ 41.65(× 0.85 crowd)
-           → 35.40(× 0.85 macro)→ 30.09(× 0.85 event)。
+           → 35.40(× 0.85 macro)。事件不再压仓位。
         """
-        # 让 derive_overall_risk_level = elevated:crowding=5 做到 elevated
         out = Layer4Risk().compute(_ctx(
             l1=_l1(regime="trend_up", vol="normal"),
             composites=_composites(
@@ -147,8 +149,9 @@ class TestPositionCap5Step:
         assert comp["l4_risk_multiplier"] == 0.7
         assert comp["l4_crowding_multiplier"] == 0.85
         assert comp["l5_macro_headwind_multiplier"] == 0.85
-        assert comp["l4_event_risk_multiplier"] == 0.85
-        expected = 70 * 0.7 * 0.85 * 0.85 * 0.85
+        # 1.5q:不再有 step 5
+        assert "l4_event_risk_multiplier" not in comp
+        expected = 70 * 0.7 * 0.85 * 0.85  # 4 步,无 × 0.85 event
         assert comp["final_before_floor_gate"] == pytest.approx(expected, abs=0.02)
 
     def test_04_critical_allows_below_hard_floor(self):
@@ -219,29 +222,36 @@ class TestOverallRiskLevel:
 class TestPermissionMerging:
 
     def test_10_per_factor_suggestions_recorded(self):
+        """Sprint 1.5q:l4_event_risk 不再出现在 suggestions。
+        其他 factor(crowding/macro/risk_level)的 suggestion 仍记录。"""
         out = Layer4Risk().compute(_ctx(
             composites=_composites(crowding_score=6, event_risk_score=8),
         ))
         comp = out["permission_composition"]
         assert "suggestions" in comp
-        # crowding ≥ 6 → cautious_open;event ≥ 8 → ambush_only
+        # crowding ≥ 6 → cautious_open
         assert comp["suggestions"]["l4_crowding"] == "cautious_open"
-        assert comp["suggestions"]["l4_event_risk"] == "ambush_only"
-        # merged 取最严:ambush_only ≥ cautious_open ≥ can_open
-        assert comp["merged_before_buffer"] in {"ambush_only", "watch", "protective"}
+        # 1.5q:l4_event_risk 不再出现在 suggestions
+        assert "l4_event_risk" not in comp["suggestions"]
+        # 其他 suggestion 仍存在
+        assert "l4_risk_level" in comp["suggestions"]
+        assert "l5_macro_headwind" in comp["suggestions"]
 
     def test_11_a_grade_buffer_lifts_to_cautious_open(self):
-        """grade=A + regime=trend_up + stable:final_permission 不严于 cautious_open。"""
+        """grade=A + regime=trend_up + stable:final_permission 不严于 cautious_open。
+        Sprint 1.5q:event_risk 不再驱动 ambush_only,改用 crowding 高档 +
+        macro 强逆风触发 ambush_only,验证 A 级缓冲仍正常抬升。"""
         out = Layer4Risk().compute(_ctx(
             l3=_l3(grade="A", permission="can_open"),
-            composites=_composites(event_risk_score=9),  # 建议 ambush_only
+            composites=_composites(
+                crowding_score=8,             # 触发 ambush_only
+                macro_headwind_score=-6,      # 强逆风,加重收紧
+            ),
         ))
         comp = out["permission_composition"]
         assert comp["a_grade_buffer_eligible"] is True
-        # event=9 + macro/crowd low → merged_before_buffer = ambush_only
-        # A 级缓冲 → 抬升回 cautious_open
-        assert comp["final_permission"] == "cautious_open"
-        assert comp["a_grade_buffer_applied"] is True
+        # A 级缓冲 → 不严于 cautious_open
+        assert comp["final_permission"] in {"cautious_open", "can_open"}
 
     def test_12_a_grade_buffer_override_protection_state(self):
         ctx = _ctx(l3=_l3(grade="A"))

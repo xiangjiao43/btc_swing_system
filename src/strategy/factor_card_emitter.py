@@ -1729,6 +1729,9 @@ def _emit_events_reference(
         ev = next_by_type.get(t) or fallback_seen.get(t)
         label = type_labels[t]
         hours_to = ev.get("hours_to") if ev else None
+        # Sprint 1.5q:中长期波段哲学 — 事件改纯参考显示,impact_direction
+        # 永远 neutral,不再"< 48h 标偏空"。事件影响通过 funding/LSR/价格/
+        # macro_headwind 数据层自然体现,不需要预先打标签。
         cards.append(_make_card(
             card_id=f"event_{t}_next_{today}",
             category="events", tier="reference",
@@ -1738,15 +1741,15 @@ def _emit_events_reference(
             captured_at_bjt=datetime.now(_BJT).strftime("%Y-%m-%d %H:%M (BJT)"),
             data_fresh=True,
             plain_interpretation=(
-                (f"📊 距离下次 {label} 还有 {hours_to:.0f} 小时\n"
-                 f"🔍 < 24h = 高风险窗口(系统降档);24-48h = 中等风险;48-72h = 低风险;> 72h = 无影响"
-                 ) if hours_to is not None
+                f"📊 距离下次 {label} 还有 {hours_to:.0f} 小时\n"
+                f"🔍 仅供参考 — 事件本身不参与策略评分(中长期波段)"
+                if hours_to is not None
                 else (f"📊 未来 72 小时内无 {label}\n"
-                      f"🔍 < 24h = 高风险窗口;24-48h = 中等;48-72h = 低;> 72h = 无影响")
+                      f"🔍 仅供参考 — 事件本身不参与策略评分")
             ),
-            strategy_impact=event_descriptions[t],
-            impact_direction=("bearish" if hours_to is not None and hours_to < 48 else "neutral"),
-            impact_weight=0.5,
-            linked_layer="L4", source="Event calendar",
+            strategy_impact="📍 此为参考信息,不参与策略评分(Sprint 1.5q)",
+            impact_direction="neutral",  # 永远 neutral
+            impact_weight=0.0,            # 不计入加权
+            linked_layer=None, source="Event calendar",
         ))
     return cards

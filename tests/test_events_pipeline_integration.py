@@ -103,9 +103,11 @@ def test_seed_then_event_risk_scores_medium_band(
     })
 
     # fomc base_weight=4 × distance_multiplier(36h → [24,48] bucket)=1.0 → 4.0
+    # Sprint 1.5q:分数仍计算用于审计,但 band=none / cap_multiplier=1.0
+    # (中长期波段哲学,事件不影响策略)
     assert out["score"] == pytest.approx(4.0, abs=0.01)
-    assert out["band"] == "medium"
-    assert out["position_cap_multiplier"] == 0.85
+    assert out["band"] == "none"
+    assert out["position_cap_multiplier"] == 1.0
     assert out["upcoming_events_count"] == 1
     assert out["contributing_events"][0]["type"] == "fomc"
 

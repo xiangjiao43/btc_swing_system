@@ -645,7 +645,9 @@ _JOB_FUNCTIONS: dict[str, Callable[..., Any]] = {
     # Sprint 2.7-C:pipeline 2 个 wrapper(对应 yaml 2 个 cron 条目)
     "pipeline_run_regular": job_pipeline_run_regular,
     "pipeline_run_8h_onchain": job_pipeline_run_8h_onchain,
-    # Sprint 2.7-A/B:5 个 collector + event_listener(stub,2.7-D 实施)
+    # Sprint 2.7-A/B:5 个 collector + event_listener(2.7-D 已完整实施 +
+    # 1.5q 修注释:event_listener 真在跑,4 类 event 都通,但生产 30d 0 触发
+    # 是因为 ±3% 24h 阈值在中长期波段并非高频信号 — 详见 sprint_1_5q.md A.1)
     "collect_klines_1h": job_collect_klines_1h,
     "collect_klines_daily": job_collect_klines_daily,
     "collect_klines_weekly": job_collect_klines_weekly,

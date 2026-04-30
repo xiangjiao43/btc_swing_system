@@ -84,34 +84,24 @@ class EventRiskFactor(CompositeFactorBase):
                 "effective_score": round(event_score, 3),
             })
 
-        # ---- 输出 band ----
-        high_th = float(bands.get("high_at_or_above", 8))
-        medium_th = float(bands.get("medium_at_or_above", 4))
-
-        permission_adjustment: Optional[str] = None
-        if total_score >= high_th:
-            band = "high"
-            cap_multiplier = 0.7
-            permission_adjustment = "ambush_only"
-        elif total_score >= medium_th:
-            band = "medium"
-            cap_multiplier = 0.85
-        else:
-            band = "low"
-            cap_multiplier = 1.0
-
+        # ---- Sprint 1.5q:中长期波段哲学 — EventRisk 不再影响策略 ----
+        # 旧实现:< 24h 时 cap×0.7 + permission=ambush_only,系统被预降级。
+        # 新实施:band 永远 'none',cap_multiplier=1.0,permission_adjustment=None,
+        # 让 events 列表纯做参考显示(网页事件日历区),不改 cap / permission。
+        # 详见 docs/cc_reports/sprint_1_5q.md。
         return {
             "factor": self.name,
-            "score": round(total_score, 3),
-            "band": band,
-            "position_cap_multiplier": cap_multiplier,
-            "permission_adjustment": permission_adjustment,
+            "score": round(total_score, 3),  # 保留分数仅供日志/审计
+            "band": "none",                   # 1.5q:永远 none(不分档)
+            "position_cap_multiplier": 1.0,   # 1.5q:永远 1.0(不压仓位)
+            "permission_adjustment": None,    # 1.5q:永远 None(不影响 permission)
             "contributing_events": contributing,
             "upcoming_events_count": len(events),
             **reduce_metadata(
-                health_status="healthy" if events else "healthy",  # 空也不是错
+                health_status="healthy",
                 notes=(
-                    ["no events in 72h window"] if not events else []
+                    ["EventRisk 已在 Sprint 1.5q 软删除:不影响策略,events "
+                     "仅供网页参考显示"]
                 ),
             ),
         }

@@ -340,16 +340,8 @@ def _derive_overall_risk_level(
         else:
             levels.append("low")
 
-    # event_risk
-    if event_risk_score is not None:
-        if event_risk_score >= 10:
-            levels.append("high")
-        elif event_risk_score >= 6:
-            levels.append("elevated")
-        elif event_risk_score >= 3:
-            levels.append("moderate")
-        else:
-            levels.append("low")
+    # Sprint 1.5q:event_risk 不再驱动 overall_risk_level(中长期波段)
+    _ = event_risk_score  # kept in signature for compat
 
     # macro_headwind(负值越深越严)
     if macro_headwind_score is not None:
@@ -406,18 +398,16 @@ def _compose_position_cap(
     comp["after_l5_macro"] = round(after_l5_macro, 4)
     comp["l5_macro_headwind_multiplier"] = mult_macro
 
-    # step 5: × L4_event_risk
-    mult_event = _score_to_multiplier(event_risk_score, _EVENT_BANDS, default=1.0)
-    after_l4_event = after_l5_macro * mult_event
-    comp["after_l4_event"] = round(after_l4_event, 4)
-    comp["l4_event_risk_multiplier"] = mult_event
+    # Sprint 1.5q:删除 step 5 (× L4_event_risk)。中长期波段不让事件预降级仓位。
+    # event_risk_score 仍接收(向下兼容上游 caller 传参)但不再使用。
+    _ = event_risk_score  # explicitly unused, kept in signature for compat
 
     comp["hard_floor_pct"] = hard_floor_pct
     comp["hard_floor_applied_to_final"] = False  # 由 _apply_floor_gate 置位
-    comp["final_before_floor_gate"] = round(after_l4_event, 4)
-    comp["final"] = round(after_l4_event, 4)  # 会被 _apply_floor_gate 更新
+    comp["final_before_floor_gate"] = round(after_l5_macro, 4)
+    comp["final"] = round(after_l5_macro, 4)  # 会被 _apply_floor_gate 更新
 
-    return after_l4_event, comp
+    return after_l5_macro, comp
 
 
 def apply_l5_ai_loopback(
@@ -464,11 +454,8 @@ def apply_l5_ai_loopback(
     comp["macro_headwind_score_source"] = "l5_ai"
     comp["after_l5_macro"] = round(new_after_l5_macro, 4)
 
-    # ---- 重算 step 5(× event_risk multiplier,该值不变)----
-    event_mult = float(comp.get("l4_event_risk_multiplier") or 1.0)
-    new_after_l4_event = new_after_l5_macro * event_mult
-    comp["after_l4_event"] = round(new_after_l4_event, 4)
-    comp["final_before_floor_gate"] = round(new_after_l4_event, 4)
+    # Sprint 1.5q:不再有 step 5(event_risk),final_before_floor 直接 = after_l5_macro
+    comp["final_before_floor_gate"] = round(new_after_l5_macro, 4)
 
     # ---- 重新走 hard floor gate(用现有 permission)----
     final_permission = (
@@ -479,7 +466,7 @@ def apply_l5_ai_loopback(
     overall_risk = layer_4_output.get("overall_risk_level") or "moderate"
     hard_floor = float(comp.get("hard_floor_pct") or 15.0)
     new_final_pct, comp = _apply_floor_gate(
-        cap_pct=new_after_l4_event,
+        cap_pct=new_after_l5_macro,
         composition=comp,
         final_permission=final_permission,
         overall_risk_level=overall_risk,
@@ -597,10 +584,9 @@ def _merge_permissions(
         crowding_score, _CROWDING_PERMISSION_BANDS, default="can_open",
     )
 
-    # L4 EventRisk 建议
-    suggestions["l4_event_risk"] = _score_to_permission(
-        event_risk_score, _EVENT_PERMISSION_BANDS, default="can_open",
-    )
+    # Sprint 1.5q:删除 L4 EventRisk permission 建议(中长期波段不让事件预降级)。
+    # event_risk_score 仍接收为兼容上游,但不再 merge 到 final_permission。
+    _ = event_risk_score  # explicitly unused
 
     # L5 MacroHeadwind 建议
     suggestions["l5_macro_headwind"] = _score_to_permission(

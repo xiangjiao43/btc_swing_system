@@ -189,8 +189,9 @@ def test_loopback_applies_strong_headwind_multiplier():
     assert comp["l5_macro_headwind_multiplier"] == 0.7
     # after_l5_macro = 49 × 0.7 = 34.3
     assert comp["after_l5_macro"] == pytest.approx(34.3, abs=0.01)
-    # after_l4_event = 34.3 × 1.0 = 34.3
-    assert comp["after_l4_event"] == pytest.approx(34.3, abs=0.01)
+    # Sprint 1.5q:删除 step 5(× event_risk),final_before_floor_gate
+    # 直接 = after_l5_macro
+    assert comp["final_before_floor_gate"] == pytest.approx(34.3, abs=0.01)
     # final cap reflects new value
     assert out["position_cap_pct"] == pytest.approx(34.3, abs=0.01)
     assert comp["macro_headwind_score_source"] == "l5_ai"

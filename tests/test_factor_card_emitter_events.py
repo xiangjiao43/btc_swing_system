@@ -52,8 +52,10 @@ def test_emit_events_card_includes_pce():
     assert pce_card is not None
     assert pce_card["current_value"] == 30.0
     assert "PCE" in pce_card["name"] or "PCE" in pce_card.get("name_en", "")
-    # strategy_impact 含 PCE 描述(Pinchuk 2024)
-    assert "PCE" in pce_card["strategy_impact"]
+    # Sprint 1.5q:strategy_impact 改为统一 "参考信息" 文案(中长期波段)
+    assert "参考信息" in pce_card["strategy_impact"]
+    # impact_direction 永远 neutral
+    assert pce_card["impact_direction"] == "neutral"
 
 
 def test_emit_events_card_includes_options_expiry_major():
@@ -66,8 +68,9 @@ def test_emit_events_card_includes_options_expiry_major():
     )
     assert opt_card is not None
     assert opt_card["current_value"] == 721.0
-    # strategy_impact 含季度 / 月度区分说明
-    assert "季度" in opt_card["strategy_impact"] or "Q" in opt_card["strategy_impact"]
+    # Sprint 1.5q:strategy_impact 改为统一 "参考信息" 文案
+    assert "参考信息" in opt_card["strategy_impact"]
+    assert opt_card["impact_direction"] == "neutral"
 
 
 def test_emit_events_card_value_none_when_event_missing():

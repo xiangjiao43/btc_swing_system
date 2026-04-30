@@ -706,6 +706,11 @@ class DerivativesDAO:
             df = pd.DataFrame(pairs, columns=["timestamp", "metric_value"])
             df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
             df = df.set_index("timestamp").sort_index()
+            # Sprint 1.5j Bug 1:同一 captured_at 上 alias 双写(主列 + extras
+            # 同名)会让 _explode_row emit 两次,导致 _pct_change(series, 1)
+            # 取末两行 = 同 daily bar → 0% 假信号(LSR、OI 都受影响)。
+            # 通用兜底:取每个 ts 的最后一次值(假设后写更准),避免重复行。
+            df = df[~df.index.duplicated(keep="last")]
             out[name] = df["metric_value"].astype(float)
         return out
 

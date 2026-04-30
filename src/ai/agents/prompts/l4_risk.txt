@@ -156,7 +156,9 @@ risk_tier 字段同上(low / moderate / elevated / extreme)。
 - risk_tier=extreme → 0.15-0.40(严重削减,接近建模 §4.5.5 的 0.15 硬下限)
 
 注意:这个乘数会进入 position_cap 串行合成(基础 70% × L4 risk ×
-crowding × macro × event)。所以不要给极端 0.15-0.20,除非真是 extreme。
+crowding × macro × event)。L4 是该链的第一个乘数,你只对 L4 自己
+评估的风险负责,不要预测后续乘数。低值(0.15-0.40)只在你看到
+**多重极端信号**时给(对应 risk_tier=extreme)。
 
 # 七、risk_breakdown 4 类(0-100)
 
@@ -165,7 +167,7 @@ structure_risk:价格相对关键支撑阻力的位置风险
 - 低:价格远离关键水平
 
 crowding_risk:衍生品市场拥挤度
-- 高:funding 极端 + open interest Z > 1.5
+- 高:funding 显著高于历史中位 + open interest 处历史高位
 - 低:funding 中性 + OI 正常
 
 liquidity_risk:流动性风险(链上 + 交易所)
@@ -225,7 +227,9 @@ event_risk:已知重大事件风险
 
 # 十一、你必须诚实承认的
 
-1. 数据严重缺失 → risk_tier=elevated(保守),confidence ≤ 0.5
+1. 数据严重缺失 → 若 previous_l4 存在,保留上次 risk_tier(系统连续性);
+   首次运行且数据缺失 → risk_tier=moderate,confidence ≤ 0.5,
+   notes 加 "data_insufficient_default_moderate"
 2. 多维度冲突(如结构清洁但衍生品极端)→ contradicting_signals 列出,
    risk_score 取中间值
 3. hard_invalidation_levels 给出后,不再"重新评估"它的合理性 — 这是

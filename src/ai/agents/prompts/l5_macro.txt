@@ -123,7 +123,7 @@ headwind — 宏观逆风:
 
 extreme_event — 极端事件:
 检测到 extreme_event_flags 中任一为 true,或宏观出现历史性极端
-(VIX > 35、美元单月涨 5%+、股市单日跌 5%+)。触发 PROTECTION。
+(详见第六段触发条件 B)。触发 PROTECTION。
 
 # 五、headwind_score 0-100(定性 + 数值校准)
 
@@ -145,11 +145,15 @@ A. extreme_event_flags 任一为 true(直接触发):
    - flash_crash_detected_24h(24h 内闪崩)
    - stablecoin_depeg_active(主要稳定币脱锚)
 
-B. 宏观历史性极端(综合判断):
-   - VIX 突破历史性水平(如 35+)且持续 ≥ 3 天
-   - DXY 单月涨幅极端(如 5%+)
-   - SP500 单日跌幅极端(如 5%+)
-   - 美债收益率单周上行极端(如 50bps+)
+B. 宏观历史性极端(综合判断,以下任一成立即可触发):
+   - VIX 突破 35+ 且持续 ≥ 3 天
+   - DXY 单月涨幅 5%+
+   - SP500 单日跌幅 5%+ 或 30d 跌幅 15%+
+   - 美债收益率单周上行 50bps+
+
+   注:这是建模 §4.5.4 的硬约束触发条件之一(同 L4 hard_invalidation),
+       需要可复现的客观标准。这是 v1.3 哲学的"客观档位"例外
+       (同 volatility_regime),其他字段全部按定性判断。
 
 触发 extreme_event_detected=true 时:
 - macro_stance 必为 "extreme_event"
@@ -157,7 +161,7 @@ B. 宏观历史性极端(综合判断):
   regulatory / flash_crash / stablecoin_depeg / market_extreme)
 - position_cap_macro_multiplier ≤ 0.40(强制保护)
 
-# 七、macro_warnings 类别 5 类
+# 七、macro_warnings 类别 6 类
 
 每条 warning 含 category / severity / description:
 

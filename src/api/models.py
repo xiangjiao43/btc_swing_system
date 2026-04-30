@@ -81,3 +81,26 @@ class DataSourceSummary(BaseModel):
 
 class DataSummaryResponse(BaseModel):
     sources: list[DataSourceSummary]
+
+
+# Sprint 1.5n:系统自检面板
+class HealthDetailEvidenceLayer(BaseModel):
+    layer_id: int
+    name: str
+    health: str  # healthy / degraded / missing
+    pillars_summary: str
+    missing_reasons: list[str] = Field(default_factory=list)
+
+
+class HealthDetailDataSource(BaseModel):
+    name: str
+    status: str  # ok / warn / critical / no_data
+    age_minutes: float | None = None
+    captured_at_bjt: str | None = None
+    expected_cadence: str
+
+
+class HealthDetailResponse(BaseModel):
+    evidence_layers: list[HealthDetailEvidenceLayer]
+    data_sources: list[HealthDetailDataSource]
+    overall_status: str  # all_healthy / partial_degraded / critical

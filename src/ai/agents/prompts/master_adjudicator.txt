@@ -408,19 +408,19 @@ H10. confidence ≤ data_completeness_pct/100 × min(L1-L5 confidence)
     "entry_price_zone": [75000, 75500],
     "stop_loss": 73200,
     "take_profit_zones": [78900, 82100, 86000],
-    "position_size_pct": 0.45,
-    "position_size_reasoning": "position_cap=0.44,grade=A 给 1.0 比例 → 0.44(取 0.45 精度)"
+    "position_size_pct": 0.44,
+    "position_size_reasoning": "grade=A 给最高比例 1.0 × position_cap 0.4409 = 0.44(取两位精度)"
   },
   "position_cap_final": {
-    "value": 0.44,
+    "value": 0.4409,
     "composition": {
       "base": 0.70,
       "l4_multiplier": 0.78,
       "crowding_multiplier": 0.85,
       "macro_multiplier": 1.00,
       "event_multiplier": 0.95,
-      "raw_product": 0.4408,
-      "after_hard_floor": 0.44
+      "raw_product": 0.4409,
+      "after_hard_floor": 0.4409
     }
   },
   "conflict_resolution": [],
@@ -428,14 +428,14 @@ H10. confidence ≤ data_completeness_pct/100 × min(L1-L5 confidence)
   "key_observations": [
     "5 层 AI 全部齐心支持 LONG_PLANNED:L1 trend_up + L2 bullish + L3 A + L4 moderate + L5 supportive",
     "L4 给出 3 档止损,选最近 swing_low 73200(距当前 -3.36%)作为 stop_loss",
-    "position_cap 串行合成 0.44,grade=A 仓位比例 1.0 → 0.45 实际仓位",
+    "position_cap 串行合成 0.4409,grade=A 仓位比例 1.0 → 0.44 实际仓位",
     "等待 75000-75500 回撤入场,take_profit 三档 78900 / 82100 / 86000"
   ],
   "counter_arguments": [
     "L2 phase=early 表明趋势空间大,但若 swing_high 创新失败(78900 突破后回落破 75320),趋势可能转 transition_down,需关注",
     "L4 funding Z=0.85 偏高,若快速冲到 Z=2,可能去杠杆,届时 stop_loss 73200 可能被快速触及"
   ],
-  "narrative": "BTC 处于高质量做多窗口。L1-L5 五层 AI 全部齐心:L1 趋势稳定向上,L2 看多结构成立且处于早期阶段,L3 给出 A 级机会,L4 风险中等,L5 宏观助推。决策 LONG_PLANNED:在 75000-75500 区间等待回撤入场,止损 73200(L4 最近 swing_low),三档止盈 78900 / 82100 / 86000,实际仓位 0.45(position_cap 0.44)。若价格跌破 73200 立即离场。关注 funding 是否冲高引发去杠杆。",
+  "narrative": "BTC 处于高质量做多窗口。L1-L5 五层 AI 全部齐心:L1 趋势稳定向上,L2 看多结构成立且处于早期阶段,L3 给出 A 级机会,L4 风险中等,L5 宏观助推。决策 LONG_PLANNED:在 75000-75500 区间等待回撤入场,止损 73200(L4 最近 swing_low),三档止盈 78900 / 82100 / 86000,实际仓位 0.44(position_cap 0.4409)。若价格跌破 73200 立即离场。关注 funding 是否冲高引发去杠杆。",
   "confidence": 0.85,
   "data_completeness_pct": 100,
   "notes": []
@@ -478,7 +478,7 @@ H10. confidence ≤ data_completeness_pct/100 × min(L1-L5 confidence)
     "stop_loss": 65890,
     "take_profit_zones": null,
     "position_size_pct": 0.15,
-    "position_size_reasoning": "PROTECTION 状态强制减仓至硬下限 0.15(基础 70% × 0.20 × 0.50 × 0.20 × 0.50 = 0.014,触发硬下限 0.15)"
+    "position_size_reasoning": "PROTECTION 状态强制减仓至硬下限 0.15(基础 70% × 0.20 × 0.50 × 0.20 × 0.50 = 0.007,触发硬下限 0.15)"
   },
   "position_cap_final": {
     "value": 0.15,
@@ -488,7 +488,7 @@ H10. confidence ≤ data_completeness_pct/100 × min(L1-L5 confidence)
       "crowding_multiplier": 0.50,
       "macro_multiplier": 0.20,
       "event_multiplier": 0.50,
-      "raw_product": 0.014,
+      "raw_product": 0.007,
       "after_hard_floor": 0.15
     }
   },
@@ -502,16 +502,16 @@ H10. confidence ≤ data_completeness_pct/100 × min(L1-L5 confidence)
   "key_observations": [
     "L5 extreme_event_detected=true(地缘冲突)+ L1=chaos + L4=extreme,5 层 AI 全部反向",
     "硬约束 H4 触发:任何持仓状态 + extreme_event → PROTECTION",
-    "position_cap 串行 raw 0.014 触发 0.15 硬下限,实际仓位 0.15",
+    "position_cap 串行 raw 0.007 触发 0.15 硬下限,实际仓位 0.15",
     "stop_loss 选 EMA_200_BREAK 65890(距当前 -1.95%,L4 给的最近止损)"
   ],
   "counter_arguments": [
     "若 extreme_event 是市场短暂反应(如几天内地缘缓解),减仓后可能错过回弹,但建模设计 PROTECTION 是为了'宁错过不做错',符合系统纪律"
   ],
-  "narrative": "BTC 触发极端事件保护。L5 报告地缘冲突活跃,extreme_event_detected=true 触发硬约束 H4。L1 切到 chaos、L4 给出 extreme 风险、L2 已转 bearish,5 层 AI 全部反向。状态从 LONG_HOLD 强制进 PROTECTION,position_cap 串行合成 raw 0.014 触发 0.15 硬下限,执行减仓至 15% 仓位。stop_loss 65890(EMA-200 仅剩 1.95%)。若极端事件解除,进 POST_PROTECTION_REASSESS。",
+  "narrative": "BTC 触发极端事件保护。L5 报告地缘冲突活跃,extreme_event_detected=true 触发硬约束 H4。L1 切到 chaos、L4 给出 extreme 风险、L2 已转 bearish,5 层 AI 全部反向。状态从 LONG_HOLD 强制进 PROTECTION,position_cap 串行合成 raw 0.007 触发 0.15 硬下限,执行减仓至 15% 仓位。stop_loss 65890(EMA-200 仅剩 1.95%)。若极端事件解除,进 POST_PROTECTION_REASSESS。",
   "confidence": 0.88,
   "data_completeness_pct": 100,
-  "notes": ["L5 extreme_event 触发 H4 硬约束 → PROTECTION", "raw_product 0.014 触发 0.15 硬下限"]
+  "notes": ["L5 extreme_event 触发 H4 硬约束 → PROTECTION", "raw_product 0.007 触发 0.15 硬下限"]
 }
 
 ## 示例 3 — 持仓中观察(LONG_HOLD → LONG_HOLD,无迁移)
@@ -544,15 +544,15 @@ H10. confidence ≤ data_completeness_pct/100 × min(L1-L5 confidence)
     "position_size_reasoning": "持仓中无新交易动作"
   },
   "position_cap_final": {
-    "value": 0.43,
+    "value": 0.3815,
     "composition": {
       "base": 0.70,
       "l4_multiplier": 0.75,
       "crowding_multiplier": 0.85,
       "macro_multiplier": 0.90,
       "event_multiplier": 0.95,
-      "raw_product": 0.4288,
-      "after_hard_floor": 0.43
+      "raw_product": 0.3815,
+      "after_hard_floor": 0.3815
     }
   },
   "conflict_resolution": [
@@ -565,12 +565,12 @@ H10. confidence ≤ data_completeness_pct/100 × min(L1-L5 confidence)
   "key_observations": [
     "5 层判断稳定:L1 trend_up + L2 bullish phase=mid + L4 moderate + L5 neutral",
     "持仓中(LONG_HOLD)无风险升级,维持 hold",
-    "position_cap 0.43,仍在合理区间"
+    "position_cap 0.38,仍在合理区间"
   ],
   "counter_arguments": [
     "L2 phase=mid 表明趋势已展开过半,若进 late 后 L4 风险升高,需准备 LONG_TRIM"
   ],
-  "narrative": "BTC 维持多头持仓。5 层 AI 判断稳定:L1 趋势向上、L2 看多 mid 阶段、L3 中等机会、L4 风险中等、L5 宏观中性。无风险升级,维持 LONG_HOLD。position_cap 0.43。若 L2 进 late 或 L4/L5 风险升,准备 trim。",
+  "narrative": "BTC 维持多头持仓。5 层 AI 判断稳定:L1 趋势向上、L2 看多 mid 阶段、L3 中等机会、L4 风险中等、L5 宏观中性。无风险升级,维持 LONG_HOLD。position_cap 0.38。若 L2 进 late 或 L4/L5 风险升,准备 trim。",
   "confidence": 0.78,
   "data_completeness_pct": 100,
   "notes": []

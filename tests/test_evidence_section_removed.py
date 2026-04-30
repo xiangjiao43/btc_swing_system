@@ -126,5 +126,27 @@ def test_no_chain_text_logic_in_js(app_js: str):
 
 def test_self_check_panel_still_exists(index_html: str):
     assert "🩺 系统自检" in index_html
-    # 自检面板应永远展开(1.5o Task B 之后不再有 toggle)
-    # 这里只断言面板本体存在,具体 always-expanded 行为另测
+
+
+# ============================================================
+# Task B:自检面板必须永远展开(无 toggle)
+# ============================================================
+
+def test_self_check_panel_no_toggle_button(index_html: str):
+    """1.5o Task B:删除 toggle 按钮和 selfCheckExpanded x-show 控制。"""
+    assert "toggleSelfCheck()" not in index_html
+    assert "selfCheckExpanded" not in index_html
+
+
+def test_self_check_panel_no_toggle_in_js(app_js: str):
+    """toggleSelfCheck / selfCheckExpanded / _selfCheckUserToggled 必须从
+    JS 删除(永远展开,不需要状态)。"""
+    assert "toggleSelfCheck" not in app_js
+    assert "selfCheckExpanded" not in app_js
+    assert "_selfCheckUserToggled" not in app_js
+
+
+def test_self_check_panel_uses_glyphs(app_js: str):
+    """1.5o:三段式视觉(● / ⚠ / ✗)替代纯圆点。"""
+    assert "layerHealthGlyph" in app_js
+    assert "sourceStatusGlyph" in app_js

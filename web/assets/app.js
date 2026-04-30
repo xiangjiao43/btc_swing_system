@@ -22,12 +22,9 @@ function app() {
         livePriceData: null,
         _priceTimer: null,
 
-        // Sprint 1.5n:系统自检面板数据(每 5 分钟刷一次)
+        // Sprint 1.5n/1.5o:系统自检面板数据(每 5 分钟刷一次,永久展开)
         systemHealth: null,
         _healthTimer: null,
-        // 用户主动展开后保留状态(避免后续刷新自动折叠)
-        _selfCheckUserToggled: false,
-        selfCheckExpanded: false,
 
         // ============== 初始化 ==============
         async init() {
@@ -50,19 +47,8 @@ function app() {
             try {
                 const r = await fetch('/api/system/health-detail',
                                       { cache: 'no-cache' });
-                if (r.ok) {
-                    this.systemHealth = await r.json();
-                    // 有 degraded/critical 且用户未手动 toggle 过 → 自动展开
-                    if (!this._selfCheckUserToggled
-                        && this.systemHealth.overall_status !== 'all_healthy') {
-                        this.selfCheckExpanded = true;
-                    }
-                }
+                if (r.ok) this.systemHealth = await r.json();
             } catch (e) { /* 静默失败 */ }
-        },
-        toggleSelfCheck() {
-            this.selfCheckExpanded = !this.selfCheckExpanded;
-            this._selfCheckUserToggled = true;
         },
         selfCheckBadgeLabel() {
             const s = this.systemHealth && this.systemHealth.overall_status;
@@ -81,16 +67,33 @@ function app() {
                 return 'bg-rose-100 dark:bg-rose-900/30 text-rose-700 dark:text-rose-300';
             return 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400';
         },
-        layerHealthDot(h) {
-            if (h === 'healthy') return 'bg-emerald-500';
-            if (h === 'degraded') return 'bg-amber-500';
-            return 'bg-rose-500';
+        // Sprint 1.5o:三段式视觉(● 绿点 / ⚠ 黄三角 / ✗ 红叉)
+        layerHealthGlyph(h) {
+            if (h === 'healthy') return '●';
+            if (h === 'degraded') return '⚠';
+            return '✗';  // missing
         },
-        sourceStatusDot(s) {
-            if (s === 'ok') return 'bg-emerald-500';
-            if (s === 'warn') return 'bg-amber-500';
-            if (s === 'critical') return 'bg-rose-500';
-            return 'bg-slate-400';  // no_data
+        layerHealthGlyphClass(h) {
+            if (h === 'healthy') return 'text-emerald-500';
+            if (h === 'degraded') return 'text-amber-500';
+            return 'text-rose-500 font-bold';
+        },
+        layerHealthTextClass(h) {
+            if (h === 'healthy') return 'text-slate-700 dark:text-slate-300';
+            if (h === 'degraded') return 'text-amber-600 dark:text-amber-400';
+            return 'text-rose-600 dark:text-rose-400 font-medium';
+        },
+        sourceStatusGlyph(s) {
+            if (s === 'ok') return '●';
+            if (s === 'warn') return '⚠';
+            if (s === 'critical') return '✗';
+            return '○';  // no_data
+        },
+        sourceStatusGlyphClass(s) {
+            if (s === 'ok') return 'text-emerald-500';
+            if (s === 'warn') return 'text-amber-500';
+            if (s === 'critical') return 'text-rose-500 font-bold';
+            return 'text-slate-400';
         },
         sourceAgeLabel(s) {
             if (s.age_minutes == null) return '无数据';
@@ -100,11 +103,11 @@ function app() {
             return `${(m/1440).toFixed(1)} 天前`;
         },
         sourceTextClass(s) {
-            if (s === 'ok') return 'text-slate-500 dark:text-slate-400';
+            if (s === 'ok') return 'text-slate-700 dark:text-slate-300';
             if (s === 'warn') return 'text-amber-600 dark:text-amber-400';
             if (s === 'critical')
-                return 'text-rose-600 dark:text-rose-400 font-semibold';
-            return 'text-slate-400 dark:text-slate-500';
+                return 'text-rose-600 dark:text-rose-400 font-medium';
+            return 'text-slate-400 dark:text-slate-500';  // no_data
         },
         // 持仓预览占位框是否显示(FLAT / FLIP_WATCH 状态下显示)
         showPositionPreviewPlaceholder() {

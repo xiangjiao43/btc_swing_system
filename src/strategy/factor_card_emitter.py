@@ -307,6 +307,9 @@ def emit_factor_cards(
     cards.extend(_emit_events_reference(events, today,
                                         next_by_type=next_events_by_type))
 
+    # ========== Sprint 1.6:9 个 v1.3 新因子卡(占位文案,Sprint 1.10 细化)==========
+    cards.extend(_emit_v13_new_factors(onchain, derivatives, today))
+
     # Sprint 2.6-J:per-metric inserted_at_utc 回填 fetched_at_bjt(秒级精度)
     _stamp_fetched_at(cards, context.get("metric_inserted_at") or {}, today)
 
@@ -1752,4 +1755,214 @@ def _emit_events_reference(
             impact_weight=0.0,            # 不计入加权
             linked_layer=None, source="Event calendar",
         ))
+    return cards
+
+
+# ============================================================
+# Sprint 1.6:9 个 v1.3 新因子卡(建模 §2.4 链上 + §2.6 机构/市场结构)
+# 文案占位,Sprint 1.10 网页改造时细化
+# ============================================================
+
+def _emit_v13_new_factors(
+    onchain: dict[str, Any],
+    derivatives: dict[str, Any],
+    today: str,
+) -> list[dict[str, Any]]:
+    """Sprint 1.6:9 张新卡(占位文案):
+    onchain (7): sth_supply / lth_mvrv / sth_mvrv / ssr / hodl_waves / cdd / asopr
+    derivatives (2): etf_flow / btc_dominance
+    """
+    cards: list[dict[str, Any]] = []
+    onchain = onchain or {}
+    derivatives = derivatives or {}
+
+    # ---- 1. STH Supply (L2) ----
+    val, ts = _latest(onchain.get("sth_supply"))
+    cards.append(_make_card(
+        card_id=f"onchain_sth_supply_{today}",
+        category="onchain", tier="primary",
+        name="STH Supply", name_en="Short-Term Holder Supply",
+        current_value=round(val, 2) if val is not None else None,
+        value_unit="BTC",
+        captured_at_bjt=ts,
+        plain_interpretation=(
+            f"📊 当前 STH 持仓 {val:,.0f} BTC\n"
+            f"🔍 短持有者(< 155 天)总持仓 — 上升期对应散户入场,下降期对应散户撤退。"
+            if val is not None
+            else "📊 数据不足(等 Sprint 1.6 collector 跑完)\n🔍 短持有者总持仓"
+        ),
+        strategy_impact="📍 [Sprint 1.10 占位] STH 持仓变化反映散户参与度,Sprint 1.8 接入 L2/L3 逻辑层。",
+        impact_direction="neutral", impact_weight=0.5,
+        linked_layer="L2", source="Glassnode",
+    ))
+
+    # ---- 2. LTH-MVRV (L2,本地计算) ----
+    val, ts = _latest(onchain.get("lth_mvrv"))
+    cards.append(_make_card(
+        card_id=f"onchain_lth_mvrv_{today}",
+        category="onchain", tier="primary",
+        name="LTH-MVRV", name_en="LTH MVRV",
+        current_value=round(val, 3) if val is not None else None,
+        captured_at_bjt=ts,
+        plain_interpretation=(
+            f"📊 当前 {val:.3f}(price / lth_realized_price 比率)\n"
+            f"🔍 长持有者(LTH)平均盈亏比 — > 3 顶部区域,< 1 底部区域。"
+            if val is not None
+            else "📊 数据不足(等 collector 跑完)\n🔍 价格 / LTH 实现价格"
+        ),
+        strategy_impact="📍 [Sprint 1.10 占位] LTH 浮盈状态,本地计算自 price/lth_realized_price。",
+        impact_direction="neutral", impact_weight=0.5,
+        linked_layer="L2", source="computed",
+    ))
+
+    # ---- 3. STH-MVRV (L2,本地计算) ----
+    val, ts = _latest(onchain.get("sth_mvrv"))
+    cards.append(_make_card(
+        card_id=f"onchain_sth_mvrv_{today}",
+        category="onchain", tier="primary",
+        name="STH-MVRV", name_en="STH MVRV",
+        current_value=round(val, 3) if val is not None else None,
+        captured_at_bjt=ts,
+        plain_interpretation=(
+            f"📊 当前 {val:.3f}(price / sth_realized_price 比率)\n"
+            f"🔍 短持有者(STH)平均盈亏比 — > 1 STH 整体浮盈,< 1 浮亏。"
+            if val is not None
+            else "📊 数据不足(等 collector 跑完)\n🔍 价格 / STH 实现价格"
+        ),
+        strategy_impact="📍 [Sprint 1.10 占位] STH 浮盈状态,本地计算。",
+        impact_direction="neutral", impact_weight=0.5,
+        linked_layer="L2", source="computed",
+    ))
+
+    # ---- 4. SSR (L5) ----
+    val, ts = _latest(onchain.get("ssr"))
+    cards.append(_make_card(
+        card_id=f"onchain_ssr_{today}",
+        category="onchain", tier="primary",
+        name="SSR", name_en="Stablecoin Supply Ratio",
+        current_value=round(val, 3) if val is not None else None,
+        captured_at_bjt=ts,
+        plain_interpretation=(
+            f"📊 当前 SSR {val:.3f}\n"
+            f"🔍 BTC 市值 / 稳定币供应 — 低值意味稳定币购买力相对 BTC 充裕(潜在买盘)。"
+            if val is not None
+            else "📊 数据不足\n🔍 稳定币供应比率"
+        ),
+        strategy_impact="📍 [Sprint 1.10 占位] 稳定币购买力,L5 宏观背景信号。",
+        impact_direction="neutral", impact_weight=0.5,
+        linked_layer="L5", source="Glassnode",
+    ))
+
+    # ---- 5. HODL Waves(>1y 区段聚合)(L2) ----
+    # 求和 1y_2y + 2y_3y + 3y_5y + 5y_7y + 7y_10y + more_10y
+    long_buckets = (
+        "hodl_waves_1y_2y", "hodl_waves_2y_3y", "hodl_waves_3y_5y",
+        "hodl_waves_5y_7y", "hodl_waves_7y_10y", "hodl_waves_more_10y",
+    )
+    long_pct = 0.0
+    long_ts = None
+    have_any = False
+    for k in long_buckets:
+        v, t = _latest(onchain.get(k))
+        if v is not None:
+            long_pct += v
+            long_ts = t
+            have_any = True
+    cards.append(_make_card(
+        card_id=f"onchain_hodl_waves_long_{today}",
+        category="onchain", tier="primary",
+        name="HODL Waves (>1y)", name_en="HODL Waves > 1y",
+        current_value=round(long_pct * 100, 2) if have_any else None,
+        value_unit="%",
+        captured_at_bjt=long_ts,
+        plain_interpretation=(
+            f"📊 持有 ≥ 1 年的 BTC 占比 {long_pct*100:.1f}%\n"
+            f"🔍 长期持有比例 — 高占比意味抛压低,熊末/早牛常见。"
+            if have_any
+            else "📊 数据不足\n🔍 持有 ≥ 1 年的 BTC 占比"
+        ),
+        strategy_impact="📍 [Sprint 1.10 占位] 长期持有占比,Sprint 1.8 接入 L2 stance。",
+        impact_direction="neutral", impact_weight=0.5,
+        linked_layer="L2", source="Glassnode",
+    ))
+
+    # ---- 6. CDD (L3) ----
+    val, ts = _latest(onchain.get("cdd"))
+    cards.append(_make_card(
+        card_id=f"onchain_cdd_{today}",
+        category="onchain", tier="primary",
+        name="CDD", name_en="Coin Days Destroyed",
+        current_value=round(val, 0) if val is not None else None,
+        captured_at_bjt=ts,
+        plain_interpretation=(
+            f"📊 当前 CDD {val:,.0f}\n"
+            f"🔍 老币移动量 — 高值意味长持币被唤醒(可能抛压)。"
+            if val is not None
+            else "📊 数据不足\n🔍 Coin Days Destroyed,反映老币移动"
+        ),
+        strategy_impact="📍 [Sprint 1.10 占位] 老币移动量,L3 机会执行层信号。",
+        impact_direction="neutral", impact_weight=0.5,
+        linked_layer="L3", source="Glassnode",
+    ))
+
+    # ---- 7. aSOPR (L3,1.6 升级 display→primary,加 primary 卡) ----
+    # 老 reference 卡仍存在(_emit_onchain_reference 里),本卡是 primary 升级镜像
+    val, ts = _latest(onchain.get("sopr_adjusted"))
+    cards.append(_make_card(
+        card_id=f"onchain_asopr_primary_{today}",
+        category="onchain", tier="primary",
+        name="aSOPR", name_en="Adjusted SOPR",
+        current_value=round(val, 4) if val is not None else None,
+        captured_at_bjt=ts,
+        plain_interpretation=(
+            f"📊 当前 aSOPR {val:.4f}\n"
+            f"🔍 调整后 SOPR(去 1h 噪声)— > 1 盈利卖出主导,< 1 投降抛售;1 = 关键支撑/阻力。"
+            if val is not None
+            else "📊 数据不足\n🔍 调整后 SOPR,> 1 盈利 / < 1 亏损卖出"
+        ),
+        strategy_impact="📍 [Sprint 1.10 占位] 1.6 升级:替代 SOPR 在 cycle_position 中的位置(1.8 接入)。",
+        impact_direction="neutral", impact_weight=0.7,
+        linked_layer="L3", source="Glassnode",
+    ))
+
+    # ---- 8. ETF Flows (L5) ----
+    val, ts = _latest(derivatives.get("etf_flow"))
+    cards.append(_make_card(
+        card_id=f"derivatives_etf_flow_{today}",
+        category="derivatives", tier="primary",
+        name="ETF Flows", name_en="BTC Spot ETF Net Flow",
+        current_value=round(val, 0) if val is not None else None,
+        value_unit="USD",
+        captured_at_bjt=ts,
+        plain_interpretation=(
+            f"📊 当日 ETF 净流入 {val/1e6:+,.1f}M USD\n"
+            f"🔍 BTC 现货 ETF 24h 净流入 — 正=机构买入,负=机构赎回。"
+            if val is not None
+            else "📊 数据不足\n🔍 BTC 现货 ETF 净流入(美元)"
+        ),
+        strategy_impact="📍 [Sprint 1.10 占位] 机构资金流向,L5 宏观信号。",
+        impact_direction="neutral", impact_weight=0.6,
+        linked_layer="L5", source="CoinGlass",
+    ))
+
+    # ---- 9. Bitcoin Dominance (L5) ----
+    val, ts = _latest(derivatives.get("btc_dominance"))
+    cards.append(_make_card(
+        card_id=f"derivatives_btc_dominance_{today}",
+        category="derivatives", tier="primary",
+        name="Bitcoin Dominance", name_en="BTC Dominance",
+        current_value=round(val, 2) if val is not None else None,
+        value_unit="%",
+        captured_at_bjt=ts,
+        plain_interpretation=(
+            f"📊 BTC 市值占比 {val:.2f}%\n"
+            f"🔍 BTC 在加密总市值占比 — 上升 = 资金集中 BTC,下降 = 山寨季可能。"
+            if val is not None
+            else "📊 数据不足\n🔍 BTC 市值 / 加密总市值"
+        ),
+        strategy_impact="📍 [Sprint 1.10 占位] 市场结构信号,L5 宏观背景。",
+        impact_direction="neutral", impact_weight=0.5,
+        linked_layer="L5", source="CoinGlass",
+    ))
+
     return cards

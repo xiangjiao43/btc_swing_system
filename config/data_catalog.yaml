@@ -745,9 +745,11 @@ single_factors:
     depends_on: [glassnode_sopr_adjusted]
     formula_ref: src/indicators/onchain.py::read_glassnode_direct
     frequency: daily
-    layer: L2
-    role_in_v1: display
-    notes: "B4:展示,不进规则"
+    layer: L3
+    role_in_v1: primary
+    notes: "Sprint 1.6 (建模 v1.3 §2.4):升级 display → primary。
+            替代 SOPR 在 cycle_position 中的位置(逻辑层对接留 Sprint 1.8)。
+            旧 'L2 display' 标签 1.6 改为 'L3 primary'。"
 
   - name: ath_drawdown
     depends_on: [btc_ath_price, binance_klines_1d]

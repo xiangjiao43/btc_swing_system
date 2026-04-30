@@ -172,19 +172,6 @@ function app() {
             if (sec < 86400) return Math.floor(sec / 3600) + 'h ago';
             return Math.floor(sec / 86400) + 'd ago';
         },
-        freshnessLabel(v) {
-            const s = this._freshStatus(v);
-            const age = this.formatAge(this._freshAgeSec(v));
-            if (!s) return '—';
-            return age ? `${s} · ${age}` : s;
-        },
-        freshnessBadgeClass(v) {
-            const s = this._freshStatus(v);
-            if (s === 'green') return 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300';
-            if (s === 'yellow') return 'bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300';
-            if (s === 'red') return 'bg-rose-50 text-rose-700 dark:bg-rose-950 dark:text-rose-300';
-            return 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400';
-        },
         _initDarkMode() {
             const q = new URLSearchParams(window.location.search).get('theme');
             if (q === 'dark' || q === 'light') { this.darkMode = (q === 'dark'); return; }
@@ -336,50 +323,10 @@ function app() {
                 };
             }
 
-            // evidence_summary:优先沿用,否则从 evidence_reports 派生
-            if (!out.evidence_summary || typeof out.evidence_summary !== 'object') {
-                const er = raw.evidence_reports || {};
-                const built = {};
-                for (const [idx, key] of [[1,'layer_1'],[2,'layer_2'],[3,'layer_3'],[4,'layer_4'],[5,'layer_5']]) {
-                    const layer = er[key] || {};
-                    built[key] = {
-                        layer_id: idx,
-                        layer_name: layer.layer_name || key,
-                        verdict: layer.verdict || this._layer_verdict_from(layer, idx),
-                        confidence_tier: layer.confidence_tier || 'medium',
-                        confidence_numeric: this._confidence_numeric(layer),
-                        data_freshness: layer.data_freshness || 'green',
-                        contribution: layer.contribution || 'neutral',
-                        key_signals: layer.key_signals || [],
-                        contradicting_signals: layer.contradicting_signals || [],
-                        plain_reading: layer.plain_reading || '',
-                        // Sprint 2.3:pillars / core_question / rule_trace / downstream_hint
-                        core_question: layer.core_question || '',
-                        pillars: layer.pillars || [],
-                        rule_trace: layer.rule_trace || null,
-                        position_cap_chain: layer.position_cap_chain || null,
-                        permission_chain: layer.permission_chain || null,
-                        macro_stance: layer.macro_stance || null,
-                        completeness_warning: layer.completeness_warning || null,
-                        downstream_hint: layer.downstream_hint || '',
-                        health_status: layer.health_status || '—',
-                    };
-                }
-                out.evidence_summary = built;
-            } else {
-                const er = raw.evidence_reports || {};
-                for (const k of ['layer_1','layer_2','layer_3','layer_4','layer_5']) {
-                    if (out.evidence_summary[k] && er[k]) {
-                        const tgt = out.evidence_summary[k];
-                        const src = er[k];
-                        for (const f of ['plain_reading','core_question','pillars','rule_trace',
-                                         'position_cap_chain','permission_chain','macro_stance',
-                                         'completeness_warning','downstream_hint','health_status']) {
-                            if (tgt[f] == null && src[f] != null) tgt[f] = src[f];
-                        }
-                    }
-                }
-            }
+            // Sprint 1.5o:旧 evidence_summary 派生(供已删除「五层证据推导细节」区
+            // 渲染 verdict / confidence_numeric / pillars / rule_trace / chain 等)
+            // 已整块删除。原始 state.evidence_reports.layer_* 仍由后端
+            // /api/system/health-detail 直接读 health_status。
 
             // risks
             if (!out.risks || typeof out.risks !== 'object') {
@@ -434,22 +381,6 @@ function app() {
             return out;
         },
 
-        _confidence_numeric(layer) {
-            const c = layer.confidence_numeric;
-            if (typeof c === 'number') return c;
-            const tier = (layer.confidence_tier || '').toLowerCase();
-            return { very_low: 0.25, low: 0.4, medium: 0.6, high: 0.8, very_high: 0.9 }[tier] ?? null;
-        },
-        _layer_verdict_from(layer, idx) {
-            if (idx === 1) return (layer.regime || layer.regime_primary || '—')
-                + (layer.volatility_regime ? ' / ' + layer.volatility_regime : '');
-            if (idx === 2) return (layer.stance || '—') + ' / ' + (layer.phase || '—');
-            if (idx === 3) return 'grade=' + (layer.opportunity_grade || layer.grade || 'none');
-            if (idx === 4) return 'cap=' + (layer.position_cap ?? '—') + ' / risk=' + (layer.overall_risk_level || '—');
-            if (idx === 5) return layer.macro_stance || layer.macro_environment || '—';
-            return '';
-        },
-
         // ============== 派生 ==============
         tp() {
             // adjudicator.trade_plan 优先,否则回退 state.trade_plan(mock)
@@ -463,11 +394,6 @@ function app() {
             if (tp && tp.direction) return tp.direction;
             const adj = this.state && this.state.adjudicator || {};
             return adj.direction || 'none';
-        },
-        orderedLayers() {
-            if (!this.state || !this.state.evidence_summary) return [];
-            const es = this.state.evidence_summary;
-            return [1, 2, 3, 4, 5].map(i => es['layer_' + i]).filter(Boolean);
         },
         compositeCards() {
             // Sprint 2.3 tuning:按对策略建议的影响程度重排
@@ -693,33 +619,6 @@ function app() {
             return this.dataSource === 'api' ? '实时 API' : 'MOCK 回退';
         },
 
-        // L4 chain 文本化
-        positionCapChainText(chain) {
-            if (!chain || typeof chain !== 'object') return '';
-            const base = chain.base != null ? `${chain.base}%` : '70%';
-            const risk = chain.l4_risk_multiplier != null ? `× ${chain.l4_risk_multiplier}` : '';
-            const crowd = chain.l4_crowding_multiplier != null ? `× ${chain.l4_crowding_multiplier}` : '';
-            const macro = chain.l5_macro_headwind_multiplier != null ? `× ${chain.l5_macro_headwind_multiplier}` : '';
-            const event = chain.l4_event_risk_multiplier != null ? `× ${chain.l4_event_risk_multiplier}` : '';
-            const final = chain.final != null ? `${chain.final}%` : '—';
-            const floor = chain.hard_floor_applied_to_final ? ' · hard_floor 15% 已抬升' : '';
-            return `基础 ${base} ${risk} (L4 risk) ${crowd} (crowding) ${macro} (macro) ${event} (event) → ${final}${floor}`;
-        },
-        permissionChainText(chain) {
-            if (!chain || typeof chain !== 'object') return '';
-            const sug = chain.suggestions || {};
-            const merged = chain.merged_before_buffer || '—';
-            const final_ = chain.final_permission || '—';
-            const buffer = chain.a_grade_buffer_applied ? '(A 级缓冲已触发)'
-                         : chain.override_reason ? `(例外:${chain.override_reason})` : '';
-            const parts = [];
-            if (sug.l4_risk_level) parts.push(`L4 risk → ${sug.l4_risk_level}`);
-            if (sug.l4_crowding) parts.push(`Crowding → ${sug.l4_crowding}`);
-            if (sug.l4_event_risk) parts.push(`EventRisk → ${sug.l4_event_risk}`);
-            if (sug.l5_macro_headwind) parts.push(`Macro → ${sug.l5_macro_headwind}`);
-            return `${parts.join(' · ')} → 归并 ${merged} → 最终 ${final_} ${buffer}`;
-        },
-
         // ============== 颜色 / 标签 ==============
         stateColor(s) {
             return {
@@ -797,18 +696,6 @@ function app() {
                      level_3: 'text-rose-600 dark:text-rose-400' }[l] || 'text-slate-500';
         },
 
-        contributionLabel(c) {
-            return { supportive: '支持', neutral: '中性', challenging: '质疑', blocking: '阻止' }[c] || c;
-        },
-        contributionClass(c) {
-            return {
-                supportive: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300',
-                neutral: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400',
-                challenging: 'bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300',
-                blocking: 'bg-rose-50 text-rose-700 dark:bg-rose-950 dark:text-rose-300',
-            }[c] || 'bg-slate-100 text-slate-600';
-        },
-
         directionClass(d) {
             return { bullish: 'text-emerald-600 dark:text-emerald-400',
                      bearish: 'text-rose-600 dark:text-rose-400',
@@ -864,10 +751,6 @@ function app() {
                 medium: 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300',
                 low:    'bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
             }[t] || 'bg-slate-100 text-slate-600';
-        },
-
-        layerChineseName(id) {
-            return ['市场状态', '方向结构', '机会执行', '风险失效', '背景事件'][id - 1] || '';
         },
 
         timelineNodeColor(t) {

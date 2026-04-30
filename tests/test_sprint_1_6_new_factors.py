@@ -101,19 +101,33 @@ def test_hodl_waves_skips_missing_buckets_gracefully():
 
 @pytest.fixture
 def db_with_seed_metrics(tmp_path: Path) -> sqlite3.Connection:
-    """种入 btc_price_close + lth_realized_price + sth_realized_price 各 7 天数据。"""
+    """Sprint 1.6.1:种入
+       - price_candles 表(timeframe='1d', symbol='BTCUSDT')7 天 close
+       - onchain_metrics 表 lth_realized_price + sth_realized_price 7 天
+    1.6 老 fixture 只种 onchain.btc_price_close 是错的(实际 BTC 收盘价唯
+    一来源是 price_candles 1d K 线,不在 onchain_metrics)。
+    """
     db = tmp_path / "derived.db"
     init_db(db_path=db, verbose=False)
     conn = sqlite3.connect(db)
     conn.row_factory = sqlite3.Row
     base_ts = "2026-04-{:02d}T00:00:00Z"
-    metrics = []
+    # price_candles 1d 收盘
     for d in range(24, 31):
         ts = base_ts.format(d)
-        metrics.extend([
-            OnchainMetric(timestamp=ts, metric_name="btc_price_close",
-                          metric_value=70000.0 + d * 100,
-                          source="glassnode_primary"),
+        close = 70000.0 + d * 100
+        conn.execute(
+            "INSERT INTO price_candles "
+            "(symbol, timeframe, open_time_utc, open, high, low, close, "
+            "volume, inserted_at_utc) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("BTCUSDT", "1d", ts, close, close, close, close, 1.0, ts),
+        )
+    # onchain realized prices
+    onchain_metrics = []
+    for d in range(24, 31):
+        ts = base_ts.format(d)
+        onchain_metrics.extend([
             OnchainMetric(timestamp=ts, metric_name="lth_realized_price",
                           metric_value=35000.0,
                           source="glassnode_primary"),
@@ -121,7 +135,7 @@ def db_with_seed_metrics(tmp_path: Path) -> sqlite3.Connection:
                           metric_value=60000.0,
                           source="glassnode_primary"),
         ])
-    OnchainDAO.upsert_batch(conn, metrics)
+    OnchainDAO.upsert_batch(conn, onchain_metrics)
     conn.commit()
     yield conn
     conn.close()
@@ -168,16 +182,44 @@ def test_local_computed_mvrv_value_correct(
 def test_local_computed_mvrv_skips_when_realized_price_missing(
     tmp_path: Path,
 ):
-    """缺 lth_realized_price 时不抛错,只返回 0 行。"""
+    """1.6.1:price_candles 有 close 但缺 lth_realized_price 时不抛错,
+    只返回 0 行(派生计算依赖 inner join,缺一个直接跳过)。"""
     db = tmp_path / "missing.db"
     init_db(db_path=db, verbose=False)
     conn = sqlite3.connect(db)
     conn.row_factory = sqlite3.Row
     try:
+        ts = "2026-04-30T00:00:00Z"
+        conn.execute(
+            "INSERT INTO price_candles "
+            "(symbol, timeframe, open_time_utc, open, high, low, close, "
+            "volume, inserted_at_utc) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("BTCUSDT", "1d", ts, 70000.0, 70000.0, 70000.0, 70000.0, 1.0, ts),
+        )
+        conn.commit()
+        stats = compute_and_save_derived_mvrv(conn)
+        assert stats["lth_mvrv"] == 0
+        assert stats["sth_mvrv"] == 0
+    finally:
+        conn.close()
+
+
+def test_local_computed_mvrv_skips_when_price_candles_empty(
+    tmp_path: Path,
+):
+    """1.6.1 反退化:price_candles 1d 表空时跳过整批(老 1.6 找
+    onchain_metrics.btc_price_close 找不到也是这个分支,但数据源错了)。"""
+    db = tmp_path / "no_price.db"
+    init_db(db_path=db, verbose=False)
+    conn = sqlite3.connect(db)
+    conn.row_factory = sqlite3.Row
+    try:
+        # 仅有 lth_realized_price,无 price_candles 1d
         OnchainDAO.upsert_batch(conn, [OnchainMetric(
             timestamp="2026-04-30T00:00:00Z",
-            metric_name="btc_price_close",
-            metric_value=70000.0, source="glassnode_primary",
+            metric_name="lth_realized_price",
+            metric_value=35000.0, source="glassnode_primary",
         )])
         conn.commit()
         stats = compute_and_save_derived_mvrv(conn)

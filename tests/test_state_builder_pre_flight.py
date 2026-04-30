@@ -100,13 +100,16 @@ def test_evaluate_freshness_all_fresh_returns_empty():
 
 
 def test_evaluate_freshness_klines_1h_stale_for_regular():
-    """klines_1h 11 分钟前 → 失败(阈值 10 分钟)。"""
-    stale = "2026-04-27T07:49:00Z"
+    """klines_1h captured_at 3h 前 → 失败(1.5j 阈值 2h,口径=open_time)。"""
+    stale = "2026-04-27T05:00:00Z"  # -3h
     fresh = "2026-04-27T07:59:00Z"
+    daily_fresh = "2026-04-27T00:00:00Z"
     now = "2026-04-27T08:00:00Z"
     mia = {
         "klines_by_tf": {"1h": stale, "4h": fresh, "1d": fresh},
+        "klines_captured_by_tf": {"1h": stale, "4h": fresh, "1d": fresh},
         "derivatives_snapshot": fresh,
+        "derivatives_snapshot_captured": daily_fresh,
         "onchain": {"x": fresh},
         "macro": {"y": fresh},
     }

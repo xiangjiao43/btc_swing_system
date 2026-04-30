@@ -243,6 +243,29 @@ class BTCKlinesDAO:
         return {r["timeframe"]: r["inserted_at_utc"] for r in rows}
 
     @staticmethod
+    def get_latest_captured_at_by_timeframe(
+        conn: sqlite3.Connection,
+    ) -> dict[str, Optional[str]]:
+        """Sprint 1.5j:每个 timeframe 最新 bar 的 open_time_utc(数据点时间)。
+
+        与 inserted_at(系统抓取时间)区别:open_time_utc 是 K 线 bar 自身
+        的开盘时间。1h K 线建模 cadence = 每小时一根新 bar,所以 open_time
+        距 now 通常 < 1h,2h 阈值容忍 1 个 cron 抖动。
+        pre_flight 用 captured_at 跟 1.5g derivatives 口径对齐(数据点而非
+        系统侧),简化心智模型。
+        """
+        rows = conn.execute(
+            """
+            SELECT timeframe, MAX(open_time_utc) AS max_t
+              FROM price_candles
+             WHERE symbol = ?
+             GROUP BY timeframe
+            """,
+            (_DEFAULT_SYMBOL,),
+        ).fetchall()
+        return {r["timeframe"]: r["max_t"] for r in rows}
+
+    @staticmethod
     def get_recent_as_df(
         conn: sqlite3.Connection,
         timeframe: TimeFrame,

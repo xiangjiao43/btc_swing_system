@@ -1144,7 +1144,8 @@ def _query_metric_inserted_at(conn: Any) -> dict[str, Any]:
       {
         "onchain":      {metric_name: iso | None},
         "macro":        {metric_name: iso | None},
-        "klines_by_tf": {timeframe:   iso | None},
+        "klines_by_tf":          {timeframe: iso | None},  # inserted_at(系统侧)
+        "klines_captured_by_tf": {timeframe: iso | None},  # open_time(数据点,1.5j)
         "derivatives_snapshot":         iso | None,  # inserted_at(系统侧)
         "derivatives_snapshot_captured": iso | None,  # captured_at(数据点,1.5g)
       }
@@ -1155,6 +1156,11 @@ def _query_metric_inserted_at(conn: Any) -> dict[str, Any]:
             "onchain": OnchainDAO.get_metric_inserted_at_map(conn),
             "macro":   MacroDAO.get_metric_inserted_at_map(conn),
             "klines_by_tf": BTCKlinesDAO.get_latest_inserted_at_by_timeframe(conn),
+            # Sprint 1.5j:K 线组改用 open_time_utc(数据点时间)+ 2h 阈值,
+            # 跟 1.5g derivatives captured-first 口径对齐。
+            "klines_captured_by_tf": (
+                BTCKlinesDAO.get_latest_captured_at_by_timeframe(conn)
+            ),
             "derivatives_snapshot": (
                 DerivativesDAO.get_latest_snapshot_inserted_at(conn)
             ),
@@ -1168,7 +1174,8 @@ def _query_metric_inserted_at(conn: Any) -> dict[str, Any]:
         logger.warning("_query_metric_inserted_at failed: %s", e)
         return {
             "onchain": {}, "macro": {},
-            "klines_by_tf": {}, "derivatives_snapshot": None,
+            "klines_by_tf": {}, "klines_captured_by_tf": {},
+            "derivatives_snapshot": None,
             "derivatives_snapshot_captured": None,
         }
 
@@ -1224,7 +1231,11 @@ def _write_preflight_degraded_alert(
 # 8 点链上档(08:40 BJT)严格,要求当天链上 < 10 min 落地。
 _PREFLIGHT_THRESHOLDS_SEC: dict[str, dict[str, int]] = {
     "scheduled": {
-        "klines_1h":     10 * 60,
+        # Sprint 1.5j:K 线 1h 改用 open_time_utc(数据点时间)+ 2h 阈值。
+        # cadence = 每小时一根新 bar,正常 open_time 距 now < 1h;2h 阈值
+        # 容忍 1 个 cron 抖动。老 10min 阈值用 inserted_at,cron 抖动直接判
+        # stale,长期产生 alerts 噪音。
+        "klines_1h":     2 * 3600,
         # Sprint 1.5g:衍生品改用 captured_at_utc(数据点时间)+ 30h 阈值。
         # 1.5f-revised 起 derivatives 是 daily cadence(jobs.py interval='1d',
         # 每小时 cron 刷今天 daily bar)。daily 数据点天然 0-24h 老,30h 阈值
@@ -1236,8 +1247,8 @@ _PREFLIGHT_THRESHOLDS_SEC: dict[str, dict[str, int]] = {
         "macro":         30 * 3600,
     },
     "scheduled_8h_onchain": {
-        "klines_1h":     10 * 60,
-        # 8 点档 onchain 严格,但衍生品 daily 仍 30h
+        # 8 点档 onchain 严格,但 K 线 1h cadence 不变 → 仍 2h
+        "klines_1h":     2 * 3600,
         "derivatives":   30 * 3600,
         "klines_1d_4h":  30 * 60,
         "onchain":       10 * 60,
@@ -1252,16 +1263,21 @@ def _latest_iso_for_group(
     """从 metric_inserted_at dict 中取该 group 的最新 ISO 时间戳。
 
     Sprint 1.5g:衍生品 group 用 `derivatives_snapshot_captured`(数据点时间)
-    替代 `derivatives_snapshot`(系统侧 inserted_at)。其他 group 仍用 inserted_at。
+    替代 `derivatives_snapshot`(系统侧 inserted_at)。
+    Sprint 1.5j:klines_1h 同理改用 `klines_captured_by_tf['1h']`(open_time);
+    klines_1d_4h 仍用 inserted_at(daily/4h cadence 慢,inserted 直观)。
     """
     onchain = metric_inserted_at.get("onchain") or {}
     macro = metric_inserted_at.get("macro") or {}
     klines_by_tf = metric_inserted_at.get("klines_by_tf") or {}
+    klines_captured_by_tf = metric_inserted_at.get("klines_captured_by_tf") or {}
     deriv_captured = metric_inserted_at.get("derivatives_snapshot_captured")
     deriv_inserted = metric_inserted_at.get("derivatives_snapshot")
 
     if group == "klines_1h":
-        return klines_by_tf.get("1h")
+        # Sprint 1.5j:用 open_time(数据点时间)+ 2h 阈值;
+        # 兼容旧 dict(无 captured 字段)→ 退回 inserted_at。
+        return klines_captured_by_tf.get("1h") or klines_by_tf.get("1h")
     if group == "derivatives":
         # Sprint 1.5g:用 captured_at(数据点时间)+ 30h 阈值;
         # 兼容旧 metric_inserted_at(无 captured 字段)→ 退回 inserted。

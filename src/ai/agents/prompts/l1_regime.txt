@@ -220,9 +220,9 @@ previous_l1.regime: trend_up
   "volatility_regime": "normal",
   "confidence": 0.90,
   "key_signals": [
-    "ADX-14 = 32(≥ 25 阈值,趋势确立)",
-    "EMA 20>50>200,价格站稳 EMA-20 之上",
-    "Swing 序列高低均抬升(higher_highs_higher_lows)"
+    "ADX-14 = 32,显示力道集中,趋势可信",
+    "EMA 多头排列(20>50>200)且价格站稳 EMA-20 之上,结构稳定",
+    "Swing HH+HL 序列连续,趋势在自我强化"
   ],
   "contradicting_signals": [],
   "narrative": "BTC 处于稳定的上升趋势。ADX-14 = 32 高于 25 阈值,EMA 多头排列且价格站稳 EMA-20 之上,Swing 高低均抬升,几何形态典型。波动率分位 55% 属正常区间,未出现波动放大。与上次 L1 报告一致(均 trend_up),状态稳定。",
@@ -251,9 +251,9 @@ klines_4h_summary: missing  ← 数据不全
   "volatility_regime": "extreme",
   "confidence": 0.45,
   "key_signals": [
-    "ADX-14 = 14(< 20,无明显趋势)",
-    "ATR 180d 分位 92%(波动极端)",
-    "Swing structure = mixed(无规律)"
+    "ADX-14 = 14,趋势力度严重不足",
+    "ATR 180d 分位 92%,波动放大显著",
+    "Swing 序列 mixed,价格在区间内无规律高低交替"
   ],
   "contradicting_signals": [
     "EMA alignment = mixed,不支持任何方向"

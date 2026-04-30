@@ -112,7 +112,7 @@ Swing(mixed = 无规律)、ATR 分位(高 = 波动放大)。
 |---|---|
 | `stable` | 当前 regime 与 previous_l1.regime 相同 + 关键信号无矛盾 |
 | `shifting` | 当前 regime 与 previous_l1.regime 不同(或 previous 缺失但当前 regime ∈ {transition_*}) |
-| `uncertain` | key_signals 与 contradicting_signals 数量接近(差 ≤ 1)|
+| `uncertain` | 几何信号呈现明显对立(如 EMA 多头但 Swing 下移),或 regime 处于多档之间难以决断 |
 
 特殊情况:
 - 若 previous_l1 不存在(系统首次运行 / 冷启动)→
@@ -146,10 +146,13 @@ Swing(mixed = 无规律)、ATR 分位(高 = 波动放大)。
 
 # 五、你必须做的
 
-1. **挑出 3-5 个关键信号**(key_signals),每条形如:
-   `"ADX-14 = 28(≥ 25 阈值,趋势确立)"`
-   `"EMA 20>50>200(多头排列)"`
-   每条必须包含具体数值 + 阈值含义。
+1. **挑出 3-5 个关键信号**(key_signals),每条用一句话说出
+   "这个指标当前的状态对 regime 判断意味着什么"。形式参考:
+   - `"ADX-14 = 32,显示力道集中,支持 trend_up"`
+   - `"EMA 多头排列且斜率向上,结构稳定"`
+   - `"Swing HH+HL 序列连续,自我强化中"`
+   - `"价格在 90d 区间下 1/4,叠加 EMA 散乱,符合 range_low"`
+   重点是写"信号在判断中起的作用",而非"阈值对比"。
 2. **挑出 1-3 个矛盾信号**(contradicting_signals),如有则列;
    全无矛盾时返回 [] 而非编造。
 3. narrative:**4-6 句中文**,讲清楚:
@@ -157,8 +160,14 @@ Swing(mixed = 无规律)、ATR 分位(高 = 波动放大)。
    - 几何特征(ADX / EMA / Swing)各自在哪
    - 与上次比是稳定还是切换
    - 波动率档位
-4. data_completeness_pct:数据可用度,范围 0-100。
-   缺 EMA-200 → 扣 30 分;缺 swing → 扣 20 分;缺 ATR → 扣 25 分。
+4. data_completeness_pct:这是给系统消费的客观字段,按机械扣分计算
+   (不参与 regime 判断本身)。范围 0-100,起始 100 分:
+   - 缺 EMA-200 → 扣 30 分
+   - 缺 Swing 序列 → 扣 20 分
+   - 缺 ATR 180d 分位 → 扣 25 分
+   - 缺 4h 数据 → 扣 15 分
+   - 缺 previous_l1 → 不扣分(首次运行属正常)
+   多项缺失叠加扣减,下限 0。
 
 # 六、你绝对不能做的(防偏见)
 
@@ -177,7 +186,8 @@ Swing(mixed = 无规律)、ATR 分位(高 = 波动放大)。
 
 # 七、你必须诚实承认的
 
-1. 数据不足时(< 90 天)→ `unclear_insufficient`,confidence ≤ 0.3
+1. 核心指标缺失或数据严重不足 → 输出 `unclear_insufficient`。
+   confidence 反映真实不确定度(参考 4.4 段校准)。
 2. 几何信号互相矛盾(如 EMA 多头 + Swing 下移)→ regime_stability=uncertain,
    key_signals 和 contradicting_signals 都列出
 3. 历史回测期 ATR 分位需要至少 180 天数据 — 不足时

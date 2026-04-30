@@ -139,8 +139,9 @@ class TestNarrativeStructure:
             out = generate_no_opportunity_narrative(facts, state)
             n = out["narrative"]
             assert isinstance(n, str), f"[{label}] narrative not str"
-            assert 50 <= len(n) <= 400, \
-                f"[{label}] narrative length {len(n)} 不在 50-400:{n}"
+            # Sprint 1.5m:4 段交易员叙事更长(原 50-400 → 80-1200)
+            assert 80 <= len(n) <= 1200, \
+                f"[{label}] narrative length {len(n)} 不在 80-1200:{n}"
 
     def test_all_scenarios_have_three_or_more_drivers(self, all_scenarios):
         for label, facts, state in all_scenarios:

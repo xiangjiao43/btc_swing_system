@@ -532,3 +532,98 @@ def test_has_today_btc_dominance_or_etf_flow_false_when_missing(tmp_path: Path):
         assert _has_today_btc_dominance_or_etf_flow(conn) is False
     finally:
         conn.close()
+
+
+# ============================================================
+# Sprint 1.6.1 任务 C:CoinGlass 新 metric e2e 入 DB 验证
+# ============================================================
+
+def test_coinglass_btc_dominance_writes_to_derivatives_snapshots(tmp_path: Path):
+    """端到端:CoinGlass btc_dominance fetch 后通过 DerivativesDAO.upsert_batch
+    入 derivatives_snapshots 表 full_data_json extras。
+
+    daily timestamp guard 1.5f-revised:metric_value 仍写入但 timestamp
+    必须 endswith 'T00:00:00Z'。CoinGlass 1d bar 天然落 UTC 00:00。
+    """
+    from src.data.storage.dao import DerivativeMetric, DerivativesDAO
+    db = tmp_path / "cg_e2e.db"
+    init_db(db_path=db, verbose=False)
+    conn = sqlite3.connect(db)
+    conn.row_factory = sqlite3.Row
+    try:
+        # 模拟 fetch_btc_dominance 返回 daily 行
+        metrics = [
+            DerivativeMetric(
+                timestamp="2026-04-30T00:00:00Z",  # daily,通过 guard
+                metric_name="btc_dominance",
+                metric_value=60.36,
+            ),
+        ]
+        n = DerivativesDAO.upsert_batch(conn, metrics)
+        conn.commit()
+        assert n >= 1, f"upsert 应 ≥1,实际 {n}"
+
+        # 验证 full_data_json extras 含 btc_dominance(因为不是 wide column)
+        row = conn.execute(
+            "SELECT full_data_json FROM derivatives_snapshots "
+            "WHERE captured_at_utc = '2026-04-30T00:00:00Z'"
+        ).fetchone()
+        assert row is not None
+        assert "btc_dominance" in (row["full_data_json"] or "")
+        # 数值正确(JSON 解析)
+        import json
+        extras = json.loads(row["full_data_json"])
+        assert abs(extras["btc_dominance"] - 60.36) < 0.01
+    finally:
+        conn.close()
+
+
+def test_coinglass_etf_flow_writes_to_derivatives_snapshots(tmp_path: Path):
+    """同上,etf_flow 写入。"""
+    from src.data.storage.dao import DerivativeMetric, DerivativesDAO
+    db = tmp_path / "etf_e2e.db"
+    init_db(db_path=db, verbose=False)
+    conn = sqlite3.connect(db)
+    conn.row_factory = sqlite3.Row
+    try:
+        metrics = [
+            DerivativeMetric(
+                timestamp="2026-04-30T00:00:00Z",
+                metric_name="etf_flow",
+                metric_value=12345678.9,
+            ),
+        ]
+        DerivativesDAO.upsert_batch(conn, metrics)
+        conn.commit()
+
+        row = conn.execute(
+            "SELECT full_data_json FROM derivatives_snapshots "
+            "WHERE captured_at_utc = '2026-04-30T00:00:00Z'"
+        ).fetchone()
+        assert row is not None
+        import json
+        extras = json.loads(row["full_data_json"])
+        assert abs(extras["etf_flow"] - 12345678.9) < 1.0
+    finally:
+        conn.close()
+
+
+def test_job_collect_klines_daily_calls_btc_dominance_and_etf_flow():
+    """1.6.1 §X 反退化:job_collect_klines_daily 必须调 fetch_btc_dominance
+    + fetch_etf_flow_history(被 1.6 commit f6cc795 加进来,确保未来不被回退)。"""
+    src = (
+        Path(__file__).resolve().parent.parent / "src" / "scheduler" / "jobs.py"
+    ).read_text(encoding="utf-8")
+    # 在 job_collect_klines_daily 函数体内必须 reference 这两个 fetcher 名
+    # (静态字符串检查比 mock 更稳)
+    daily_section_start = src.find("def job_collect_klines_daily(")
+    assert daily_section_start > 0
+    daily_section_end = src.find("def job_collect_klines_weekly(", daily_section_start)
+    assert daily_section_end > daily_section_start
+    daily_body = src[daily_section_start:daily_section_end]
+    assert "fetch_btc_dominance" in daily_body, (
+        "1.6.1:job_collect_klines_daily 必须调 fetch_btc_dominance"
+    )
+    assert "fetch_etf_flow_history" in daily_body, (
+        "1.6.1:job_collect_klines_daily 必须调 fetch_etf_flow_history"
+    )

@@ -334,14 +334,7 @@ sources:
     role_in_v1: display
     serves: [sth_realized_price]
 
-  - name: glassnode_sopr
-    platform: glassnode
-    endpoint: /v1/metrics/indicators/sopr
-    params: { a: BTC }
-    frequency: daily
-    freshness_class: onchain
-    role_in_v1: display
-    serves: [sopr]
+  # Sprint 1.7:glassnode_sopr 已删除(噪音因子;aSOPR=sopr_adjusted 替代)。
 
   - name: glassnode_sopr_adjusted
     platform: glassnode
@@ -705,14 +698,8 @@ single_factors:
     role_in_v1: primary
     notes: "喂给 ExchangeMomentum(L2 内部修正项)"
 
-  # Sprint 1.7:reserve_risk + puell_multiple 已删除(噪音因子)。
-
-  - name: sopr
-    depends_on: [glassnode_sopr]
-    formula_ref: src/indicators/onchain.py::read_glassnode_direct
-    frequency: daily
-    layer: L2
-    role_in_v1: display
+  # Sprint 1.7:reserve_risk + puell_multiple + sopr 已删除(噪音因子;
+  # aSOPR=sopr_adjusted 替代 SOPR 在 cycle_position 中的位置)。
 
   - name: asopr
     depends_on: [glassnode_sopr_adjusted]

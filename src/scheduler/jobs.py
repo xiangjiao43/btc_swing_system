@@ -179,7 +179,9 @@ _GLASSNODE_FETCHERS: tuple[str, ...] = (
     "fetch_mvrv_z_score", "fetch_nupl", "fetch_lth_supply",
     "fetch_exchange_net_flow", "fetch_mvrv", "fetch_realized_price",
     "fetch_lth_realized_price", "fetch_sth_realized_price",
-    "fetch_sopr_adjusted",  # Sprint 1.7:删除 fetch_sopr / fetch_reserve_risk / fetch_puell_multiple
+    "fetch_sopr_adjusted",
+    # Sprint 1.7:删除 fetch_sopr / fetch_reserve_risk / fetch_puell_multiple
+    # (噪音因子;aSOPR=fetch_sopr_adjusted 已替代 SOPR 在 cycle_position 中的位置)
     # Sprint 1.6(建模 v1.3 §2.4):4 新链上端点
     "fetch_sth_supply", "fetch_ssr", "fetch_cdd", "fetch_hodl_waves",
 )
@@ -227,7 +229,8 @@ _ONCHAIN_EXPECTED_METRICS_TODAY: tuple[str, ...] = (
     "mvrv_z_score", "nupl", "lth_supply", "exchange_net_flow",
     "btc_price_close", "mvrv", "realized_price",
     "lth_realized_price", "sth_realized_price",
-    "sopr_adjusted",  # Sprint 1.7:删除 sopr / reserve_risk / puell_multiple
+    "sopr_adjusted",
+    # Sprint 1.7:删除 sopr / reserve_risk / puell_multiple(噪音因子)
     # Sprint 1.6 新增 4 个(hodl_waves 用前缀匹配,见下)
     "sth_supply", "ssr", "cdd",
 )

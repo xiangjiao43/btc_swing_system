@@ -73,7 +73,6 @@ class GlassnodeCollector:
     # ---- Display 7(辅助)----
     _PATH_MVRV               = f"{_BASE_PATH}/market/mvrv"
     _PATH_REALIZED_PRICE     = f"{_BASE_PATH}/market/price_realized_usd"
-    _PATH_SOPR               = f"{_BASE_PATH}/indicators/sopr"
     _PATH_SOPR_ADJUSTED      = f"{_BASE_PATH}/indicators/sopr_adjusted"
 
     # Sprint 2.6-I:LTH/STH realized price 通过 breakdowns 客户端聚合得出
@@ -612,14 +611,8 @@ class GlassnodeCollector:
             source="glassnode_display",
         )
 
-    def fetch_sopr(
-        self, interval: str = "24h", since_days: int = 180
-    ) -> list[dict[str, Any]]:
-        return self._fetch_series(
-            self._PATH_SOPR, "sopr",
-            interval=interval, since_days=since_days,
-            source="glassnode_display",
-        )
+    # Sprint 1.7:fetch_sopr 已删除(噪音因子;1.6 已升级 aSOPR=fetch_sopr_adjusted
+    # 替代它在 cycle_position 中的位置)。
 
     def fetch_sopr_adjusted(
         self, interval: str = "24h", since_days: int = 180
@@ -661,7 +654,6 @@ class GlassnodeCollector:
             # 共享 HTTP(实例缓存),所以两个注册项实际只产生 2 次 HTTP
             ("lth_realized_price", self.fetch_lth_realized_price),
             ("sth_realized_price", self.fetch_sth_realized_price),
-            ("sopr",               self.fetch_sopr),
             ("sopr_adjusted",      self.fetch_sopr_adjusted),
             # Sprint 1.6(建模 v1.3 §2.4):4 个新链上端点
             ("sth_supply",         self.fetch_sth_supply),

@@ -50,7 +50,8 @@ def test_writer_inserts_row_when_pre_flight_degraded(db_path):
             run_ts_utc="2026-04-28T08:05:00Z",
             degraded_stages=["pre_flight.onchain", "pre_flight.macro"],
             metric_inserted_at={
-                "onchain": {"sopr": "2026-04-28T07:50:00Z"},
+                # Sprint 1.7:sopr 因子已删除,改用 sopr_adjusted(aSOPR)做 onchain 测样
+                "onchain": {"sopr_adjusted": "2026-04-28T07:50:00Z"},
                 "macro":   {"dxy":  "2026-04-27T20:00:00Z"},
                 "klines_by_tf": {}, "derivatives_snapshot": None,
             },

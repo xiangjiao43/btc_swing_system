@@ -181,6 +181,8 @@ _GLASSNODE_FETCHERS: tuple[str, ...] = (
     "fetch_lth_realized_price", "fetch_sth_realized_price",
     "fetch_sopr", "fetch_sopr_adjusted",
     "fetch_reserve_risk", "fetch_puell_multiple",
+    # Sprint 1.6(建模 v1.3 §2.4):4 新链上端点
+    "fetch_sth_supply", "fetch_ssr", "fetch_cdd", "fetch_hodl_waves",
 )
 
 
@@ -422,6 +424,33 @@ def job_collect_klines_daily(
                 errors[tf] = str(e)[:200]
                 by_tf[tf] = 0
 
+        # Sprint 1.6(建模 v1.3 §2.6):2 个机构/市场结构 daily 端点
+        # btc_dominance + etf_flow → 入 derivatives_snapshots(daily timestamp guard 1.5f)
+        from ..data.storage.dao import DerivativeMetric, DerivativesDAO
+        for fn_name in ("fetch_btc_dominance", "fetch_etf_flow_history"):
+            try:
+                fn = getattr(cg, fn_name, None)
+                if fn is None:
+                    continue
+                rows = fn(interval="1d", limit=720)
+                if not rows:
+                    by_tf[fn_name] = 0
+                    continue
+                metrics = [
+                    DerivativeMetric(
+                        timestamp=r["timestamp"],
+                        metric_name=r["metric_name"],
+                        metric_value=r["metric_value"],
+                    )
+                    for r in rows
+                ]
+                by_tf[fn_name] = DerivativesDAO.upsert_batch(conn, metrics)
+            except Exception as e:
+                logger.warning("collect_klines_daily.%s failed: %s",
+                               fn_name, e)
+                errors[fn_name] = str(e)[:200]
+                by_tf[fn_name] = 0
+
         conn.commit()
         return {
             "by_collector": by_tf,
@@ -554,12 +583,29 @@ def job_collect_onchain(
                 errors[fn_name] = str(e)[:200]
 
         conn.commit()
+
+        # Sprint 1.6:Glassnode fetch 完后跑本地派生 MVRV 计算
+        # (alphanode 不开 mvrv_more,改 price/realized_price 比率)
+        derived_stats: dict[str, int] = {}
+        try:
+            from ..data.collectors.derived_onchain import (
+                compute_and_save_derived_mvrv,
+            )
+            derived_stats = compute_and_save_derived_mvrv(conn)
+            total += sum(derived_stats.values())
+        except Exception as e:
+            logger.warning("derived_mvrv compute failed: %s", e)
+            errors["derived_mvrv"] = str(e)[:200]
+
         # Sprint 2.7-D:onchain 抓完立即 enqueue 一次 pipeline_run(event_onchain)
         # 无节流(每天 08:35 只跑一次,天然不重复)
         if total > 0:
             _enqueue_pipeline_run("event_onchain")
         return {
-            "by_collector": {"glassnode": total},
+            "by_collector": {
+                "glassnode": total - sum(derived_stats.values()),
+                "derived_mvrv": sum(derived_stats.values()),
+            },
             "total_upserted": total,
             "events_triggered": ["event_onchain"] if total > 0 else [],
             "errors": errors,

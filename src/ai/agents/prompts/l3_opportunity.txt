@@ -193,11 +193,12 @@ protective — 保护:已持仓且出现风险信号,只能减仓不能加仓
 H1. L1 regime=chaos → grade 必为 none,permission 必为 watch / no_open
 H2. L2 stance=neutral → grade 必为 none(无方向不能开仓)
 H3. L1 regime=transition_* + L2 stance_confidence_tier=low → grade 不可高于 C
-H4. 任一反模式触发 → grade 必降级(A→B / B→C / C→none)
+H4. 反模式触发数量决定 grade 降级:
+    - 0 个反模式 → grade 不降
+    - 1 个反模式 → grade 降 1 级(A→B / B→C / C→none)
+    - ≥ 2 个反模式 → grade 强制 none
 H5. current_state ∈ {LONG_HOLD, LONG_TRIM, SHORT_HOLD, SHORT_TRIM} →
     grade=none(L3 不重复给开仓信号,持仓中只看 protective)
-H6. 任一反模式 + grade=A → 降到 B
-H7. 多重反模式 + grade=B → 降到 none
 
 防偏见(语气和判断纪律):
 
@@ -260,7 +261,7 @@ H7. 多重反模式 + grade=B → 降到 none
     "L2 stance=bullish high tier + phase=early (2/3 方向确认)",
     "风险预览:crowding moderate / 无宏观警告 / 无事件风险 (3/3 风险清洁)",
     "反模式扫描:5 项全 false,无降级",
-    "current_state=FLAT,可开仓",
+    "current_state=FLAT,无 H5 持仓阻断",
     "三维度齐心 + 反模式无 + 状态允许 → grade A",
     "phase=early + crowding moderate → permission active_open"
   ],
@@ -270,7 +271,7 @@ H7. 多重反模式 + grade=B → 降到 none
     "phase=early 表明趋势空间未释放"
   ],
   "contradicting_signals": [],
-  "narrative": "BTC 处于高质量开仓窗口。L1 trend_up 稳定、L2 bullish high tier、phase early、风险清洁、反模式全无,5 个维度齐心支持。Permission 给 active_open。",
+  "narrative": "BTC 处于高质量开仓窗口。L1 trend_up 稳定、L2 bullish high tier、phase early、风险清洁、反模式全 0 通过,L1+L2+风险三维度齐心支持,反模式无降级因素。Permission 给 active_open。",
   "confidence": 0.92,
   "data_completeness_pct": 100,
   "notes": []

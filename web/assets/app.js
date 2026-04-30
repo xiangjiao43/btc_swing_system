@@ -334,7 +334,9 @@ function app() {
             // risks
             if (!out.risks || typeof out.risks !== 'object') {
                 const l4 = (raw.evidence_reports || {}).layer_4 || {};
-                const er = (raw.composite_factors || {}).event_risk || {};
+                // Sprint 1.5q.1:event_risk 已删,event_windows 退化为空数组
+                // (网页"事件日历"区现在直接读 factor_cards 的 events 卡)
+                const er = {};
                 out.risks = {
                     hard_invalidation_levels: l4.hard_invalidation_levels || [],
                     active_risk_tags: l4.active_risk_tags || [],
@@ -402,13 +404,13 @@ function app() {
             // Sprint 2.3 tuning:按对策略建议的影响程度重排
             const all = (this.state && this.state.factor_cards || [])
                 .filter(c => c.tier === 'composite');
+            // Sprint 1.5q.1:event_risk 已 rm,5 个组合因子排序
             const order = [
                 'cycle_position',    // 决定动态门槛 + stance
                 'truth_trend',       // L1 regime 主导
                 'band_position',     // L2 phase 决定
                 'crowding',          // L4 position_cap 主要乘数
                 'macro_headwind',    // L5 → L4 乘数
-                'event_risk',        // L4 事件乘数
             ];
             const idxOf = (c) => {
                 // card_id 形如 composite_cycle_position_20260424

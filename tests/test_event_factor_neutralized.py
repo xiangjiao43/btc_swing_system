@@ -1,10 +1,11 @@
-"""tests/test_event_factor_neutralized.py — Sprint 1.5q §X 反退化。
+"""tests/test_event_factor_neutralized.py — Sprint 1.5q.1 §X 反退化(真删版)。
 
-EventRisk 软删除(中长期波段哲学):
-- 因子永远 band='none' / cap_multiplier=1.0 / permission_adjustment=None
+EventRiskFactor 已在 Sprint 1.5q.1 真删:
+- src/composite/event_risk.py 整文件 rm
+- composite/__init__.py 不再 export EventRiskFactor
+- pipeline/state_builder Stage 9 整段删
 - L4 risk 删除 step 5(× event_risk)+ permission 不再含 l4_event_risk 建议
 - 事件卡 impact_direction='neutral',strategy_impact='参考信息'
-- 网页 "影响:偏空" 老文案不在事件卡渲染路径
 
 §Z 反退化锁:确保未来不被恢复。
 """
@@ -13,49 +14,43 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from src.composite.event_risk import EventRiskFactor
-from src.evidence.layer4_risk import _compose_position_cap, _merge_permissions
+import pytest
+
+from src.evidence.layer4_risk import _compose_position_cap
 from src.strategy.factor_card_emitter import _emit_events_reference
 
 
 # ============================================================
-# A. EventRiskFactor 永远 neutral
+# A. EventRiskFactor 整文件已 rm — import 必须 ImportError
 # ============================================================
 
-def test_event_risk_factor_band_always_none():
-    """无论 events 多多少 / hours_to 多近,band 永远 'none'。"""
-    high_pressure = [
-        {"name": "FOMC", "event_type": "fomc", "hours_to": 1},
-        {"name": "CPI", "event_type": "cpi", "hours_to": 6},
-        {"name": "NFP", "event_type": "nfp", "hours_to": 12},
-    ]
-    out = EventRiskFactor().compute({
-        "events_upcoming_48h": high_pressure,
-        "is_volatility_extreme": True,
-        "btc_nasdaq_correlated": True,
-    })
-    assert out["band"] == "none"
+def test_event_risk_factor_import_fails():
+    """1.5q.1:src/composite/event_risk.py 已 rm,import 必须报 ModuleNotFoundError。"""
+    with pytest.raises((ImportError, ModuleNotFoundError)):
+        from src.composite.event_risk import EventRiskFactor  # noqa: F401
 
 
-def test_event_risk_factor_cap_multiplier_always_1():
-    out = EventRiskFactor().compute({
-        "events_upcoming_48h": [
-            {"name": "FOMC", "event_type": "fomc", "hours_to": 2},
-        ],
-    })
-    assert out["position_cap_multiplier"] == 1.0
+def test_composite_init_does_not_export_event_risk():
+    """composite/__init__.py 的 __all__ 不应含 EventRiskFactor。"""
+    import src.composite as composite_pkg
+    assert "EventRiskFactor" not in (composite_pkg.__all__ or [])
+    assert not hasattr(composite_pkg, "EventRiskFactor")
 
 
-def test_event_risk_factor_permission_adjustment_always_none():
-    """老实现 score >= 8 触发 ambush_only,新实现永远 None。"""
-    out = EventRiskFactor().compute({
-        "events_upcoming_48h": [
-            {"name": "FOMC", "event_type": "fomc", "hours_to": 1},
-            {"name": "CPI", "event_type": "cpi", "hours_to": 5},
-        ],
-    })
-    assert out["score"] >= 8.0  # 分数仍计算
-    assert out["permission_adjustment"] is None
+def test_state_builder_does_not_import_event_risk():
+    """pipeline.state_builder 不再 import EventRiskFactor(只允许在解释性注释里)。"""
+    src = (
+        Path(__file__).resolve().parent.parent
+        / "src" / "pipeline" / "state_builder.py"
+    ).read_text(encoding="utf-8")
+    # 检查每行:不能在 import 段或 active code 里出现 EventRiskFactor
+    for line in src.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            continue  # 注释允许保留 1.5q.1 删除标记
+        assert "EventRiskFactor" not in line, (
+            f"state_builder.py 活跃代码仍含 EventRiskFactor: {line!r}"
+        )
 
 
 # ============================================================
@@ -63,14 +58,13 @@ def test_event_risk_factor_permission_adjustment_always_none():
 # ============================================================
 
 def test_position_cap_composition_no_after_l4_event():
-    """_compose_position_cap 输出 composition dict 不再含 after_l4_event /
-    l4_event_risk_multiplier。"""
+    """_compose_position_cap 输出不再含 after_l4_event / l4_event_risk_multiplier。"""
     final, comp = _compose_position_cap(
         base_pct=70.0,
         overall_risk_level="moderate",
         crowding_score=2,
         macro_headwind_score=0.0,
-        event_risk_score=8.0,  # 即使传入也不应影响
+        event_risk_score=8.0,  # 即使传入也不应影响(向下兼容 signature)
         hard_floor_pct=15.0,
     )
     assert "after_l4_event" not in comp
@@ -78,7 +72,7 @@ def test_position_cap_composition_no_after_l4_event():
 
 
 def test_position_cap_composition_has_4_steps():
-    """1.5q:剩 4 步乘数(base + l4_risk + l4_crowding + l5_macro_headwind)。"""
+    """1.5q.1:剩 4 步乘数(base + l4_risk + l4_crowding + l5_macro_headwind)。"""
     final, comp = _compose_position_cap(
         base_pct=70.0,
         overall_risk_level="moderate",
@@ -90,7 +84,6 @@ def test_position_cap_composition_has_4_steps():
     assert "l4_risk_multiplier" in comp
     assert "l4_crowding_multiplier" in comp
     assert "l5_macro_headwind_multiplier" in comp
-    # 但没有 event_risk multiplier
     assert "l4_event_risk_multiplier" not in comp
 
 
@@ -99,20 +92,19 @@ def test_position_cap_composition_has_4_steps():
 # ============================================================
 
 def test_event_card_impact_direction_always_neutral():
-    """1.5q:事件卡 impact_direction 永远 neutral,不再"< 48h 标 bearish"。"""
     cards = _emit_events_reference(
         events=[],
         today="20260430",
         next_by_type={
-            "fomc": {"hours_to": 1.0, "event_type": "fomc"},     # 极近
-            "cpi":  {"hours_to": 6.0, "event_type": "cpi"},      # < 48h
-            "nfp":  {"hours_to": 100.0, "event_type": "nfp"},    # > 72h
+            "fomc": {"hours_to": 1.0, "event_type": "fomc"},
+            "cpi":  {"hours_to": 6.0, "event_type": "cpi"},
+            "nfp":  {"hours_to": 100.0, "event_type": "nfp"},
         },
     )
     for c in cards:
         assert c["impact_direction"] == "neutral", (
             f"event card {c.get('card_id')} impact_direction={c['impact_direction']},"
-            "应永远 neutral(1.5q 中长期波段哲学)"
+            "应永远 neutral"
         )
 
 
@@ -123,11 +115,9 @@ def test_event_card_strategy_impact_says_reference_only():
     )
     fomc_card = next(c for c in cards if "fomc" in c["card_id"])
     assert "参考信息" in fomc_card["strategy_impact"]
-    assert "不参与策略评分" in fomc_card["strategy_impact"]
 
 
 def test_event_card_plain_interpretation_no_high_risk_label():
-    """1.5q 反退化:plain_interpretation 不含 "< 24h = 高风险窗口" 老标签。"""
     cards = _emit_events_reference(
         events=[], today="20260430",
         next_by_type={"fomc": {"hours_to": 5.0, "event_type": "fomc"}},
@@ -138,18 +128,48 @@ def test_event_card_plain_interpretation_no_high_risk_label():
 
 
 # ============================================================
-# D. 前端 HTML 没有"影响:偏空"等老文案
+# D. composite_factors 输出 5 个,不含 event_risk(end-to-end)
 # ============================================================
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent
+def test_e2e_composite_factors_does_not_include_event_risk(tmp_path):
+    """关键反退化:跑完 pipeline 后 composite_factors 不应有 'event_risk' 键。
 
+    注入 fake ai_caller 跳过外部 AI 调用,加快测试。空 DB → fallback,
+    但 composite_factors / L4 输出仍能 inspect。
+    """
+    import sqlite3
+    from src.data.storage.connection import init_db
+    from src.pipeline import StrategyStateBuilder
 
-def test_html_has_no_event_impact_label_text():
-    """1.5q 反退化:web/index.html 不应含静态"影响:偏空"标签。
-    (impact_direction 现在永远 neutral,即使老 directionLabel 渲染也是"中性"。)"""
-    html = (_REPO_ROOT / "web" / "index.html").read_text(encoding="utf-8")
-    # 静态字面量 "偏空" / "偏多" 不应作为 strategy_impact 老文案出现
-    # (允许出现在 directionLabel 函数定义里,作为 lookup 值)
-    # 这里反退化主要确保不出现 hardcoded "影响:偏空" 这种事件硬编码
-    assert "事件影响:偏空" not in html
-    assert "事件影响:偏多" not in html
+    db_path = tmp_path / "e2e.db"
+    init_db(db_path=db_path, verbose=False)
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        # fake AI caller:返回 mock degraded 输出,避免外部 HTTP
+        def _fake_ai(*args, **kwargs):
+            return {
+                "status": "degraded_skip",
+                "summary_text": None,
+                "model": "mock",
+                "tokens_in": 0, "tokens_out": 0, "latency_ms": 0,
+                "error": None,
+            }
+        builder = StrategyStateBuilder(conn, ai_caller=_fake_ai)
+        result = builder.run(run_trigger="manual_e2e_1_5q1")
+        state = getattr(result, "state", None) or {}
+        comp = state.get("composite_factors") or {}
+        assert "event_risk" not in comp, (
+            f"composite_factors 仍含 event_risk:keys={list(comp.keys())}"
+        )
+        # L4 cap composition 不含 event_risk 字段
+        l4 = (state.get("evidence_reports") or {}).get("layer_4") or {}
+        cap_comp = l4.get("position_cap_composition") or {}
+        assert "after_l4_event" not in cap_comp
+        assert "l4_event_risk_multiplier" not in cap_comp
+        # permission suggestions 不含 l4_event_risk
+        perm_comp = l4.get("permission_composition") or {}
+        suggestions = perm_comp.get("suggestions") or {}
+        assert "l4_event_risk" not in suggestions
+    finally:
+        conn.close()

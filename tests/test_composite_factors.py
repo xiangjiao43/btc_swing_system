@@ -18,7 +18,6 @@ import pytest
 from src.composite.band_position import BandPositionFactor
 from src.composite.crowding import CrowdingFactor
 from src.composite.cycle_position import CyclePositionFactor
-from src.composite.event_risk import EventRiskFactor
 from src.composite.macro_headwind import MacroHeadwindFactor
 from src.composite.truth_trend import TruthTrendFactor
 
@@ -327,79 +326,6 @@ class TestMacroHeadwind:
             assert key in out, f"missing: {key}"
 
 
-# ==================================================================
-# EventRisk
-# ==================================================================
-
-class TestEventRisk:
-    """Sprint 1.5q:EventRisk 软删除 — 不再影响策略。
-    band 永远 'none',cap_multiplier=1.0,permission_adjustment=None。
-    分数仍计算用于审计,但不进入 cap/permission 合成。
-    """
-
-    def test_fomc_within_24h_does_not_downgrade(self):
-        """1.5q 反退化:FOMC < 24h 老实现会 band=medium + cap×0.85,
-        新实现一律 none + 1.0(中长期波段哲学)。"""
-        events = [
-            {"name": "FOMC_decision", "event_type": "fomc",
-             "hours_to": 12, "impact_level": 5},
-        ]
-        factor = EventRiskFactor()
-        out = factor.compute({"events_upcoming_48h": events})
-        # 分数仍计算(供审计),但 band/multiplier 不再根据它降档
-        assert out["score"] > 0  # FOMC=4 × 1.5 = 6,审计字段保留
-        assert out["band"] == "none"
-        assert out["position_cap_multiplier"] == 1.0
-        assert out["permission_adjustment"] is None
-
-    def test_high_score_does_not_force_ambush_only(self):
-        """1.5q 反退化:多事件叠加 score ≥ 8 老实现 band=high + ambush_only,
-        新实现一律 None(不影响 permission)。"""
-        events = [
-            {"name": "FOMC_decision", "event_type": "fomc", "hours_to": 12},
-            {"name": "CPI", "event_type": "cpi", "hours_to": 20},
-        ]
-        factor = EventRiskFactor()
-        out = factor.compute({
-            "events_upcoming_48h": events,
-            "btc_nasdaq_correlated": False,
-        })
-        assert out["score"] >= 8.0  # 分数仍计算
-        assert out["band"] == "none"  # 但 band 永远 none
-        assert out["permission_adjustment"] is None  # 永远 None
-        assert out["position_cap_multiplier"] == 1.0
-
-    def test_no_events_still_neutral(self):
-        factor = EventRiskFactor()
-        out = factor.compute({"events_upcoming_48h": []})
-        assert out["score"] == 0.0
-        assert out["band"] == "none"
-        assert out["position_cap_multiplier"] == 1.0
-        assert out["permission_adjustment"] is None
-
-    def test_us_corr_bonus_still_calculated_but_no_effect(self):
-        """US 相关性 bonus 仍累入 score(供审计),但 band/multiplier 不变。"""
-        events = [
-            {"name": "CPI", "event_type": "cpi", "hours_to": 12},
-        ]
-        factor = EventRiskFactor()
-        out_no_corr = factor.compute({
-            "events_upcoming_48h": events,
-            "btc_nasdaq_correlated": False,
-        })
-        out_with_corr = factor.compute({
-            "events_upcoming_48h": events,
-            "btc_nasdaq_correlated": True,
-        })
-        assert out_with_corr["score"] > out_no_corr["score"]
-        # 但 band 都是 none,cap_multiplier 都是 1.0
-        assert out_no_corr["band"] == "none"
-        assert out_with_corr["band"] == "none"
-
-    def test_output_has_required_fields(self):
-        factor = EventRiskFactor()
-        out = factor.compute({"events_upcoming_48h": []})
-        for key in ("score", "band", "position_cap_multiplier",
-                    "permission_adjustment", "contributing_events",
-                    "upcoming_events_count"):
-            assert key in out, f"missing: {key}"
+# Sprint 1.5q.1:TestEventRisk 整段删除 — EventRiskFactor 已 rm。
+# 中长期波段不让事件预降级。事件仅作参考显示(网页事件日历区),
+# 不参与 composite_factors / L4 cap / permission。

@@ -448,13 +448,13 @@ def _event_risk(er: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
 # 入口
 # ============================================================
 
+# Sprint 1.5q.1:event_risk 已 rm,_SPECS 5 个组合因子。
 _SPECS: dict[str, Any] = {
     "truth_trend": _truth_trend,
     "band_position": _band_position,
     "cycle_position": _cycle_position,
     "crowding": _crowding,
     "macro_headwind": _macro_headwind,
-    "event_risk": _event_risk,
 }
 
 
@@ -860,13 +860,13 @@ def _event_risk_narrative(c: dict[str, Any], state: dict[str, Any]) -> dict[str,
     }
 
 
+# Sprint 1.5q.1:event_risk 已 rm,_NARRATIVE_GENERATORS 5 个组合因子。
 _NARRATIVE_GENERATORS: dict[str, Any] = {
     "truth_trend": _truth_trend_narrative,
     "band_position": _band_position_narrative,
     "cycle_position": _cycle_position_narrative,
     "crowding": _crowding_narrative,
     "macro_headwind": _macro_headwind_narrative,
-    "event_risk": _event_risk_narrative,
 }
 
 

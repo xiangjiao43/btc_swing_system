@@ -327,54 +327,9 @@ class TestPersistenceRoundTrip:
 
 
 # ==================================================================
-# 9. event_risk 在 L1 之后跑(能拿到 is_volatility_extreme)
+# Sprint 1.5q.1:TestEventRiskAfterL1 整段删除 — EventRiskFactor 已 rm。
+# composite_factors 不再包含 event_risk 键。
 # ==================================================================
-
-class TestEventRiskAfterL1:
-    def test_event_risk_uses_l1_volatility(self, conn):
-        _seed_klines(conn, n=260)
-        # 埋一个 72h 内的高权重事件(FOMC)
-        utc = datetime.now(timezone.utc) + timedelta(hours=12)
-        ts_str = utc.strftime("%Y-%m-%dT%H:%M:%SZ")
-        EventsCalendarDAO.upsert_event(
-            conn,
-            EventRow(
-                event_id="fomc-1", date=utc.strftime("%Y-%m-%d"),
-                timezone="UTC", local_time=None,
-                utc_trigger_time=ts_str,
-                event_type="fomc", event_name="FOMC Meeting",
-                impact_level=3, notes=None,
-            ),
-        )
-        conn.commit()
-
-        # 保证 L1 输出一定 "extreme"(monkey-patch Layer1Regime)
-        import src.pipeline.state_builder as sb
-        class _FakeL1:
-            def compute(self, ctx, rules_version="v1.2.0"):
-                return {
-                    "layer_id": 1, "layer_name": "regime",
-                    "regime": "chaos", "regime_primary": "chaos",
-                    "volatility_regime": "extreme",
-                    "volatility_level": "extreme",
-                    "health_status": "healthy", "confidence_tier": "medium",
-                    "reference_timestamp_utc": "2024-01-01T00:00:00Z",
-                    "run_trigger": "scheduled", "rules_version": rules_version,
-                    "data_freshness": {}, "computation_method": "rule_based",
-                    "notes": [], "generated_at_utc": "2024-01-01T00:00:00Z",
-                }
-        sb.Layer1Regime = _FakeL1  # type: ignore
-
-        try:
-            result = _sb(conn, ai_caller=_ai_ok()).run()
-            er = result.state["composite_factors"]["event_risk"]
-            # 有事件被计入且应用了 vol bonus
-            assert er["upcoming_events_count"] >= 1
-            assert any(e.get("vol_bonus_applied") is True
-                       for e in er.get("contributing_events", []))
-        finally:
-            from src.evidence import Layer1Regime as _RealL1
-            sb.Layer1Regime = _RealL1
 
 
 # ==================================================================

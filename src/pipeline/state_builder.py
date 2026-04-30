@@ -37,7 +37,6 @@ from ..composite import (
     BandPositionFactor,
     CrowdingFactor,
     CyclePositionFactor,
-    EventRiskFactor,
     MacroHeadwindFactor,
     TruthTrendFactor,
 )
@@ -413,22 +412,10 @@ class StrategyStateBuilder:
         )
         context["layer_1_output"] = layer_1_output
 
-        # === Stage 9: event_risk(需 L1.volatility_regime 和 macro_headwind 相关性)===
-        context["is_volatility_extreme"] = (
-            (layer_1_output.get("volatility_regime")
-             or layer_1_output.get("volatility_level")) == "extreme"
-        )
-        context["btc_nasdaq_correlated"] = bool(
-            (composite_factors.get("macro_headwind") or {}).get(
-                "correlation_amplified", False
-            )
-        )
-        composite_factors["event_risk"] = self._run_stage(
-            "composite.event_risk", failures, degraded_stages, run_ts_utc,
-            lambda: EventRiskFactor().compute(context),
-            default=_factor_degraded("event_risk"),
-        )
-        context["composite_factors"] = composite_factors  # event_risk 已就位
+        # Sprint 1.5q.1:删除 Stage 9 event_risk 整段。EventRiskFactor 已 rm,
+        # 中长期波段不让事件预降级仓位 / permission(详见 docs/cc_reports/sprint_1_5q_1.md)。
+        # composite_factors 现在 5 个:cycle_position / truth_trend / band_position /
+        # crowding / macro_headwind。
 
         # === Stage 10: L2 ===
         layer_2_output = self._run_stage(

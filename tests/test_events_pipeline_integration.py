@@ -82,34 +82,9 @@ def test_seed_then_dao_query_returns_event_with_hours_to(
     assert ev["hours_to"] == pytest.approx(36.0, abs=0.01)
 
 
-def test_seed_then_event_risk_scores_medium_band(
-    db_with_events, fomc_in_36h_seed,
-):
-    """seed → DAO → event_risk.compute → score=4.0(fomc 4 × 36h-bucket 1.0),band=medium。"""
-    from src.composite.event_risk import EventRiskFactor
-
-    seed_events(db_with_events, fomc_in_36h_seed)
-    events = EventsCalendarDAO.get_upcoming_within_hours(
-        db_with_events,
-        hours=72,
-        now_utc="2026-04-28T06:00:00Z",
-    )
-
-    factor = EventRiskFactor()
-    out = factor.compute({
-        "events_upcoming_48h": events,
-        "is_volatility_extreme": False,
-        "btc_nasdaq_correlated": False,
-    })
-
-    # fomc base_weight=4 × distance_multiplier(36h → [24,48] bucket)=1.0 → 4.0
-    # Sprint 1.5q:分数仍计算用于审计,但 band=none / cap_multiplier=1.0
-    # (中长期波段哲学,事件不影响策略)
-    assert out["score"] == pytest.approx(4.0, abs=0.01)
-    assert out["band"] == "none"
-    assert out["position_cap_multiplier"] == 1.0
-    assert out["upcoming_events_count"] == 1
-    assert out["contributing_events"][0]["type"] == "fomc"
+# Sprint 1.5q.1:test_seed_then_event_risk_scores_medium_band 整段删除 —
+# EventRiskFactor 已 rm。事件 seed → DAO → 仅参与网页事件参考显示,
+# 不再走 event_risk 评分路径。
 
 
 def test_real_seed_loads_and_query_returns_apr29_fomc(db_with_events):

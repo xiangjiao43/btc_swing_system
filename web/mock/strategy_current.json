@@ -260,7 +260,7 @@
       "current_value": "7 天后",
       "history_percentile": null,
       "one_line_interpretation": "7 天后 FOMC,暂未进入事件窗口。",
-      "analysis": "距离下次 FOMC 还有 7 天,超过事件窗口 48 小时阈值。届时 event_risk_score 将自动升级。",
+      "analysis": "距离下次 FOMC 还有 7 天。事件仅供参考,不参与策略评分(Sprint 1.5q.1)。",
       "strategy_impact": "future_caution",
       "direction": "neutral",
       "captured_at_bjt": "2026-05-01 02:00 (BJT)",

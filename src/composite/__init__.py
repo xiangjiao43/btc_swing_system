@@ -1,5 +1,5 @@
 """
-src.composite — 6 个组合因子(建模 §3.8)。
+src.composite — 5 个组合因子(建模 §3.8;Sprint 1.5q.1 删除 EventRisk)。
 
 每个 factor 类:
   - 继承 CompositeFactorBase
@@ -10,7 +10,6 @@ src.composite — 6 个组合因子(建模 §3.8)。
 from .band_position import BandPositionFactor
 from .crowding import CrowdingFactor
 from .cycle_position import CyclePositionFactor
-from .event_risk import EventRiskFactor
 from .macro_headwind import MacroHeadwindFactor
 from .truth_trend import TruthTrendFactor
 from ._base import CompositeFactorBase
@@ -22,5 +21,4 @@ __all__ = [
     "CyclePositionFactor",
     "CrowdingFactor",
     "MacroHeadwindFactor",
-    "EventRiskFactor",
 ]

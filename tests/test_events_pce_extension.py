@@ -192,34 +192,7 @@ def test_event_risk_composition_includes_pce_row():
     assert by_id["event_pce_next"]["weight"] > 0
 
 
-# ============================================================
-# event_risk.py:PCE 走美宏相关性加成
-# ============================================================
-
-def test_event_risk_pce_in_us_macro_types():
-    """_US_MACRO_TYPES 应含 pce(相关性 > 0.7 时美宏事件 +1)。"""
-    from src.composite.event_risk import _US_MACRO_TYPES
-    assert "pce" in _US_MACRO_TYPES
-    assert "fomc" in _US_MACRO_TYPES
-    assert "cpi" in _US_MACRO_TYPES
-
-
-def test_event_risk_compute_picks_pce_event():
-    """contributing_events 含 pce 时,base_weight 应 = 4(从 thresholds 读)。"""
-    from src.composite.event_risk import EventRiskFactor
-
-    factor = EventRiskFactor()
-    out = factor.compute({
-        "events_upcoming_48h": [
-            {"event_type": "pce", "name": "PCE", "hours_to": 36.0},
-        ],
-        "is_volatility_extreme": False,
-        "btc_nasdaq_correlated": False,
-    })
-    contributing = out.get("contributing_events") or []
-    assert len(contributing) == 1
-    pce_evt = contributing[0]
-    assert pce_evt["type"] == "pce"
-    assert pce_evt["base_weight"] == 4.0
-    # 24-48h 距离 multiplier=1.0 → effective_score=4.0
-    assert pce_evt["effective_score"] == 4.0
+# Sprint 1.5q.1:test_event_risk_pce_in_us_macro_types +
+# test_event_risk_compute_picks_pce_event 已删除 — EventRiskFactor 已 rm。
+# PCE 仍然在 events_calendar 和事件参考卡里展示(中长期波段保留事件参考显示),
+# 但不再走 EventRiskFactor 评分,详见 docs/cc_reports/sprint_1_5q_1.md。

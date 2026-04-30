@@ -1,0 +1,454 @@
+"""tests/ai/test_orchestrator.py — Sprint 1.8 Task E 端到端测试。
+
+用 mock anthropic client 模拟 6 AI 返回,验证完整 pipeline 行为:
+- 5 层齐心 → 主裁 LONG_PLANNED + active_open
+- L5=extreme_event=true → Validator 强制 PROTECTION (H4)
+- L1=chaos → action 强制 watch / hold (H5)
+- L3=none → action 强制 watch / hold (H6)
+- 主裁 stop_loss 不在 L4 列表 → Validator 强制覆盖 (H2)
+- 串行合成 multipliers 由 Orchestrator 计算
+"""
+
+from __future__ import annotations
+
+import json
+from typing import Any
+from unittest.mock import MagicMock
+
+import numpy as np
+import pandas as pd
+import pytest
+
+from src.ai.orchestrator import AIOrchestrator
+
+
+def _build_mock_klines_1d(days: int = 200) -> pd.DataFrame:
+    idx = pd.date_range("2025-10-01", periods=days, freq="1D", tz="UTC")
+    np.random.seed(42)
+    close = 70000 + np.cumsum(np.random.randn(days) * 500)
+    return pd.DataFrame({
+        "open": close - 100, "high": close + 200,
+        "low": close - 200, "close": close,
+    }, index=idx)
+
+
+def _build_mock_klines_4h(days: int = 30) -> pd.DataFrame:
+    bars = days * 6
+    idx = pd.date_range("2026-04-01", periods=bars, freq="4h", tz="UTC")
+    np.random.seed(43)
+    close = 75000 + np.cumsum(np.random.randn(bars) * 200)
+    return pd.DataFrame({
+        "open": close - 50, "high": close + 100,
+        "low": close - 100, "close": close,
+    }, index=idx)
+
+
+def _make_layered_mock_agents(
+    l1_output: dict[str, Any],
+    l2_output: dict[str, Any],
+    l3_output: dict[str, Any],
+    l4_output: dict[str, Any],
+    l5_output: dict[str, Any],
+    master_output: dict[str, Any],
+) -> dict[str, Any]:
+    """构造每层 agent 的 mock。每个 agent 的 analyze() 直接返回预设 JSON。
+
+    返回 {l1, l2, l3, l4, l5, master} dict 给 AIOrchestrator(agents=...)。
+    """
+    def _mock_agent(out: dict[str, Any], name: str) -> Any:
+        a = MagicMock()
+        out_with_status = {**out}
+        out_with_status.setdefault("status", "success")
+        a.analyze.return_value = out_with_status
+        a._fallback_output.return_value = {**out, "status": "degraded"}
+        return a
+
+    return {
+        "l1": _mock_agent(l1_output, "l1"),
+        "l2": _mock_agent(l2_output, "l2"),
+        "l3": _mock_agent(l3_output, "l3"),
+        "l4": _mock_agent(l4_output, "l4"),
+        "l5": _mock_agent(l5_output, "l5"),
+        "master": _mock_agent(master_output, "master"),
+    }
+
+
+def _build_context(current_state: str = "FLAT", **overrides) -> dict[str, Any]:
+    base = {
+        "klines_1d": _build_mock_klines_1d(),
+        "klines_4h": _build_mock_klines_4h(),
+        "computed_indicators": {"adx_14": 30, "ema_20_current": 75320},
+        "macro_indicators": {"dxy_current": 102.0, "vix_current": 14.5},
+        "events_calendar_72h": [],
+        "extreme_event_flags": {
+            "geopolitical_conflict_active": False,
+            "major_bank_crisis_signal": False,
+            "regulatory_crackdown_recent": False,
+            "flash_crash_detected_24h": False,
+            "stablecoin_depeg_active": False,
+        },
+        "current_state": current_state,
+        "current_close": 75749,
+    }
+    base.update(overrides)
+    return base
+
+
+# ============================================================
+# 端到端场景测试
+# ============================================================
+
+def test_ideal_open_long_5layers_aligned():
+    """5 层齐心 → 主裁应给 FLAT → LONG_PLANNED + open。"""
+    l1 = {"regime": "trend_up", "regime_stability": "stable",
+          "volatility_regime": "normal", "confidence": 0.90}
+    l2 = {"stance": "bullish", "stance_confidence_tier": "high",
+          "phase": "early",
+          "key_levels": {"nearest_support": 75320, "nearest_resistance": 78900,
+                         "major_support": 71420, "major_resistance": 82100},
+          "confidence": 0.85}
+    l3 = {"opportunity_grade": "A", "execution_permission": "active_open",
+          "anti_pattern_flags": [], "confidence": 0.85}
+    l4 = {"risk_score": 38, "risk_tier": "moderate",
+          "hard_invalidation_levels": [
+              {"price": 73200, "type": "swing_low",
+               "distance_from_current_pct": -3.36},
+              {"price": 71420, "type": "ema_50_break",
+               "distance_from_current_pct": -5.71},
+          ],
+          "position_cap_multiplier": 0.78,
+          "risk_breakdown": {"crowding_risk": 30, "structure_risk": 25,
+                             "liquidity_risk": 18, "event_risk": 10},
+          "confidence": 0.85}
+    l5 = {"macro_stance": "supportive", "headwind_score": 18,
+          "extreme_event_detected": False, "extreme_event_type": None,
+          "position_cap_macro_multiplier": 1.0,
+          "confidence": 0.90}
+    master = {
+        "state_transition": {"from_state": "FLAT", "to_state": "LONG_PLANNED",
+                             "transition_reasoning": "5 层齐心"},
+        "trade_plan": {"action": "open", "direction": "long",
+                       "entry_price_zone": [75000, 75500],
+                       "stop_loss": 73200,
+                       "take_profit_zones": [78900, 82100, 86000],
+                       "position_size_pct": 0.40,
+                       "position_size_reasoning": "..."},
+        "position_cap_final": {
+            "value": 0.4409,
+            "composition": {"base": 0.70, "l4_multiplier": 0.78,
+                            "crowding_multiplier": 0.85,
+                            "macro_multiplier": 1.00,
+                            "event_multiplier": 0.95,
+                            "raw_product": 0.4409,
+                            "after_hard_floor": 0.4409}},
+        "conflict_resolution": [],
+        "what_would_change_mind": "若跌破 73200 离场",
+        "key_observations": ["5 层齐心"],
+        "counter_arguments": ["若 swing_high 失败趋势可能反转"],
+        "narrative": "BTC 多头机会",
+        "confidence": 0.80,
+        "data_completeness_pct": 100,
+    }
+
+    agents = _make_layered_mock_agents(l1, l2, l3, l4, l5, master)
+    orch = AIOrchestrator(agents=agents)
+    result = orch.run_full_a(_build_context())
+
+    assert result["status"] == "ok"
+    assert result["validator"]["passed"] is True
+    out_master = result["layers"]["master"]
+    assert out_master["state_transition"]["to_state"] == "LONG_PLANNED"
+    assert out_master["trade_plan"]["action"] == "open"
+    assert out_master["trade_plan"]["stop_loss"] == 73200
+
+
+def test_extreme_event_protection_h4():
+    """L5 extreme_event=true 但主裁给 LONG_HOLD → Validator 强制 PROTECTION。"""
+    l1 = {"regime": "chaos", "volatility_regime": "extreme",
+          "confidence": 0.60}
+    l2 = {"stance": "bearish", "phase": "mid",
+          "stance_confidence_tier": "high", "confidence": 0.70}
+    l3 = {"opportunity_grade": "none", "execution_permission": "no_open",
+          "confidence": 0.80}
+    l4 = {"risk_tier": "extreme", "position_cap_multiplier": 0.20,
+          "hard_invalidation_levels": [
+              {"price": 65890, "type": "ema_200_break",
+               "distance_from_current_pct": -1.95},
+          ],
+          "risk_breakdown": {"crowding_risk": 92, "structure_risk": 75,
+                             "liquidity_risk": 80, "event_risk": 25},
+          "confidence": 0.88}
+    l5 = {"macro_stance": "extreme_event", "headwind_score": 92,
+          "extreme_event_detected": True,
+          "extreme_event_type": "geopolitical",
+          "position_cap_macro_multiplier": 0.20,
+          "confidence": 0.88}
+    # 主裁错误地给了 LONG_HOLD(违反 H4)
+    master = {
+        "state_transition": {"from_state": "LONG_HOLD",
+                             "to_state": "LONG_HOLD",
+                             "transition_reasoning": "维持"},
+        "trade_plan": {"action": "hold", "direction": "long",
+                       "stop_loss": 65890,
+                       "position_size_pct": 0.40},
+        "position_cap_final": {"value": 0.40,
+                               "composition": {"base": 0.70,
+                                               "raw_product": 0.40}},
+        "counter_arguments": ["若情况恶化"],
+        "narrative": "持仓维持",
+        "confidence": 0.50,
+        "data_completeness_pct": 100,
+    }
+
+    agents = _make_layered_mock_agents(l1, l2, l3, l4, l5, master)
+    orch = AIOrchestrator(agents=agents)
+    result = orch.run_full_a(_build_context(current_state="LONG_HOLD"))
+
+    rules = [v["rule"] for v in result["validator"]["violations"]]
+    assert "H4" in rules
+    out_master = result["layers"]["master"]
+    assert out_master["state_transition"]["to_state"] == "PROTECTION"
+    assert out_master["trade_plan"]["action"] == "protective"
+
+
+def test_l1_chaos_no_open_h5():
+    """L1=chaos + 主裁错误地 open → 强制 watch (H5)。"""
+    l1 = {"regime": "chaos", "confidence": 0.60}
+    l2 = {"stance": "neutral", "phase": "n_a",
+          "stance_confidence_tier": "none", "confidence": 0.50}
+    l3 = {"opportunity_grade": "none", "confidence": 0.60}
+    l4 = {"risk_tier": "moderate",
+          "hard_invalidation_levels": [
+              {"price": 73200, "type": "swing_low",
+               "distance_from_current_pct": -3.36}],
+          "risk_breakdown": {"crowding_risk": 30}, "confidence": 0.70}
+    l5 = {"macro_stance": "neutral", "extreme_event_detected": False,
+          "position_cap_macro_multiplier": 0.90, "confidence": 0.80}
+    master = {
+        "state_transition": {"from_state": "FLAT",
+                             "to_state": "LONG_PLANNED",
+                             "transition_reasoning": "..."},
+        "trade_plan": {"action": "open", "direction": "long",
+                       "stop_loss": 73200,
+                       "position_size_pct": 0.30},
+        "position_cap_final": {"value": 0.30,
+                               "composition": {"base": 0.70,
+                                               "raw_product": 0.30}},
+        "counter_arguments": ["..."],
+        "narrative": "...",
+        "confidence": 0.50,
+        "data_completeness_pct": 100,
+    }
+    agents = _make_layered_mock_agents(l1, l2, l3, l4, l5, master)
+    orch = AIOrchestrator(agents=agents)
+    result = orch.run_full_a(_build_context())
+
+    rules = [v["rule"] for v in result["validator"]["violations"]]
+    # H5 先触发(chaos→不能开),H5 已重写 action=watch,
+    # 之后 H6 (none→不能开) 检查时 action 已是 watch,故不再触发。
+    # 这是正确的"first match auto-fix"行为。
+    assert "H5" in rules
+    assert result["layers"]["master"]["trade_plan"]["action"] == "watch"
+
+
+def test_l3_none_no_open_h6():
+    """L1 ok + L3=none + 主裁错误地 open → 强制 watch (H6)。"""
+    l1 = {"regime": "trend_up", "confidence": 0.90}
+    l2 = {"stance": "bullish", "phase": "early",
+          "stance_confidence_tier": "medium", "confidence": 0.65}
+    l3 = {"opportunity_grade": "none", "confidence": 0.70}
+    l4 = {"risk_tier": "moderate",
+          "hard_invalidation_levels": [
+              {"price": 73200, "type": "swing_low",
+               "distance_from_current_pct": -3.36}],
+          "risk_breakdown": {"crowding_risk": 30}, "confidence": 0.85}
+    l5 = {"macro_stance": "neutral", "extreme_event_detected": False,
+          "position_cap_macro_multiplier": 1.0, "confidence": 0.80}
+    master = {
+        "state_transition": {"from_state": "FLAT",
+                             "to_state": "LONG_PLANNED",
+                             "transition_reasoning": "..."},
+        "trade_plan": {"action": "open", "direction": "long",
+                       "stop_loss": 73200, "position_size_pct": 0.30},
+        "position_cap_final": {"value": 0.40,
+                               "composition": {"base": 0.70,
+                                               "raw_product": 0.40}},
+        "counter_arguments": ["..."],
+        "narrative": "...",
+        "confidence": 0.50,
+        "data_completeness_pct": 100,
+    }
+    agents = _make_layered_mock_agents(l1, l2, l3, l4, l5, master)
+    orch = AIOrchestrator(agents=agents)
+    result = orch.run_full_a(_build_context())
+
+    rules = [v["rule"] for v in result["validator"]["violations"]]
+    assert "H6" in rules
+    assert result["layers"]["master"]["trade_plan"]["action"] == "watch"
+
+
+def test_validator_h2_stop_loss_off_list():
+    """主裁 stop_loss 不在 L4 列表 → Validator 强制覆盖。"""
+    l1 = {"regime": "trend_up", "confidence": 0.90}
+    l2 = {"stance": "bullish", "phase": "early",
+          "stance_confidence_tier": "high",
+          "key_levels": {"nearest_support": 75320}, "confidence": 0.85}
+    l3 = {"opportunity_grade": "A", "confidence": 0.85}
+    l4 = {"risk_tier": "moderate",
+          "hard_invalidation_levels": [
+              {"price": 73200, "type": "swing_low",
+               "distance_from_current_pct": -3.36},
+              {"price": 71420, "type": "ema_50_break",
+               "distance_from_current_pct": -5.71},
+          ],
+          "risk_breakdown": {"crowding_risk": 30}, "confidence": 0.85}
+    l5 = {"macro_stance": "supportive", "extreme_event_detected": False,
+          "position_cap_macro_multiplier": 1.0, "confidence": 0.90}
+    master = {
+        "state_transition": {"from_state": "FLAT",
+                             "to_state": "LONG_PLANNED",
+                             "transition_reasoning": "..."},
+        "trade_plan": {"action": "open", "direction": "long",
+                       "stop_loss": 70000,  # 不在 L4 列表
+                       "position_size_pct": 0.40},
+        "position_cap_final": {"value": 0.4409,
+                               "composition": {"base": 0.70,
+                                               "raw_product": 0.4409}},
+        "counter_arguments": ["..."],
+        "narrative": "...",
+        "confidence": 0.80,
+        "data_completeness_pct": 100,
+    }
+    agents = _make_layered_mock_agents(l1, l2, l3, l4, l5, master)
+    orch = AIOrchestrator(agents=agents)
+    result = orch.run_full_a(_build_context())
+
+    rules = [v["rule"] for v in result["validator"]["violations"]]
+    assert "H2" in rules
+    # 强制使用 L4 第一个止损位
+    assert result["layers"]["master"]["trade_plan"]["stop_loss"] == 73200
+
+
+# ============================================================
+# system_provided multipliers 计算
+# ============================================================
+
+def test_compute_crowding_multiplier_buckets():
+    o = AIOrchestrator()
+    assert o._compute_crowding_multiplier(
+        {"risk_breakdown": {"crowding_risk": 10}}) == 1.0
+    assert o._compute_crowding_multiplier(
+        {"risk_breakdown": {"crowding_risk": 30}}) == 0.85
+    assert o._compute_crowding_multiplier(
+        {"risk_breakdown": {"crowding_risk": 60}}) == 0.65
+    assert o._compute_crowding_multiplier(
+        {"risk_breakdown": {"crowding_risk": 90}}) == 0.50
+
+
+def test_compute_crowding_multiplier_missing_field():
+    """缺 risk_breakdown → 默认 1.0(crowding 0)。"""
+    o = AIOrchestrator()
+    assert o._compute_crowding_multiplier({}) == 1.0
+    assert o._compute_crowding_multiplier({"risk_breakdown": {}}) == 1.0
+
+
+def test_compute_event_multiplier_levels():
+    o = AIOrchestrator()
+    assert o._compute_event_multiplier([]) == 0.95
+    assert o._compute_event_multiplier(
+        [{"impact_level": "low"}]) == 0.95
+    assert o._compute_event_multiplier(
+        [{"impact_level": "medium"}]) == 0.85
+    assert o._compute_event_multiplier(
+        [{"impact_level": "high"}]) == 0.70
+    assert o._compute_event_multiplier(
+        [{"impact_level": "critical"}]) == 0.50
+
+
+def test_compute_event_multiplier_takes_max_impact():
+    """混合事件 → 取最高 impact。"""
+    o = AIOrchestrator()
+    assert o._compute_event_multiplier([
+        {"impact_level": "low"},
+        {"impact_level": "high"},
+        {"impact_level": "medium"},
+    ]) == 0.70
+
+
+# ============================================================
+# 退化场景:层失败时 fallback 链
+# ============================================================
+
+def test_l1_failure_does_not_crash_pipeline():
+    """L1 fallback 但其他层正常 → 整个 pipeline 仍出 result + degraded 状态。"""
+    l1 = {"regime": "unclear_insufficient", "status": "degraded_l1_failed",
+          "confidence": 0.0}
+    l2 = {"stance": "neutral", "phase": "n_a", "confidence": 0.5}
+    l3 = {"opportunity_grade": "none", "confidence": 0.5}
+    l4 = {"risk_tier": "high",
+          "hard_invalidation_levels": [], "confidence": 0.5}
+    l5 = {"macro_stance": "neutral", "extreme_event_detected": False,
+          "position_cap_macro_multiplier": 1.0, "confidence": 0.5}
+    master = {
+        "state_transition": {"from_state": "FLAT", "to_state": "FLAT",
+                             "transition_reasoning": "数据降级"},
+        "trade_plan": {"action": "watch", "direction": None,
+                       "stop_loss": None, "position_size_pct": None},
+        "position_cap_final": {"value": 0.30,
+                               "composition": {"base": 0.70,
+                                               "raw_product": 0.30}},
+        "counter_arguments": ["数据缺失,谨慎"],
+        "narrative": "...",
+        "confidence": 0.30,
+        "data_completeness_pct": 50,
+    }
+    agents = _make_layered_mock_agents(l1, l2, l3, l4, l5, master)
+    orch = AIOrchestrator(agents=agents)
+    result = orch.run_full_a(_build_context())
+
+    assert "degraded_l1" in result["status"]
+    assert result["layers"]["l1"]["status"].startswith("degraded")
+    # 其他层仍能跑
+    assert "master" in result["layers"]
+
+
+def test_orchestrator_result_structure():
+    """结果含 layers / validator / status / latency_ms / tokens。"""
+    l1 = {"regime": "trend_up", "confidence": 0.9}
+    l2 = {"stance": "bullish", "phase": "early",
+          "stance_confidence_tier": "high", "confidence": 0.85}
+    l3 = {"opportunity_grade": "A", "confidence": 0.85}
+    l4 = {"risk_tier": "moderate",
+          "hard_invalidation_levels": [{"price": 73200, "type": "swing_low",
+                                        "distance_from_current_pct": -3.36}],
+          "risk_breakdown": {"crowding_risk": 30}, "confidence": 0.85}
+    l5 = {"macro_stance": "supportive", "extreme_event_detected": False,
+          "position_cap_macro_multiplier": 1.0, "confidence": 0.90}
+    master = {
+        "state_transition": {"from_state": "FLAT",
+                             "to_state": "LONG_PLANNED",
+                             "transition_reasoning": "..."},
+        "trade_plan": {"action": "open", "direction": "long",
+                       "stop_loss": 73200, "position_size_pct": 0.40},
+        "position_cap_final": {"value": 0.4409,
+                               "composition": {"base": 0.70,
+                                               "raw_product": 0.4409}},
+        "counter_arguments": ["..."],
+        "narrative": "...",
+        "confidence": 0.80,
+        "data_completeness_pct": 100,
+    }
+    agents = _make_layered_mock_agents(l1, l2, l3, l4, l5, master)
+    orch = AIOrchestrator(agents=agents)
+    result = orch.run_full_a(_build_context())
+
+    assert "layers" in result
+    assert "validator" in result
+    assert "status" in result
+    assert "latency_ms" in result
+    assert set(result["layers"].keys()) == {
+        "l1", "l2", "l3", "l4", "l5", "master",
+    }
+    # 每层都有 latency 记录
+    for layer in ("l1", "l2", "l3", "l4", "l5", "master"):
+        assert layer in result["latency_ms"]

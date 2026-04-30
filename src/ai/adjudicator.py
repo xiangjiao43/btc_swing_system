@@ -404,7 +404,10 @@ class AIAdjudicator:
             )
 
         allowed_actions = _allowed_actions_for_facts(facts)
-        user_prompt = _build_user_prompt(facts, allowed_actions)
+        # Sprint 1.5l:把 strategy_state 传进去,user prompt 末尾追加原始因子快照
+        user_prompt = _build_user_prompt(
+            facts, allowed_actions, state=strategy_state,
+        )
         model = self._effective_model()
 
         total_tokens_in = 0
@@ -854,6 +857,7 @@ def _should_call_ai(facts: dict[str, Any]) -> bool:
 def _build_user_prompt(
     facts: dict[str, Any],
     allowed_actions: list[str],
+    state: Optional[dict[str, Any]] = None,
 ) -> str:
     l4_cap = facts.get("l4_position_cap") or 0.0
     max_cap_pct = round(float(l4_cap) * 100, 2) if l4_cap else 0.0
@@ -899,12 +903,131 @@ def _build_user_prompt(
         "",
         "=== 允许的 action(chosen_action_state 必须在此集合内)===",
         json.dumps(allowed_actions, ensure_ascii=False),
+    ]
+
+    # Sprint 1.5l Task B:原始因子快照,供 narrative 自由挑 3-5 个关键指标
+    if state is not None:
+        snapshot_block = _build_raw_factor_snapshot(state)
+        if snapshot_block:
+            lines.extend(["", snapshot_block])
+
+    lines.extend([
         "",
         "=== 输出规范 ===",
         "严格按 system prompt 描述的 JSON schema 输出。",
         "grade ∈ {A, B, C} 必须同时产出完整 trade_plan(带 confidence_tier);grade=none 则 trade_plan=null。",
         "只输出 JSON,首字符 {,尾字符 }。",
+    ])
+    return "\n".join(lines)
+
+
+def _build_raw_factor_snapshot(state: dict[str, Any]) -> str:
+    """Sprint 1.5l Task B:把 strategy_state 中的 45 因子卡 + 6 组合因子 +
+    72h 事件窗口拍平成纯文本块,供 AI 在 narrative 中自由挑 3-5 个最有信号
+    的指标。
+
+    格式:按 category(derivatives / onchain / macro / structure)分组列出
+    factor_cards 的 name + current_value + value_unit;composite_factors
+    单独一段;events 单独一段。
+    """
+    cards = (
+        state.get("factor_cards")
+        or state.get("evidence_cards")
+        or []
+    )
+    composite = state.get("composite_factors") or {}
+    events_48h = state.get("events_upcoming_48h") or []
+    next_events = state.get("next_events_by_type") or {}
+
+    lines: list[str] = [
+        "=== 原始因子快照(自由挑 3-5 个最有信号的写入 narrative)===",
     ]
+
+    # ---- factor_cards 按 category 分组 ----
+    by_category: dict[str, list[dict[str, Any]]] = {}
+    for c in cards:
+        if not isinstance(c, dict):
+            continue
+        cat = str(c.get("category") or "other")
+        by_category.setdefault(cat, []).append(c)
+
+    _CATEGORY_LABELS = {
+        "price_structure": "价格 / 结构(K 线)",
+        "derivatives": "衍生品(Binance / 全交易所)",
+        "onchain": "链上(Glassnode,daily)",
+        "macro": "宏观(FRED / yfinance)",
+        "sentiment": "情绪 / 流动性",
+    }
+    for cat in (
+        "price_structure", "derivatives", "onchain", "macro", "sentiment",
+    ):
+        items = by_category.get(cat) or []
+        if not items:
+            continue
+        lines.append("")
+        lines.append(f"-- {_CATEGORY_LABELS.get(cat, cat)} --")
+        for c in items:
+            name = c.get("name") or c.get("metric_name") or c.get("card_id")
+            val = c.get("current_value")
+            unit = c.get("value_unit") or ""
+            captured = c.get("captured_at_bjt") or c.get("captured_at_utc")
+            if val is None:
+                lines.append(f"  {name}: (no data)")
+                continue
+            cap_str = f" @ {captured}" if captured else ""
+            lines.append(f"  {name}: {val} {unit}{cap_str}".rstrip())
+
+    # ---- composite_factors(6 个) ----
+    if composite:
+        lines.append("")
+        lines.append("-- 组合因子(6 个,影响 L3/L4 收紧)--")
+        for name in (
+            "cycle_position", "truth_trend", "band_position",
+            "crowding", "macro_headwind", "event_risk",
+        ):
+            cf = composite.get(name) or {}
+            if not isinstance(cf, dict):
+                continue
+            # 不同 composite 关键字段不同,优先列出常见诊断字段
+            interesting_keys = (
+                "cycle_position", "cycle_confidence",
+                "truth_trend", "trend_score",
+                "band_position", "band_pct",
+                "crowding_level", "crowding_score",
+                "macro_headwind_level", "headwind_score",
+                "event_risk_level", "event_risk_score",
+                "value", "score", "level",
+            )
+            kv: list[str] = []
+            for k in interesting_keys:
+                if k in cf and cf.get(k) is not None:
+                    kv.append(f"{k}={cf[k]}")
+            if kv:
+                lines.append(f"  {name}: {', '.join(kv[:5])}")
+            else:
+                # fallback:dump 部分字段(不超过 4 个)
+                short = {k: v for k, v in list(cf.items())[:4]}
+                lines.append(f"  {name}: {json.dumps(short, ensure_ascii=False)}")
+
+    # ---- 事件窗口(72h)----
+    if events_48h or next_events:
+        lines.append("")
+        lines.append("-- 事件窗口(72h within / 各类下次)--")
+        for ev in (events_48h or [])[:6]:
+            if not isinstance(ev, dict):
+                continue
+            name = ev.get("event_name") or ev.get("event_type")
+            trig = ev.get("utc_trigger_time") or ev.get("date")
+            impact = ev.get("impact_level")
+            lines.append(f"  {name} @ {trig} (impact={impact})")
+        for et, ev in (next_events or {}).items():
+            if not isinstance(ev, dict):
+                continue
+            trig = ev.get("utc_trigger_time") or ev.get("date")
+            lines.append(f"  next.{et}: {trig}")
+
+    if len(lines) <= 1:
+        return ""  # 没有任何快照可写
     return "\n".join(lines)
 
 

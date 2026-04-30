@@ -93,10 +93,9 @@
       <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3 items-center">
         <div class="col-span-2 md:col-span-1 lg:col-span-2">
           <div class="stat-label flex items-center gap-1.5">
-            <span>BTC 价格</span>
-            <span class="text-[8.5px] normal-case text-slate-400 dark:text-slate-500 tracking-normal">
-              实时 · 每分钟更新
-            </span>
+            <span>BTC 现价</span>
+            <span class="text-[8.5px] normal-case text-slate-400 dark:text-slate-500 tracking-normal"
+                  x-text="livePriceSourceLabel()"></span>
           </div>
           <div class="flex items-baseline gap-1.5">
             <span class="text-xl lg:text-2xl font-mono font-bold tabular-nums"
@@ -110,7 +109,7 @@
           <div class="text-[10px] text-slate-500 dark:text-slate-400 flex items-center gap-1">
             <span x-text="'采集 ' + (livePriceCapturedAt() || '—')"></span>
             <span x-show="livePriceStale()" class="text-amber-600 dark:text-amber-400"
-                  title="价格数据 > 30 分钟">·stale</span>
+                  title="数据陈旧:现货 > 2 分钟 / K 线 fallback > 30 分钟">·stale</span>
           </div>
         </div>
         <div>

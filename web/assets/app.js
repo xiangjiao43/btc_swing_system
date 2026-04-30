@@ -30,7 +30,8 @@ function app() {
             this._connectSSE();
             // 顶栏 BTC 价格每分钟刷一次(零 AI 消耗,只碰 /api/market/btc-price)
             await this._refreshLivePrice();
-            this._priceTimer = setInterval(() => this._refreshLivePrice(), 60000);
+            // Sprint 1.5k:轮询 30 秒(后端切到现货 1m 数据,1 分钟太慢)
+            this._priceTimer = setInterval(() => this._refreshLivePrice(), 30000);
         },
 
         async _refreshLivePrice() {
@@ -62,6 +63,13 @@ function app() {
         },
         livePriceStale() {
             return !!(this.livePriceData && this.livePriceData.stale);
+        },
+        // Sprint 1.5k:动态显示数据源标签(spot 1m 主路径 vs K 线 fallback)
+        livePriceSourceLabel() {
+            const src = this.livePriceData && this.livePriceData.source || '';
+            if (src.startsWith('binance_spot')) return '实时(分钟级,Binance 现货)';
+            if (src.includes('kline_1h')) return '1h K 线(fallback)';
+            return '—';
         },
 
         // Sprint 2.3 R4:data_freshness 可能是字符串 'green'/'yellow'/'red',
@@ -564,9 +572,10 @@ function app() {
 
         // ============== 格式化 ==============
         formatPrice(v) {
+            // Sprint 1.5k:数据是 USDT 计价(Binance 现货 BTCUSDT),改 USDT 后缀
             if (v == null) return '—';
-            return '$' + Number(v).toLocaleString(undefined,
-                { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            return Number(v).toLocaleString(undefined,
+                { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' USDT';
         },
         formatPct(v, showSign) {
             if (v == null) return '—';

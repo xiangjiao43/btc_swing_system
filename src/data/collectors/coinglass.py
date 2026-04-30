@@ -166,6 +166,9 @@ class CoinglassCollector:
     _PATH_NET_POSITION  = f"{_PATH_PREFIX}/futures/net-position/history"
     # Sprint 1.5k:现货 1m 价格端点(顶栏分钟级现价,非策略层 K 线)
     _PATH_SPOT_PRICE    = f"{_PATH_PREFIX}/spot/price/history"
+    # Sprint 1.6(建模 v1.3 §2.6):新增机构 / 市场结构 2 端点
+    _PATH_BTC_DOMINANCE = f"{_PATH_PREFIX}/index/bitcoin-dominance"
+    _PATH_ETF_FLOW      = f"{_PATH_PREFIX}/etf/bitcoin/flow-history"
 
     def __init__(self) -> None:
         cfg = load_source_config("coinglass")
@@ -448,6 +451,91 @@ class CoinglassCollector:
                     e,
                 )
                 continue
+        return result
+
+    # ------------------------------------------------------------------
+    # A.2) 机构 / 市场结构(Sprint 1.6,建模 v1.3 §2.6)
+    # ------------------------------------------------------------------
+
+    def fetch_btc_dominance(
+        self,
+        interval: str = "1d",
+        limit: int = 720,
+    ) -> list[dict[str, Any]]:
+        """BTC dominance %(BTC 市值占总加密市值比)。
+
+        GET /api/index/bitcoin-dominance(interval=1d, limit=720)
+        响应:{code, data: [{timestamp, price, bitcoin_dominance, market_cap}, ...]}
+        timestamp 是 ms epoch。
+
+        Returns: list[{timestamp, metric_name='btc_dominance', metric_value, source}]
+        metric_value 单位 %(如 60.36 表示 60.36%)。
+        """
+        body = self._request(
+            "GET", self._PATH_BTC_DOMINANCE,
+            params={"interval": interval, "limit": limit},
+        )
+        rows = self._unwrap_data(body)
+        self._log_response_shape("btc_dominance", rows)
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            t_raw = row.get("timestamp") or row.get("t") or row.get("time")
+            v = row.get("bitcoin_dominance")
+            if t_raw is None or v is None:
+                continue
+            try:
+                ts = _normalize_timestamp(t_raw)
+                value = float(v)
+            except (TypeError, ValueError):
+                continue
+            result.append({
+                "timestamp": ts,
+                "metric_name": "btc_dominance",
+                "metric_value": value,
+            })
+        return result
+
+    def fetch_etf_flow_history(
+        self,
+        interval: str = "1d",
+        limit: int = 720,
+    ) -> list[dict[str, Any]]:
+        """BTC 现货 ETF 净流入历史(美元)。
+
+        GET /api/etf/bitcoin/flow-history(注意:etf 在 bitcoin 之前)
+        响应:{code, data: [{timestamp, flow_usd, price_usd, etf_flows: [...]}]}
+        timestamp 是 ms epoch。
+
+        Returns: list[{timestamp, metric_name='etf_flow', metric_value, source}]
+        metric_value 单位美元(正=净流入,负=净流出)。
+        不存 etf_flows 数组(各 ETF 详细),太冗余,只存 flow_usd 总值。
+        """
+        body = self._request(
+            "GET", self._PATH_ETF_FLOW,
+            params={"interval": interval, "limit": limit},
+        )
+        rows = self._unwrap_data(body)
+        self._log_response_shape("etf_flow", rows)
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            t_raw = row.get("timestamp") or row.get("t") or row.get("time")
+            v = row.get("flow_usd")
+            if t_raw is None or v is None:
+                continue
+            try:
+                ts = _normalize_timestamp(t_raw)
+                value = float(v)
+            except (TypeError, ValueError):
+                continue
+            result.append({
+                "timestamp": ts,
+                "metric_name": "etf_flow",
+                "metric_value": value,
+            })
         return result
 
     # ==================================================================

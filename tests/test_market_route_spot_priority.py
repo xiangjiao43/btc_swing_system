@@ -142,11 +142,23 @@ def test_24h_change_uses_kline_even_in_spot_path(
 # ============================================================
 
 def test_spot_fail_falls_back_to_kline(client: TestClient, db_path: Path):
-    """spot fetch 返回空 → fallback 到 K 线路径,source 含 kline_1h。"""
+    """spot fetch 返回空 → fallback 到 K 线路径,source 含 kline_1h。
+
+    Sprint 1.8.1.2:同时 mock _try_refresh_from_coinglass。原因:测试种入
+    K 线最后一根 ts=2026-05-01T00:00:00Z(写测试时是"今天"),age 超过
+    30 分钟阈值后会触发 endpoint 的 _try_refresh_from_coinglass(),如生产
+    环境有 CoinGlass API key,会真请求并把 seeded 70000-72100 覆盖成实时价。
+    Mac 本地无 key → silent skip → 测试碰巧 PASS;
+    生产 Ubuntu 服务器有 key → 真覆盖 → 断言 fail。
+    本次 patch 让 refresh 无操作,环境无关。
+    """
     _seed_klines_25h(db_path)
     with patch(
         "src.data.collectors.coinglass.CoinglassCollector.fetch_spot_price_history",
         return_value=[],
+    ), patch(
+        "src.api.routes.market._try_refresh_from_coinglass",
+        return_value=None,
     ):
         r = client.get("/api/market/btc-price")
     body = r.json()
@@ -157,11 +169,17 @@ def test_spot_fail_falls_back_to_kline(client: TestClient, db_path: Path):
 
 
 def test_spot_exception_falls_back_to_kline(client: TestClient, db_path: Path):
-    """spot fetch 抛异常 → fallback,不让 endpoint 崩溃。"""
+    """spot fetch 抛异常 → fallback,不让 endpoint 崩溃。
+
+    Sprint 1.8.1.2:同样 mock _try_refresh_from_coinglass(同 reasoning)。
+    """
     _seed_klines_25h(db_path)
     with patch(
         "src.data.collectors.coinglass.CoinglassCollector.fetch_spot_price_history",
         side_effect=RuntimeError("network down"),
+    ), patch(
+        "src.api.routes.market._try_refresh_from_coinglass",
+        return_value=None,
     ):
         r = client.get("/api/market/btc-price")
     assert r.status_code == 200

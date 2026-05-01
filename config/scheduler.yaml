@@ -112,21 +112,25 @@ jobs:
 
   # ------------- 主 pipeline(2 个 cron entry,共享 pipeline_run 函数)-------
 
+  # Sprint 1.8.1:v1.2 pipeline_run 已退役。state_builder 旧 evidence /
+  # composite / adjudicator 模块全删,真触发只会写 degraded 行。等 1.9
+  # 切到 AIOrchestrator 后再 enabled: true。data_collection / event_listener
+  # 仍正常跑(继续抓数据,1.9 上线立即可用)。
   pipeline_run_regular:
-    enabled: true
+    enabled: false
     cron: {hour: '0,4,12,16,20', minute: 5}  # 5 档:00/04/12/16/20 :05 BJT
     misfire_grace_time: 300
     coalesce: true
     max_instances: 1
-    description: 'Pipeline 主循环常规档(00/04/12/16/20:05 BJT,run_trigger=scheduled)'
+    description: 'Pipeline 主循环常规档(00/04/12/16/20:05 BJT,run_trigger=scheduled);1.8.1 暂关,待 1.9 切 orchestrator'
 
   pipeline_run_8h_onchain:
-    enabled: true
+    enabled: false
     cron: {hour: 8, minute: 40}        # 08:40 BJT(链上 08:35 抓完 + 5 分钟缓冲)
     misfire_grace_time: 300
     coalesce: true
     max_instances: 1
-    description: 'Pipeline 8 点链上档(run_trigger=scheduled_8h_onchain,严格 pre-flight)'
+    description: 'Pipeline 8 点链上档(run_trigger=scheduled_8h_onchain,严格 pre-flight);1.8.1 暂关,待 1.9 切 orchestrator'
 
   # ------------- 高频事件监听 ------------------------
 

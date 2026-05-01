@@ -31,15 +31,7 @@ from typing import Any, Callable, Optional
 
 import yaml
 
-from ..ai.adjudicator import AIAdjudicator
 from ..ai.summary import call_ai_summary
-from ..composite import (
-    BandPositionFactor,
-    CrowdingFactor,
-    CyclePositionFactor,
-    MacroHeadwindFactor,
-    TruthTrendFactor,
-)
 from ..data.storage.dao import (
     BTCKlinesDAO,
     DerivativesDAO,
@@ -50,13 +42,43 @@ from ..data.storage.dao import (
     RunMetadataDAO,
     StrategyStateDAO,
 )
-from ..evidence import (
-    Layer1Regime,
-    Layer2Direction,
-    Layer3Opportunity,
-    Layer4Risk,
-    Layer5Macro,
-)
+from ..composite import CyclePositionFactor
+
+# Sprint 1.8.1:旧 v1.2 evidence layers / composites / adjudicator 已退役
+# (1.9 切到 AIOrchestrator)。下方 try/except 让 state_builder 仍 import
+# 成功(API + factor_cards_refresher 还要用 _assemble_context),但
+# 实际 .compute() / .adjudicate() 调用时抛 NotImplementedError,
+# 由 _run_stage 兜成 degraded 写入 fallback_log,不 crash。
+# 同时 scheduler.yaml 里 pipeline_run job 已 disabled,生产端不会真触发。
+
+class _RetiredV12Module:
+    """v1.2 退役模块 stub。任何调用都抛 NotImplementedError。"""
+    def __init__(self, *args, **kwargs): pass
+    def compute(self, *args, **kwargs):
+        raise NotImplementedError(
+            "v1.2 module retired in Sprint 1.8.1; "
+            "v1.9 will swap to AIOrchestrator/AdjudicatorValidator"
+        )
+    def adjudicate(self, *args, **kwargs):
+        raise NotImplementedError(
+            "v1.2 module retired in Sprint 1.8.1; "
+            "v1.9 will swap to AIOrchestrator/AdjudicatorValidator"
+        )
+    def __getattr__(self, name):
+        # 任何属性访问都 fallback 到 stub callable
+        return self.compute
+
+
+AIAdjudicator = _RetiredV12Module
+TruthTrendFactor = _RetiredV12Module
+BandPositionFactor = _RetiredV12Module
+CrowdingFactor = _RetiredV12Module
+MacroHeadwindFactor = _RetiredV12Module
+Layer1Regime = _RetiredV12Module
+Layer2Direction = _RetiredV12Module
+Layer3Opportunity = _RetiredV12Module
+Layer4Risk = _RetiredV12Module
+Layer5Macro = _RetiredV12Module
 
 
 logger = logging.getLogger(__name__)

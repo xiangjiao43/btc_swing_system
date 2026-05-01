@@ -1,24 +1,15 @@
 """
-src.composite — 5 个组合因子(建模 §3.8;Sprint 1.5q.1 删除 EventRisk)。
+src.composite — Sprint 1.8.1:仅保留 CyclePosition。
 
-每个 factor 类:
-  - 继承 CompositeFactorBase
-  - 从 config/thresholds.yaml 读阈值
-  - compute(context) 返回符合 schemas.yaml composite_factors_schemas 的 dict
+v1.2 旧组合因子(TruthTrend / BandPosition / Crowding / MacroHeadwind)
+已退役;v1.3 改用 6 AI 角色综合判断。CyclePosition 是规则版长周期定位
+辅助因子,L2 prompt 仍消费它(rule_cycle_position 字段),保留。
 """
 
-from .band_position import BandPositionFactor
-from .crowding import CrowdingFactor
 from .cycle_position import CyclePositionFactor
-from .macro_headwind import MacroHeadwindFactor
-from .truth_trend import TruthTrendFactor
 from ._base import CompositeFactorBase
 
 __all__ = [
     "CompositeFactorBase",
-    "TruthTrendFactor",
-    "BandPositionFactor",
     "CyclePositionFactor",
-    "CrowdingFactor",
-    "MacroHeadwindFactor",
 ]

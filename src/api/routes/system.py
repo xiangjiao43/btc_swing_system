@@ -237,6 +237,38 @@ def _query_evidence_layers_health(
         state = json.loads(row["full_state_json"])
     except (TypeError, ValueError, KeyError):
         state = {}
+
+    # Sprint 1.8.2-D:v13 优先(orchestrator layers 字段),退回 v12 evidence_reports
+    v13_layers = state.get("layers") if isinstance(state.get("layers"), dict) else None
+    if v13_layers:
+        for lid in range(1, 6):
+            l = v13_layers.get(f"l{lid}") or {}
+            status_raw = str(l.get("status") or "").lower()
+            if status_raw == "success":
+                health = "healthy"
+            elif status_raw.startswith("degraded"):
+                health = "degraded"
+            else:
+                health = "missing"
+            obs = l.get("key_observations") or []
+            if isinstance(obs, list) and obs:
+                summary = f"{len(obs)} 项关键观察"
+            else:
+                summary = "—"
+            missing_reasons: list[str] = []
+            if health in ("degraded", "missing"):
+                err = l.get("error_message") or l.get("notes")
+                if isinstance(err, str) and err:
+                    missing_reasons = [err]
+                elif isinstance(err, list):
+                    missing_reasons = [str(x) for x in err][:5]
+            layers.append(HealthDetailEvidenceLayer(
+                layer_id=lid, name=_LAYER_NAMES[lid],
+                health=health, pillars_summary=summary,
+                missing_reasons=missing_reasons,
+            ))
+        return layers
+
     er = state.get("evidence_reports") or {}
 
     for lid in range(1, 6):

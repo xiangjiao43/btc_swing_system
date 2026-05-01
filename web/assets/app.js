@@ -197,6 +197,66 @@ function app() {
         layerCardOpen(layer) {
             return !!this.layerCardsOpen[layer];
         },
+        // Sprint 1.8.2-D:13 张小卡 helpers
+        cardOpportunityGrade() {
+            const grade = this.state?.main_strategy?.opportunity_grade;
+            if (!grade || grade === 'none' || grade === 'None') return '无机会';
+            return grade + ' 级';
+        },
+        cardConfidence() {
+            const tier = this.tp().confidence_tier;
+            if (!tier) return '—';
+            return { high: '高', medium: '中', low: '低' }[tier] || tier;
+        },
+        cardEntryZones() {
+            const zones = this.tp().entry_zones || [];
+            if (zones.length === 0) return '<span class="text-slate-400">—</span>';
+            return zones.map(z =>
+                `$${z.price_low}-${z.price_high}<br><span class="text-[10px] text-slate-500">${z.allocation_pct}%</span>`
+            ).join('<br>');
+        },
+        cardStopLoss() {
+            const sl = this.tp().stop_loss;
+            return sl != null ? '$' + sl : '—';
+        },
+        cardTakeProfits() {
+            const tps = this.tp().take_profit_plan || [];
+            if (tps.length === 0) return '<span class="text-slate-400">—</span>';
+            return tps.map((t, i) =>
+                `<div>TP${i+1} $${t.price} <span class="text-[10px] text-slate-500">×${t.size_pct}%</span></div>`
+            ).join('');
+        },
+        cardPositionCap() {
+            const cap = this.tp().max_position_size_pct;
+            return cap != null ? cap + '%' : '—';
+        },
+        hasActivePosition() {
+            const st = this.state?.main_strategy?.action_state;
+            return ['LONG_OPEN', 'LONG_HOLD', 'LONG_TRIM', 'SHORT_OPEN', 'SHORT_HOLD', 'SHORT_TRIM'].includes(st);
+        },
+        cardCurrentPnl() {
+            return '—';
+        },
+        cardDistanceToStop() { return '—'; },
+        cardHoldingDuration() { return '—'; },
+        cardHardInvalidations() {
+            const his = this.hardInvalidationLevels();
+            if (his.length === 0) return '<span class="text-slate-400">—</span>';
+            return his.slice(0, 3).map(h =>
+                `<div>$${h.price} <span class="text-[10px] text-slate-500">${h.basis || ''}</span></div>`
+            ).join('');
+        },
+        cardFutureEvents() {
+            const events = this.eventWindows();
+            if (events.length === 0) return '<span class="text-slate-400">无登记事件</span>';
+            return events.slice(0, 5).map(e =>
+                `<div class="flex items-center gap-2">
+                  <span class="inline-block w-1 h-1 rounded-full ${e.in_window ? 'bg-rose-500' : 'bg-slate-400'}"></span>
+                  <span>${e.event_name}</span>
+                  <span class="font-mono text-slate-500 ml-auto">${e.hours_to != null ? e.hours_to.toFixed(0) + 'h' : ''}</span>
+                </div>`
+            ).join('');
+        },
         _startClock() {
             const tick = () => { this.nowBjt = this._currentBjt(); };
             tick();

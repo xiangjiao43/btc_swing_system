@@ -77,8 +77,6 @@ def normalize_state(
     if isinstance(state, dict):
         if "factor_cards" in state:
             normalized["factor_cards"] = state["factor_cards"]
-        if "composite_factors" in state:
-            normalized["composite_factors"] = state["composite_factors"]
         meta = state.get("meta")
         if isinstance(meta, dict):
             normalized["meta"] = meta

@@ -109,13 +109,6 @@ function app() {
                 return 'text-rose-600 dark:text-rose-400 font-medium';
             return 'text-slate-400 dark:text-slate-500';  // no_data
         },
-        // 持仓预览占位框是否显示(FLAT / FLIP_WATCH 状态下显示)
-        showPositionPreviewPlaceholder() {
-            const st = this.state && this.state.main_strategy
-                && this.state.main_strategy.action_state;
-            return ['FLAT', 'FLIP_WATCH'].includes(st);
-        },
-
         async _refreshLivePrice() {
             try {
                 const r = await fetch('/api/market/btc-price', { cache: 'no-cache' });
@@ -297,17 +290,8 @@ function app() {
                     console.warn('[app] API status', r.status);
                 }
             } catch (e) { console.warn('[app] API fetch failed:', e); }
-            if (!apiOk) {
-                try {
-                    const r = await fetch('/mock/strategy_current.json', { cache: 'no-cache' });
-                    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-                    const body = await r.json();
-                    this.state = body.state || body;
-                    this.dataSource = 'mock';
-                } catch (e) {
-                    this.error = String(e.message || e);
-                    console.error('[app] mock fallback failed:', e);
-                }
+            if (!apiOk && !this.error) {
+                this.error = '⚠️ /api/strategy/current 不可用。请检查 service 状态或等待下次定时运行。';
             }
             this.loading = false;
         },
@@ -335,12 +319,13 @@ function app() {
             if (!body) return null;
             const raw = body.state || body;
             if (!raw || typeof raw !== 'object') return null;
-            // v13 检测:schema_version 存在
             if (raw.schema_version === 'v13' && raw.summary_card) {
                 return this._to_display_state_v13(raw);
             }
-            // v12 老路径
-            return this._to_display_state(raw);
+            // 非 v13 数据:不静默兜底,显式报错让用户知道
+            console.error('[app] 收到非 v13 数据,无法渲染。schema_version=', raw.schema_version);
+            this.error = '⚠️ 数据格式异常(非 v13 schema)。系统下次定时运行后会自动恢复,如紧急可联系管理员重启服务。';
+            return null;
         },
 
         _to_display_state_v13(raw) {
@@ -476,123 +461,6 @@ function app() {
             return [];
         },
 
-        _to_display_state(raw) {
-            if (!raw || typeof raw !== 'object') return raw;
-            const out = JSON.parse(JSON.stringify(raw));
-
-            // meta
-            if (!out.meta || typeof out.meta !== 'object') out.meta = {};
-            const meta = out.meta;
-            meta.run_id = meta.run_id || out.run_id;
-            meta.rules_version = meta.rules_version || out.rules_version;
-            meta.ai_model_actual = meta.ai_model_actual || out.ai_model_actual;
-            meta.strategy_flavor = meta.strategy_flavor || 'swing';
-            meta.generated_at_utc = meta.generated_at_utc || out.generated_at_utc
-                || out.reference_timestamp_utc;
-            meta.generated_at_bjt = meta.generated_at_bjt
-                || this.formatBJT(meta.generated_at_utc);
-            meta.fallback_level = meta.fallback_level
-                || ((out.pipeline_meta || {}).fallback_level);
-            meta.cold_start = meta.cold_start || out.cold_start || {};
-            meta.next_run_eta_bjt = meta.next_run_eta_bjt || null;
-
-            // market_snapshot(Sprint 2.2 hotfix:后端已派生)
-            if (!out.market_snapshot || typeof out.market_snapshot !== 'object') {
-                out.market_snapshot = {
-                    btc_price_usd: null, btc_price_change_24h_pct: null,
-                    btc_price_updated_bjt: null,
-                };
-            }
-
-            // main_strategy
-            if (!out.main_strategy || typeof out.main_strategy !== 'object') {
-                out.main_strategy = {};
-            }
-            const ms = out.main_strategy;
-            const sm = raw.state_machine || {};
-            const observation = raw.observation || {};
-            const adj = raw.adjudicator || {};
-            const l3 = (raw.evidence_reports || {}).layer_3 || {};
-            ms.action_state = ms.action_state || sm.current_state || 'FLAT';
-            ms.lifecycle_phase = ms.lifecycle_phase || (
-                sm.current_state === 'FLAT' ? '待启动' : (sm.current_state || '—')
-            );
-            ms.opportunity_grade = ms.opportunity_grade
-                || adj.opportunity_grade
-                || l3.opportunity_grade || l3.grade || 'none';
-            ms.execution_permission = ms.execution_permission
-                || l3.execution_permission || 'watch';
-            ms.observation_category = ms.observation_category
-                || observation.observation_category || '—';
-
-            // data_health
-            if (!out.data_health || typeof out.data_health !== 'object') {
-                out.data_health = {
-                    overall: 'green', data_completeness_pct: null,
-                    sources: {}, degraded_stages: [],
-                };
-            }
-
-            // Sprint 1.5o:旧 evidence_summary 派生(供已删除「五层证据推导细节」区
-            // 渲染 verdict / confidence_numeric / pillars / rule_trace / chain 等)
-            // 已整块删除。原始 state.evidence_reports.layer_* 仍由后端
-            // /api/system/health-detail 直接读 health_status。
-
-            // risks
-            if (!out.risks || typeof out.risks !== 'object') {
-                const l4 = (raw.evidence_reports || {}).layer_4 || {};
-                // Sprint 1.5q.1:event_risk 已删,event_windows 退化为空数组
-                // (网页"事件日历"区现在直接读 factor_cards 的 events 卡)
-                const er = {};
-                out.risks = {
-                    hard_invalidation_levels: l4.hard_invalidation_levels || [],
-                    active_risk_tags: l4.active_risk_tags || [],
-                    event_windows: (er.contributing_events || []).map(e => ({
-                        event_name: e.name || e.type || '—',
-                        event_time_bjt: e.time_bjt || '',
-                        hours_to: e.hours_to,
-                        in_window: (e.hours_to != null && e.hours_to < 48),
-                    })),
-                    worst_case_estimate: null,
-                };
-            }
-
-            // ai_verdict
-            if (!out.ai_verdict || typeof out.ai_verdict !== 'object') {
-                out.ai_verdict = {
-                    one_line_summary: adj.one_line_summary || adj.rationale || '',
-                    narrative: adj.narrative || adj.rationale || '',
-                    primary_drivers: adj.primary_drivers || [],
-                    counter_arguments: adj.counter_arguments || [],
-                    what_would_change_mind: adj.what_would_change_mind || [],
-                    thesis_assessment: null, holding_guidance: null,
-                    transition_reason: adj.transition_reason || '',
-                    confidence_breakdown: adj.confidence_breakdown || {},
-                };
-            }
-
-            // delta_from_previous
-            if (!out.delta_from_previous || typeof out.delta_from_previous !== 'object') {
-                out.delta_from_previous = {
-                    has_previous: !!sm.previous_state,
-                    summary_tag: sm.stable_in_state ? '状态未变' : '状态切换',
-                    notable_changes: [],
-                };
-            }
-
-            // factor_cards
-            if (!Array.isArray(out.factor_cards)) {
-                out.factor_cards = raw.factor_cards || raw.evidence_cards || [];
-            }
-
-            // extra / history
-            if (!out.extra || typeof out.extra !== 'object') out.extra = {};
-            if (!Array.isArray(out.extra.history_timeline_preview)) {
-                out.extra.history_timeline_preview = [];
-            }
-            return out;
-        },
-
         // ============== 派生 ==============
         tp() {
             // adjudicator.trade_plan 优先,否则回退 state.trade_plan(mock)
@@ -600,12 +468,6 @@ function app() {
                 (this.state.adjudicator && this.state.adjudicator.trade_plan)
                 || this.state.trade_plan
             )) || {};
-        },
-        strategyDirection() {
-            const tp = this.tp();
-            if (tp && tp.direction) return tp.direction;
-            const adj = this.state && this.state.adjudicator || {};
-            return adj.direction || 'none';
         },
         // 区域 4 分组(Sprint 2.3 tuning:顺序改为价格→衍生→链上→宏观→事件)
         factorGroups() {
@@ -639,9 +501,6 @@ function app() {
             return (this.state && this.state.risks
                     && this.state.risks.hard_invalidation_levels) || [];
         },
-        activeRiskTags() {
-            return (this.state && this.state.risks && this.state.risks.active_risk_tags) || [];
-        },
         eventWindows() {
             return (this.state && this.state.risks && this.state.risks.event_windows) || [];
         },
@@ -650,76 +509,6 @@ function app() {
         historyTimeline() {
             return (this.state && this.state.extra
                     && this.state.extra.history_timeline_preview) || [];
-        },
-
-        // primary_drivers / counter_arguments / what_would_change_mind 兜底
-        primaryDriversDisplay() {
-            const raw = (this.state && this.state.ai_verdict
-                         && this.state.ai_verdict.primary_drivers) || [];
-            if (raw.length > 0) return raw;
-            // 兜底:基于 L3 rule_trace 生成"为什么是这个档"的 drivers
-            const l3 = (this.state && this.state.evidence_summary
-                        && this.state.evidence_summary.layer_3) || {};
-            const rt = l3.rule_trace;
-            if (rt && rt.matched_rule) {
-                return [{ text: rt.matched_rule, evidence_ref: null }];
-            }
-            return [{ text: '规则兜底:证据尚未达到 AI 裁决调用门槛', evidence_ref: null }];
-        },
-        counterArgumentsDisplay() {
-            const raw = (this.state && this.state.ai_verdict
-                         && this.state.ai_verdict.counter_arguments) || [];
-            if (raw.length > 0) return raw;
-            return [{ text: '规则兜底:未列出具体反方,证据冲突程度低' }];
-        },
-        whatWouldChangeMindDisplay() {
-            const raw = (this.state && this.state.ai_verdict
-                         && this.state.ai_verdict.what_would_change_mind) || [];
-            if (raw.length >= 3) return raw;
-            // 兜底:从 L3 upgrade_conditions 补
-            const l3 = (this.state && this.state.evidence_summary
-                        && this.state.evidence_summary.layer_3) || {};
-            const rt = l3.rule_trace;
-            const upgrades = rt && rt.upgrade_conditions || [];
-            const merged = [...raw, ...upgrades];
-            if (merged.length >= 3) return merged.slice(0, 5);
-            // 再兜底 3 条通用
-            const generic = [
-                '稳态证据连续 3 次运行一致',
-                'L1 regime 切换稳定(非 transition / chaos)',
-                'L2 stance_confidence 达到动态门槛',
-            ];
-            return [...merged, ...generic].slice(0, 5);
-        },
-
-        // 策略说明兜底
-        strategyFallbackNarrative() {
-            const adj = (this.state && this.state.adjudicator) || {};
-            if (adj.rationale) return adj.rationale;
-            const grade = (this.state && this.state.main_strategy
-                           && this.state.main_strategy.opportunity_grade) || 'none';
-            if (grade === 'none') {
-                return '当前无符合 A/B/C 门槛的机会,系统按纪律保持观望。下方"五层证据链"详细说明每层如何判定,"什么会改变判断"列出升档所需条件。';
-            }
-            return '基于五层证据链和规则判档,当前机会等级为 ' + grade + '。详见下方分析过程。';
-        },
-
-        // stop_loss basis 展示
-        stopLossBasis() {
-            const his = this.hardInvalidationLevels();
-            if (!his.length) return null;
-            const p = this.tp().stop_loss;
-            if (p == null) return null;
-            const match = his.find(h => Math.abs((h.price || 0) - p) < 0.5);
-            return match ? (match.basis + ' · ' + (match.confirmation_timeframe || '4H')) : null;
-        },
-
-        // position_cap 说明
-        positionCapExplain() {
-            const tier = this.tp().confidence_tier;
-            const mul = { high: '1.0', medium: '0.7', low: '0.4' }[tier];
-            if (!mul) return '';
-            return `${tier} 档 × L4 合成 position_cap × ${mul}`;
         },
 
         // ============== 格式化 ==============
@@ -784,32 +573,6 @@ function app() {
                 PROTECTION: 'bg-red-500 text-white dark:bg-red-700',
                 POST_PROTECTION_REASSESS: 'bg-orange-100 text-orange-800 dark:bg-orange-950 dark:text-orange-300',
             }[s] || 'bg-slate-100 text-slate-700';
-        },
-
-        directionHeroClass(d) {
-            return {
-                long:   'text-emerald-600 dark:text-emerald-400',
-                short:  'text-rose-600 dark:text-rose-400',
-                'none': 'text-slate-600 dark:text-slate-400',
-            }[d] || 'text-slate-600 dark:text-slate-400';
-        },
-        directionHeroLabel(d) {
-            return { long: 'LONG 做多', short: 'SHORT 做空', 'none': '观望' }[d] || '观望';
-        },
-
-        gradeLabel(g) {
-            return { A: '高信心', B: '中信心', C: '低信心', 'none': '无机会' }[g] || '';
-        },
-        permissionClass(p) {
-            return {
-                can_open: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300',
-                cautious_open: 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300',
-                ambush_only: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300',
-                no_chase: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
-                hold_only: 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300',
-                watch: 'bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
-                protective: 'bg-rose-200 text-rose-900 dark:bg-rose-950 dark:text-rose-300',
-            }[p] || 'bg-slate-100 text-slate-700';
         },
 
         observationLabel(c) {
@@ -889,17 +652,6 @@ function app() {
             return ago ? '抓取于 ' + stamp + '(' + ago + ')' : '抓取于 ' + stamp;
         },
 
-        tradePlanTierLabel(t) {
-            return { high: 'A · 高信心', medium: 'B · 中信心', low: 'C · 低信心参考' }[t] || t;
-        },
-        tradePlanTierClass(t) {
-            return {
-                high:   'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300',
-                medium: 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300',
-                low:    'bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
-            }[t] || 'bg-slate-100 text-slate-600';
-        },
-
         timelineNodeColor(t) {
             return { state_enter: 'bg-blue-500', position_open: 'bg-emerald-500',
                      position_trim: 'bg-amber-400', position_exit: 'bg-slate-400',
@@ -918,27 +670,6 @@ function app() {
                 flip: 'bg-purple-50 text-purple-700 dark:bg-purple-950 dark:text-purple-300',
                 cold_start_tick: 'bg-cyan-50 text-cyan-700 dark:bg-cyan-950 dark:text-cyan-300',
             }[t] || 'bg-slate-100 text-slate-700';
-        },
-
-        jumpToCard(cardId) {
-            if (!cardId) return;
-            const target = document.getElementById('card-' + cardId);
-            if (!target) { console.warn('[app] jumpToCard missing', cardId); return; }
-            this.$nextTick(() => {
-                // 若 card 在折叠组里,先展开
-                for (const g of this.factorGroups()) {
-                    if (g.secondary.some(c => c.card_id === cardId)) {
-                        this.expandedGroups = { ...this.expandedGroups, [g.key]: true };
-                        break;
-                    }
-                }
-                setTimeout(() => {
-                    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    target.classList.add('ring-2', 'ring-blue-400', 'dark:ring-cyan-400');
-                    setTimeout(() => target.classList.remove(
-                        'ring-2', 'ring-blue-400', 'dark:ring-cyan-400'), 2000);
-                }, 200);
-            });
         },
     };
 }

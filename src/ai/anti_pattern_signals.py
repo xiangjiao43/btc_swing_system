@@ -52,8 +52,9 @@ def is_against_long_cycle(l2_output: dict[str, Any]) -> bool:
     long_ctx = l2_output.get("long_cycle_context") or {}
     if not isinstance(long_ctx, dict):
         return False
-    cycle_label = (long_ctx.get("rule_cycle_position")
-                   or long_ctx.get("ai_alternative") or "")
+    # ai_alternative 优先(L2 显式覆盖了 rule),其次 rule_cycle_position
+    cycle_label = (long_ctx.get("ai_alternative")
+                   or long_ctx.get("rule_cycle_position") or "")
 
     bearish_cycles = {
         "distribution", "late_bull", "early_bear",

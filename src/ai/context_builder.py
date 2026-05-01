@@ -408,7 +408,9 @@ def compute_macro_features(macro: dict[str, Any]) -> dict[str, Any]:
             out["us10y_30d_change_bps"] = bps
         break
 
-    s10 = macro.get("us10y") or macro.get("dgs10")
+    s10 = macro.get("us10y")
+    if s10 is None:
+        s10 = macro.get("dgs10")
     s2 = macro.get("us2y")
     if s10 is not None and s2 is not None and len(s10) > 0 and len(s2) > 0:
         try:

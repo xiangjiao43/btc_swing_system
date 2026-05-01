@@ -59,12 +59,22 @@ class BaseAgent:
     # Public
     # ------------------------------------------------------------------
 
-    def analyze(self, context: dict[str, Any]) -> dict[str, Any]:
+    def analyze(
+        self,
+        context: dict[str, Any],
+        *,
+        client: Any = None,
+    ) -> dict[str, Any]:
         """主入口。读 context → 调 AI → 解析 → 返回结构化 dict。
 
         v5(Sprint 1.8):支持 multi-modal — context 可含 'chart_b64' 字段
         (base64 PNG)。BaseAgent 自动构造 anthropic 多模态 message
         (image content block + text content block)。子类不需要管。
+
+        Sprint 1.9-A.5.2 修:加 client= 参数。优先级:
+          1. 调用方传入(orchestrator 每层新建避中转站连接复用限流)
+          2. self._client_override(__init__ 注入,测试用)
+          3. build_anthropic_client(timeout=_DEFAULT_TIMEOUT_SEC) 兜底
 
         失败时返回 _fallback_output(),status='degraded' / 'fallback'。
         绝不抛异常。
@@ -96,17 +106,18 @@ class BaseAgent:
             out["error"] = str(e)[:200]
             return out
 
-        client = self._client_override or build_anthropic_client(
+        # 优先级:调用方 client > self._client_override > 工厂兜底
+        eff_client = client or self._client_override or build_anthropic_client(
             timeout=_DEFAULT_TIMEOUT_SEC,
         )
-        if client is None:
+        if eff_client is None:
             out = self._fallback_output()
             out["status"] = "degraded_client_unavailable"
             return out
 
         chart_b64 = context.get("chart_b64") if context else None
         return self._call_ai_with_retry(
-            client, system_prompt, user_prompt, chart_b64=chart_b64,
+            eff_client, system_prompt, user_prompt, chart_b64=chart_b64,
         )
 
     # ------------------------------------------------------------------

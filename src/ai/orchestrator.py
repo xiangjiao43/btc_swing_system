@@ -33,6 +33,7 @@ from .agents import (
 )
 from .agents.chart_renderer import ChartRenderer
 from .anti_pattern_signals import compute_anti_pattern_signals
+from .client import build_anthropic_client
 from .validator import AdjudicatorValidator
 
 
@@ -239,7 +240,10 @@ class AIOrchestrator:
         l1_input = dict(context.get("l1") or {})
         l1_input["chart_b64"] = chart_b64
         try:
-            out = self._agents["l1"].analyze(l1_input)
+            # Sprint 1.9-A.5.2 fix:每层新建 client 避中转站连接复用限流
+            out = self._agents["l1"].analyze(
+                l1_input, client=build_anthropic_client(),
+            )
         except Exception as e:
             logger.warning("orchestrator: L1 analyze raised: %s", e)
             out = self._agents["l1"]._fallback_output()
@@ -278,7 +282,9 @@ class AIOrchestrator:
         l2_input["l1_output"] = l1_out
         l2_input["chart_b64"] = chart_b64
         try:
-            out = self._agents["l2"].analyze(l2_input)
+            out = self._agents["l2"].analyze(
+                l2_input, client=build_anthropic_client(),
+            )
         except Exception as e:
             logger.warning("orchestrator: L2 analyze raised: %s", e)
             out = self._agents["l2"]._fallback_output()
@@ -314,7 +320,9 @@ class AIOrchestrator:
         l3_input["l2_output"] = l2_out
         l3_input["anti_pattern_signals"] = anti_pattern_signals
         try:
-            out = self._agents["l3"].analyze(l3_input)
+            out = self._agents["l3"].analyze(
+                l3_input, client=build_anthropic_client(),
+            )
         except Exception as e:
             logger.warning("orchestrator: L3 analyze raised: %s", e)
             out = self._agents["l3"]._fallback_output()
@@ -357,7 +365,9 @@ class AIOrchestrator:
         l4_input["l3_output"] = l3_out
         l4_input["chart_b64"] = chart_b64
         try:
-            out = self._agents["l4"].analyze(l4_input)
+            out = self._agents["l4"].analyze(
+                l4_input, client=build_anthropic_client(),
+            )
         except Exception as e:
             logger.warning("orchestrator: L4 analyze raised: %s", e)
             out = self._agents["l4"]._fallback_output()
@@ -378,7 +388,9 @@ class AIOrchestrator:
         # L5 独立做宏观判断,不消费 L1-L4 输出
         l5_input = dict(context.get("l5") or {})
         try:
-            out = self._agents["l5"].analyze(l5_input)
+            out = self._agents["l5"].analyze(
+                l5_input, client=build_anthropic_client(),
+            )
         except Exception as e:
             logger.warning("orchestrator: L5 analyze raised: %s", e)
             out = self._agents["l5"]._fallback_output()
@@ -416,7 +428,9 @@ class AIOrchestrator:
             "current_close": shared.get("current_close"),
         }
         try:
-            out = self._agents["master"].analyze(master_input)
+            out = self._agents["master"].analyze(
+                master_input, client=build_anthropic_client(),
+            )
         except Exception as e:
             logger.warning("orchestrator: master analyze raised: %s", e)
             out = self._agents["master"]._fallback_output()

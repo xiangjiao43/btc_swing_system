@@ -186,6 +186,17 @@ function app() {
             this.darkMode = !this.darkMode;
             localStorage.setItem('btc_strategy_theme', this.darkMode ? 'dark' : 'light');
         },
+        // Sprint 1.8.2-C:layer_cards 折叠状态
+        layerCardsOpen: {},
+        toggleLayerCard(layer) {
+            this.layerCardsOpen = {
+                ...this.layerCardsOpen,
+                [layer]: !this.layerCardsOpen[layer],
+            };
+        },
+        layerCardOpen(layer) {
+            return !!this.layerCardsOpen[layer];
+        },
         _startClock() {
             const tick = () => { this.nowBjt = this._currentBjt(); };
             tick();
@@ -536,61 +547,6 @@ function app() {
             const adj = this.state && this.state.adjudicator || {};
             return adj.direction || 'none';
         },
-        compositeCards() {
-            const all = (this.state && this.state.factor_cards || [])
-                .filter(c => c.tier === 'composite');
-            // 1.8.2-B:v1.3 只用 cycle_position,其他 4 个 composite 已退役
-            const KEEP = ['cycle_position'];
-            return all.filter(c => {
-                const m = (c.card_id || '').match(/^composite_([a-z_]+)_\d{8}$/);
-                const key = m ? m[1] : '';
-                return KEEP.includes(key);
-            });
-        },
-        // 6 composite 因子 composition 等字段目前在 composite_factors[key] 上
-        _composite_raw(card_id) {
-            if (!this.state) return null;
-            const key = (card_id || '').replace(/^composite_/, '').replace(/_\d{8}$/, '');
-            return (this.state.composite_factors || {})[key] || null;
-        },
-        compositeComposition(card_id) {
-            const r = this._composite_raw(card_id);
-            return r && r.composition || [];
-        },
-        compositeRule(card_id) {
-            const r = this._composite_raw(card_id);
-            return r && r.rule_description || '';
-        },
-        compositeInterpretation(card_id) {
-            const r = this._composite_raw(card_id);
-            return r && r.value_interpretation || '';
-        },
-        compositeAffects(card_id) {
-            const r = this._composite_raw(card_id);
-            return r && r.affects_layer || '';
-        },
-
-        // Sprint 2.5-B:AI 双段分析 + 缺失数据提示
-        compositeCurrentAnalysis(card_id) {
-            const r = this._composite_raw(card_id);
-            return r && r.current_analysis || '';
-        },
-        compositeStrategyImpact(card_id) {
-            const r = this._composite_raw(card_id);
-            return r && r.strategy_impact || '';
-        },
-        compositeMissingHint(card_id) {
-            // 返回 '' / '⚠ 数据未就绪' / '⚠ N 项中 X 项数据缺失,分析基于已有项'
-            const r = this._composite_raw(card_id);
-            if (!r) return '';
-            const total = r.total_count;
-            const missing = r.missing_count;
-            if (total == null || missing == null || total <= 0) return '';
-            if (missing >= total) return '⚠ 数据未就绪';
-            if (missing > 0) return `⚠ ${total} 项中 ${missing} 项数据缺失,分析基于已有项`;
-            return '';
-        },
-
         // 区域 4 分组(Sprint 2.3 tuning:顺序改为价格→衍生→链上→宏观→事件)
         factorGroups() {
             const cards = ((this.state && this.state.factor_cards) || [])

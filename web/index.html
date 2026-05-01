@@ -269,7 +269,7 @@
     <!-- ============================================================ -->
     <div class="grid grid-cols-1 lg:grid-cols-5 gap-4 items-start">
 
-    <section id="region-1" class="audit-card lg:col-span-3">
+    <section id="region-1" class="audit-card lg:col-span-5">
       <header class="px-4 py-2.5 border-b border-slate-200 dark:border-slate-800">
         <h2 class="text-base font-semibold flex items-center gap-2">
           <span>🎯</span><span>AI 策略建议</span>
@@ -531,90 +531,94 @@
       </div>
     </section>
 
-    <!-- 右侧 40%:组合因子紧凑版(2 列 × 3 行)-->
-    <section id="region-3" class="audit-card lg:col-span-2">
+    </div> <!-- /grid 核心建议与高阶信号 -->
+
+    <!-- ============================================================ -->
+    <!-- 🔬 五层分析(1.8.2-C):L1-L5 + master 6 张卡,密度 C 默认折叠  -->
+    <!-- ============================================================ -->
+    <section id="region-layer-cards" class="audit-card"
+             x-show="(state.layer_cards || []).length > 0">
       <header class="px-4 py-2.5 border-b border-slate-200 dark:border-slate-800">
         <h2 class="text-base font-semibold flex items-center gap-2">
-          <span>🔢</span><span>组合因子</span>
-          <span class="text-[11px] font-normal text-slate-500 ml-1"
-                x-text="compositeCards().length + ' 个'"></span>
+          <span>🔬</span><span>五层分析</span>
+          <span class="text-[11px] font-normal text-slate-500 ml-1">L1-L5 + 主裁</span>
         </h2>
         <p class="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-          高阶信号:每卡展示 "组成因子 + 影响层"。
+          每层 AI 独立分析,综合判断;点"查看详细"展开关键观察 / 完整分析 / 矛盾信号
         </p>
       </header>
-      <!-- 紧凑网格:2 × 3 -->
-      <div class="p-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
-        <template x-for="c in compositeCards()" :key="c.card_id">
-          <article class="border border-slate-200 dark:border-slate-800 rounded-md
-                          p-2.5 space-y-1.5 min-w-0">
-            <!-- 标题行:名称 + 档位/值 + linked_layer -->
-            <header class="flex items-center justify-between gap-1">
-              <h4 class="text-[12.5px] font-semibold truncate"
-                  :title="c.name" x-text="c.name"></h4>
-              <div class="flex items-center gap-1 shrink-0">
-                <span class="text-[12.5px] font-mono font-bold tabular-nums"
-                      :class="directionClass(c.impact_direction)"
-                      x-text="formatFactorValue(c.current_value)"></span>
-                <span class="text-[9px] px-1 rounded bg-slate-100 dark:bg-slate-800
-                             text-slate-600 dark:text-slate-400"
-                      x-text="c.linked_layer"></span>
-              </div>
+      <div class="p-3 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+        <template x-for="(card, idx) in (state.layer_cards || [])" :key="card.layer">
+          <article class="border border-slate-200 dark:border-slate-800 rounded p-3
+                          space-y-2 min-w-0">
+            <!-- 标题 -->
+            <header class="flex items-baseline justify-between gap-2">
+              <h3 class="text-[12px] font-semibold text-slate-600 dark:text-slate-400"
+                  x-text="card.title"></h3>
             </header>
-
-            <!-- 细分割线 -->
-            <div class="border-t border-slate-100 dark:border-slate-800"></div>
-
-            <!-- 组成 4 项 -->
-            <ul class="space-y-0 text-[11px] leading-tight">
-              <template x-for="comp in (compositeComposition(c.card_id) || []).slice(0, 4)"
-                        :key="comp.factor_id">
-                <li class="flex items-start gap-1">
-                  <span class="text-slate-400 shrink-0">•</span>
-                  <span class="flex-1 truncate" :title="comp.name" x-text="comp.name"></span>
-                  <span class="font-mono tabular-nums text-slate-600 dark:text-slate-400 shrink-0"
-                        x-text="formatFactorValue(comp.value)"></span>
-                </li>
+            <!-- 大字标签 -->
+            <div class="text-base font-bold leading-snug" x-text="card.label || '—'"></div>
+            <!-- 次要标签 -->
+            <div class="flex flex-wrap gap-1" x-show="(card.secondary_labels || []).length > 0">
+              <template x-for="sl in (card.secondary_labels || [])" :key="sl">
+                <span class="px-1.5 py-0.5 rounded text-[10px]
+                             bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400"
+                      x-text="sl"></span>
               </template>
-              <li x-show="(compositeComposition(c.card_id) || []).length === 0"
-                  class="text-slate-400">组成明细未就绪</li>
-            </ul>
-
-            <!-- 细分割线 -->
-            <div class="border-t border-slate-100 dark:border-slate-800"></div>
-
-            <!-- Sprint 2.5-B:AI 双段分析(当前态势 / 对策略影响) -->
-            <div>
-              <div class="text-[11px] font-semibold text-slate-600 dark:text-slate-400
-                          flex items-center gap-1">
-                <span>📊</span><span>当前态势</span>
-              </div>
-              <p class="text-[11px] leading-snug text-slate-700 dark:text-slate-300 mt-0.5"
-                 x-text="compositeCurrentAnalysis(c.card_id) || '—'"></p>
             </div>
-            <div class="mt-3">
-              <div class="text-[11px] font-semibold text-slate-600 dark:text-slate-400
-                          flex items-center gap-1">
-                <span>🎯</span><span>对策略影响</span>
+            <!-- 摘要(默认看)-->
+            <p class="text-[12px] leading-snug text-slate-700 dark:text-slate-300"
+               x-text="card.summary || '—'"></p>
+            <!-- 查看详细按钮 -->
+            <button @click="toggleLayerCard(card.layer)"
+                    class="text-[11px] text-blue-600 dark:text-cyan-400 hover:underline">
+              <span x-show="!layerCardOpen(card.layer)">查看详细 ▼</span>
+              <span x-show="layerCardOpen(card.layer)">收起 ▲</span>
+            </button>
+            <!-- 详细区(展开后)-->
+            <div x-show="layerCardOpen(card.layer)" x-cloak
+                 class="space-y-2.5 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <!-- 关键观察 -->
+              <div x-show="(card.key_observations || []).length > 0">
+                <h4 class="text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                  关键观察
+                </h4>
+                <ul class="space-y-0.5 text-[11.5px] leading-snug">
+                  <template x-for="obs in (card.key_observations || [])" :key="obs">
+                    <li class="flex items-start gap-1.5">
+                      <span class="text-slate-400 shrink-0">•</span>
+                      <span x-text="obs"></span>
+                    </li>
+                  </template>
+                </ul>
               </div>
-              <p class="text-[11px] leading-snug text-slate-700 dark:text-slate-300 mt-0.5"
-                 x-text="compositeStrategyImpact(c.card_id) || '—'"></p>
+              <!-- 完整分析 -->
+              <div x-show="card.narrative">
+                <h4 class="text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                  完整分析
+                </h4>
+                <p class="text-[11.5px] leading-snug text-slate-700 dark:text-slate-300"
+                   x-text="card.narrative"></p>
+              </div>
+              <!-- 矛盾信号 -->
+              <div x-show="(card.contradicting_signals || []).length > 0">
+                <h4 class="text-[11px] font-semibold text-amber-600 dark:text-amber-400 mb-1">
+                  ⚠️ 矛盾信号
+                </h4>
+                <ul class="space-y-0.5 text-[11.5px] leading-snug">
+                  <template x-for="cs in (card.contradicting_signals || [])" :key="cs">
+                    <li class="flex items-start gap-1.5">
+                      <span class="text-amber-500 shrink-0">•</span>
+                      <span x-text="cs"></span>
+                    </li>
+                  </template>
+                </ul>
+              </div>
             </div>
-
-            <!-- 数据缺失提示(全有 → 不显示) -->
-            <div x-show="compositeMissingHint(c.card_id)"
-                 class="text-[10px] text-slate-400 dark:text-slate-500 mt-2"
-                 x-text="compositeMissingHint(c.card_id)"></div>
           </article>
         </template>
-        <div x-show="compositeCards().length === 0"
-             class="col-span-full text-[11px] text-slate-500 py-4 text-center">
-          暂无组合因子(冷启动期或 pipeline 失败)
-        </div>
       </div>
     </section>
-
-    </div> <!-- /grid 核心建议与高阶信号 -->
 
     <!-- Sprint 1.5o:整块删除「五层证据推导细节」区(用户反馈无价值,
          健康信号已在顶部「🩺 系统自检」面板里展示)。 -->

@@ -50,7 +50,10 @@ def _row_to_model(row: dict[str, Any]) -> StrategyStateRow:
     # schema(含 schema_version + summary_card + layer_cards + raw)
     normalized: dict[str, Any] = {}
     try:
-        normalized = normalize_state(state or {}, row.get("run_mode"))
+        normalized = normalize_state(
+            state or {}, row.get("run_mode"),
+            generated_at_utc=row.get("generated_at_utc"),
+        )
     except Exception:
         # 任何异常 fallback 为空 normalized,前端可降级渲染
         normalized = {"schema_version": "unknown", "summary_card": {},

@@ -22,9 +22,14 @@ schema:
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 from typing import Any, Optional
+from zoneinfo import ZoneInfo
 
 from . import labels
+
+
+_BJT = ZoneInfo("Asia/Shanghai")
 
 
 logger = logging.getLogger(__name__)
@@ -37,12 +42,16 @@ logger = logging.getLogger(__name__)
 def normalize_state(
     state: dict[str, Any],
     run_mode: Optional[str] = None,
+    *,
+    generated_at_utc: Optional[str] = None,
 ) -> dict[str, Any]:
     """v12 / v13 → 统一前端友好 schema。
 
     Args:
         state: strategy_runs.full_state_json 解析后的 dict(可能 v12 也可能 v13)
         run_mode: strategy_runs.run_mode("ai_orchestrator" 表 v13)
+        generated_at_utc: strategy_runs.generated_at_utc(用于 summary_card.decision_time
+            转 BJT 显示);若 None 则从 state 内部 fallback
     """
     if not isinstance(state, dict):
         return _empty_normalized("invalid_state")
@@ -58,6 +67,12 @@ def normalize_state(
         return _empty_normalized(f"normalize_failed_{schema_version}",
                                  raw=state)
 
+    # Sprint 1.8.2-A 修:summary_card.decision_time 用 generated_at_utc 转 BJT
+    bjt = _format_bjt(generated_at_utc) if generated_at_utc else None
+    if bjt is None:
+        bjt = _format_bjt(_decision_time(state))
+    normalized["summary_card"]["decision_time"] = bjt
+
     # Sprint 1.8.2-A:passthrough 前端依赖的 v12 兼容字段(factor_cards / meta)
     if isinstance(state, dict):
         if "factor_cards" in state:
@@ -66,6 +81,20 @@ def normalize_state(
         if isinstance(meta, dict):
             normalized["meta"] = meta
     return normalized
+
+
+def _format_bjt(utc_iso: Optional[str]) -> Optional[str]:
+    """UTC ISO 字符串 → 'YYYY-MM-DD HH:MM BJT' 格式;无效返回 None。"""
+    if not utc_iso:
+        return None
+    try:
+        s = str(utc_iso).replace("Z", "+00:00")
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(_BJT).strftime("%Y-%m-%d %H:%M BJT")
+    except (ValueError, TypeError):
+        return None
 
 
 # ============================================================

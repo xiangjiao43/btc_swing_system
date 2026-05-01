@@ -364,3 +364,45 @@ def test_v13_detected_without_run_mode():
     out = normalize_state(_v13_state_full(), run_mode=None)
     assert out["schema_version"] == "v13"
     assert out["layer_cards"][0]["label"] != "未知"
+
+
+# ============================================================
+# Sprint 1.8.2-A 收尾:decision_time UTC → BJT 转换
+# ============================================================
+
+def test_decision_time_format_bjt():
+    """传入 UTC ISO → summary_card.decision_time 是 BJT 格式 'YYYY-MM-DD HH:MM BJT'。"""
+    out = normalize_state(
+        _v13_state_full(), run_mode="ai_orchestrator",
+        generated_at_utc="2026-05-01T12:48:00Z",
+    )
+    # UTC 12:48 → BJT 20:48
+    assert out["summary_card"]["decision_time"] == "2026-05-01 20:48 BJT"
+
+
+def test_decision_time_handles_none_generated_at_utc():
+    """generated_at_utc=None 时不抛,优先从 state 内部 timestamp 提。"""
+    state = _v13_state_full()
+    state["generated_at_utc"] = "2026-05-01T08:00:00Z"
+    out = normalize_state(state, run_mode="ai_orchestrator",
+                          generated_at_utc=None)
+    # fallback 到 state['generated_at_utc'] → BJT 16:00
+    assert out["summary_card"]["decision_time"] == "2026-05-01 16:00 BJT"
+
+
+def test_decision_time_invalid_utc_returns_none():
+    """无效 UTC 字符串 → decision_time=None,不抛。"""
+    out = normalize_state(
+        _v13_state_full(), run_mode="ai_orchestrator",
+        generated_at_utc="not-a-date",
+    )
+    assert out["summary_card"]["decision_time"] is None
+
+
+def test_decision_time_handles_iso_with_offset():
+    """带 +00:00 后缀的 ISO 也支持。"""
+    out = normalize_state(
+        _v13_state_full(), run_mode="ai_orchestrator",
+        generated_at_utc="2026-05-01T00:00:00+00:00",
+    )
+    assert out["summary_card"]["decision_time"] == "2026-05-01 08:00 BJT"

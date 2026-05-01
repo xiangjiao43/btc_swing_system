@@ -858,13 +858,12 @@ def _event_risk_narrative(c: dict[str, Any], state: dict[str, Any]) -> dict[str,
     }
 
 
-# Sprint 1.5q.1:event_risk 已 rm,_NARRATIVE_GENERATORS 5 个组合因子。
+# Sprint 1.8.1:旧 v1.2 composite 全删(truth_trend / band_position /
+# crowding / macro_headwind),只留 cycle_position(L2 prompt 仍消费)。
+# 4 个旧 narrative helpers(_truth_trend_narrative 等)留作 1.10 因子卡
+# 文案重做的参考代码,Sprint 1.10 一并清理。
 _NARRATIVE_GENERATORS: dict[str, Any] = {
-    "truth_trend": _truth_trend_narrative,
-    "band_position": _band_position_narrative,
     "cycle_position": _cycle_position_narrative,
-    "crowding": _crowding_narrative,
-    "macro_headwind": _macro_headwind_narrative,
 }
 
 

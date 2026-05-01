@@ -107,11 +107,11 @@ def _state_with_composites(**composite_overrides):
 # ==================================================================
 
 class TestModuleHygiene:
-    def test_six_narrators_registered(self):
-        assert set(_NARRATIVE_GENERATORS.keys()) == {
-            "truth_trend", "band_position", "cycle_position",
-            "crowding", "macro_headwind", "event_risk",
-        }
+    def test_only_cycle_position_narrator_registered(self):
+        # Sprint 1.8.1:旧 v1.2 composite 全删,只剩 cycle_position narrator。
+        # event_risk 1.5q.1 删;truth_trend / band_position / crowding /
+        # macro_headwind 1.8.1 随 composite 类删除而退役。
+        assert set(_NARRATIVE_GENERATORS.keys()) == {"cycle_position"}
 
     def test_module_does_not_import_anthropic(self):
         mod = importlib.import_module("src.strategy.composite_composition")

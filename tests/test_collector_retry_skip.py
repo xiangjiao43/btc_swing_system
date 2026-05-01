@@ -222,9 +222,20 @@ def test_macro_runs_when_today_missing(db_path):
 # ============================================================
 
 def test_onchain_skip_when_today_already_inserted(db_path):
+    # Sprint 1.6.1 起 onchain skip gate 改细粒度:_ONCHAIN_EXPECTED_METRICS_TODAY
+    # ∪ {"hodl_waves"} 必须全部今天已写过才 skip。本测试种全集合,验细粒度 skip。
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today_captured = f"{today}T08:00:00Z"
+    for m in jobs_mod._ONCHAIN_EXPECTED_METRICS_TODAY:
+        _seed_metric(
+            db_path, "onchain_metrics", metric_name=m,
+            captured_at_utc=today_captured, value=1.0,
+            inserted_at_utc=_today_iso(),
+        )
+    # hodl_waves 用前缀匹配,seed 任一 bucket 即代表 hodl_waves 已抓
     _seed_metric(
-        db_path, "onchain_metrics", metric_name="mvrv_z_score",
-        captured_at_utc=_yesterday_iso(), value=2.0,
+        db_path, "onchain_metrics", metric_name="hodl_waves_1d_1w",
+        captured_at_utc=today_captured, value=0.05,
         inserted_at_utc=_today_iso(),
     )
     gn_cls = MagicMock()
@@ -257,11 +268,28 @@ def test_onchain_runs_when_today_missing(db_path):
 # ============================================================
 
 def test_klines_daily_skip_when_today_1d_exists(db_path):
+    # Sprint 1.6.1 起 klines_daily skip gate 改细粒度:1d 候 + btc_dominance/etf_flow
+    # 必须都今天已写过才 skip。本测试种 1d K 线 + derivatives_snapshots 行
+    # 含 btc_dominance,验细粒度 skip。
     today_midnight = (
         datetime.now(timezone.utc).date().isoformat() + "T00:00:00Z"
     )
     _seed_kline(db_path, timeframe="1d", open_time_utc=today_midnight,
                 inserted_at_utc=_today_iso())
+    # 种 derivatives_snapshots 一行,full_data_json 含 btc_dominance
+    conn = _conn(db_path)
+    conn.execute(
+        "INSERT INTO derivatives_snapshots "
+        "(captured_at_utc, full_data_json, inserted_at_utc) "
+        "VALUES (?, ?, ?)",
+        (
+            f"{datetime.now(timezone.utc).strftime('%Y-%m-%d')}T08:00:00Z",
+            '{"btc_dominance": 0.55}',
+            _today_iso(),
+        ),
+    )
+    conn.commit()
+    conn.close()
     cg_cls = MagicMock()
     with patch("src.data.collectors.coinglass.CoinglassCollector", cg_cls):
         result = jobs_mod.job_collect_klines_daily(

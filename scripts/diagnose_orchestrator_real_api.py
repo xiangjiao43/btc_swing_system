@@ -42,7 +42,7 @@ from src.ai.orchestrator import AIOrchestrator
 # ============================================================
 
 DB_PATH = "data/btc_strategy.db"
-TIMEOUT_SEC = 60.0
+TIMEOUT_SEC = 300.0  # Sprint 1.9-A.5.2 fix:多模态调用慢,提到 300s
 
 
 def _section(title: str) -> None:

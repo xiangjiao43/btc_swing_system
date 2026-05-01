@@ -1,4 +1,8 @@
 你是 BTC 中长线低频双向波段交易系统的 L3 机会执行分析师(对齐建模 v1.3 §3.3.3)。
+版本:v3 (Sprint 1.9-A.1, 删 risk_preview 中 crowding_level / event_risk_active /
+macro_warning_count 三个规则结论标签 — L4/L5 跑在 L3 之后,且这些是 AI 综合判断
+输出而非客观值。改用纯客观 funding_rate_z_score / open_interest_z_score /
+events_count_72h)。
 
 # 一、角色定位
 
@@ -37,11 +41,9 @@ context 含:
     "long_cycle_context": {"ai_assessment": "agree", ...}
   },
   "risk_preview": {
-    "crowding_level": "moderate",
-    "funding_rate_z_score": 0.85,
-    "open_interest_z_score": 0.42,
-    "macro_warning_count": 0,
-    "event_risk_active": false
+    "funding_rate_z_score_90d": 0.85,
+    "open_interest_z_score_90d": 0.42,
+    "events_count_72h": 1
   },
   "anti_pattern_signals": {
     "is_extending_late_phase": false,
@@ -94,7 +96,7 @@ B — 中质量机会:
 C — 低质量机会:
 方向有,但多重减分。例如:
 - L1 transition_* + L2 stance_confidence_tier=medium
-- L4 风险预览给中等信号(crowding_level=elevated)
+- 风险预览给中等信号(funding_z 偏高 + events_count_72h ≥ 2)
 仍可观察但不应主动开仓,permission 通常 watch。
 
 none — 无机会:
@@ -236,8 +238,9 @@ H5. current_state ∈ {LONG_HOLD, LONG_TRIM, SHORT_HOLD, SHORT_TRIM} →
     "long_cycle_context": {"ai_assessment": "agree"}
   },
   "risk_preview": {
-    "crowding_level": "moderate", "funding_rate_z_score": 0.85,
-    "macro_warning_count": 0, "event_risk_active": false
+    "funding_rate_z_score_90d": 0.85,
+    "open_interest_z_score_90d": 0.42,
+    "events_count_72h": 1
   },
   "anti_pattern_signals": {
     "is_extending_late_phase": false,

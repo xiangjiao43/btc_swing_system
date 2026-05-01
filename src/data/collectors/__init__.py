@@ -6,7 +6,7 @@ src.data.collectors — 外部数据源采集器。
 架构(Sprint 2.6-A.4 起):
   - CoinglassCollector:BTC K 线 + 所有衍生品
   - GlassnodeCollector:链上指标(MVRV / NUPL / SOPR 等)
-  - FredCollector:macro 唯一主源(覆盖 dxy/vix/sp500/nasdaq/dgs10/dff/cpi/unemployment_rate)
+  - FredCollector:macro 唯一主源(覆盖 dxy/vix/nasdaq/dgs10)
 
 Binance / Yahoo Finance 已从架构移除(都因 IP 限速 / 封禁不可用);
 详见 docs/PROJECT_LOG.md 与 docs/cc_reports/sprint_2_6_a*.md。

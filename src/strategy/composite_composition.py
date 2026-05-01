@@ -292,9 +292,7 @@ def _crowding(cr: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
         {"factor_id": "derivatives_basis", "name": "基差年化",
          "value": _latest("basis"), "weight": 0.10,
          "role": "> 20% → +1"},
-        {"factor_id": "derivatives_put_call", "name": "Put/Call Ratio",
-         "value": _latest("put_call_ratio"), "weight": 0.10,
-         "role": "< 0.5 → +1(多头情绪热)"},
+        # Sprint 1.8.1:put_call_ratio 因子退役(数据源不稳定,1.7 列入延后清单)
     ]
     if score is None:
         interp = "未就绪"

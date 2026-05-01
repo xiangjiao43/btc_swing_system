@@ -4,7 +4,7 @@ fred.py — FRED(美联储经济数据)采集器
 对应建模 §3.6.4。直连 FRED 官方 API,需要免费注册拿 API key。
 
 Sprint 2.6-A.4:覆盖 layer5_macro.py 全部 8 个核心字段,包括
-dxy / vix / sp500 / nasdaq(FRED 是这些指数的官方权威数据源)。
+dxy / vix / nasdaq(FRED 是这些指数的官方权威数据源;Sprint 1.7 删 sp500 — 与 NASDAQ 90%+ 重叠)。
 原 Yahoo Finance 路径已弃用 — 腾讯云 IP 被 Yahoo 全局 429 封禁,
 FRED 是当前唯一可用的 macro 主源。
 
@@ -38,18 +38,13 @@ class FredCollectorError(RuntimeError):
 SERIES_TO_METRIC: dict[str, str] = {
     # 利率类
     "DGS10":    "dgs10",              # 10-year Treasury yield(daily)
-    "DFF":      "dff",                # Federal funds rate(daily)
-    # 通胀 / 就业
-    "CPIAUCSL": "cpi",                # CPI all urban consumers(monthly)
-    "UNRATE":   "unemployment_rate",  # Unemployment rate(monthly)
-    # 股指(Sprint 2.6-A.4 新增,FRED 是 SP500 / NASDAQ 的官方数据源)
-    "SP500":    "sp500",              # S&P 500(daily,~10 年历史)
+    # 股指(Sprint 1.7:删 SP500 — 与 NASDAQ 90%+ 重叠)
     "NASDAQCOM": "nasdaq",            # NASDAQ Composite(daily,1971-至今)
-    # 波动率与美元(Sprint 2.6-A.4 新增)
+    # 波动率与美元
     "VIXCLS":   "vix",                # CBOE VIX(daily,1990-至今)
     "DTWEXBGS": "dxy",                # Trade Weighted USD Index(Fed 官方版,语义等同 ICE DXY)
-    # 商品(Sprint 2.6-F 新增,用于 BTC-黄金 60d 相关性)
-    "GOLDPMGBD228NLBM": "gold_price",  # London Gold Fixing PM (USD/oz, daily)
+    # Sprint 1.8.1 删除:dff / cpi / unemployment_rate / sp500 / gold_price
+    # (因子退役 — 详见 docs/cc_reports/sprint_1_8_1_full.md)
 }
 
 # Sprint 2.6-A.4:metric 别名 — 同一份 series 数据写多个 metric_name。

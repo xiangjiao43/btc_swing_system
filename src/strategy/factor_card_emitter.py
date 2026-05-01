@@ -1585,36 +1585,8 @@ def _emit_macro_reference(
         impact_direction=nas_dir, impact_weight=0.4,
         linked_layer="L5", source="derived",
     ))
-    # Sprint 2.6-F:BTC-黄金 60 日相关性(FRED gold_price → 现在能算了)
-    gold_series = macro.get("gold_price") if isinstance(macro, dict) else None
-    btc_gold_corr = _compute_corr_60d(klines_1d, gold_series)
-    if btc_gold_corr is not None:
-        gold_interp = (
-            f"📊 BTC 与黄金 60 日相关系数 = {btc_gold_corr:+.2f}\n"
-            f"🔍 > +0.5 = 数字黄金叙事强(避险买盘共振);±0.5 内 = 弱相关;"
-            f"< -0.5 = 风险资产属性主导(与黄金背离)"
-        )
-        gold_dir = (
-            "neutral" if -0.5 <= btc_gold_corr <= 0.5
-            else ("bullish" if btc_gold_corr > 0.5 else "bearish")
-        )
-    else:
-        gold_interp = (
-            "📊 数据不足(需 BTC 与黄金各 60+ 天)\n"
-            "🔍 > +0.5 = 数字黄金叙事强;< -0.5 = 风险资产属性主导"
-        )
-        gold_dir = "neutral"
-    cards.append(_make_card(
-        card_id=f"macro_btc_gold_corr_60d_{today}",
-        category="macro", tier="reference",
-        name="BTC-黄金 60 日相关性", name_en="BTC-Gold 60d Correlation",
-        current_value=round(btc_gold_corr, 3) if btc_gold_corr is not None else None,
-        captured_at_bjt=None,
-        plain_interpretation=gold_interp,
-        strategy_impact="📍 BTC 与黄金过去 60 天的相关系数,用于跟踪BTC 的数字黄金叙事强度。",
-        impact_direction=gold_dir, impact_weight=0.2,
-        linked_layer="L5", source="derived",
-    ))
+    # Sprint 1.8.1:BTC-黄金 60d 相关性卡退役(gold_price 因子已删,
+    # FRED GOLDPMGBD228NLBM 已从 SERIES_TO_METRIC 移除)
     return cards
 
 

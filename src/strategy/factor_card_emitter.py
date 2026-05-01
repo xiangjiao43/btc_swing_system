@@ -1224,11 +1224,6 @@ def _emit_onchain_reference(onchain: dict[str, Any], today: str) -> list[dict[st
          "STH Realized Price",
          "📍 短期持有者(持有 < 155 天)的平均成本价。",
          "🔍 牛市中跌破 STH 成本常是回调买点;熊市中跌破常是继续下跌信号"),
-        # Sprint 1.7:SOPR 卡已删除(噪音因子;aSOPR 已替代它在 1.6 升级 primary)。
-        ("sopr_adjusted", "onchain_asopr", "aSOPR",
-         "Adjusted SOPR",
-         "📍 调整后的 SOPR,排除 1 小时内的交易(去噪声)。比 SOPR 更稳定。",
-         "🔍 > 1 = 盈利卖出主导;= 1 = 关键支撑/阻力位;< 1 = 投降"),
         # Sprint 1.7:puell_multiple 卡已删除(噪音因子)。
     ]
     for key, card_slug, name_cn, name_en, impact_desc, threshold_desc in _ref_specs:

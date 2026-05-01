@@ -155,18 +155,18 @@ def test_build_scheduler_uses_bjt_timezone(monkeypatch):
     try:
         assert str(sched.timezone) == "Asia/Shanghai"
         registered_ids = {j.id for j in sched.get_jobs()}
-        expected_8 = {
+        # Sprint 1.8.1:pipeline_run_regular + pipeline_run_8h_onchain
+        # 已 enabled: false(等 1.9 切到 AIOrchestrator),只剩 6 个 cron。
+        expected_6 = {
             "collect_klines_1h",
             "collect_klines_daily",
             "collect_klines_weekly",
             "collect_macro",
             "collect_onchain",
-            "pipeline_run_regular",
-            "pipeline_run_8h_onchain",
             "event_listener",
         }
-        assert registered_ids == expected_8, (
-            f"missing={expected_8 - registered_ids}, extra={registered_ids - expected_8}"
+        assert registered_ids == expected_6, (
+            f"missing={expected_6 - registered_ids}, extra={registered_ids - expected_6}"
         )
     finally:
         if sched.running:

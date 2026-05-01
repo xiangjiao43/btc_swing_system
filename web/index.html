@@ -315,8 +315,8 @@
           </div>
         </div>
 
-        <!-- ▸ 第 3 行:持仓 & 风险(只在持仓中显示)-->
-        <div x-show="hasActivePosition()">
+        <!-- ▸ 第 3 行:持仓 & 风险(常显,无持仓时显示 —)-->
+        <div>
           <h3 class="subheading">持仓状态</h3>
           <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
             <div class="border border-slate-200 dark:border-slate-800 rounded p-2.5">

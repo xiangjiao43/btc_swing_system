@@ -239,6 +239,99 @@ def _derive_ai_model(layers: dict[str, Any]) -> Optional[str]:
     return None
 
 
+def _build_summary_v13(
+    result: dict[str, Any],
+    mapped: dict[str, Any],
+) -> dict[str, Any]:
+    """Sprint 1.9-A.5.3:从 orchestrator result + mapped state 提取 summary,
+    给 scripts/run_pipeline_once.py 的 _summarize() 用。
+
+    解决 bug:v13 路径 BuildResult.state 不含 evidence_reports/state_machine
+    /adjudicator 等 v12 字段,导致 _summarize() 全 None。本函数把 result
+    各 layer 真值映射到 v12 同名 key,scripts/run_pipeline_once.py 优先读。
+    """
+    layers = result.get("layers") or {}
+    l1 = layers.get("l1") or {}
+    l2 = layers.get("l2") or {}
+    l3 = layers.get("l3") or {}
+    l4 = layers.get("l4") or {}
+    l5 = layers.get("l5") or {}
+    master = layers.get("master") or {}
+    state_trans = master.get("state_transition") or {}
+    trade_plan = master.get("trade_plan") or {}
+
+    # 累计 token 用量
+    tokens_in = sum(
+        (layer.get("tokens_in") or 0)
+        for layer in layers.values() if isinstance(layer, dict)
+    )
+    tokens_out = sum(
+        (layer.get("tokens_out") or 0)
+        for layer in layers.values() if isinstance(layer, dict)
+    )
+
+    return {
+        # metadata
+        "run_id": mapped.get("run_id"),
+        "reference_ts": mapped.get("reference_timestamp_utc"),
+        "cold_start": {"warming_up": mapped.get("cold_start") == 1},
+        # L1
+        "L1.regime": l1.get("regime"),
+        "L1.volatility": l1.get("volatility_regime"),
+        # L2
+        "L2.stance": l2.get("stance"),
+        "L2.phase": l2.get("phase"),
+        "L2.stance_confidence": l2.get("stance_confidence_tier"),
+        # L3
+        "L3.opportunity_grade": l3.get("opportunity_grade"),
+        "L3.execution_permission": l3.get("execution_permission"),
+        "L3.anti_pattern_flags": l3.get("anti_pattern_flags"),
+        # L4
+        "L4.position_cap": l4.get("position_cap_multiplier"),
+        "L4.risk_permission": l4.get("risk_permission"),
+        "L4.rr_pass_level": l4.get("rr_pass_level"),
+        # L5
+        "L5.macro_environment": l5.get("macro_stance"),
+        "L5.macro_headwind_vs_btc": l5.get("headwind_score"),
+        # AI ops
+        "ai.status": result.get("status"),
+        "ai.tokens_in": tokens_in,
+        "ai.tokens_out": tokens_out,
+        "ai.summary_preview": (master.get("narrative") or "")[:200],
+        # state machine(从 master.state_transition 取)
+        "state_machine.previous": state_trans.get("from_state"),
+        "state_machine.current": state_trans.get("to_state"),
+        "state_machine.transition_reason":
+            state_trans.get("transition_reasoning"),
+        "state_machine.stable_in_state": (
+            state_trans.get("from_state") == state_trans.get("to_state")
+        ),
+        # adjudicator(master 输出 = 主裁)
+        "adjudicator.action": trade_plan.get("action"),
+        "adjudicator.direction": trade_plan.get("direction"),
+        "adjudicator.confidence": master.get("confidence"),
+        "adjudicator.status": master.get("status"),
+        "adjudicator.rationale_preview":
+            (master.get("narrative") or master.get("rationale") or "")[:200],
+        # lifecycle(v13 暂未接入 lifecycle_manager,占位 None)
+        "lifecycle.previous": None,
+        "lifecycle.current": None,
+        "lifecycle.triggered_by": None,
+        "lifecycle.conflict_detected": None,
+        # pipeline meta
+        "pipeline.degraded_stages": [
+            name for name, layer in layers.items()
+            if isinstance(layer, dict)
+            and not str(layer.get("status", "")).startswith("success")
+        ],
+        "pipeline.failure_count": sum(
+            1 for layer in layers.values()
+            if isinstance(layer, dict)
+            and not str(layer.get("status", "")).startswith("success")
+        ),
+    }
+
+
 def _build_full_state_json(
     result: dict[str, Any],
     context: dict[str, Any],

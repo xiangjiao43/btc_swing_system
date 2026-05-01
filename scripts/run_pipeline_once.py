@@ -37,7 +37,17 @@ from src.pipeline import StrategyStateBuilder
 
 
 def _summarize(state: dict[str, Any]) -> dict[str, Any]:
-    """挑 state 的关键字段打印,避免一屏 JSON 吓到人。"""
+    """挑 state 的关键字段打印,避免一屏 JSON 吓到人。
+
+    Sprint 1.9-A.5.3:加 v13 检测 — 若 state 含 v13_orchestrator=True 和
+    state["summary"](由 _build_summary_v13 在 state_builder._run_v13_orchestrator
+    内填),直接返回那份 summary;否则走 v12 evidence_reports 路径(原代码)。
+    """
+    if state.get("v13_orchestrator") is True and isinstance(
+        state.get("summary"), dict,
+    ):
+        return state["summary"]
+
     l1 = (state.get("evidence_reports") or {}).get("layer_1") or {}
     l2 = (state.get("evidence_reports") or {}).get("layer_2") or {}
     l3 = (state.get("evidence_reports") or {}).get("layer_3") or {}

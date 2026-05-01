@@ -125,10 +125,13 @@ def test_collect_onchain_at_0835_bjt():
     assert spec.trigger_kwargs["cron_list"][0] == {"hour": 8, "minute": 35}
 
 
-def test_pipeline_run_regular_cron_5_hours():
+def test_pipeline_run_regular_cron_at_1605_bjt():
+    """Sprint 1.9-B(2026-05-01)改为每日 1 档 16:05 BJT(= UTC 08:05)。
+    原 5 档 00/04/12/16/20:05 是 v1.2 多档轮询;v1.3 AI orchestrator 跑得慢
+    + 成本敏感,改每日 1 档。"""
     out = {jc.name: jc for jc in build_job_configs(load_scheduler_config(_CONFIG_PATH))}
     spec = out["pipeline_run_regular"]
-    assert spec.trigger_kwargs == {"hour": "0,4,12,16,20", "minute": 5}
+    assert spec.trigger_kwargs == {"hour": 16, "minute": 5}
 
 
 def test_pipeline_run_8h_onchain_at_0840_bjt():
@@ -155,18 +158,19 @@ def test_build_scheduler_uses_bjt_timezone(monkeypatch):
     try:
         assert str(sched.timezone) == "Asia/Shanghai"
         registered_ids = {j.id for j in sched.get_jobs()}
-        # Sprint 1.8.1:pipeline_run_regular + pipeline_run_8h_onchain
-        # 已 enabled: false(等 1.9 切到 AIOrchestrator),只剩 6 个 cron。
-        expected_6 = {
+        # Sprint 1.9-B(2026-05-01)启用 pipeline_run_regular(16:05 BJT 每日);
+        # pipeline_run_8h_onchain 仍 disabled。共 7 个 cron。
+        expected_7 = {
             "collect_klines_1h",
             "collect_klines_daily",
             "collect_klines_weekly",
             "collect_macro",
             "collect_onchain",
             "event_listener",
+            "pipeline_run_regular",
         }
-        assert registered_ids == expected_6, (
-            f"missing={expected_6 - registered_ids}, extra={registered_ids - expected_6}"
+        assert registered_ids == expected_7, (
+            f"missing={expected_7 - registered_ids}, extra={registered_ids - expected_7}"
         )
     finally:
         if sched.running:

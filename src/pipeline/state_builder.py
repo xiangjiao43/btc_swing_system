@@ -349,7 +349,10 @@ class StrategyStateBuilder:
         """
         from ..ai.context_builder import ContextBuilder
         from ..ai.orchestrator import AIOrchestrator
-        from ._orchestrator_mapper import _map_orchestrator_result_to_state
+        from ._orchestrator_mapper import (
+            _build_summary_v13,
+            _map_orchestrator_result_to_state,
+        )
 
         start_ts = time.time()
         try:
@@ -418,16 +421,20 @@ class StrategyStateBuilder:
             except Exception as e:
                 logger.warning("v13 INSERT strategy_runs failed: %s", e)
 
+        # Sprint 1.9-A.5.3:把 summary 放进 state,供 scripts/run_pipeline_once.py
+        # 的 _summarize() 优先读(原 v12 路径不变,_summarize 检测 v13 标记)
+        summary = _build_summary_v13(result, mapped)
         return BuildResult(
             run_id=mapped["run_id"],
             run_timestamp_utc=mapped["generated_at_utc"],
             state={
                 "v13_orchestrator": True,
+                "summary": summary,
                 "mapped": {k: v for k, v in mapped.items()
                            if k != "full_state_json"},
             },
             failures=[],
-            degraded_stages=[],
+            degraded_stages=summary["pipeline.degraded_stages"],
             ai_status=str(result.get("status", "unknown")),
             persisted=persisted,
             duration_ms=int((time.time() - start_ts) * 1000),

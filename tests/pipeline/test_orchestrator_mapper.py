@@ -19,6 +19,7 @@ from src.pipeline._orchestrator_mapper import (
     _build_classifier_state,
     _build_cold_start_state,
     _build_full_state_json,
+    _build_summary_v13,
     _derive_ai_model,
     _derive_fallback_level,
     _map_orchestrator_result_to_state,
@@ -398,3 +399,131 @@ def test_build_full_state_json_handles_missing_keys():
     parsed = json.loads(json_str)
     assert "layers" in parsed
     assert parsed["layers"] == {}
+
+
+# ============================================================
+# _build_summary_v13(Sprint 1.9-A.5.3)
+# ============================================================
+
+def test_build_summary_v13_extracts_real_fields():
+    """完整 result + mapped → summary 所有 22+ 字段都不是 null,值与 mock 对应。"""
+    result = {
+        "layers": {
+            "l1": {"regime": "transition_up", "volatility_regime": "normal",
+                   "tokens_in": 8500, "tokens_out": 1200,
+                   "status": "success"},
+            "l2": {"stance": "bullish", "phase": "early",
+                   "stance_confidence_tier": "high",
+                   "tokens_in": 12000, "tokens_out": 1500,
+                   "status": "success"},
+            "l3": {"opportunity_grade": "C",
+                   "execution_permission": "watch",
+                   "anti_pattern_flags": [],
+                   "tokens_in": 4500, "tokens_out": 800,
+                   "status": "success"},
+            "l4": {"risk_tier": "moderate",
+                   "position_cap_multiplier": 0.78,
+                   "tokens_in": 15000, "tokens_out": 1700,
+                   "status": "success"},
+            "l5": {"macro_stance": "neutral", "headwind_score": 28,
+                   "tokens_in": 6000, "tokens_out": 1100,
+                   "status": "success"},
+            "master": {
+                "state_transition": {"from_state": "FLAT",
+                                     "to_state": "FLAT",
+                                     "transition_reasoning": "L3=C 等待"},
+                "trade_plan": {"action": "watch", "direction": None},
+                "narrative": "BTC 处于过渡上升,等待更好机会窗口...",
+                "confidence": 0.65,
+                "status": "success",
+                "tokens_in": 22000, "tokens_out": 3000,
+            },
+        },
+        "status": "ok",
+    }
+    mapped = {
+        "run_id": "abc123",
+        "reference_timestamp_utc": "2026-05-01T08:00:00Z",
+        "cold_start": 0,
+    }
+    summary = _build_summary_v13(result, mapped)
+
+    # metadata
+    assert summary["run_id"] == "abc123"
+    assert summary["reference_ts"] == "2026-05-01T08:00:00Z"
+    assert summary["cold_start"]["warming_up"] is False
+
+    # L1
+    assert summary["L1.regime"] == "transition_up"
+    assert summary["L1.volatility"] == "normal"
+    # L2
+    assert summary["L2.stance"] == "bullish"
+    assert summary["L2.phase"] == "early"
+    assert summary["L2.stance_confidence"] == "high"
+    # L3
+    assert summary["L3.opportunity_grade"] == "C"
+    assert summary["L3.execution_permission"] == "watch"
+    assert summary["L3.anti_pattern_flags"] == []
+    # L4
+    assert summary["L4.position_cap"] == 0.78
+    # L5
+    assert summary["L5.macro_environment"] == "neutral"
+    assert summary["L5.macro_headwind_vs_btc"] == 28
+
+    # AI ops
+    assert summary["ai.status"] == "ok"
+    assert summary["ai.tokens_in"] == 8500 + 12000 + 4500 + 15000 + 6000 + 22000
+    assert summary["ai.tokens_out"] == 1200 + 1500 + 800 + 1700 + 1100 + 3000
+    assert "BTC 处于过渡上升" in summary["ai.summary_preview"]
+
+    # state machine
+    assert summary["state_machine.previous"] == "FLAT"
+    assert summary["state_machine.current"] == "FLAT"
+    assert summary["state_machine.transition_reason"] == "L3=C 等待"
+    assert summary["state_machine.stable_in_state"] is True
+
+    # adjudicator
+    assert summary["adjudicator.action"] == "watch"
+    assert summary["adjudicator.direction"] is None
+    assert summary["adjudicator.confidence"] == 0.65
+    assert summary["adjudicator.status"] == "success"
+    assert "BTC 处于过渡上升" in summary["adjudicator.rationale_preview"]
+
+    # pipeline meta(全 success → degraded_stages 空)
+    assert summary["pipeline.degraded_stages"] == []
+    assert summary["pipeline.failure_count"] == 0
+
+
+def test_build_summary_v13_marks_degraded_layers():
+    """L1+L4 status=degraded → pipeline.degraded_stages 含 l1+l4。"""
+    result = {
+        "layers": {
+            "l1": {"status": "degraded_l1_failed", "regime": None},
+            "l2": {"status": "success", "stance": "bullish"},
+            "l3": {"status": "success"},
+            "l4": {"status": "degraded_l4_failed"},
+            "l5": {"status": "success"},
+            "master": {"status": "success",
+                       "state_transition": {"from_state": "FLAT",
+                                            "to_state": "FLAT"},
+                       "trade_plan": {"action": "watch"}},
+        },
+        "status": "degraded_l1_failed",
+    }
+    mapped = {"run_id": "x", "reference_timestamp_utc": "2026-05-01T00:00:00Z",
+              "cold_start": 1}
+    summary = _build_summary_v13(result, mapped)
+    assert "l1" in summary["pipeline.degraded_stages"]
+    assert "l4" in summary["pipeline.degraded_stages"]
+    assert "l2" not in summary["pipeline.degraded_stages"]
+    assert summary["pipeline.failure_count"] == 2
+
+
+def test_build_summary_v13_handles_empty_result():
+    """空 result → 所有字段 None / 0,不抛异常。"""
+    summary = _build_summary_v13({}, {})
+    assert summary["L1.regime"] is None
+    assert summary["L2.stance"] is None
+    assert summary["adjudicator.action"] is None
+    assert summary["ai.tokens_in"] == 0
+    assert summary["pipeline.failure_count"] == 0

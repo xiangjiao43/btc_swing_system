@@ -21,6 +21,7 @@ from fastapi.responses import StreamingResponse
 
 from ...data.storage.dao import LatestFactorCardsDAO, StrategyStateDAO
 from ..models import HistoryPage, StrategyStateRow
+from ...web_helpers import normalize_state
 
 
 router = APIRouter(prefix="/strategy", tags=["strategy"])
@@ -44,13 +45,25 @@ def _row_to_model(row: dict[str, Any]) -> StrategyStateRow:
             meta = {}
             state["meta"] = meta
         meta.setdefault("strategy_flavor", "swing")
+
+    # Sprint 1.8.2-A:经 normalize_state 把 v12/v13 统一成"前端友好+已翻译"
+    # schema(含 schema_version + summary_card + layer_cards + raw)
+    normalized: dict[str, Any] = {}
+    try:
+        normalized = normalize_state(state or {}, row.get("run_mode"))
+    except Exception:
+        # 任何异常 fallback 为空 normalized,前端可降级渲染
+        normalized = {"schema_version": "unknown", "summary_card": {},
+                      "layer_cards": [], "anti_patterns_active": [],
+                      "extreme_events_active": [], "raw": state or {}}
+
     return StrategyStateRow(
         run_timestamp_utc=row["run_timestamp_utc"],
         run_id=row["run_id"],
         run_trigger=row["run_trigger"],
         rules_version=row["rules_version"],
         ai_model_actual=row.get("ai_model_actual"),
-        state=state or {},
+        state=normalized,
         created_at=row.get("created_at"),
     )
 

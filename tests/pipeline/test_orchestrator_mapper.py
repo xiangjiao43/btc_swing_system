@@ -1,0 +1,400 @@
+"""tests/pipeline/test_orchestrator_mapper.py — Sprint 1.9-A.5.1。
+
+_map_orchestrator_result_to_state 19 列每列至少 1 个断言。
+全 mock,不调真 anthropic API。§Z 端到端字段值断言。
+"""
+
+from __future__ import annotations
+
+import json
+import sqlite3
+import tempfile
+from pathlib import Path
+from unittest.mock import patch
+
+import pytest
+
+from src.data.storage.connection import init_db
+from src.pipeline._orchestrator_mapper import (
+    _build_classifier_state,
+    _build_cold_start_state,
+    _build_full_state_json,
+    _derive_ai_model,
+    _derive_fallback_level,
+    _map_orchestrator_result_to_state,
+)
+
+
+# ============================================================
+# Fixtures
+# ============================================================
+
+@pytest.fixture
+def db_path() -> Path:
+    tmp = Path(tempfile.mkdtemp()) / "m.db"
+    init_db(db_path=tmp, verbose=False)
+    return tmp
+
+
+@pytest.fixture
+def conn(db_path):
+    c = sqlite3.connect(db_path)
+    c.row_factory = sqlite3.Row
+    yield c
+    c.close()
+
+
+def _make_result(
+    *,
+    status: str = "ok",
+    to_state: str = "LONG_PLANNED",
+    stance: str = "bullish",
+    grade: str = "A",
+    risk_tier: str = "moderate",
+    macro_stance: str = "supportive",
+    model_used: str = "claude-sonnet-4-5-20250929",
+) -> dict:
+    return {
+        "layers": {
+            "l1": {"regime": "trend_up", "confidence": 0.9,
+                   "model_used": model_used},
+            "l2": {"stance": stance, "phase": "early"},
+            "l3": {"opportunity_grade": grade, "execution_permission": "active_open"},
+            "l4": {"risk_tier": risk_tier,
+                   "hard_invalidation_levels": [{"price": 73200,
+                                                 "type": "swing_low"}],
+                   "position_cap_multiplier": 0.78},
+            "l5": {"macro_stance": macro_stance,
+                   "extreme_event_detected": False},
+            "master": {
+                "state_transition": {"from_state": "FLAT",
+                                     "to_state": to_state,
+                                     "transition_reasoning": "..."},
+                "trade_plan": {"action": "open"},
+                "position_cap_final": {"value": 0.4409},
+            },
+        },
+        "validator": {"violations": [], "passed": True},
+        "status": status,
+        "latency_ms": {"l1": 100, "l2": 110, "master": 200},
+        "_system_provided": {"crowding_multiplier": 0.85, "event_multiplier": 0.95},
+    }
+
+
+def _make_context() -> dict:
+    return {
+        "_shared": {
+            "current_close": 75749.5,
+            "events_count_72h": 2,
+            "btc_macro_corr_60d": 0.45,
+            "reference_timestamp_utc": "2026-05-01T08:00:00Z",
+        },
+        "l5": {"extreme_event_flags": {"flash_crash_detected_24h": False}},
+        "l2": {"rule_cycle_position": {"label": "early_bull",
+                                       "confidence": 0.74}},
+    }
+
+
+# ============================================================
+# 19 列映射 — 每列至少 1 测试
+# ============================================================
+
+def test_col_1_run_id_is_uuid_hex(conn):
+    out = _map_orchestrator_result_to_state(_make_result(), _make_context(), conn)
+    assert isinstance(out["run_id"], str)
+    assert len(out["run_id"]) == 32  # uuid hex
+
+
+def test_col_2_3_timestamps_format(conn):
+    out = _map_orchestrator_result_to_state(_make_result(), _make_context(), conn)
+    assert out["generated_at_utc"].endswith("Z")
+    assert "T" in out["generated_at_utc"]
+    assert "+08:00" in out["generated_at_bjt"]
+
+
+def test_col_4_reference_timestamp_from_shared(conn):
+    out = _map_orchestrator_result_to_state(_make_result(), _make_context(), conn)
+    assert out["reference_timestamp_utc"] == "2026-05-01T08:00:00Z"
+
+
+def test_col_4_reference_timestamp_falls_back_when_missing(conn):
+    ctx = _make_context()
+    del ctx["_shared"]["reference_timestamp_utc"]
+    out = _map_orchestrator_result_to_state(_make_result(), ctx, conn)
+    # fallback 到 generated_at_utc
+    assert out["reference_timestamp_utc"] == out["generated_at_utc"]
+
+
+def test_col_5_previous_run_id_when_provided(conn):
+    out = _map_orchestrator_result_to_state(
+        _make_result(), _make_context(), conn,
+        previous_run={"run_id": "abc123", "action_state": "FLAT"},
+    )
+    assert out["previous_run_id"] == "abc123"
+
+
+def test_col_5_previous_run_id_none_when_no_previous(conn):
+    out = _map_orchestrator_result_to_state(_make_result(), _make_context(), conn)
+    assert out["previous_run_id"] is None
+
+
+def test_col_6_action_state_from_master_state_transition(conn):
+    out = _map_orchestrator_result_to_state(
+        _make_result(to_state="LONG_PLANNED"), _make_context(), conn,
+    )
+    assert out["action_state"] == "LONG_PLANNED"
+
+
+def test_col_6_action_state_fallback_flat_when_master_missing(conn):
+    result = _make_result()
+    result["layers"]["master"] = {}
+    out = _map_orchestrator_result_to_state(result, _make_context(), conn)
+    assert out["action_state"] == "FLAT"
+
+
+def test_col_7_stance_from_l2(conn):
+    out = _map_orchestrator_result_to_state(
+        _make_result(stance="bearish"), _make_context(), conn,
+    )
+    assert out["stance"] == "bearish"
+
+
+def test_col_8_btc_price_from_shared_current_close(conn):
+    out = _map_orchestrator_result_to_state(_make_result(), _make_context(), conn)
+    assert out["btc_price_usd"] == 75749.5
+
+
+def test_col_9_state_transitioned_1_when_changed(conn):
+    out = _map_orchestrator_result_to_state(
+        _make_result(to_state="LONG_PLANNED"), _make_context(), conn,
+        previous_run={"run_id": "x", "action_state": "FLAT"},
+    )
+    assert out["state_transitioned"] == 1
+
+
+def test_col_9_state_transitioned_0_when_same(conn):
+    out = _map_orchestrator_result_to_state(
+        _make_result(to_state="FLAT"), _make_context(), conn,
+        previous_run={"run_id": "x", "action_state": "FLAT"},
+    )
+    assert out["state_transitioned"] == 0
+
+
+def test_col_9_state_transitioned_0_when_no_previous(conn):
+    out = _map_orchestrator_result_to_state(_make_result(), _make_context(), conn)
+    assert out["state_transitioned"] == 0
+
+
+def test_col_10_run_trigger_from_param(conn):
+    out = _map_orchestrator_result_to_state(
+        _make_result(), _make_context(), conn, run_trigger="manual",
+    )
+    assert out["run_trigger"] == "manual"
+
+
+def test_col_11_run_mode_is_ai_orchestrator(conn):
+    out = _map_orchestrator_result_to_state(_make_result(), _make_context(), conn)
+    assert out["run_mode"] == "ai_orchestrator"
+
+
+def test_col_12_fallback_level_none_when_ok(conn):
+    out = _map_orchestrator_result_to_state(_make_result(status="ok"), _make_context(), conn)
+    assert out["fallback_level"] is None
+
+
+def test_col_12_fallback_level_l1_failed(conn):
+    out = _map_orchestrator_result_to_state(
+        _make_result(status="degraded_l1_failed"), _make_context(), conn,
+    )
+    assert out["fallback_level"] == "level_1"
+
+
+def test_col_12_fallback_level_master_failed(conn):
+    out = _map_orchestrator_result_to_state(
+        _make_result(status="degraded_master_failed"), _make_context(), conn,
+    )
+    assert out["fallback_level"] == "level_2"
+
+
+def test_col_13_system_version_from_param(conn):
+    out = _map_orchestrator_result_to_state(
+        _make_result(), _make_context(), conn, system_version="1.9-B-test",
+    )
+    assert out["system_version"] == "1.9-B-test"
+
+
+def test_col_14_rules_version_default(conn):
+    out = _map_orchestrator_result_to_state(_make_result(), _make_context(), conn)
+    assert out["rules_version"] == "v1.3.0"
+
+
+def test_col_15_strategy_flavor_v13_ai_majority(conn):
+    out = _map_orchestrator_result_to_state(_make_result(), _make_context(), conn)
+    assert out["strategy_flavor"] == "v1.3_ai_majority"
+
+
+def test_col_16_observation_category_from_classifier(conn):
+    """mock classify 返回 disciplined → 输出 disciplined。"""
+    with patch("src.pipeline._orchestrator_mapper.classify",
+               return_value={"observation_category": "disciplined",
+                             "suppressed_base_satisfied": False,
+                             "streak_runs": 0, "reason": "..."}):
+        out = _map_orchestrator_result_to_state(_make_result(), _make_context(), conn)
+    assert out["observation_category"] == "disciplined"
+
+
+def test_col_16_observation_category_fallback_on_error(conn):
+    """mock classify raise → fallback watchful。"""
+    with patch("src.pipeline._orchestrator_mapper.classify",
+               side_effect=RuntimeError("boom")):
+        out = _map_orchestrator_result_to_state(_make_result(), _make_context(), conn)
+    assert out["observation_category"] == "watchful"
+
+
+def test_col_17_cold_start_1_when_runs_below_threshold(conn):
+    """空 DB → runs=0 < 42 → cold_start=1。"""
+    out = _map_orchestrator_result_to_state(_make_result(), _make_context(), conn)
+    assert out["cold_start"] == 1
+
+
+def test_col_17_cold_start_0_when_runs_above_threshold(conn):
+    """种 50 行 strategy_runs → runs=50 ≥ 42 → cold_start=0。"""
+    for i in range(50):
+        conn.execute(
+            "INSERT INTO strategy_runs "
+            "(run_id, generated_at_utc, generated_at_bjt, action_state, "
+            " full_state_json) VALUES (?, ?, ?, ?, '{}')",
+            (f"r{i}", "2026-04-01T00:00:00Z", "2026-04-01 08:00:00", "FLAT"),
+        )
+    conn.commit()
+    out = _map_orchestrator_result_to_state(_make_result(), _make_context(), conn)
+    assert out["cold_start"] == 0
+
+
+def test_col_18_ai_model_actual_from_first_layer_with_model(conn):
+    out = _map_orchestrator_result_to_state(
+        _make_result(model_used="claude-opus-4-7"), _make_context(), conn,
+    )
+    assert out["ai_model_actual"] == "claude-opus-4-7"
+
+
+def test_col_18_ai_model_actual_none_when_no_layer_has_model(conn):
+    result = _make_result()
+    for layer_name in ("l1", "l2", "l3", "l4", "l5", "master"):
+        layer = result["layers"][layer_name]
+        layer.pop("model_used", None)
+    out = _map_orchestrator_result_to_state(result, _make_context(), conn)
+    assert out["ai_model_actual"] is None
+
+
+def test_col_19_full_state_json_contains_layers(conn):
+    """full_state_json 必须含 layers 子键(parse_previous 依赖)。"""
+    out = _map_orchestrator_result_to_state(_make_result(), _make_context(), conn)
+    parsed = json.loads(out["full_state_json"])
+    assert "layers" in parsed
+    assert set(parsed["layers"].keys()) == {"l1", "l2", "l3", "l4", "l5", "master"}
+    # 每层有内容
+    assert parsed["layers"]["l1"]["regime"] == "trend_up"
+    assert parsed["layers"]["master"]["state_transition"]["to_state"] == "LONG_PLANNED"
+
+
+def test_col_19_full_state_json_contains_validator_and_status(conn):
+    out = _map_orchestrator_result_to_state(_make_result(), _make_context(), conn)
+    parsed = json.loads(out["full_state_json"])
+    assert parsed["validator"]["passed"] is True
+    assert parsed["status"] == "ok"
+
+
+def test_col_19_full_state_json_contains_context_summary(conn):
+    out = _map_orchestrator_result_to_state(_make_result(), _make_context(), conn)
+    parsed = json.loads(out["full_state_json"])
+    cs = parsed["context_summary"]
+    assert cs["current_close"] == 75749.5
+    assert cs["events_count_72h"] == 2
+    assert cs["btc_macro_corr_60d"] == 0.45
+    assert "extreme_event_flags" in cs
+    assert "rule_cycle_position" in cs
+
+
+def test_col_19_full_state_json_does_not_contain_pandas_objects(conn):
+    """ensure pandas Series / DataFrame 不被 dump 进 JSON(默认 default=str)。"""
+    out = _map_orchestrator_result_to_state(_make_result(), _make_context(), conn)
+    # 单纯能 json.loads 就证明没有 unserializable 对象漏出
+    parsed = json.loads(out["full_state_json"])
+    assert isinstance(parsed, dict)
+
+
+# ============================================================
+# 完整 19 列 schema 断言
+# ============================================================
+
+def test_returns_all_19_strategy_runs_columns(conn):
+    out = _map_orchestrator_result_to_state(_make_result(), _make_context(), conn)
+    expected_keys = {
+        "run_id", "generated_at_utc", "generated_at_bjt",
+        "reference_timestamp_utc", "previous_run_id",
+        "action_state", "stance", "btc_price_usd",
+        "state_transitioned", "run_trigger", "run_mode",
+        "fallback_level", "system_version", "rules_version",
+        "strategy_flavor", "observation_category",
+        "cold_start", "ai_model_actual", "full_state_json",
+    }
+    assert set(out.keys()) == expected_keys
+
+
+# ============================================================
+# 辅助函数测试
+# ============================================================
+
+def test_derive_fallback_level_buckets():
+    assert _derive_fallback_level("ok") is None
+    assert _derive_fallback_level("degraded_l1_failed") == "level_1"
+    assert _derive_fallback_level("degraded_l2_xxx") == "level_1"
+    assert _derive_fallback_level("degraded_l3_yyy") == "level_2"
+    assert _derive_fallback_level("degraded_l4_yyy") == "level_2"
+    assert _derive_fallback_level("degraded_l5_zzz") == "level_2"
+    assert _derive_fallback_level("degraded_master_anything") == "level_2"
+    assert _derive_fallback_level("unknown_status") == "level_3"
+
+
+def test_build_cold_start_state_returns_dict_with_3_keys(conn):
+    cs = _build_cold_start_state(conn)
+    assert set(cs.keys()) == {"warming_up", "runs_completed", "threshold"}
+    assert cs["threshold"] == 42
+    assert cs["runs_completed"] == 0
+    assert cs["warming_up"] is True
+
+
+def test_build_classifier_state_shape():
+    layers = {
+        "l1": {"regime": "trend_up"},
+        "l2": {"stance": "bullish"},
+        "l3": {}, "l4": {}, "l5": {},
+        "master": {"action": "open"},
+    }
+    cs = {"warming_up": True, "runs_completed": 5}
+    state = _build_classifier_state(layers, cs, "LONG_PLANNED")
+    assert "evidence_reports" in state
+    assert state["evidence_reports"]["layer_1"]["regime"] == "trend_up"
+    assert state["state_machine"]["current_state"] == "LONG_PLANNED"
+    assert state["cold_start"]["warming_up"] is True
+
+
+def test_derive_ai_model_skips_layers_without_model_used():
+    layers = {
+        "l1": {},  # 无 model_used
+        "l2": {},
+        "l3": {"model_used": "claude-haiku-4-5"},
+        "l4": {"model_used": "claude-sonnet-4-5"},
+        "l5": {}, "master": {},
+    }
+    # 取第一个有 model_used 的(l3)
+    assert _derive_ai_model(layers) == "claude-haiku-4-5"
+
+
+def test_build_full_state_json_handles_missing_keys():
+    """result/context 缺关键字段 → 不抛错,JSON 仍可解析。"""
+    json_str = _build_full_state_json({}, {})
+    parsed = json.loads(json_str)
+    assert "layers" in parsed
+    assert parsed["layers"] == {}

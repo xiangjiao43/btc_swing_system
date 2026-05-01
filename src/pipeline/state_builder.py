@@ -307,15 +307,130 @@ class StrategyStateBuilder:
     ) -> BuildResult:
         """
         从 self.conn 拼 context,一路跑完并写库。conn=None 时 raise。
+
+        Sprint 1.9-A.5.1:加 BTC_USE_ORCHESTRATOR feature flag。
+          - 默认 false → 走 v1.2 stub fallback 路径(self.build,行为不变)
+          - true → 走 v1.3 AIOrchestrator 路径(self._run_v13_orchestrator)
         """
         if self.conn is None:
             raise ValueError("run() requires a sqlite3 Connection; "
                              "pass one via __init__ or use build()")
+
+        import os as _os
+        use_orchestrator = (
+            _os.getenv("BTC_USE_ORCHESTRATOR", "false").lower() == "true"
+        )
+        if use_orchestrator:
+            return self._run_v13_orchestrator(
+                run_trigger=run_trigger, persist=persist,
+            )
+
+        # v1.2 legacy path(stub fallback)
         context = self._assemble_context(self.conn, now_utc=now_utc)
         return self.build(
             context=context,
             run_trigger=run_trigger,
             persist=persist,
+        )
+
+    def _run_v13_orchestrator(
+        self,
+        *,
+        run_trigger: str = "scheduled",
+        persist: bool = True,
+    ) -> BuildResult:
+        """v1.3 AI 主导路径 — 不走 9 个 stub stage,直接 ContextBuilder +
+        AIOrchestrator + _map_orchestrator_result_to_state + DB 写入。
+
+        Sprint 1.9-A.5.1:实施。BTC_USE_ORCHESTRATOR=true 时走本路径。
+
+        失败处理:任一异常被捕获,返回 persisted=False + ai_status='failed_*'
+        的 BuildResult,不抛(配合 jobs.py 不 crash)。
+        """
+        from ..ai.context_builder import ContextBuilder
+        from ..ai.orchestrator import AIOrchestrator
+        from ._orchestrator_mapper import _map_orchestrator_result_to_state
+
+        start_ts = time.time()
+        try:
+            context = ContextBuilder(self.conn).build_full_context()
+            previous_run = StrategyStateDAO.get_latest_state(self.conn)
+            result = AIOrchestrator().run_full_a(context)
+            mapped = _map_orchestrator_result_to_state(
+                result, context, self.conn,
+                run_trigger=run_trigger,
+                rules_version=self.rules_version,
+                previous_run=previous_run,
+            )
+        except Exception as e:
+            logger.exception("_run_v13_orchestrator failed: %s", e)
+            return BuildResult(
+                run_id=str(uuid.uuid4()),
+                run_timestamp_utc=_utc_now_iso(),
+                state={},
+                failures=[{"stage": "v13_orchestrator", "error": str(e)[:200]}],
+                degraded_stages=["v13_orchestrator"],
+                ai_status=f"failed_{type(e).__name__}",
+                persisted=False,
+                duration_ms=int((time.time() - start_ts) * 1000),
+            )
+
+        # ---- 直接 INSERT(不走 DAO.insert_state,因 19 列已 mapped 完整)----
+        persisted = False
+        if persist and self.conn is not None:
+            try:
+                self.conn.execute(
+                    """
+                    INSERT INTO strategy_runs (
+                        run_id, generated_at_utc, generated_at_bjt,
+                        reference_timestamp_utc, previous_run_id,
+                        action_state, stance, btc_price_usd,
+                        state_transitioned, run_trigger, run_mode,
+                        fallback_level, system_version, rules_version,
+                        strategy_flavor, observation_category,
+                        cold_start, ai_model_actual, full_state_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        mapped["run_id"],
+                        mapped["generated_at_utc"],
+                        mapped["generated_at_bjt"],
+                        mapped["reference_timestamp_utc"],
+                        mapped["previous_run_id"],
+                        mapped["action_state"],
+                        mapped["stance"],
+                        mapped["btc_price_usd"],
+                        mapped["state_transitioned"],
+                        mapped["run_trigger"],
+                        mapped["run_mode"],
+                        mapped["fallback_level"],
+                        mapped["system_version"],
+                        mapped["rules_version"],
+                        mapped["strategy_flavor"],
+                        mapped["observation_category"],
+                        mapped["cold_start"],
+                        mapped["ai_model_actual"],
+                        mapped["full_state_json"],
+                    ),
+                )
+                self.conn.commit()
+                persisted = True
+            except Exception as e:
+                logger.warning("v13 INSERT strategy_runs failed: %s", e)
+
+        return BuildResult(
+            run_id=mapped["run_id"],
+            run_timestamp_utc=mapped["generated_at_utc"],
+            state={
+                "v13_orchestrator": True,
+                "mapped": {k: v for k, v in mapped.items()
+                           if k != "full_state_json"},
+            },
+            failures=[],
+            degraded_stages=[],
+            ai_status=str(result.get("status", "unknown")),
+            persisted=persisted,
+            duration_ms=int((time.time() - start_ts) * 1000),
         )
 
     def build(

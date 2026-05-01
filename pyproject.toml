@@ -17,6 +17,8 @@ dependencies = [
     "openai>=2.32.0",
     "httpx[socks]>=0.28.1",
     "anthropic>=0.97.0",
+    "matplotlib>=3.8",
+    "mplfinance>=0.12",
 ]
 
 [dependency-groups]

@@ -83,6 +83,10 @@ git commit --no-verify -m "..."
 ssh ubuntu@124.222.89.86
 cd /home/ubuntu/btc_swing_system
 git pull
+# 同步依赖(本地 pyproject.toml 改动后必跑)
+.venv/bin/uv pip install -e .
+# 验证关键 AI/可视化依赖能 import(Sprint 1.8 v5 起需要)
+.venv/bin/python -c "import matplotlib, mplfinance, anthropic; print('deps ok')"
 sudo cp deploy/systemd/btc-strategy.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl restart btc-strategy.service

@@ -24,6 +24,7 @@ AI 看)。**不引入任何规则结论标签**(铁律 1)。
 
 from __future__ import annotations
 
+import json
 import logging
 import sqlite3
 from datetime import datetime, timedelta, timezone
@@ -32,6 +33,7 @@ from typing import Any, Optional
 import numpy as np
 import pandas as pd
 
+from ..composite.cycle_position import CyclePositionFactor
 from ..data.storage.dao import (
     BTCKlinesDAO,
     DerivativesDAO,
@@ -40,6 +42,7 @@ from ..data.storage.dao import (
     OnchainDAO,
     StrategyStateDAO,
 )
+from .extreme_event_detector import detect_extreme_events
 
 
 logger = logging.getLogger(__name__)
@@ -432,6 +435,28 @@ def compute_macro_features(macro: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def compute_price_position_in_90d_range(
+    klines_1d: pd.DataFrame,
+) -> Optional[float]:
+    """L1 prompt 期望的 price_position_in_90d_range。
+
+    返回 0-100 浮点:0=90d 区间最低、100=90d 最高。
+    需 klines_1d 至少 90 行;否则返回 None。
+    """
+    if (klines_1d is None or klines_1d.empty
+            or not {"high", "low", "close"}.issubset(klines_1d.columns)
+            or len(klines_1d) < 90):
+        return None
+    last_90 = klines_1d.iloc[-90:]
+    high_90 = float(last_90["high"].max())
+    low_90 = float(last_90["low"].min())
+    current = float(klines_1d.iloc[-1]["close"])
+    if high_90 == low_90:
+        return 50.0
+    pct = (current - low_90) / (high_90 - low_90) * 100
+    return round(float(pct), 1)
+
+
 def compute_btc_macro_corr_60d(
     klines_1d: pd.DataFrame, macro: dict[str, Any], *, key: str = "nasdaq",
 ) -> Optional[float]:
@@ -504,7 +529,25 @@ class ContextBuilder:
     def build_full_context(
         self, *, now_utc: Optional[str] = None,
     ) -> dict[str, Any]:
-        """一次性构造完整 context(给 Orchestrator.run_full_a 用)。"""
+        """构造**per-agent 嵌套** context dict,与 v3/v5 prompt 字段名对齐。
+
+        返回结构:
+          {
+            "_shared": {...},       # 给 orchestrator chart_renderer + helper 复用
+            "l1": {...},            # L1 agent _build_user_prompt 直接读
+            "l2": {...},
+            "l3": {...},
+            "l4": {...},
+            "l5": {...},
+            "master": {...},        # orchestrator 还要补 l1-l5 输出 + _system_provided
+          }
+
+        Sprint 1.9-A.4:
+        - 加 5 个 ❌ 项:klines_1d_30d_close / price_position_in_90d_range /
+          rule_cycle_position / extreme_event_flags / (anti_pattern_signals 在
+          orchestrator 调,因需 l1+l2 输出)
+        - previous_l1-l5 从 strategy_runs.full_state_json 解析(零 schema 改动)
+        """
         klines_1d = BTCKlinesDAO.get_recent_as_df(
             self.conn, "1d", limit=self.klines_lookback,
         )
@@ -539,7 +582,45 @@ class ContextBuilder:
         macro_feats = compute_macro_features(macro)
         btc_corr_60d = compute_btc_macro_corr_60d(klines_1d, macro, key="nasdaq")
 
-        # computed_indicators 聚合(L1+L2+L4 共用)
+        # ❌1 + ❌2:Step 4 新增
+        klines_1d_30d_close = (
+            klines_1d["close"].astype(float).iloc[-30:].tolist()
+            if (klines_1d is not None and not klines_1d.empty
+                and "close" in klines_1d.columns and len(klines_1d) >= 1)
+            else []
+        )
+        price_position_90d = compute_price_position_in_90d_range(klines_1d)
+
+        # ❌3:rule_cycle_position(调 CyclePositionFactor)
+        try:
+            cp_dict = CyclePositionFactor().compute({
+                "onchain": onchain, "klines_1d": klines_1d,
+            })
+            rule_cycle_position = {
+                "label": cp_dict.get("cycle_position", "unclear"),
+                "confidence": cp_dict.get("cycle_confidence", 0.30),
+                "voting_details": cp_dict.get("voting_breakdown") or {},
+            }
+        except Exception as e:
+            logger.warning("rule_cycle_position compute failed: %s", e)
+            rule_cycle_position = {
+                "label": "unclear", "confidence": 0.30, "voting_details": {},
+            }
+
+        # ❌4:extreme_event_flags(L5 用,5 类 bool)
+        try:
+            extreme_event_flags = detect_extreme_events(self.conn)
+        except Exception as e:
+            logger.warning("detect_extreme_events failed: %s", e)
+            extreme_event_flags = {
+                "flash_crash_detected_24h": False,
+                "stablecoin_depeg_active": False,
+                "geopolitical_conflict_active": False,
+                "major_bank_crisis_signal": False,
+                "regulatory_crackdown_recent": False,
+            }
+
+        # computed_indicators 聚合(L1+L2+L4 共用 — 各 agent 只读自己关心的子集)
         computed_indicators = {
             **{k: v for k, v in ema1d.items() if not k.endswith("_series")},
             **{k: v for k, v in ema4h.items() if not k.endswith("_series")},
@@ -547,7 +628,12 @@ class ContextBuilder:
             "adx_14_1d_5d_avg": adx["adx_5d_avg"],
             "atr_14_1d_current": atr["atr_14_current"],
             "atr_180d_percentile": atr["atr_180d_percentile"],
+            "price_position_in_90d_range": price_position_90d,
             **{k: v for k, v in lth_sth.items()},
+            # 别名(prompt 用 _current 后缀的 / 不带后缀的两种命名共存)
+            "lth_realized_price": lth_sth["lth_realized_price_current"],
+            "sth_realized_price": lth_sth["sth_realized_price_current"],
+            "exchange_net_flow_30d": ex_flow["exchange_net_flow_30d_sum"],
             "exchange_net_flow_30d_sum": ex_flow["exchange_net_flow_30d_sum"],
             "exchange_net_flow_30d_max_outflow":
                 ex_flow["exchange_net_flow_30d_max_outflow"],
@@ -571,23 +657,28 @@ class ContextBuilder:
             ][-3:],
         }
 
-        # 历史:上一次 strategy_run + 各层 AI 输出占位(1.9-A 还没建 AIOutputsDAO)
+        # 历史:上一次 strategy_run + previous_l1-l5(从 full_state_json 解析)
         previous_strategy_run = StrategyStateDAO.get_latest_state(self.conn)
+        previous_layers = parse_previous_layer_outputs(previous_strategy_run)
         current_state = (
-            (previous_strategy_run or {}).get("action_state")
-            or "FLAT"
+            (previous_strategy_run or {}).get("action_state") or "FLAT"
         )
 
-        # 类型 D — orchestrator 内部映射(多在 Orchestrator 内算,这里只摆位置)
-        return {
-            # 原始 series + DAO dump(给 chart 渲染 + helper 复用)
+        risk_preview = build_risk_preview(
+            funding_z=funding["funding_rate_z_score_90d"],
+            oi_z=oi["open_interest_z_score_90d"],
+            events_count_72h=events_count_72h,
+        )
+
+        # ============================================================
+        # 嵌套 per-agent 结构
+        # ============================================================
+        shared = {
             "klines_1d": klines_1d,
             "klines_4h": klines_4h,
             "derivatives": derivatives,
             "onchain": onchain,
             "macro": macro,
-
-            # 类型 A 派生 series + dict
             "ema_20_1d": ema1d["ema_20_series"],
             "ema_50_1d": ema1d["ema_50_series"],
             "ema_200_1d": ema1d["ema_200_series"],
@@ -601,34 +692,115 @@ class ContextBuilder:
             "open_interest_series": oi["open_interest_30d_series"],
             "exchange_net_flow_series":
                 ex_flow["exchange_net_flow_30d_series"],
-
-            # 给 6 个 agent 直接用的字段
-            "computed_indicators": computed_indicators,
-            "computed_macro_indicators": macro_feats,
-            "btc_macro_corr_60d": btc_corr_60d,
             "current_close": price["current_close"],
-
-            # 事件 + 类 B 预览(L3 risk_preview 在此组装)
-            "events_calendar_72h": events_72h,
+            "btc_macro_corr_60d": btc_corr_60d,
             "events_count_72h": events_count_72h,
-            "risk_preview": build_risk_preview(
-                funding_z=funding["funding_rate_z_score_90d"],
-                oi_z=oi["open_interest_z_score_90d"],
-                events_count_72h=events_count_72h,
-            ),
+        }
 
-            # 状态机 + 历史(类型 C)
+        l1_ctx = {
+            "klines_1d_30d_close": klines_1d_30d_close,
+            "computed_indicators": computed_indicators,
+            "previous_l1": previous_layers["previous_l1"],
+        }
+        l2_ctx = {
+            "klines_1d_30d_close": klines_1d_30d_close,
+            "computed_indicators": computed_indicators,
+            "rule_cycle_position": rule_cycle_position,
+            "previous_l2": previous_layers["previous_l2"],
+            # l1_output 由 orchestrator 在 L1 跑完后注入
+        }
+        l3_ctx = {
+            "risk_preview": risk_preview,
+            "current_state": current_state,
+            "previous_l3": previous_layers["previous_l3"],
+            # l1_output / l2_output / anti_pattern_signals 由 orchestrator 注入
+        }
+        l4_ctx = {
+            "computed_indicators": computed_indicators,
+            "current_state": current_state,
+            "previous_l4": previous_layers["previous_l4"],
+            # l1_output / l2_output / l3_output 由 orchestrator 注入
+        }
+        l5_ctx = {
+            "computed_macro_indicators": macro_feats,
+            "events_calendar_72h": events_72h,
+            "extreme_event_flags": extreme_event_flags,
+            "previous_l5": previous_layers["previous_l5"],
+        }
+        master_ctx = {
             "current_state": current_state,
             "previous_strategy_run": previous_strategy_run,
-            # previous_l1-l5 占位:1.9-A 暂无 AIOutputsDAO,均为 None
-            "previous_l1": None, "previous_l2": None, "previous_l3": None,
-            "previous_l4": None, "previous_l5": None,
+            # l1-l5_output / _system_provided 由 orchestrator 注入
+        }
+
+        return {
+            "_shared": shared,
+            "l1": l1_ctx,
+            "l2": l2_ctx,
+            "l3": l3_ctx,
+            "l4": l4_ctx,
+            "l5": l5_ctx,
+            "master": master_ctx,
         }
 
 
 # ============================================================
 # 类型 B — risk_preview 派生(纯客观,3 字段)
 # ============================================================
+
+def parse_previous_layer_outputs(
+    strategy_run: Optional[dict[str, Any]],
+) -> dict[str, Any]:
+    """从 StrategyStateDAO.get_latest_state() 返回的 dict 中,解析
+    full_state_json 字段,提取 layers.l1 ~ layers.l5 + master 输出。
+
+    用户决策 b 方案:零 schema 变更,从现有 strategy_runs.full_state_json
+    解析(orchestrator 每次写入时已含 layers 子结构)。
+
+    Args:
+        strategy_run: StrategyStateDAO.get_latest_state() 的返回 dict
+                      (含 full_state_json TEXT 字段),或 None
+    Returns:
+        {
+            "previous_l1": dict | None,
+            "previous_l2": dict | None,
+            "previous_l3": dict | None,
+            "previous_l4": dict | None,
+            "previous_l5": dict | None,
+            "previous_master": dict | None,
+        }
+        缺字段 / 解析失败 / 旧 v1.2 格式 → 全 None。
+    """
+    empty = {f"previous_l{i}": None for i in (1, 2, 3, 4, 5)}
+    empty["previous_master"] = None
+    if not isinstance(strategy_run, dict):
+        return empty
+
+    # state 字段是 dict(StrategyStateDAO.get_latest_state 已 JSON parse)
+    state_dict = strategy_run.get("state")
+    if not isinstance(state_dict, dict):
+        # 某些 DAO 返回 raw string,尝试 parse
+        raw = strategy_run.get("full_state_json")
+        if isinstance(raw, str):
+            try:
+                state_dict = json.loads(raw)
+            except (json.JSONDecodeError, TypeError):
+                return empty
+        else:
+            return empty
+
+    layers = state_dict.get("layers")
+    if not isinstance(layers, dict):
+        return empty
+    return {
+        "previous_l1": layers.get("l1"),
+        "previous_l2": layers.get("l2"),
+        "previous_l3": layers.get("l3"),
+        "previous_l4": layers.get("l4"),
+        "previous_l5": layers.get("l5"),
+        "previous_master": layers.get("master"),
+    }
+
 
 def build_risk_preview(
     *,

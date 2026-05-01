@@ -122,33 +122,53 @@ def _seed_full_db(db_path: Path) -> None:
 # ============================================================
 
 def test_build_full_context_returns_all_required_top_level_keys(db_path):
-    """断言所有 orchestrator + 6 agents 期望的 top-level key 都存在。"""
+    """Sprint 1.9-A.4:per-agent 嵌套结构断言。"""
     _seed_full_db(db_path)
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     ctx = ContextBuilder(conn).build_full_context()
 
-    # 原始 series + DAO dump
-    for k in ("klines_1d", "klines_4h", "derivatives", "onchain", "macro"):
-        assert k in ctx, f"missing key: {k}"
+    # 顶层 7 个 key:_shared + 6 agents
+    assert set(ctx.keys()) == {"_shared", "l1", "l2", "l3", "l4", "l5", "master"}
 
-    # 类型 A 派生 series + dict
-    for k in ("ema_20_1d", "ema_50_1d", "ema_200_1d",
+    # _shared 含 chart_renderer 需要的 series + 共用数据
+    shared = ctx["_shared"]
+    for k in ("klines_1d", "klines_4h", "derivatives", "onchain", "macro",
+              "ema_20_1d", "ema_50_1d", "ema_200_1d",
               "ema_20_4h", "ema_50_4h",
               "adx_14_1d", "atr_14_1d", "atr_180d_pct_1d",
               "swing_points_1d",
               "funding_rate_series", "open_interest_series",
               "exchange_net_flow_series",
-              "computed_indicators", "computed_macro_indicators",
-              "btc_macro_corr_60d", "current_close"):
-        assert k in ctx, f"missing key: {k}"
+              "current_close", "btc_macro_corr_60d", "events_count_72h"):
+        assert k in shared, f"missing _shared key: {k}"
 
-    # 类型 B + 状态机 + 历史
-    for k in ("events_calendar_72h", "events_count_72h", "risk_preview",
-              "current_state", "previous_strategy_run",
-              "previous_l1", "previous_l2", "previous_l3",
-              "previous_l4", "previous_l5"):
-        assert k in ctx, f"missing key: {k}"
+    # L1 ctx
+    assert set(ctx["l1"].keys()) == {
+        "klines_1d_30d_close", "computed_indicators", "previous_l1",
+    }
+    # L2 ctx
+    assert set(ctx["l2"].keys()) == {
+        "klines_1d_30d_close", "computed_indicators",
+        "rule_cycle_position", "previous_l2",
+    }
+    # L3 ctx
+    assert set(ctx["l3"].keys()) == {
+        "risk_preview", "current_state", "previous_l3",
+    }
+    # L4 ctx
+    assert set(ctx["l4"].keys()) == {
+        "computed_indicators", "current_state", "previous_l4",
+    }
+    # L5 ctx
+    assert set(ctx["l5"].keys()) == {
+        "computed_macro_indicators", "events_calendar_72h",
+        "extreme_event_flags", "previous_l5",
+    }
+    # master ctx
+    assert set(ctx["master"].keys()) == {
+        "current_state", "previous_strategy_run",
+    }
 
 
 def test_build_full_context_computed_indicators_has_required_subfields(db_path):
@@ -157,8 +177,13 @@ def test_build_full_context_computed_indicators_has_required_subfields(db_path):
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     ctx = ContextBuilder(conn).build_full_context()
-    ci = ctx["computed_indicators"]
+    # computed_indicators 在每个 agent ctx 里(L1/L2/L4 共享同一 dict)
+    ci = ctx["l1"]["computed_indicators"]
+    assert ci is ctx["l2"]["computed_indicators"]
+    assert ci is ctx["l4"]["computed_indicators"]
 
+    # 1.9-A.4 新增子字段
+    assert "price_position_in_90d_range" in ci
     # L1 必有
     assert "adx_14_1d_current" in ci
     assert "adx_14_1d_5d_avg" in ci
@@ -196,7 +221,7 @@ def test_build_full_context_computed_macro_indicators_subfields(db_path):
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     ctx = ContextBuilder(conn).build_full_context()
-    cm = ctx["computed_macro_indicators"]
+    cm = ctx["l5"]["computed_macro_indicators"]
 
     # L5 必有(种入了 dxy/vix/nasdaq/dgs10/us2y/etf_flow)
     for k in ("dxy_current", "dxy_30d_change_pct", "dxy_90d_change_pct",
@@ -215,7 +240,7 @@ def test_build_full_context_risk_preview_only_3_keys(db_path):
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     ctx = ContextBuilder(conn).build_full_context()
-    rp = ctx["risk_preview"]
+    rp = ctx["l3"]["risk_preview"]
     assert set(rp.keys()) == {
         "funding_rate_z_score_90d",
         "open_interest_z_score_90d",
@@ -235,15 +260,17 @@ def test_build_full_context_handles_empty_db():
     ctx = ContextBuilder(conn).build_full_context()
 
     # 必有的 key 仍存在(降级不缺 key)
-    assert "computed_indicators" in ctx
-    assert "computed_macro_indicators" in ctx
-    assert "risk_preview" in ctx
+    assert "l1" in ctx and "l2" in ctx and "l3" in ctx
+    assert "computed_indicators" in ctx["l1"]
+    assert "computed_macro_indicators" in ctx["l5"]
+    assert "risk_preview" in ctx["l3"]
     # 值为空集合或 None
-    assert ctx["events_count_72h"] == 0
-    assert ctx["computed_indicators"]["adx_14_1d_current"] is None
-    assert ctx["risk_preview"]["funding_rate_z_score_90d"] is None
+    assert ctx["_shared"]["events_count_72h"] == 0
+    assert ctx["l1"]["computed_indicators"]["adx_14_1d_current"] is None
+    assert ctx["l3"]["risk_preview"]["funding_rate_z_score_90d"] is None
     # current_state 默认 FLAT
-    assert ctx["current_state"] == "FLAT"
+    assert ctx["master"]["current_state"] == "FLAT"
+    assert ctx["l3"]["current_state"] == "FLAT"
 
 
 def test_build_full_context_current_state_from_strategy_runs(db_path):
@@ -261,5 +288,7 @@ def test_build_full_context_current_state_from_strategy_runs(db_path):
     )
     conn.commit()
     ctx = ContextBuilder(conn).build_full_context()
-    assert ctx["current_state"] == "LONG_HOLD"
-    assert ctx["previous_strategy_run"] is not None
+    assert ctx["master"]["current_state"] == "LONG_HOLD"
+    assert ctx["l3"]["current_state"] == "LONG_HOLD"
+    assert ctx["l4"]["current_state"] == "LONG_HOLD"
+    assert ctx["master"]["previous_strategy_run"] is not None

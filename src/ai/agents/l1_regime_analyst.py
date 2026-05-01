@@ -37,16 +37,12 @@ class L1RegimeAnalyst(BaseAgent):
     PROMPT_FILE = "l1_regime.txt"
 
     def _build_user_prompt(self, context: dict[str, Any]) -> str:
-        """把 context 拍平。具体字段抽取在 orchestrator 里完成,本函数
-        只做最后的字符串化(便于子类化测试)。"""
-        # context 期望已含拍平字段(orchestrator 准备),这里只做 dump
+        """v3 prompt 期望字段:klines_1d_30d_close + computed_indicators + previous_l1。"""
         snapshot = {
-            "klines_1d_summary": context.get("klines_1d_summary"),
-            "klines_4h_summary": context.get("klines_4h_summary"),
-            "indicators": context.get("indicators"),
+            "klines_1d_30d_close": context.get("klines_1d_30d_close"),
+            "computed_indicators": context.get("computed_indicators"),
             "previous_l1": context.get("previous_l1"),
         }
-        # 防 None 字段污染
         snapshot = {k: v for k, v in snapshot.items() if v is not None}
         return (
             "===== L1 输入数据 =====\n"

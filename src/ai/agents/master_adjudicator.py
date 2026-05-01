@@ -50,20 +50,22 @@ class MasterAdjudicator(BaseAgent):
     PROMPT_FILE = "master_adjudicator.txt"
 
     def _build_user_prompt(self, context: dict[str, Any]) -> str:
+        """v2 prompt 期望:l1-l5_output + current_state + previous_strategy_run
+        + _system_provided(crowding_multiplier / event_multiplier / current_close)。
+        hard_invalidation_levels 已嵌在 l4_output 内,master 自己取。"""
         snapshot = {
             "l1_output": context.get("l1_output"),
             "l2_output": context.get("l2_output"),
             "l3_output": context.get("l3_output"),
             "l4_output": context.get("l4_output"),
             "l5_output": context.get("l5_output"),
-            "state_machine_current": context.get("state_machine_current"),
-            "allowed_transitions": context.get("allowed_transitions"),
-            "account_state": context.get("account_state"),
-            "hard_invalidation_levels": context.get("hard_invalidation_levels"),
+            "current_state": context.get("current_state"),
+            "previous_strategy_run": context.get("previous_strategy_run"),
+            "_system_provided": context.get("_system_provided"),
         }
         snapshot = {k: v for k, v in snapshot.items() if v is not None}
         return (
-            "===== 主裁输入(L1-L5 + 状态机 + 账户 + 硬失效)=====\n"
+            "===== 主裁输入(L1-L5 + 状态机 + 历史 + system_provided)=====\n"
             f"{json.dumps(snapshot, ensure_ascii=False, indent=2, default=str)}\n"
         )
 

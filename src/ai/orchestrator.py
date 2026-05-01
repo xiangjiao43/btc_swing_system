@@ -32,6 +32,7 @@ from .agents import (
     MasterAdjudicator,
 )
 from .agents.chart_renderer import ChartRenderer
+from .anti_pattern_signals import compute_anti_pattern_signals
 from .validator import AdjudicatorValidator
 
 
@@ -83,18 +84,26 @@ class AIOrchestrator:
     def run_full_a(self, context: dict[str, Any]) -> dict[str, Any]:
         """完整 A 流程(每日 16:00 用)。
 
-        context 必含:
-          - klines_1d: pd.DataFrame (≥180 天,做 L1/L2/L4 主图)
-          - klines_4h: pd.DataFrame (≥30 天,做 L2 副图)
-          - computed_indicators: dict (各种数值,EMA/ADX/ATR/funding/OI 等)
-          - macro_indicators: dict (DXY/VIX/M2 等)
-          - events_calendar_72h: list
-          - extreme_event_flags: dict
-          - current_state: str
-          - current_close: float
-          - previous_strategy_run: dict (可选)
-          - previous_l1, l2, l3, l4, l5, master: dict (可选)
+        context 必含(Sprint 1.9-A.4 起,per-agent 嵌套结构):
+          - "_shared":  {klines_1d, klines_4h, ema_*, adx, atr, swing_points,
+                          funding_rate_series, open_interest_series,
+                          exchange_net_flow_series, current_close, ...}
+          - "l1":       {klines_1d_30d_close, computed_indicators, previous_l1}
+          - "l2":       {klines_1d_30d_close, computed_indicators,
+                          rule_cycle_position, previous_l2}
+          - "l3":       {risk_preview, current_state, previous_l3}
+          - "l4":       {computed_indicators, current_state, previous_l4}
+          - "l5":       {computed_macro_indicators, events_calendar_72h,
+                          extreme_event_flags, previous_l5}
+          - "master":   {current_state, previous_strategy_run}
+
+        Orchestrator 在运行时注入:
+          - chart_b64 (L1/L2/L4)
+          - 上游 layer outputs(l1_output → l2,l1+l2 → l3+l4,l1-l5 → master)
+          - anti_pattern_signals(L3,基于 l1_out + l2_out)
+          - _system_provided(master,基于 L4 + events_calendar)
         """
+        shared = context.get("_shared") or {}
         result: dict[str, Any] = {
             "layers": {},
             "validator": None,
@@ -103,45 +112,49 @@ class AIOrchestrator:
             "tokens": {},
         }
 
-        # ---- 1. L1 AI ----
-        l1_out = self._run_l1(context, result)
+        # ---- 1. L1 ----
+        l1_out = self._run_l1(context, shared, result)
         result["layers"]["l1"] = l1_out
 
-        # ---- 2. L2 AI ----
-        l2_out = self._run_l2(context, l1_out, result)
+        # ---- 2. L2(注入 l1_output)----
+        l2_out = self._run_l2(context, shared, l1_out, result)
         result["layers"]["l2"] = l2_out
 
-        # ---- 3. L3 AI ----
-        l3_out = self._run_l3(context, l1_out, l2_out, result)
-        result["layers"]["l3"] = l3_out
-
-        # ---- 4. L4 AI ----
-        l4_out = self._run_l4(context, l1_out, l2_out, l3_out, result)
-        result["layers"]["l4"] = l4_out
-
-        # ---- 5. L5 AI ----
+        # ---- 5. L5(独立,无依赖)— 提前跑,L3 anti_pattern 需 extreme_event_flags ----
         l5_out = self._run_l5(context, result)
         result["layers"]["l5"] = l5_out
 
+        # ---- 3. L3(注入 l1+l2 output + anti_pattern_signals)----
+        l3_out = self._run_l3(
+            context, shared, l1_out, l2_out, l5_out, result,
+        )
+        result["layers"]["l3"] = l3_out
+
+        # ---- 4. L4(注入 l1+l2+l3 output)----
+        l4_out = self._run_l4(
+            context, shared, l1_out, l2_out, l3_out, result,
+        )
+        result["layers"]["l4"] = l4_out
+
         # ---- 计算 _system_provided multipliers ----
         crowding_mult = self._compute_crowding_multiplier(l4_out)
-        event_mult = self._compute_event_multiplier(
-            context.get("events_calendar_72h") or []
-        )
+        events_72h = (context.get("l5") or {}).get("events_calendar_72h") or []
+        event_mult = self._compute_event_multiplier(events_72h)
 
-        # ---- 6. 主裁 AI ----
+        # ---- 6. 主裁(注入 l1-l5 output + _system_provided)----
         master_out = self._run_master(
-            context, l1_out, l2_out, l3_out, l4_out, l5_out,
+            context, shared, l1_out, l2_out, l3_out, l4_out, l5_out,
             crowding_mult, event_mult, result,
         )
         result["layers"]["master"] = master_out
 
         # ---- 7. Validator ----
+        master_ctx = context.get("master") or {}
         v_result = self._validator.validate(
             master_output=master_out,
             l1_output=l1_out, l2_output=l2_out, l3_output=l3_out,
             l4_output=l4_out, l5_output=l5_out,
-            current_state=context.get("current_state", "FLAT"),
+            current_state=master_ctx.get("current_state", "FLAT"),
         )
         result["layers"]["master"] = v_result["validated_output"]
         result["validator"] = {
@@ -205,30 +218,26 @@ class AIOrchestrator:
     def _run_l1(
         self,
         context: dict[str, Any],
+        shared: dict[str, Any],
         result: dict[str, Any],
     ) -> dict[str, Any]:
         t0 = time.time()
         try:
             chart_b64 = self._chart.render_l1_chart(
-                context["klines_1d"],
-                ema_20=context.get("ema_20_1d"),
-                ema_50=context.get("ema_50_1d"),
-                ema_200=context.get("ema_200_1d"),
-                adx=context.get("adx_14_1d"),
-                atr_180d_pct=context.get("atr_180d_pct_1d"),
-                swing_points=context.get("swing_points_1d"),
+                shared["klines_1d"],
+                ema_20=shared.get("ema_20_1d"),
+                ema_50=shared.get("ema_50_1d"),
+                ema_200=shared.get("ema_200_1d"),
+                adx=shared.get("adx_14_1d"),
+                atr_180d_pct=shared.get("atr_180d_pct_1d"),
+                swing_points=shared.get("swing_points_1d"),
             )
         except Exception as e:
             logger.warning("orchestrator: L1 chart render failed: %s", e)
             chart_b64 = None
 
-        l1_input = {
-            "indicators": context.get("computed_indicators"),
-            "klines_1d_summary": _kline_summary(context.get("klines_1d")),
-            "klines_4h_summary": _kline_summary(context.get("klines_4h")),
-            "previous_l1": context.get("previous_l1"),
-            "chart_b64": chart_b64,
-        }
+        l1_input = dict(context.get("l1") or {})
+        l1_input["chart_b64"] = chart_b64
         try:
             out = self._agents["l1"].analyze(l1_input)
         except Exception as e:
@@ -245,34 +254,29 @@ class AIOrchestrator:
     def _run_l2(
         self,
         context: dict[str, Any],
+        shared: dict[str, Any],
         l1_out: dict[str, Any],
         result: dict[str, Any],
     ) -> dict[str, Any]:
         t0 = time.time()
         try:
             chart_b64 = self._chart.render_l2_chart(
-                context["klines_1d"],
-                klines_4h=context.get("klines_4h"),
-                ema_20_1d=context.get("ema_20_1d"),
-                ema_50_1d=context.get("ema_50_1d"),
-                ema_20_4h=context.get("ema_20_4h"),
-                ema_50_4h=context.get("ema_50_4h"),
-                swing_points_1d=context.get("swing_points_1d"),
-                key_levels=context.get("key_levels_rule_estimate"),
+                shared["klines_1d"],
+                klines_4h=shared.get("klines_4h"),
+                ema_20_1d=shared.get("ema_20_1d"),
+                ema_50_1d=shared.get("ema_50_1d"),
+                ema_20_4h=shared.get("ema_20_4h"),
+                ema_50_4h=shared.get("ema_50_4h"),
+                swing_points_1d=shared.get("swing_points_1d"),
+                # 不传 key_levels:L2 自己看图判断(铁律 1)
             )
         except Exception as e:
             logger.warning("orchestrator: L2 chart render failed: %s", e)
             chart_b64 = None
 
-        l2_input = {
-            "l1_output": l1_out,
-            "derivatives_snapshot": context.get("derivatives_snapshot"),
-            "onchain_structure": context.get("onchain_structure"),
-            "price_structure": context.get("computed_indicators"),
-            "rule_cycle_position": context.get("rule_cycle_position"),
-            "previous_l2": context.get("previous_l2"),
-            "chart_b64": chart_b64,
-        }
+        l2_input = dict(context.get("l2") or {})
+        l2_input["l1_output"] = l1_out
+        l2_input["chart_b64"] = chart_b64
         try:
             out = self._agents["l2"].analyze(l2_input)
         except Exception as e:
@@ -289,27 +293,26 @@ class AIOrchestrator:
     def _run_l3(
         self,
         context: dict[str, Any],
+        shared: dict[str, Any],
         l1_out: dict[str, Any],
         l2_out: dict[str, Any],
+        l5_out: dict[str, Any],
         result: dict[str, Any],
     ) -> dict[str, Any]:
         t0 = time.time()
-        # L3 不需要图
-        l3_input = {
-            "l1_output": l1_out,
-            "l2_output": l2_out,
-            "asopr_value": (context.get("computed_indicators") or {}
-                            ).get("asopr_value"),
-            "cdd_value": (context.get("computed_indicators") or {}
-                          ).get("cdd_value"),
-            "cycle_position_rule": context.get("rule_cycle_position"),
-            "funding_pressure": (context.get("computed_indicators") or {}
-                                 ).get("funding_pressure"),
-            "risk_preview": context.get("risk_preview"),
-            "anti_pattern_signals": context.get("anti_pattern_signals"),
-            "current_state": context.get("current_state", "FLAT"),
-            "previous_l3": context.get("previous_l3"),
-        }
+        # L3 不需要图;计算 anti_pattern_signals(需 l1+l2 输出)
+        extreme_event_flags = (context.get("l5") or {}).get(
+            "extreme_event_flags") or {}
+        anti_pattern_signals = compute_anti_pattern_signals(
+            l1_output=l1_out, l2_output=l2_out,
+            current_close=shared.get("current_close"),
+            extreme_event_flags=extreme_event_flags,
+        )
+
+        l3_input = dict(context.get("l3") or {})
+        l3_input["l1_output"] = l1_out
+        l3_input["l2_output"] = l2_out
+        l3_input["anti_pattern_signals"] = anti_pattern_signals
         try:
             out = self._agents["l3"].analyze(l3_input)
         except Exception as e:
@@ -326,6 +329,7 @@ class AIOrchestrator:
     def _run_l4(
         self,
         context: dict[str, Any],
+        shared: dict[str, Any],
         l1_out: dict[str, Any],
         l2_out: dict[str, Any],
         l3_out: dict[str, Any],
@@ -334,29 +338,24 @@ class AIOrchestrator:
         t0 = time.time()
         try:
             chart_b64 = self._chart.render_l4_chart(
-                context["klines_1d"],
-                ema_50=context.get("ema_50_1d"),
-                ema_200=context.get("ema_200_1d"),
+                shared["klines_1d"],
+                ema_50=shared.get("ema_50_1d"),
+                ema_200=shared.get("ema_200_1d"),
                 key_levels=(l2_out or {}).get("key_levels"),
-                atr_14=context.get("atr_14_1d"),
-                funding_rate=context.get("funding_rate_series"),
-                open_interest=context.get("open_interest_series"),
-                exchange_net_flow=context.get("exchange_net_flow_series"),
+                atr_14=shared.get("atr_14_1d"),
+                funding_rate=shared.get("funding_rate_series"),
+                open_interest=shared.get("open_interest_series"),
+                exchange_net_flow=shared.get("exchange_net_flow_series"),
             )
         except Exception as e:
             logger.warning("orchestrator: L4 chart render failed: %s", e)
             chart_b64 = None
 
-        l4_input = {
-            "l1_output": l1_out,
-            "l2_output": l2_out,
-            "l3_output": l3_out,
-            "current_price": context.get("current_close"),
-            "crowding_signals": context.get("crowding_signals"),
-            "account_state": context.get("account_state"),
-            "previous_l4": context.get("previous_l4"),
-            "chart_b64": chart_b64,
-        }
+        l4_input = dict(context.get("l4") or {})
+        l4_input["l1_output"] = l1_out
+        l4_input["l2_output"] = l2_out
+        l4_input["l3_output"] = l3_out
+        l4_input["chart_b64"] = chart_b64
         try:
             out = self._agents["l4"].analyze(l4_input)
         except Exception as e:
@@ -377,13 +376,7 @@ class AIOrchestrator:
     ) -> dict[str, Any]:
         t0 = time.time()
         # L5 独立做宏观判断,不消费 L1-L4 输出
-        l5_input = {
-            "macro_factors": context.get("macro_indicators"),
-            "events_72h": context.get("events_calendar_72h"),
-            "extreme_event_flags": context.get("extreme_event_flags"),
-            "btc_corr_60d": context.get("btc_macro_corr_60d"),
-            "previous_l5": context.get("previous_l5"),
-        }
+        l5_input = dict(context.get("l5") or {})
         try:
             out = self._agents["l5"].analyze(l5_input)
         except Exception as e:
@@ -400,6 +393,7 @@ class AIOrchestrator:
     def _run_master(
         self,
         context: dict[str, Any],
+        shared: dict[str, Any],
         l1_out: dict[str, Any],
         l2_out: dict[str, Any],
         l3_out: dict[str, Any],
@@ -410,25 +404,16 @@ class AIOrchestrator:
         result: dict[str, Any],
     ) -> dict[str, Any]:
         t0 = time.time()
-        master_input = {
-            "l1_output": l1_out,
-            "l2_output": l2_out,
-            "l3_output": l3_out,
-            "l4_output": l4_out,
-            "l5_output": l5_out,
-            "current_state": context.get("current_state", "FLAT"),
-            "previous_strategy_run": context.get("previous_strategy_run"),
-            "_system_provided": {
-                "crowding_multiplier": crowding_mult,
-                "event_multiplier": event_mult,
-                "current_close": context.get("current_close"),
-            },
-            # 主裁需要的额外 keys 给原 master_adjudicator.py 用:
-            "state_machine_current": context.get("current_state", "FLAT"),
-            "allowed_transitions": context.get("allowed_transitions"),
-            "account_state": context.get("account_state"),
-            "hard_invalidation_levels": (l4_out or {}
-                                         ).get("hard_invalidation_levels"),
+        master_input = dict(context.get("master") or {})
+        master_input["l1_output"] = l1_out
+        master_input["l2_output"] = l2_out
+        master_input["l3_output"] = l3_out
+        master_input["l4_output"] = l4_out
+        master_input["l5_output"] = l5_out
+        master_input["_system_provided"] = {
+            "crowding_multiplier": crowding_mult,
+            "event_multiplier": event_mult,
+            "current_close": shared.get("current_close"),
         }
         try:
             out = self._agents["master"].analyze(master_input)

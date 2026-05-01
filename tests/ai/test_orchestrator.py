@@ -74,21 +74,57 @@ def _make_layered_mock_agents(
 
 
 def _build_context(current_state: str = "FLAT", **overrides) -> dict[str, Any]:
+    """Sprint 1.9-A.4 起 ctx 是 per-agent 嵌套结构。"""
+    klines_1d = _build_mock_klines_1d()
+    extreme_flags = {
+        "geopolitical_conflict_active": False,
+        "major_bank_crisis_signal": False,
+        "regulatory_crackdown_recent": False,
+        "flash_crash_detected_24h": False,
+        "stablecoin_depeg_active": False,
+    }
     base = {
-        "klines_1d": _build_mock_klines_1d(),
-        "klines_4h": _build_mock_klines_4h(),
-        "computed_indicators": {"adx_14": 30, "ema_20_current": 75320},
-        "macro_indicators": {"dxy_current": 102.0, "vix_current": 14.5},
-        "events_calendar_72h": [],
-        "extreme_event_flags": {
-            "geopolitical_conflict_active": False,
-            "major_bank_crisis_signal": False,
-            "regulatory_crackdown_recent": False,
-            "flash_crash_detected_24h": False,
-            "stablecoin_depeg_active": False,
+        "_shared": {
+            "klines_1d": klines_1d,
+            "klines_4h": _build_mock_klines_4h(),
+            "current_close": 75749,
+            "events_count_72h": 0,
         },
-        "current_state": current_state,
-        "current_close": 75749,
+        "l1": {
+            "klines_1d_30d_close": klines_1d["close"].iloc[-30:].tolist(),
+            "computed_indicators": {"adx_14_1d_current": 30,
+                                    "ema_20_current": 75320},
+            "previous_l1": None,
+        },
+        "l2": {
+            "klines_1d_30d_close": klines_1d["close"].iloc[-30:].tolist(),
+            "computed_indicators": {"ema_20_current": 75320},
+            "rule_cycle_position": {"label": "early_bull", "confidence": 0.74},
+            "previous_l2": None,
+        },
+        "l3": {
+            "risk_preview": {"funding_rate_z_score_90d": 0.5,
+                             "open_interest_z_score_90d": 0.3,
+                             "events_count_72h": 0},
+            "current_state": current_state,
+            "previous_l3": None,
+        },
+        "l4": {
+            "computed_indicators": {"current_close": 75749},
+            "current_state": current_state,
+            "previous_l4": None,
+        },
+        "l5": {
+            "computed_macro_indicators": {"dxy_current": 102.0,
+                                          "vix_current": 14.5},
+            "events_calendar_72h": [],
+            "extreme_event_flags": extreme_flags,
+            "previous_l5": None,
+        },
+        "master": {
+            "current_state": current_state,
+            "previous_strategy_run": None,
+        },
     }
     base.update(overrides)
     return base

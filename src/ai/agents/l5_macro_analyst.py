@@ -40,10 +40,13 @@ class L5MacroAnalyst(BaseAgent):
     PROMPT_FILE = "l5_macro.txt"
 
     def _build_user_prompt(self, context: dict[str, Any]) -> str:
+        """v3 prompt 期望:computed_macro_indicators + events_calendar_72h
+        + extreme_event_flags + previous_l5。"""
         snapshot = {
-            "macro_factors": context.get("macro_factors"),
-            "events_72h": context.get("events_72h"),
-            "btc_corr_60d": context.get("btc_corr_60d"),
+            "computed_macro_indicators": context.get("computed_macro_indicators"),
+            "events_calendar_72h": context.get("events_calendar_72h"),
+            "extreme_event_flags": context.get("extreme_event_flags"),
+            "previous_l5": context.get("previous_l5"),
         }
         snapshot = {k: v for k, v in snapshot.items() if v is not None}
         return (

@@ -38,11 +38,14 @@ class L2DirectionAnalyst(BaseAgent):
     PROMPT_FILE = "l2_direction.txt"
 
     def _build_user_prompt(self, context: dict[str, Any]) -> str:
+        """v2 prompt 期望:klines_1d_30d_close + computed_indicators + l1_output
+        + rule_cycle_position + previous_l2。"""
         snapshot = {
-            "previous_l1_output": context.get("l1_output"),
-            "derivatives_snapshot": context.get("derivatives_snapshot"),
-            "onchain_structure_snapshot": context.get("onchain_structure"),
-            "price_structure": context.get("price_structure"),
+            "klines_1d_30d_close": context.get("klines_1d_30d_close"),
+            "computed_indicators": context.get("computed_indicators"),
+            "l1_output": context.get("l1_output"),
+            "rule_cycle_position": context.get("rule_cycle_position"),
+            "previous_l2": context.get("previous_l2"),
         }
         snapshot = {k: v for k, v in snapshot.items() if v is not None}
         return (

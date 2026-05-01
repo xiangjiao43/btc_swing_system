@@ -37,13 +37,15 @@ class L3OpportunityAnalyst(BaseAgent):
     PROMPT_FILE = "l3_opportunity.txt"
 
     def _build_user_prompt(self, context: dict[str, Any]) -> str:
+        """v3 prompt 期望:l1_output + l2_output + risk_preview(3 客观字段)
+        + anti_pattern_signals(5 bool)+ current_state + previous_l3。"""
         snapshot = {
-            "previous_l1": context.get("l1_output"),
-            "previous_l2": context.get("l2_output"),
-            "asopr": context.get("asopr_value"),
-            "cdd": context.get("cdd_value"),
-            "cycle_position_rule": context.get("cycle_position_rule"),
-            "funding_pressure": context.get("funding_pressure"),
+            "l1_output": context.get("l1_output"),
+            "l2_output": context.get("l2_output"),
+            "risk_preview": context.get("risk_preview"),
+            "anti_pattern_signals": context.get("anti_pattern_signals"),
+            "current_state": context.get("current_state"),
+            "previous_l3": context.get("previous_l3"),
         }
         snapshot = {k: v for k, v in snapshot.items() if v is not None}
         return (

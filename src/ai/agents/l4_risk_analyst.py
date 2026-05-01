@@ -39,13 +39,15 @@ class L4RiskAnalyst(BaseAgent):
     PROMPT_FILE = "l4_risk.txt"
 
     def _build_user_prompt(self, context: dict[str, Any]) -> str:
+        """v2 prompt 期望:computed_indicators + l1/l2/l3_output + current_state
+        + previous_l4。注:不传 crowding_signals(违反铁律 1)。"""
         snapshot = {
-            "previous_l1": context.get("l1_output"),
-            "previous_l2": context.get("l2_output"),
-            "previous_l3": context.get("l3_output"),
-            "current_price": context.get("current_price"),
-            "crowding_signals": context.get("crowding_signals"),
-            "account_state": context.get("account_state"),
+            "computed_indicators": context.get("computed_indicators"),
+            "l1_output": context.get("l1_output"),
+            "l2_output": context.get("l2_output"),
+            "l3_output": context.get("l3_output"),
+            "current_state": context.get("current_state"),
+            "previous_l4": context.get("previous_l4"),
         }
         snapshot = {k: v for k, v in snapshot.items() if v is not None}
         return (

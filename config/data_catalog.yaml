@@ -240,25 +240,11 @@ sources:
     frequency: hourly
     freshness_class: derivatives
     role_in_v1: primary
-    serves: [put_call_ratio_oi, event_risk_options]
+    serves: [event_risk_options]
+    # Sprint 1.8.1:put_call_ratio_oi 因子退役
 
-  - name: coinglass_put_call_ratio
-    platform: coinglass
-    endpoint: /api/options/putCallRatio
-    params: { symbol: BTC }
-    frequency: hourly
-    freshness_class: derivatives
-    role_in_v1: primary
-    serves: [put_call_ratio_oi]
-
-  - name: coinglass_basis
-    platform: coinglass
-    endpoint: /api/futures/basis
-    params: { symbol: BTC }
-    frequency: hourly
-    freshness_class: derivatives
-    role_in_v1: primary
-    serves: [basis_annualized]
+  # Sprint 1.8.1 删除:coinglass_put_call_ratio + coinglass_basis
+  # (put_call_ratio + basis_annualized 因子退役)
 
   # ---- Glassnode 链上 · 第一类:主裁决(§3.6.3 前 5)----
   - name: glassnode_mvrv_z_score
@@ -441,14 +427,9 @@ sources:
     role_in_v1: primary
     serves: [vix_current, macro_headwind]
 
-  - name: yahoo_sp500
-    platform: yahoo_finance
-    endpoint: ticker
-    params: { symbol: "^GSPC" }
-    frequency: daily
-    freshness_class: macro
-    role_in_v1: primary
-    serves: [l5_display]
+  # Sprint 1.8.1 删除:yahoo_sp500 + yahoo_gold
+  # (sp500 + gold_price 因子退役;Yahoo Finance 全栈在 1.5p 已 decommission,
+  # 这两条本就是死配置,仅作清理)
 
   - name: yahoo_ndx
     platform: yahoo_finance
@@ -457,16 +438,8 @@ sources:
     frequency: daily
     freshness_class: macro
     role_in_v1: primary
-    serves: [nasdaq_20d_change, btc_nasdaq_corr_60d, macro_headwind]
-
-  - name: yahoo_gold
-    platform: yahoo_finance
-    endpoint: ticker
-    params: { symbol: "GC=F" }
-    frequency: daily
-    freshness_class: macro
-    role_in_v1: primary
-    serves: [btc_gold_corr_60d]
+    serves: [nasdaq_20d_change, btc_nasdaq_corr_60d]
+    # Sprint 1.8.1:macro_headwind 已退役,从 serves 列表删除
 
   # ---- FRED 备用宏观 ----
   - name: fred_dgs10

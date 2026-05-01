@@ -769,7 +769,7 @@ layer_5_macro_schema:
     structured_macro:
       type: dict
       required: true
-      description: "{DXY, US10Y, VIX, sp500, nasdaq, ...}"
+      description: "{DXY, US10Y, VIX, nasdaq, ...}"
 
     active_macro_tags:
       type: list

@@ -426,8 +426,8 @@ layer_4_risk:
     funding_rate_30d_percentile_alert: 85
     oi_change_24h_alert_pct: 0.15            # 15%
     long_short_ratio_alert: 2.5
-    basis_annualized_alert: 0.20             # 20%
-    put_call_ratio_low: 0.5                  # < 0.5 即看涨极端
+    # Sprint 1.8.1 删除:basis_annualized_alert + put_call_ratio_low
+    # (因子退役 — 详见 docs/cc_reports/sprint_1_8_1_full.md)
 
   # ---- 事件窗口激活 ----
   event_window_activation_hours: 48          # §4.5.8
@@ -505,86 +505,9 @@ kpi_tracker:
 # 所有组合因子的评分规则、权重、分档边界都集中在这里;对应
 # config/data_catalog.yaml → composite_factors.*.formula_ref 的实现读取。
 
-# ---- 8.1 TruthTrend(§3.8.1,L1)----
-truth_trend_scoring:
-  # 每项评分项:condition + points(满足则加分)
-  items:
-    - name: adx_14_1d_strong
-      condition: "adx_14_1d >= layer_1_regime.adx.strong_threshold"
-      points: 2
-    - name: adx_14_4h_weak_or_above
-      condition: "adx_14_4h >= layer_1_regime.adx.weak_threshold"
-      points: 1
-    - name: multi_tf_aligned
-      condition: "multi_tf_direction_consistency == true"  # 4H/1D/1W 一致
-      points: 3
-    - name: ma_alignment
-      condition: "MA-20/60/120 按方向正确排列"
-      points: 2
-    - name: price_vs_ma200
-      condition: "当前价格与 MA-200 相对位置符合趋势方向"
-      points: 1
-
-  # 输出分档(总分 0-9)
-  output_bands:
-    true_trend_at_or_above: 6          # ≥ 6:真趋势
-    weak_trend_at_or_above: 4          # 4-5:弱趋势
-    # < 4:无趋势(no_trend)
-
-  # regime 切换第一周滞后提醒(§3.8.1 失真提醒)
-  regime_switch_first_week_confidence_penalty: 0.15
-
-
-# ---- 8.2 BandPosition(§3.8.2,L2)----
-# v1.2 只用价格几何(移除 MVRV Z 和 STH-SOPR 档位)
-band_position_scoring:
-  # 四个评分维度,每个挑得分最高的 phase 累积 +N;
-  # 最终 phase = argmax;confidence = top_score / theoretical_max_score
-  items:
-    # 价格结构项(impulse 扩展比率)
-    - name: impulse_extension_early
-      condition: "impulse_extension_ratio < 0.50"
-      assigns_to_phase: early
-      points: 3
-    - name: impulse_extension_mid
-      condition: "0.50 <= impulse_extension_ratio < 1.00"
-      assigns_to_phase: mid
-      points: 3
-    - name: impulse_extension_late
-      condition: "1.00 <= impulse_extension_ratio < 1.38"
-      assigns_to_phase: late
-      points: 3
-    - name: impulse_extension_exhausted
-      condition: "impulse_extension_ratio >= 1.38"
-      assigns_to_phase: exhausted
-      points: 3
-    # Swing 序列项
-    - name: hh_hl_pronounced
-      condition: "近期 HH+HL 明显"
-      assigns_to_phase: [early, mid]
-      points: 2
-    - name: lh_or_ll_recent
-      condition: "最近出现 LH 或 LL"
-      assigns_to_phase: [late, exhausted]
-      points: 2
-    # 均线距离项
-    - name: near_ma60
-      condition: "价格贴近 MA-60"
-      assigns_to_phase: [early, mid]
-      points: 1
-    - name: far_above_ma60
-      condition: "价格远离 MA-60 上方"
-      assigns_to_phase: [late, exhausted]
-      points: 1
-    # 回撤深度项
-    - name: recent_retracement_deep
-      condition: "最近回撤 > 0.5 × impulse"
-      assigns_to_phase: [early]
-      points: 1
-    - name: recent_retracement_shallow
-      condition: "最近回撤 < 0.2 × impulse"
-      assigns_to_phase: [late, exhausted]
-      points: 1
+# Sprint 1.8.1 删除:8.1 truth_trend_scoring + 8.2 band_position_scoring
+# (composite/truth_trend.py + composite/band_position.py 已退役;v1.3 改用
+# 6 AI 角色综合判断 + AdjudicatorValidator)
 
 
 # ---- 8.3 CyclePosition(§3.8.4,L2,九档)----
@@ -667,102 +590,10 @@ cycle_position_decision:
   etf_era_mvrv_recalibrate_months: 6
 
 
-# ---- 8.4 Crowding(§3.8.3,L4)----
-crowding_scoring:
-  items:
-    - name: funding_rate_high_3x
-      condition: "funding_rate > 0.0003 且连续 3 次(24h)"
-      points: 2
-    - name: funding_rate_percentile_high
-      condition: "funding_rate_30d_percentile > 85"
-      points: 2
-    - name: oi_spike
-      condition: "oi_change_24h > +0.15"
-      points: 1
-    - name: top_long_short_extreme
-      condition: "top_long_short_account_ratio > 2.5"
-      points: 1
-    - name: basis_high
-      condition: "basis_annualized > 0.20"
-      points: 1
-    - name: put_call_low
-      condition: "put_call_ratio_oi < 0.5"
-      points: 1
-    - name: upward_liquidation_density
-      condition: "上方清算热力图密集"
-      points: -1       # 反向减分(§3.8.3)
-
-  # 输出分档与对应 position_cap 乘数
-  output_bands:
-    crowded_extreme_at_or_above: 6     # × 0.7
-    crowded_mild_at_or_above: 4        # × 0.85
-    # < 4:正常(× 1.0)
-  # 空头侧对称打分(crowded_short)
-
-
-# ---- 8.5 MacroHeadwind(§3.8.5,L5)----
-macro_headwind_scoring:
-  items:
-    - name: dxy_strengthening
-      condition: "dxy_20d_change > +0.02"
-      points: -2
-    - name: us10y_rising
-      condition: "us10y_30d_change_bp > +30"
-      points: -2
-    - name: vix_elevated
-      condition: "vix_current > 25"
-      points: -2
-    - name: nasdaq_falling
-      condition: "nasdaq_20d_change < -0.05"
-      points: -2
-    - name: nasdaq_rising
-      condition: "nasdaq_20d_change > +0.05"
-      points: +2
-
-  # BTC-纳指相关性 > 0.7 时所有项权重 × 1.5
-  btc_nasdaq_correlation_amplify:
-    threshold: 0.7
-    multiplier: 1.5
-
-  # 输出分档
-  output_bands:
-    strong_headwind_at_or_below: -5    # × 0.7
-    mild_headwind_at_or_below: -2      # × 0.85
-    # ≥ -1:中性或顺风(× 1.0)
-
-
-# ---- 8.6 EventRisk(§3.8.6,L4)----
-event_risk_scoring:
-  # 事件类型基础分(表示"该类事件赋予的风险权重")
-  # 批 4 做 event_calendar.yaml 时将新增 event_type_mapping 块,
-  # 把常见事件(PPI / 零售销售 / ADP / FOMC minutes / Powell 讲话 /
-  # 减半窗口 等)显式分类,减少 other 的兜底频率。
-  event_type_weights:
-    fomc: 4
-    cpi:  3
-    nfp:  3
-    pce:  4                     # Sprint 1.5d:Fed 偏好通胀指标(NY Fed
-                                # Pinchuk 2024 实证 1σ 通胀意外 → BTC -24bps,
-                                # 与 CPI 等量级,但 PCE 是 Fed 决策核心输入)
-    options_expiry_major: 2     # 月度兜底;季度通过 events_calendar
-                                # impact_level=4 单条标记(影响 _emit /
-                                # narrative,evaluator 仍按 type 一档)
-    other: 1                    # 兜底;应尽量少用
-
-  # 距离窗口加权
-  distance_multipliers:
-    - { hours_range: [0, 24],   multiplier: 1.5 }
-    - { hours_range: [24, 48],  multiplier: 1.0 }
-    - { hours_range: [48, 72],  multiplier: 0.5 }
-
-  # 波动率 extreme 时所有事件分 +1
-  volatility_extreme_bonus: 1
-
-  # BTC-纳指相关性 > 0.7 时美国经济事件分 +1
-  us_macro_bonus_when_correlated: 1
-
-  # 输出分档
-  output_bands:
-    high_at_or_above: 8          # × 0.7,permission 降档建议(ambush_only)
-    medium_at_or_above: 4        # × 0.85
-    # < 4:低(× 1.0)
+# Sprint 1.8.1 删除:
+#   8.4 crowding_scoring(composite/crowding.py 已退役)
+#   8.5 macro_headwind_scoring(composite/macro_headwind.py 已退役)
+#   8.6 event_risk_scoring(EventRisk 已在 1.5q.1 退役;阈值表跟着退)
+# v1.3 改用 6 AI 角色:L4 risk_breakdown.crowding_risk + L5 macro_stance,
+# Orchestrator._compute_crowding_multiplier / _compute_event_multiplier
+# 读 AI 输出推导 multipliers,不再读这里的硬阈值。

@@ -239,17 +239,6 @@ function app() {
                 `<div>$${h.price} <span class="text-[10px] text-slate-500">${h.basis || ''}</span></div>`
             ).join('');
         },
-        cardFutureEvents() {
-            const events = this.eventWindows();
-            if (events.length === 0) return '<span class="text-slate-400">无登记事件</span>';
-            return events.slice(0, 5).map(e =>
-                `<div class="flex items-center gap-2">
-                  <span class="inline-block w-1 h-1 rounded-full ${e.in_window ? 'bg-rose-500' : 'bg-slate-400'}"></span>
-                  <span>${e.event_name}</span>
-                  <span class="font-mono text-slate-500 ml-auto">${e.hours_to != null ? e.hours_to.toFixed(0) + 'h' : ''}</span>
-                </div>`
-            ).join('');
-        },
         _startClock() {
             const tick = () => { this.nowBjt = this._currentBjt(); };
             tick();

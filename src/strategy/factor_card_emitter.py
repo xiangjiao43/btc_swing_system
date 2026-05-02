@@ -41,6 +41,10 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
+# Sprint 1.8.2-H:跨模块依赖披露 — emitter 直接调 context_builder 的 ADX/ATR 计算
+# (v13 layer1 改 AI 输出后,不再返回客观计算值,emitter 必须自行重算)
+from src.ai.context_builder import compute_adx_14, compute_atr_features
+
 
 logger = logging.getLogger(__name__)
 
@@ -1044,8 +1048,9 @@ def _emit_price_tech_primary(
 ) -> list[dict[str, Any]]:
     cards: list[dict[str, Any]] = []
 
-    # ADX-14(1D)—— Sprint 2.6-C:layer1 直接暴露 adx_14_1d,不再回退计算
-    adx = l1.get("adx_14_1d")
+    # ADX-14(1D)—— 1.8.2-H:v13 layer1 不再暴露 adx_14_1d(改 AI 输出),改用 context_builder 重算
+    adx_result = compute_adx_14(klines_1d) if isinstance(klines_1d, pd.DataFrame) else {}
+    adx = adx_result.get("adx_current")
     ts = _to_bjt(klines_1d.index[-1]) if isinstance(klines_1d, pd.DataFrame) and len(klines_1d) > 0 else None
     cards.append(_make_card(
         card_id=f"price_adx_14_1d_{today}",
@@ -1068,8 +1073,9 @@ def _emit_price_tech_primary(
         linked_layer="L1", source="Binance klines",
     ))
 
-    # ATR 百分位 —— Sprint 2.6-C:layer1 直接暴露 atr_percentile_180d
-    atr_pct = l1.get("atr_percentile_180d")
+    # ATR 180 日分位 —— 1.8.2-H:同 ADX,改用 context_builder 重算
+    atr_result = compute_atr_features(klines_1d) if isinstance(klines_1d, pd.DataFrame) else {}
+    atr_pct = atr_result.get("atr_180d_percentile")
     cards.append(_make_card(
         card_id=f"price_atr_percentile_180d_{today}",
         category="price_structure", tier="primary",

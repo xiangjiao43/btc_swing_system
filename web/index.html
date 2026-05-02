@@ -181,20 +181,22 @@
     <!-- 🩺 系统自检面板(Sprint 1.5o):永久展开,作为"系统是否在正常 -->
     <!-- 运作"的唯一入口。容器边框颜色随 overall_status 变化。           -->
     <!-- ============================================================ -->
-    <section class="audit-card px-3 py-2.5"
+    <section class="audit-card"
              :class="systemHealth && systemHealth.overall_status === 'critical'
                      ? 'border-rose-400 dark:border-rose-700 ring-1 ring-rose-300 dark:ring-rose-800'
                      : systemHealth && systemHealth.overall_status === 'partial_degraded'
                        ? 'border-amber-300 dark:border-amber-700'
                        : 'border-emerald-200 dark:border-emerald-900'">
-      <div class="flex items-center gap-2 text-[12px] mb-2.5">
-        <span class="font-semibold">🩺 系统自检</span>
-        <span class="text-[11px] px-1.5 py-0.5 rounded font-mono"
-              :class="selfCheckBadgeClass()"
-              x-text="selfCheckBadgeLabel()"></span>
-      </div>
+      <header class="px-4 py-2.5 border-b border-slate-200 dark:border-slate-800">
+        <h2 class="text-base font-semibold flex items-center gap-2">
+          <span>🩺</span><span>系统自检</span>
+          <span class="text-[11px] px-1.5 py-0.5 rounded font-mono ml-1"
+                :class="selfCheckBadgeClass()"
+                x-text="selfCheckBadgeLabel()"></span>
+        </h2>
+      </header>
 
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-[12px]">
+      <div class="p-3 grid grid-cols-1 md:grid-cols-2 gap-4 text-[12px]">
         <!-- 左列:5 层证据健康 -->
         <div>
           <h3 class="subheading mb-1.5">五层证据</h3>
@@ -245,7 +247,7 @@
           </ul>
         </div>
       </div>
-      <p class="mt-2 text-[10px] text-slate-400">
+      <p class="px-3 pb-3 text-[10px] text-slate-400">
         每 5 分钟自动刷新;hover 行可看 hover tooltip(详细原因 / 抓取时间)
       </p>
     </section>
@@ -272,62 +274,62 @@
       <div class="p-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-x-8 gap-y-6">
         <div>
           <div class="stat-label">方向</div>
-          <div class="text-[13px] text-slate-900 dark:text-slate-100"
+          <div class="text-[13px] font-bold text-slate-900 dark:text-slate-100"
                x-text="state.summary_card?.stance_label || '—'"></div>
         </div>
         <div>
           <div class="stat-label">状态</div>
-          <div class="text-[13px] text-slate-900 dark:text-slate-100"
+          <div class="text-[13px] font-bold text-slate-900 dark:text-slate-100"
                x-text="state.summary_card?.action_state_label || '—'"></div>
         </div>
         <div>
           <div class="stat-label">机会等级</div>
-          <div class="text-[13px] text-slate-900 dark:text-slate-100"
+          <div class="text-[13px] font-bold text-slate-900 dark:text-slate-100"
                x-text="cardOpportunityGrade()"></div>
         </div>
         <div>
           <div class="stat-label">信心指数</div>
-          <div class="text-[13px] text-slate-900 dark:text-slate-100"
+          <div class="text-[13px] font-bold text-slate-900 dark:text-slate-100"
                x-text="cardConfidence()"></div>
         </div>
         <div>
           <div class="stat-label">入场区间</div>
-          <div class="text-[13px] font-mono text-slate-900 dark:text-slate-100"
+          <div class="text-[13px] font-bold font-mono text-slate-900 dark:text-slate-100"
                x-text="cardEntryZones()"></div>
         </div>
         <div>
           <div class="stat-label">止损价</div>
-          <div class="text-[13px] font-mono text-slate-900 dark:text-slate-100"
+          <div class="text-[13px] font-bold font-mono text-slate-900 dark:text-slate-100"
                x-text="cardStopLoss()"></div>
         </div>
         <div>
           <div class="stat-label">止盈分批</div>
-          <div class="text-[13px] font-mono text-slate-900 dark:text-slate-100"
+          <div class="text-[13px] font-bold font-mono text-slate-900 dark:text-slate-100"
                x-text="cardTakeProfits()"></div>
         </div>
         <div>
           <div class="stat-label">仓位上限</div>
-          <div class="text-[13px] text-slate-900 dark:text-slate-100"
+          <div class="text-[13px] font-bold text-slate-900 dark:text-slate-100"
                x-text="cardPositionCap()"></div>
         </div>
         <div>
           <div class="stat-label">当前浮盈</div>
-          <div class="text-[13px] text-slate-900 dark:text-slate-100"
+          <div class="text-[13px] font-bold text-slate-900 dark:text-slate-100"
                x-text="cardCurrentPnl()"></div>
         </div>
         <div>
           <div class="stat-label">距离止损</div>
-          <div class="text-[13px] font-mono text-slate-900 dark:text-slate-100"
+          <div class="text-[13px] font-bold font-mono text-slate-900 dark:text-slate-100"
                x-text="cardDistanceToStop()"></div>
         </div>
         <div>
           <div class="stat-label">持仓时长</div>
-          <div class="text-[13px] text-slate-900 dark:text-slate-100"
+          <div class="text-[13px] font-bold text-slate-900 dark:text-slate-100"
                x-text="cardHoldingDuration()"></div>
         </div>
         <div>
           <div class="stat-label">硬失效位</div>
-          <div class="text-[13px] font-mono text-slate-900 dark:text-slate-100"
+          <div class="text-[13px] font-bold font-mono text-slate-900 dark:text-slate-100"
                x-text="cardHardInvalidations()"></div>
         </div>
       </div>
@@ -359,7 +361,7 @@
                   x-text="card.title"></h3>
             </header>
             <!-- 大字标签 -->
-            <div class="text-base font-bold leading-snug" x-text="card.label || '—'"></div>
+            <div class="text-[13px] font-bold leading-snug" x-text="card.label || '—'"></div>
             <!-- 次要标签 -->
             <div class="flex flex-wrap gap-1" x-show="(card.secondary_labels || []).length > 0">
               <template x-for="sl in (card.secondary_labels || [])" :key="sl">

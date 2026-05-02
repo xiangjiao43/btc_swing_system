@@ -91,6 +91,64 @@ def compute_emas_4h(klines_4h: pd.DataFrame) -> dict[str, Any]:
     }
 
 
+def compute_tf_alignment(
+    klines_4h: pd.DataFrame, klines_1d: pd.DataFrame, klines_1w: pd.DataFrame,
+) -> dict[str, Any]:
+    """4H/1D/1W EMA-20 斜率投票 → alignment 等级。
+
+    Sprint 1.8.2-J:每周期取最近 5 根 EMA-20 做线性回归,斜率 >+threshold 投 +1,
+    < -threshold 投 -1,| slope | < threshold 投 0。threshold = 0.1% × 当前价。
+    任一周期数据不足(<25 根 K 线 / 缺 close 列)→ 该周期投 None,整体返 "数据不足"。
+    """
+    def slope_sign(klines):
+        if klines is None or klines.empty or "close" not in klines.columns:
+            return None
+        if len(klines) < 25:
+            return None
+        ema = klines["close"].astype(float).ewm(span=20, adjust=False).mean()
+        last5 = ema.iloc[-5:]
+        if len(last5) < 5:
+            return None
+        x = list(range(5))
+        y = last5.values
+        slope = (
+            (5 * sum(xi * yi for xi, yi in zip(x, y)) - sum(x) * sum(y))
+            / (5 * sum(xi * xi for xi in x) - sum(x) ** 2)
+        )
+        threshold = float(klines["close"].iloc[-1]) * 0.001
+        if slope > threshold:
+            return 1
+        if slope < -threshold:
+            return -1
+        return 0
+
+    s_4h = slope_sign(klines_4h)
+    s_1d = slope_sign(klines_1d)
+    s_1w = slope_sign(klines_1w)
+
+    if None in (s_4h, s_1d, s_1w):
+        return {
+            "alignment": None, "level": "数据不足",
+            "votes": [s_4h, s_1d, s_1w], "score": None,
+        }
+
+    votes = [s_4h, s_1d, s_1w]
+    pos_count = sum(1 for v in votes if v > 0)
+    neg_count = sum(1 for v in votes if v < 0)
+
+    if pos_count == 3 or neg_count == 3:
+        level, alignment = "三周期一致", "strong"
+    elif pos_count == 2 or neg_count == 2:
+        level, alignment = "两周期一致", "weak"
+    else:
+        level, alignment = "三周期分歧", "none"
+
+    return {
+        "alignment": alignment, "level": level,
+        "votes": votes, "score": pos_count - neg_count,
+    }
+
+
 def compute_adx_14(klines_1d: pd.DataFrame) -> dict[str, Any]:
     """ADX-14 (Wilder smoothing). 输出 series + current + 5d avg。"""
     if (klines_1d is None or klines_1d.empty

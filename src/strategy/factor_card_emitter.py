@@ -43,7 +43,9 @@ import pandas as pd
 
 # Sprint 1.8.2-H:跨模块依赖披露 — emitter 直接调 context_builder 的 ADX/ATR 计算
 # (v13 layer1 改 AI 输出后,不再返回客观计算值,emitter 必须自行重算)
-from src.ai.context_builder import compute_adx_14, compute_atr_features
+from src.ai.context_builder import (
+    compute_adx_14, compute_atr_features, compute_tf_alignment,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -290,7 +292,9 @@ def emit_factor_cards(
     cards.extend(_emit_derivatives_primary(derivatives, today))
 
     # ========== 技术指标主裁决(primary)==========
-    cards.extend(_emit_price_tech_primary(l1, klines_1d, today))
+    klines_4h = context.get("klines_4h")
+    klines_1w = context.get("klines_1w")
+    cards.extend(_emit_price_tech_primary(l1, klines_1d, klines_4h, klines_1w, today))
 
     # ========== 宏观主裁决(primary)==========
     cards.extend(_emit_macro_primary(macro, today))
@@ -1044,7 +1048,11 @@ def _emit_derivatives_primary(
 # ============================================================
 
 def _emit_price_tech_primary(
-    l1: dict[str, Any], klines_1d: Any, today: str,
+    l1: dict[str, Any],
+    klines_1d: Any,
+    klines_4h: Any,
+    klines_1w: Any,
+    today: str,
 ) -> list[dict[str, Any]]:
     cards: list[dict[str, Any]] = []
 
@@ -1101,38 +1109,40 @@ def _emit_price_tech_primary(
         linked_layer="L1", source="Binance klines",
     ))
 
-    # 多周期方向一致性
-    # Sprint 1.5c:统一读建模标准名 timeframe_alignment;tf_alignment 是同 dict alias 兜底
-    alignment = (
-        l1.get("timeframe_alignment")
-        or l1.get("tf_alignment")
-        or l1.get("multi_tf_alignment")
-    )
-    alignment_value = None
-    alignment_direction = "neutral"
-    if isinstance(alignment, dict):
-        alignment_value = alignment.get("score") or alignment.get("aligned")
-        direction = alignment.get("direction")
-        if direction == "up":
-            alignment_direction = "bullish"
-        elif direction == "down":
-            alignment_direction = "bearish"
+    # 多周期方向一致性 —— 1.8.2-J:emitter 自算 4H/1D/1W EMA-20 斜率投票
+    tf_result = compute_tf_alignment(klines_4h, klines_1d, klines_1w)
+    alignment_level = tf_result.get("level")
+    alignment_score = tf_result.get("score")
+    if alignment_level == "三周期一致":
+        interp = ("📊 三周期(4H/1D/1W)EMA-20 同向 → 趋势明确\n"
+                  "🔍 三周期一致 = 趋势确立;两周期一致 = 弱信号;三周期分歧 = 无趋势")
+    elif alignment_level == "两周期一致":
+        interp = ("📊 两周期 EMA-20 同向 → 趋势弱信号\n"
+                  "🔍 三周期一致 = 趋势确立;两周期一致 = 弱信号;三周期分歧 = 无趋势")
+    elif alignment_level == "三周期分歧":
+        interp = ("📊 三周期分歧 → 无明显趋势,震荡市\n"
+                  "🔍 三周期一致 = 趋势确立;两周期一致 = 弱信号;三周期分歧 = 无趋势")
+    else:
+        interp = ("📊 数据不足或各周期方向分歧\n"
+                  "🔍 三周期一致 = 趋势确立;两周期一致 = 弱信号;三周期分歧 = 无趋势")
+    if alignment_score is None:
+        impact_dir = "neutral"
+    elif alignment_score > 0:
+        impact_dir = "bullish"
+    elif alignment_score < 0:
+        impact_dir = "bearish"
+    else:
+        impact_dir = "neutral"
     cards.append(_make_card(
         card_id=f"price_tf_alignment_4h_1d_1w_{today}",
         category="price_structure", tier="primary",
-        name="多周期方向一致性", name_en="4H/1D/1W Alignment",
-        current_value=alignment_value if alignment_value is not None else "n/a",
+        name="多周期方向一致性", name_en="Multi-Timeframe Alignment",
+        current_value=alignment_score,
         captured_at_bjt=ts,
-        plain_interpretation=(
-            ("📊 4H、1D、1W 三个周期方向一致,趋势强度高\n"
-             "🔍 三周期一致 = 趋势确立(强信号);两周期一致 = 弱信号;三周期分歧 = 无趋势"
-             ) if alignment and alignment_value
-            else ("📊 数据不足或各周期方向分歧\n"
-                  "🔍 三周期一致 = 趋势确立;两周期一致 = 弱信号;三周期分歧 = 无趋势")
-        ),
-        strategy_impact="📍 4H、1D、1W 三个时间周期的趋势方向是否一致。三周期方向一致是真趋势的最重要信号之一。",
-        impact_direction=alignment_direction,
-        impact_weight=0.85,
+        plain_interpretation=interp,
+        strategy_impact="📍 综合 4H / 1D / 1W EMA-20 斜率投票,判定趋势是否多周期共振。",
+        impact_direction=impact_dir,
+        impact_weight=0.7,
         linked_layer="L1", source="Binance klines",
     ))
     return cards

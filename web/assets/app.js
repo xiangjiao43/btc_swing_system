@@ -203,10 +203,10 @@ function app() {
         },
         cardEntryZones() {
             const zones = this.tp().entry_zones || [];
-            if (zones.length === 0) return '<span class="text-slate-400">—</span>';
+            if (zones.length === 0) return '—';
             return zones.map(z =>
-                `$${z.price_low}-${z.price_high}<br><span class="text-[10px] text-slate-500">${z.allocation_pct}%</span>`
-            ).join('<br>');
+                `$${z.price_low}-${z.price_high} (${z.allocation_pct}%)`
+            ).join(', ');
         },
         cardStopLoss() {
             const sl = this.tp().stop_loss;
@@ -214,10 +214,10 @@ function app() {
         },
         cardTakeProfits() {
             const tps = this.tp().take_profit_plan || [];
-            if (tps.length === 0) return '<span class="text-slate-400">—</span>';
+            if (tps.length === 0) return '—';
             return tps.map((t, i) =>
-                `<div>TP${i+1} $${t.price} <span class="text-[10px] text-slate-500">×${t.size_pct}%</span></div>`
-            ).join('');
+                `TP${i+1} $${t.price} ×${t.size_pct}%`
+            ).join(', ');
         },
         cardPositionCap() {
             const cap = this.tp().max_position_size_pct;
@@ -234,10 +234,8 @@ function app() {
         cardHoldingDuration() { return '—'; },
         cardHardInvalidations() {
             const his = this.hardInvalidationLevels();
-            if (his.length === 0) return '<span class="text-slate-400">—</span>';
-            return his.slice(0, 3).map(h =>
-                `<div>$${h.price} <span class="text-[10px] text-slate-500">${h.basis || ''}</span></div>`
-            ).join('');
+            if (his.length === 0) return '—';
+            return his.slice(0, 3).map(h => `$${h.price}`).join(', ');
         },
         _startClock() {
             const tick = () => { this.nowBjt = this._currentBjt(); };

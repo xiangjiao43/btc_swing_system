@@ -267,67 +267,68 @@
                 x-text="'AI 输出于 ' + (state.meta?.generated_at_bjt || '—')"></span>
         </h2>
       </header>
-      <!-- 1.8.2-K:13 卡 → 12 卡平铺(2 行 × 6 张),无边框 / 无灰底,标签小灰 + 数值黑中 -->
+      <!-- 1.8.2-K.1:12 卡字号字重统一对齐顶部状态条(.stat-label + text-[13px]),
+           多值卡(入场区间/止盈/硬失效)合并 1 行逗号分隔 -->
       <div class="p-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-x-8 gap-y-6">
         <div>
-          <div class="text-sm text-slate-500 dark:text-slate-400">方向</div>
-          <div class="text-xl font-medium text-slate-900 dark:text-slate-100 mt-1"
+          <div class="stat-label">方向</div>
+          <div class="text-[13px] text-slate-900 dark:text-slate-100"
                x-text="state.summary_card?.stance_label || '—'"></div>
         </div>
         <div>
-          <div class="text-sm text-slate-500 dark:text-slate-400">状态</div>
-          <div class="text-xl font-medium text-slate-900 dark:text-slate-100 mt-1"
+          <div class="stat-label">状态</div>
+          <div class="text-[13px] text-slate-900 dark:text-slate-100"
                x-text="state.summary_card?.action_state_label || '—'"></div>
         </div>
         <div>
-          <div class="text-sm text-slate-500 dark:text-slate-400">机会等级</div>
-          <div class="text-xl font-medium text-slate-900 dark:text-slate-100 mt-1"
+          <div class="stat-label">机会等级</div>
+          <div class="text-[13px] text-slate-900 dark:text-slate-100"
                x-text="cardOpportunityGrade()"></div>
         </div>
         <div>
-          <div class="text-sm text-slate-500 dark:text-slate-400">信心指数</div>
-          <div class="text-xl font-medium text-slate-900 dark:text-slate-100 mt-1"
+          <div class="stat-label">信心指数</div>
+          <div class="text-[13px] text-slate-900 dark:text-slate-100"
                x-text="cardConfidence()"></div>
         </div>
         <div>
-          <div class="text-sm text-slate-500 dark:text-slate-400">入场区间</div>
-          <div class="text-sm font-mono text-slate-900 dark:text-slate-100 mt-1"
-               x-html="cardEntryZones()"></div>
+          <div class="stat-label">入场区间</div>
+          <div class="text-[13px] font-mono text-slate-900 dark:text-slate-100"
+               x-text="cardEntryZones()"></div>
         </div>
         <div>
-          <div class="text-sm text-slate-500 dark:text-slate-400">止损价</div>
-          <div class="text-xl font-medium font-mono text-slate-900 dark:text-slate-100 mt-1"
+          <div class="stat-label">止损价</div>
+          <div class="text-[13px] font-mono text-slate-900 dark:text-slate-100"
                x-text="cardStopLoss()"></div>
         </div>
         <div>
-          <div class="text-sm text-slate-500 dark:text-slate-400">止盈分批</div>
-          <div class="text-sm font-mono text-slate-900 dark:text-slate-100 mt-1"
-               x-html="cardTakeProfits()"></div>
+          <div class="stat-label">止盈分批</div>
+          <div class="text-[13px] font-mono text-slate-900 dark:text-slate-100"
+               x-text="cardTakeProfits()"></div>
         </div>
         <div>
-          <div class="text-sm text-slate-500 dark:text-slate-400">仓位上限</div>
-          <div class="text-xl font-medium text-slate-900 dark:text-slate-100 mt-1"
+          <div class="stat-label">仓位上限</div>
+          <div class="text-[13px] text-slate-900 dark:text-slate-100"
                x-text="cardPositionCap()"></div>
         </div>
         <div>
-          <div class="text-sm text-slate-500 dark:text-slate-400">当前浮盈</div>
-          <div class="text-xl font-medium text-slate-900 dark:text-slate-100 mt-1"
+          <div class="stat-label">当前浮盈</div>
+          <div class="text-[13px] text-slate-900 dark:text-slate-100"
                x-text="cardCurrentPnl()"></div>
         </div>
         <div>
-          <div class="text-sm text-slate-500 dark:text-slate-400">距离止损</div>
-          <div class="text-xl font-medium font-mono text-slate-900 dark:text-slate-100 mt-1"
+          <div class="stat-label">距离止损</div>
+          <div class="text-[13px] font-mono text-slate-900 dark:text-slate-100"
                x-text="cardDistanceToStop()"></div>
         </div>
         <div>
-          <div class="text-sm text-slate-500 dark:text-slate-400">持仓时长</div>
-          <div class="text-xl font-medium text-slate-900 dark:text-slate-100 mt-1"
+          <div class="stat-label">持仓时长</div>
+          <div class="text-[13px] text-slate-900 dark:text-slate-100"
                x-text="cardHoldingDuration()"></div>
         </div>
         <div>
-          <div class="text-sm text-slate-500 dark:text-slate-400">硬失效位</div>
-          <div class="text-sm font-mono text-slate-900 dark:text-slate-100 mt-1"
-               x-html="cardHardInvalidations()"></div>
+          <div class="stat-label">硬失效位</div>
+          <div class="text-[13px] font-mono text-slate-900 dark:text-slate-100"
+               x-text="cardHardInvalidations()"></div>
         </div>
       </div>
     </section>

@@ -89,7 +89,9 @@ class AdjudicatorValidator:
                     break
 
         # H2: stop_loss 必须从 L4.hard_invalidation_levels 中选
-        trade_plan = validated.setdefault("trade_plan", {})
+        # 1.8.2-I:master 在 FLAT 状态下可能输出 trade_plan: null,setdefault 不会覆盖 None
+        trade_plan = validated.get("trade_plan") or {}
+        validated["trade_plan"] = trade_plan
         stop_loss = trade_plan.get("stop_loss")
         l4_levels = l4_output.get("hard_invalidation_levels", []) or []
         l4_prices = []
@@ -125,7 +127,9 @@ class AdjudicatorValidator:
                 pass
 
         # H3: position_cap_final.value ≥ 0.15
-        pcf = validated.setdefault("position_cap_final", {})
+        # 1.8.2-I:同上,master 可能输出 position_cap_final: null
+        pcf = validated.get("position_cap_final") or {}
+        validated["position_cap_final"] = pcf
         try:
             cap_value = float(pcf.get("value", 0))
         except (TypeError, ValueError):
@@ -139,13 +143,17 @@ class AdjudicatorValidator:
                 "auto_fix": "强制为 0.15",
             })
             pcf["value"] = 0.15
-            comp = pcf.setdefault("composition", {})
+            # 1.8.2-I:同上,pcf 可能含 composition: null
+            comp = pcf.get("composition") or {}
+            pcf["composition"] = comp
             comp["after_hard_floor"] = 0.15
             validated.setdefault("notes", []).append("ai_overridden_H3")
 
         # H4: extreme_event_detected=true → state 必须 PROTECTION
         if l5_output.get("extreme_event_detected") is True:
-            st = validated.setdefault("state_transition", {})
+            # 1.8.2-I:同上,master 可能输出 state_transition: null
+            st = validated.get("state_transition") or {}
+            validated["state_transition"] = st
             to_state = st.get("to_state")
             if to_state != "PROTECTION":
                 violations.append({

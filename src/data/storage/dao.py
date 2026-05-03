@@ -1489,3 +1489,82 @@ class RunMetadataDAO:
     ) -> int:
         return 0
 
+
+# ============================================================
+# Sprint 1.10-A:v1.4 三表 DAO(virtual_account / virtual_orders / theses)
+# ============================================================
+# 对齐 docs/modeling.md b25cfe6(v1.4 修订版)§5.1-§5.3
+# 纪律:DAO 不做业务逻辑,只 CRUD;业务逻辑留 1.10-B/C/D 的 manager 模块。
+
+
+class VirtualAccountDAO:
+    """virtual_account 表 DAO(v1.4 §5.1.2)。
+
+    每次 strategy_run 完成后写一行 1:1 快照(§5.1.4)。
+    收益指标计算(日/周/月)留给 1.10-B 的 virtual_account_manager。
+    """
+
+    @staticmethod
+    def insert_snapshot(
+        conn: sqlite3.Connection,
+        snapshot_id: str,
+        run_id: str,
+        snapshot_at_utc: str,
+        btc_price_at_snapshot: float,
+        initial_capital: float,
+        available_cash: float,
+        total_equity: float,
+        long_position_usdt: float = 0.0,
+        long_avg_price: Optional[float] = None,
+        long_btc_amount: float = 0.0,
+        short_position_usdt: float = 0.0,
+        short_avg_price: Optional[float] = None,
+        short_btc_amount: float = 0.0,
+        realized_pnl_total: float = 0.0,
+        unrealized_pnl: float = 0.0,
+        total_return_pct: float = 0.0,
+    ) -> None:
+        """写入一条 virtual_account 快照(v1.4 §5.1.4)。
+
+        run_id 是 UNIQUE,重复 run_id 会触发 IntegrityError(由调用方处理)。
+        不隐式 commit,调用方决定 commit 时机。
+        """
+        sql = """
+            INSERT INTO virtual_account (
+                snapshot_id, run_id, snapshot_at_utc, btc_price_at_snapshot,
+                initial_capital, available_cash,
+                long_position_usdt, long_avg_price, long_btc_amount,
+                short_position_usdt, short_avg_price, short_btc_amount,
+                total_equity, realized_pnl_total, unrealized_pnl, total_return_pct
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        conn.execute(sql, (
+            snapshot_id, run_id, snapshot_at_utc, btc_price_at_snapshot,
+            initial_capital, available_cash,
+            long_position_usdt, long_avg_price, long_btc_amount,
+            short_position_usdt, short_avg_price, short_btc_amount,
+            total_equity, realized_pnl_total, unrealized_pnl, total_return_pct,
+        ))
+
+    @staticmethod
+    def get_latest(conn: sqlite3.Connection) -> Optional[dict[str, Any]]:
+        """取最新一条快照(按 snapshot_at_utc DESC)。无记录返 None(v1.4 §5.1.4)。"""
+        row = conn.execute(
+            "SELECT * FROM virtual_account "
+            "ORDER BY snapshot_at_utc DESC LIMIT 1"
+        ).fetchone()
+        return dict(row) if row is not None else None
+
+    @staticmethod
+    def get_history(
+        conn: sqlite3.Connection,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """按时间降序返回历史快照,默认 100 条(v1.4 §5.1.5 收益率计算用)。"""
+        rows = conn.execute(
+            "SELECT * FROM virtual_account "
+            "ORDER BY snapshot_at_utc DESC LIMIT ?",
+            (int(limit),),
+        ).fetchall()
+        return [dict(r) for r in rows]
+

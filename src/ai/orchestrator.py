@@ -177,6 +177,8 @@ class AIOrchestrator:
             "historical_precedent_match": master_ctx.get("historical_precedent_match", 1.0),
             "fallback_level": master_ctx.get("fallback_level"),
             "master_consecutive_failures": master_ctx.get("master_consecutive_failures", 0),
+            # Sprint 1.10-F D2=a:V22 滑动 72h 检测 — caller 装入(无则 None,V22 fallback 老字段)
+            "master_failures_in_72h": master_ctx.get("master_failures_in_72h"),
             "current_btc_price": master_ctx.get("current_btc_price"),
             "stop_tightening_count_so_far": master_ctx.get("stop_tightening_count_so_far", 0),
             "initial_stop_loss_price": master_ctx.get("initial_stop_loss_price"),
@@ -185,6 +187,61 @@ class AIOrchestrator:
         validated_output, constraint_activations = validate_master_output(
             master_out, validator_ctx,
         )
+
+        # Sprint 1.10-F:Validator 触发同 run 重试(V8/V9/V11/V21)
+        # D3=b:V21 retry hint 塞入 master input 的 _v21_retry_hint 字段
+        # 失败的 master 已走 fallback,此处不重试 fallback 路径
+        if (
+            constraint_activations.get("validator_needs_retry")
+            and str(master_out.get("status", "")).startswith("success")
+        ):
+            hints = constraint_activations.get("validator_retry_hints") or []
+            retry_master_input = dict(context.get("master") or {})
+            retry_master_input["l1_output"] = l1_out
+            retry_master_input["l2_output"] = l2_out
+            retry_master_input["l3_output"] = l3_out
+            retry_master_input["l4_output"] = l4_out
+            retry_master_input["l5_output"] = l5_out
+            retry_master_input["_system_provided"] = {
+                "crowding_multiplier": crowding_mult,
+                "event_multiplier": event_mult,
+                "current_close": shared.get("current_close"),
+            }
+            if hints:
+                retry_master_input["_v21_retry_hint"] = " ".join(hints)
+            retry_master_input["_validator_retry_attempt"] = 2
+            try:
+                retry_out = self._agents["master"].analyze(
+                    retry_master_input, client=build_anthropic_client(),
+                )
+                # 第二次也校验
+                retry_validated, retry_activations = validate_master_output(
+                    retry_out, validator_ctx,
+                )
+                # 若第二次没触发 needs_retry → 接受新输出
+                if not retry_activations.get("validator_needs_retry"):
+                    validated_output = retry_validated
+                    constraint_activations = retry_activations
+                    result.setdefault("retry_log", {}).update({
+                        "validator_triggered_retry_applied": True,
+                        "validator_triggered_retry_succeeded": True,
+                    })
+                else:
+                    # 第二次也不通过 → 保留第一次输出 + 标记
+                    result.setdefault("retry_log", {}).update({
+                        "validator_triggered_retry_applied": True,
+                        "validator_triggered_retry_succeeded": False,
+                    })
+            except Exception as e:
+                logger.warning(
+                    "orchestrator: validator-triggered retry raised: %s", e,
+                )
+                result.setdefault("retry_log", {}).update({
+                    "validator_triggered_retry_applied": True,
+                    "validator_triggered_retry_succeeded": False,
+                    "validator_triggered_retry_error": str(e)[:200],
+                })
+
         result["layers"]["master"] = validated_output
         result["constraint_activations"] = constraint_activations
 

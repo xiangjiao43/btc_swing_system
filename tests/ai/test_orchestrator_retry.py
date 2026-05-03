@@ -91,8 +91,21 @@ def _ok_l5() -> dict[str, Any]:
 
 
 def _ok_master() -> dict[str, Any]:
+    """完整 mode=new_thesis 输出,Validator 全 24 条都通过(无 needs_retry)。"""
     return {
         "mode": "new_thesis",
+        "new_thesis": {
+            "thesis_id": "t_test_001",
+            "direction": "long",
+            "core_judgment": "做多 BTC",
+            "confidence_score": 70,
+            "break_conditions": [
+                "BTC 1d close < 73000",
+                "BTC 1d close < 70000",
+                "BTC 1d close < 68000",
+            ],
+            "is_60d_capped": False,
+        },
         "state_transition": {
             "from_state": "FLAT", "to_state": "LONG_PLANNED",
             "transition_reasoning": "...",
@@ -106,7 +119,9 @@ def _ok_master() -> dict[str, Any]:
             "composition": {"base": 0.70, "raw_product": 0.4409},
         },
         "counter_arguments": ["..."],
-        "narrative": "...",
+        "narrative": "层间一致,做多",
+        "one_line_summary": "做多",
+        "evidence_ref": ["l2_bullish"],
         "confidence": 0.80,
         "data_completeness_pct": 100,
     }

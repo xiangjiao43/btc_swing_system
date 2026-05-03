@@ -13,11 +13,20 @@ V24(meta)在 collect_meta_activations 实现:汇总 V1-V23 触发记录。
 
 constraint_activations dict 写入 strategy_runs.constraint_activations_json
 (migration 011),周复盘 AI(1.10-H)消费评估硬约束过严 / 过松。
+
+Sprint 1.10-F 增加:
+- V8/V9/V11/V21 失败标 `validator_<n>_needs_retry`(orchestrator 触发同 run 重试 1 次)
+- V21 提供 `validator_21_retry_hint`(D3=b,塞 master prompt)
+- V22 升级:从 strategy_runs.retry_log_json 滑动 72h 检测(D2=a)
+  辅助 helper:count_master_failures_in_window()
+- collect_meta_activations 聚合 needs_retry 决策 + retry_hints
 """
 
 from __future__ import annotations
 
-from typing import Any
+import sqlite3
+from datetime import datetime, timedelta, timezone
+from typing import Any, Optional
 
 
 def _deep_copy_dict(d: Any) -> Any:
@@ -335,7 +344,7 @@ def validator_8_break_objectivity(
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """V8:new_thesis 时 break_conditions 必须 ≥ 3 条且全部客观可判定(§3.4.2)。
 
-    失败:**重试 1 次**(留 1.10-F),本 sprint 只识别 + 标 activations。
+    Sprint 1.10-F:失败 → 标 needs_retry,orchestrator 触发同 run 重试 1 次。
     """
     out = dict(master_output)
     activations = {"validator_8_break_objectivity": False}
@@ -345,8 +354,9 @@ def validator_8_break_objectivity(
     breaks = new_thesis.get("break_conditions") or []
     if len(breaks) < 3 or not all(_is_objective_break(b) for b in breaks):
         activations["validator_8_break_objectivity"] = True
+        activations["validator_8_needs_retry"] = True
         notes = list(out.get("notes") or [])
-        notes.append("v8_break_objectivity_violation_retry_pending_1.10_f")
+        notes.append("v8_break_objectivity_violation_needs_retry")
         out["notes"] = notes
     return out, activations
 
@@ -391,8 +401,9 @@ def validator_9_break_distance(
         # 留 1.10-L 真 API 时加详细
     if violation:
         activations["validator_9_break_distance"] = True
+        activations["validator_9_needs_retry"] = True
         notes = list(out.get("notes") or [])
-        notes.append("v9_break_distance_violation_retry_pending_1.10_f")
+        notes.append("v9_break_distance_violation_needs_retry")
         out["notes"] = notes
     return out, activations
 
@@ -469,8 +480,9 @@ def validator_11_direction_lock(
     }
     if any(w in text for w in opposite_words.get(direction, ())):
         activations["validator_11_direction_lock"] = True
+        activations["validator_11_needs_retry"] = True
         notes = list(out.get("notes") or [])
-        notes.append("v11_direction_change_attempt_retry_pending_1.10_f")
+        notes.append("v11_direction_change_attempt_needs_retry")
         out["notes"] = notes
     return out, activations
 
@@ -866,10 +878,15 @@ def validator_21_soft_resistance(
         return out, activations
     # 满足创建条件但 silent → 软抗拒
     activations["validator_21_soft_resistance"] = True
-    notes = list(out.get("notes") or [])
-    notes.append(
-        "v21_soft_resistance_detected_retry_pending_1.10_f"
+    activations["validator_21_needs_retry"] = True
+    # D3=b:retry hint 文本(orchestrator 第二次调 master 时塞 prompt)
+    activations["validator_21_retry_hint"] = (
+        f"V21 软抗拒检测:active_thesis=None + cooldown=False + 14d_fuse=False + "
+        f"L3 grade={grade} ∈ {{A,B,C}},应该出 new_thesis 而非 silent_cooldown。"
+        f"请重新评估,若证据齐备且 risk_breakdown 在阈值内,务必输出 mode=new_thesis。"
     )
+    notes = list(out.get("notes") or [])
+    notes.append("v21_soft_resistance_detected_needs_retry")
     out["notes"] = notes
     return out, activations
 
@@ -877,14 +894,26 @@ def validator_21_soft_resistance(
 def validator_22_3day_fail(
     master_output: dict[str, Any], context: dict[str, Any],
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """V22:master AI 连续 3 天失败 → review_pending(§3.4.7)。
+    """V22:master AI 滑动 72h 内 ≥ 3 次失败 → review_pending(§3.4.7)。
 
-    本 sprint 只识别(标 activations),实际进入 review_pending 由调用方触发。
+    Sprint 1.10-F D2=a + sliding 72h:
+    - 优先用 context["master_failures_in_72h"](由 orchestrator 通过
+      count_master_failures_in_window() 从 strategy_runs.retry_log_json 查询)
+    - 兼容老字段 master_consecutive_failures(向后兼容,1.10-G 删)
+
+    本 sprint 只识别(标 activations + needs_review_pending),
+    review_pending 实际进入由调用方(orchestrator / scheduler)触发。
     """
     out = dict(master_output)
     activations = {"validator_22_3day_fail": False}
-    if int(context.get("master_consecutive_failures") or 0) >= 3:
+    fails_72h = context.get("master_failures_in_72h")
+    if fails_72h is None:
+        # 向后兼容旧字段
+        fails_72h = int(context.get("master_consecutive_failures") or 0)
+    if int(fails_72h) >= 3:
         activations["validator_22_3day_fail"] = True
+        activations["validator_22_needs_review_pending"] = True
+        activations["validator_22_failures_count"] = int(fails_72h)
         notes = list(out.get("notes") or [])
         notes.append("v22_3day_fail_triggers_review_pending")
         out["notes"] = notes
@@ -984,6 +1013,12 @@ _DEFAULT_ACTIVATIONS_V24 = {
     "thesis_lock_active": False,
     "in_cooldown": False,
     "cooldown_remaining_hours": 0,
+    # Sprint 1.10-F:retry 决策聚合(供 orchestrator 决定是否同 run 重试 master)
+    "validator_needs_retry": False,
+    "validator_retry_hints": [],
+    # V22:72h 内 master 失败次数(由 orchestrator 注入 context 后 V22 写回)
+    "validator_22_failures_count": 0,
+    "validator_22_needs_review_pending": False,
 }
 
 
@@ -1020,6 +1055,22 @@ def collect_meta_activations(
     cd = context.get("cooldown_state") or {}
     out["in_cooldown"] = bool(cd.get("in_cooldown"))
     out["cooldown_remaining_hours"] = float(cd.get("cooldown_remaining_hours") or 0)
+
+    # Sprint 1.10-F:聚合 V8/V9/V11/V21 needs_retry → 一个总开关
+    needs_retry = any(
+        bool(raw_activations.get(k)) for k in (
+            "validator_8_needs_retry",
+            "validator_9_needs_retry",
+            "validator_11_needs_retry",
+            "validator_21_needs_retry",
+        )
+    )
+    out["validator_needs_retry"] = needs_retry
+    # 收集所有 retry hints(目前仅 V21 提供 hint;V8/V9/V11 用 notes 中的标识)
+    hints: list[str] = []
+    if raw_activations.get("validator_21_retry_hint"):
+        hints.append(raw_activations["validator_21_retry_hint"])
+    out["validator_retry_hints"] = hints
 
     return out
 
@@ -1067,3 +1118,52 @@ def validate_master_output(
         context=context,
     )
     return output, constraint_activations
+
+
+# ============================================================
+# Sprint 1.10-F:V22 SQL 滑动窗口检测 helper(D2=a)
+# ============================================================
+
+def count_master_failures_in_window(
+    conn: sqlite3.Connection,
+    window_hours: int = 72,
+    *,
+    now_utc: Optional[datetime] = None,
+) -> int:
+    """从 strategy_runs 表统计滑动窗口内 master AI 失败次数(v1.4 §3.4.7)。
+
+    判定 master 失败的条件:retry_log_json 含 'master_fail' 或
+    'thesis_aware_fallback_applied':true 或 'master_failed' 字符串。
+
+    Args:
+        conn: SQLite 连接(已连真 DB / 测试用内存 DB)
+        window_hours: 滑动窗口长度,默认 72h(v1.4 §3.4.7)
+        now_utc: 评估时点(测试可注入),默认 datetime.now(timezone.utc)
+
+    Returns:
+        窗口内 master 失败的 strategy_runs 行数
+    """
+    if now_utc is None:
+        now_utc = datetime.now(timezone.utc)
+    window_start = (now_utc - timedelta(hours=window_hours)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+    try:
+        # 同时匹配新格式(thesis_aware_fallback_applied)和老式标记(master_fail / master_failed)
+        row = conn.execute(
+            """
+            SELECT COUNT(*) FROM strategy_runs
+            WHERE generated_at_utc >= ?
+              AND retry_log_json IS NOT NULL
+              AND (
+                  retry_log_json LIKE '%thesis_aware_fallback_applied%true%'
+                  OR retry_log_json LIKE '%master_fail%'
+                  OR retry_log_json LIKE '%master_failed%'
+              )
+            """,
+            (window_start,),
+        ).fetchone()
+        return int(row[0]) if row else 0
+    except sqlite3.OperationalError:
+        # 表 / 列不存在(极早期 / 测试 DB)→ 0
+        return 0

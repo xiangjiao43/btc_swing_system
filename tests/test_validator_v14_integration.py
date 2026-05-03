@@ -18,8 +18,46 @@ from src.ai.validator import (
 # ============================================================
 
 def test_v24_default_dict_has_28_fields():
-    """v1.4 §3.4.9 期望 28 字段 dict(全 false / None default)。"""
-    assert len(_DEFAULT_ACTIVATIONS_V24) == 28
+    """v1.4 §3.4.9 原 28 字段 dict(全 false / None default)。
+
+    Sprint 1.10-F 增加 4 个 retry-mechanism 元字段(validator_needs_retry /
+    validator_retry_hints / validator_22_failures_count /
+    validator_22_needs_review_pending),总数 32。原 28 字段都仍存在。
+    """
+    assert len(_DEFAULT_ACTIVATIONS_V24) == 32
+    # v1.4 §3.4.9 28 个原字段必须仍存在
+    v14_28_fields = {
+        "validator_1_stop_loss_overridden",
+        "validator_2_position_capped",
+        "validator_3_entry_size_normalized",
+        "validator_4_protection_blocked",
+        "validator_5_grade_permission_lock",
+        "validator_6_thesis_lock",
+        "validator_7_invalidation_check",
+        "validator_8_break_objectivity",
+        "validator_9_break_distance",
+        "validator_10_grade_lock",
+        "validator_11_direction_lock",
+        "validator_12_evidence_real",
+        "validator_13_objective_evidence",
+        "validator_14_counter_argument",
+        "validator_15_confidence_capped",
+        "validator_15_capped_value",
+        "validator_16_change_mind",
+        "validator_17_stop_tightening",
+        "validator_18_14d_fuse_active",
+        "validator_19_60d_cap",
+        "validator_20_consecutive_fuse",
+        "validator_21_soft_resistance",
+        "validator_22_3day_fail",
+        "validator_23_conflict_missing",
+        "position_cap_compressed",
+        "thesis_lock_active",
+        "in_cooldown",
+        "cooldown_remaining_hours",
+    }
+    for k in v14_28_fields:
+        assert k in _DEFAULT_ACTIVATIONS_V24, f"v1.4 §3.4.9 字段缺失: {k}"
 
 
 def test_v24_collect_meta_activations_no_violations():
@@ -188,13 +226,16 @@ def test_validate_v1_v2_v5_combined_overrides():
 
 
 def test_validate_dict_28_field_complete():
-    """validate_master_output 返回的 activations 必须含全 28 字段。"""
+    """validate_master_output 返回的 activations 必须含全 32 字段。
+
+    v1.4 §3.4.9 28 字段 + Sprint 1.10-F 新增 4 retry 元字段 = 32。
+    """
     _, activations = validate_master_output(
         {"mode": "silent_cooldown", "silent_reason": "x",
          "narrative": "无层间矛盾"},
         {"active_thesis": None, "cooldown_state": {}, "fuse_state": {}},
     )
-    assert len(activations) == 28
-    # 所有 v1.4 §3.4.9 字段都在
+    assert len(activations) == 32
+    # 所有 default 字段都在
     for key in _DEFAULT_ACTIVATIONS_V24:
         assert key in activations

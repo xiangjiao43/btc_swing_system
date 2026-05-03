@@ -1011,6 +1011,12 @@ class StrategyStateDAO:
         generated_at_utc = state.get("generated_at_utc") or _utc_now_iso()
         generated_at_bjt = state.get("generated_at_bjt") or generated_at_utc
 
+        # Sprint 1.10-E:V24 meta — 从 state 提取 constraint_activations
+        # (orchestrator 装入 state["constraint_activations"]),写入新列。
+        # 兼容旧 caller(无此 key 时存 NULL)。
+        ca = state.get("constraint_activations")
+        ca_json = json.dumps(ca, ensure_ascii=False) if ca else None
+
         sql = """
             INSERT INTO strategy_runs
                 (run_id, generated_at_utc, generated_at_bjt,
@@ -1019,8 +1025,9 @@ class StrategyStateDAO:
                  state_transitioned, run_trigger, run_mode,
                  fallback_level, system_version, rules_version,
                  strategy_flavor, observation_category,
-                 cold_start, ai_model_actual, full_state_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 cold_start, ai_model_actual, full_state_json,
+                 constraint_activations_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(run_id) DO UPDATE SET
                 generated_at_utc = excluded.generated_at_utc,
                 generated_at_bjt = excluded.generated_at_bjt,
@@ -1036,7 +1043,8 @@ class StrategyStateDAO:
                 observation_category = excluded.observation_category,
                 cold_start = excluded.cold_start,
                 ai_model_actual = excluded.ai_model_actual,
-                full_state_json = excluded.full_state_json
+                full_state_json = excluded.full_state_json,
+                constraint_activations_json = excluded.constraint_activations_json
         """
         cur = conn.execute(
             sql,
@@ -1049,6 +1057,7 @@ class StrategyStateDAO:
                 strategy_flavor, observation_category,
                 cold_start_flag, ai_model_actual,
                 json.dumps(state, ensure_ascii=False),
+                ca_json,
             ),
         )
         return cur.rowcount

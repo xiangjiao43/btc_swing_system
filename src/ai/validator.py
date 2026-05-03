@@ -1,294 +1,23 @@
-"""src/ai/validator.py — Sprint 1.8 Task C 主裁输出硬约束校验器。
+"""src/ai/validator.py — Sprint 1.10-E Validator 24 条(v1.4 §3.4)。
 
-对齐建模 v1.2 §6.5 + v1.3 主裁 prompt §13 H1-H10。
+D1=a 决策:原地重写,删除 v1.3 H1-H10 旧实施(class AdjudicatorValidator +
+HOLDING_STATES + ILLEGAL_TRANSITIONS + 14 档迁移检查)。
 
-校验主裁(MasterAdjudicator)输出符合 10 条硬约束。违反时:
-- 强制覆盖输出值(让最终输出始终合法)
-- 记录 violations 列表(包含 rule / detail / auto_fix)
-- 在 notes 标记 'ai_overridden_<rule>'
+新接口:
+  validate_master_output(master_output, context) → (validated, constraint_activations)
 
-返回 {validated_output, violations, passed}。
+24 条 Validator 模块级函数(每个签名相同):
+  validator_<n>_<name>(master_output, context) → (modified_output, activations)
+
+V24(meta)在 collect_meta_activations 实现:汇总 V1-V23 触发记录。
+
+constraint_activations dict 写入 strategy_runs.constraint_activations_json
+(migration 011),周复盘 AI(1.10-H)消费评估硬约束过严 / 过松。
 """
 
 from __future__ import annotations
 
 from typing import Any
-
-
-HOLDING_STATES = {
-    "LONG_HOLD", "LONG_TRIM", "SHORT_HOLD", "SHORT_TRIM",
-    "LONG_OPEN", "SHORT_OPEN",
-}
-
-# H7 非法迁移(必须经 FLIP_WATCH)
-ILLEGAL_TRANSITIONS = {
-    ("LONG_EXIT", "SHORT_PLANNED"),
-    ("LONG_EXIT", "LONG_PLANNED"),
-    ("SHORT_EXIT", "LONG_PLANNED"),
-    ("SHORT_EXIT", "SHORT_PLANNED"),
-}
-
-
-class AdjudicatorValidator:
-    """对齐建模 v1.2 §6.5 + v1.3 主裁 prompt §13 H1-H10 硬约束。
-
-    用法:
-        v = AdjudicatorValidator()
-        result = v.validate(master_output, l1, l2, l3, l4, l5, current_state)
-        if result['passed']:
-            ...  # 主裁输出无违反
-        else:
-            for vio in result['violations']:
-                ...  # 记录 vio['rule'] / vio['detail'] / vio['auto_fix']
-        final_output = result['validated_output']  # 修正后版本
-    """
-
-    def validate(
-        self,
-        master_output: dict[str, Any],
-        l1_output: dict[str, Any],
-        l2_output: dict[str, Any],
-        l3_output: dict[str, Any],
-        l4_output: dict[str, Any],
-        l5_output: dict[str, Any],
-        current_state: str,
-    ) -> dict[str, Any]:
-        """返回 {validated_output, violations, passed}。"""
-        violations: list[dict[str, str]] = []
-        # 深复制相关字段,避免 mutate 调用方
-        validated = _deep_copy_dict(master_output)
-
-        # H1: opportunity_grade 三重封闭(主裁不直接输出 grade,但
-        # narrative 中不应误引用与 L3 不同的 grade — 软校验,记录但
-        # 不强制覆盖文本)
-        l3_grade = l3_output.get("opportunity_grade")
-        narrative = validated.get("narrative", "") or ""
-        # 简化:只检查是否在 narrative 中错误地把 grade 写成与 L3 不一致的等级
-        # (例:L3=A 但 narrative 说"机会等级 B")
-        if l3_grade and isinstance(narrative, str):
-            for g in ("A", "B", "C", "none"):
-                if g == l3_grade:
-                    continue
-                # 中文模式:"机会等级 X" / "grade X" / "X 级机会"
-                patterns = [
-                    f"机会等级 {g}",
-                    f"grade {g}",
-                    f"{g} 级机会",
-                ]
-                if any(p in narrative for p in patterns):
-                    violations.append({
-                        "rule": "H1",
-                        "detail": (
-                            f"narrative 引用 grade={g} 与 L3 grade={l3_grade} 不符"
-                        ),
-                        "auto_fix": "保留 narrative,在 notes 标记不一致",
-                    })
-                    validated.setdefault("notes", []).append(
-                        "ai_overridden_H1_grade_inconsistent"
-                    )
-                    break
-
-        # H2: stop_loss 必须从 L4.hard_invalidation_levels 中选
-        # 1.8.2-I:master 在 FLAT 状态下可能输出 trade_plan: null,setdefault 不会覆盖 None
-        trade_plan = validated.get("trade_plan") or {}
-        validated["trade_plan"] = trade_plan
-        stop_loss = trade_plan.get("stop_loss")
-        l4_levels = l4_output.get("hard_invalidation_levels", []) or []
-        l4_prices = []
-        for lvl in l4_levels:
-            if isinstance(lvl, dict) and "price" in lvl:
-                try:
-                    l4_prices.append(float(lvl["price"]))
-                except (TypeError, ValueError):
-                    pass
-        if stop_loss is not None:
-            try:
-                stop_loss_f = float(stop_loss)
-                if stop_loss_f not in l4_prices:
-                    violations.append({
-                        "rule": "H2",
-                        "detail": (
-                            f"stop_loss {stop_loss_f} 不在 L4 "
-                            f"hard_invalidation_levels {l4_prices} 中"
-                        ),
-                        "auto_fix": (
-                            f"使用 L4 第一个止损位 "
-                            f"{l4_prices[0] if l4_prices else None}"
-                        ),
-                    })
-                    if l4_prices:
-                        trade_plan["stop_loss"] = l4_prices[0]
-                    else:
-                        trade_plan["stop_loss"] = None
-                    validated.setdefault("notes", []).append(
-                        "ai_overridden_H2"
-                    )
-            except (TypeError, ValueError):
-                pass
-
-        # H3: position_cap_final.value ≥ 0.15
-        # 1.8.2-I:同上,master 可能输出 position_cap_final: null
-        pcf = validated.get("position_cap_final") or {}
-        validated["position_cap_final"] = pcf
-        try:
-            cap_value = float(pcf.get("value", 0))
-        except (TypeError, ValueError):
-            cap_value = 0.0
-        if cap_value < 0.15:
-            violations.append({
-                "rule": "H3",
-                "detail": (
-                    f"position_cap_final.value {cap_value} < 0.15 硬下限"
-                ),
-                "auto_fix": "强制为 0.15",
-            })
-            pcf["value"] = 0.15
-            # 1.8.2-I:同上,pcf 可能含 composition: null
-            comp = pcf.get("composition") or {}
-            pcf["composition"] = comp
-            comp["after_hard_floor"] = 0.15
-            validated.setdefault("notes", []).append("ai_overridden_H3")
-
-        # H4: extreme_event_detected=true → state 必须 PROTECTION
-        if l5_output.get("extreme_event_detected") is True:
-            # 1.8.2-I:同上,master 可能输出 state_transition: null
-            st = validated.get("state_transition") or {}
-            validated["state_transition"] = st
-            to_state = st.get("to_state")
-            if to_state != "PROTECTION":
-                violations.append({
-                    "rule": "H4",
-                    "detail": (
-                        f"L5 extreme_event=true 但 to_state={to_state},"
-                        f"非 PROTECTION"
-                    ),
-                    "auto_fix": "强制 to_state=PROTECTION + action=protective",
-                })
-                st["to_state"] = "PROTECTION"
-                trade_plan["action"] = "protective"
-                validated.setdefault("notes", []).append("ai_overridden_H4")
-
-        # H5: L1=chaos → action 必须 watch/hold/protective/exit
-        if l1_output.get("regime") == "chaos":
-            action = trade_plan.get("action")
-            if action in ("open", "add"):
-                violations.append({
-                    "rule": "H5",
-                    "detail": f"L1=chaos 但 action={action},不允许开仓",
-                    "auto_fix": "强制 action=watch",
-                })
-                if current_state in HOLDING_STATES:
-                    trade_plan["action"] = "hold"
-                else:
-                    trade_plan["action"] = "watch"
-                validated.setdefault("notes", []).append("ai_overridden_H5")
-
-        # H6: L3=none → action 必须 watch/hold(不能开仓)
-        if l3_output.get("opportunity_grade") == "none":
-            action = trade_plan.get("action")
-            if action in ("open", "add"):
-                violations.append({
-                    "rule": "H6",
-                    "detail": f"L3=none 但 action={action},不允许开仓",
-                    "auto_fix": "强制 action=watch / hold",
-                })
-                if current_state in HOLDING_STATES:
-                    trade_plan["action"] = "hold"
-                else:
-                    trade_plan["action"] = "watch"
-                validated.setdefault("notes", []).append("ai_overridden_H6")
-
-        # H7: 状态迁移合法路径(禁止 EXIT 直跳 PLANNED)
-        st = validated.setdefault("state_transition", {})
-        from_s = st.get("from_state")
-        to_s = st.get("to_state")
-        if (from_s, to_s) in ILLEGAL_TRANSITIONS:
-            violations.append({
-                "rule": "H7",
-                "detail": (
-                    f"非法迁移 {from_s} → {to_s}(必须经 FLIP_WATCH)"
-                ),
-                "auto_fix": "强制 to_state=FLIP_WATCH",
-            })
-            st["to_state"] = "FLIP_WATCH"
-            validated.setdefault("notes", []).append("ai_overridden_H7")
-
-        # H8: position_size_pct ≤ position_cap_final.value
-        try:
-            cap_value = float(pcf.get("value", 0))
-        except (TypeError, ValueError):
-            cap_value = 0.0
-        size_pct = trade_plan.get("position_size_pct")
-        if size_pct is not None and cap_value > 0:
-            try:
-                size_pct_f = float(size_pct)
-                if size_pct_f > cap_value + 1e-9:
-                    violations.append({
-                        "rule": "H8",
-                        "detail": (
-                            f"position_size_pct {size_pct_f} > "
-                            f"position_cap {cap_value}"
-                        ),
-                        "auto_fix": f"强制 position_size_pct={cap_value}",
-                    })
-                    trade_plan["position_size_pct"] = cap_value
-                    validated.setdefault("notes", []).append(
-                        "ai_overridden_H8"
-                    )
-            except (TypeError, ValueError):
-                pass
-
-        # H9: counter_arguments ≥ 1 条
-        counters = validated.get("counter_arguments")
-        if not counters or not isinstance(counters, list) or len(counters) == 0:
-            violations.append({
-                "rule": "H9",
-                "detail": "counter_arguments 为空,违反诚实纪律",
-                "auto_fix": "添加默认 placeholder",
-            })
-            validated["counter_arguments"] = [
-                "[Validator 注:主裁未提供反向论证,这是建模硬要求 H9 违反]"
-            ]
-            validated.setdefault("notes", []).append("ai_overridden_H9")
-
-        # H10: confidence ≤ data_completeness/100 × min(L1-L5 confidence)
-        try:
-            master_conf = float(validated.get("confidence", 0))
-        except (TypeError, ValueError):
-            master_conf = 0.0
-        try:
-            data_pct = (
-                float(validated.get("data_completeness_pct", 100)) / 100.0
-            )
-        except (TypeError, ValueError):
-            data_pct = 1.0
-        l_confs = []
-        for layer_out in (l1_output, l2_output, l3_output,
-                          l4_output, l5_output):
-            try:
-                c = float(layer_out.get("confidence", 1.0))
-                l_confs.append(c)
-            except (TypeError, ValueError):
-                l_confs.append(1.0)
-        max_allowed = data_pct * min(l_confs) if l_confs else 1.0
-        # 1% 浮点容差(避免 round 抖动触发)
-        if master_conf > max_allowed + 0.01:
-            violations.append({
-                "rule": "H10",
-                "detail": (
-                    f"confidence {master_conf} > {max_allowed:.4f} "
-                    f"(data×min(L1-L5))"
-                ),
-                "auto_fix": f"强制 confidence={round(max_allowed, 2)}",
-            })
-            validated["confidence"] = round(max_allowed, 2)
-            validated.setdefault("notes", []).append("ai_overridden_H10")
-
-        return {
-            "validated_output": validated,
-            "violations": violations,
-            "passed": len(violations) == 0,
-        }
 
 
 def _deep_copy_dict(d: Any) -> Any:
@@ -1189,3 +918,152 @@ def validator_23_conflict_resolution(
         notes.append("conflict_resolution_missing")
         out["notes"] = notes
     return out, activations
+
+
+# ============================================================
+# V24:Meta 约束(灵魂条款,§3.4.9)
+# ============================================================
+
+# V1-V23 应用顺序(自然顺序;V18 后跑也无害,silent_cooldown 后续检查自动跳过)
+_VALIDATOR_PIPELINE = [
+    ("V1",  validator_1_stop_loss),
+    ("V2",  validator_2_position_cap),
+    ("V3",  validator_3_entry_size_normalized),
+    ("V4",  validator_4_protection_blocked),
+    ("V5",  validator_5_grade_permission_lock),
+    ("V6",  validator_6_thesis_lock),
+    ("V7",  validator_7_invalidation_check),
+    ("V8",  validator_8_break_objectivity),
+    ("V9",  validator_9_break_distance),
+    ("V10", validator_10_grade_lock),
+    ("V11", validator_11_direction_lock),
+    ("V12", validator_12_evidence_real),
+    ("V13", validator_13_objective_evidence),
+    ("V14", validator_14_counter_argument),
+    ("V15", validator_15_confidence_cap),
+    ("V16", validator_16_change_mind),
+    ("V17", validator_17_stop_tightening),
+    ("V18", validator_18_14d_fuse),
+    ("V19", validator_19_60d_cap),
+    ("V20", validator_20_consecutive_fuse),
+    ("V21", validator_21_soft_resistance),
+    ("V22", validator_22_3day_fail),
+    ("V23", validator_23_conflict_resolution),
+]
+
+
+# v1.4 §3.4.9 全 28 字段 default(false / None)— 周复盘 AI 期望全字段都在
+# 即使本次未触发 → 写 false / None,便于 SQL 查询过滤
+_DEFAULT_ACTIVATIONS_V24 = {
+    "validator_1_stop_loss_overridden": False,
+    "validator_2_position_capped": False,
+    "validator_3_entry_size_normalized": False,
+    "validator_4_protection_blocked": False,
+    "validator_5_grade_permission_lock": False,
+    "validator_6_thesis_lock": False,
+    "validator_7_invalidation_check": False,
+    "validator_8_break_objectivity": False,
+    "validator_9_break_distance": False,
+    "validator_10_grade_lock": False,
+    "validator_11_direction_lock": False,
+    "validator_12_evidence_real": False,
+    "validator_13_objective_evidence": False,
+    "validator_14_counter_argument": False,
+    "validator_15_confidence_capped": False,
+    "validator_15_capped_value": None,
+    "validator_16_change_mind": False,
+    "validator_17_stop_tightening": False,
+    "validator_18_14d_fuse_active": False,
+    "validator_19_60d_cap": False,
+    "validator_20_consecutive_fuse": False,
+    "validator_21_soft_resistance": False,
+    "validator_22_3day_fail": False,
+    "validator_23_conflict_missing": False,
+    # 额外 meta 字段(§3.4.9 末段)
+    "position_cap_compressed": None,
+    "thesis_lock_active": False,
+    "in_cooldown": False,
+    "cooldown_remaining_hours": 0,
+}
+
+
+def collect_meta_activations(
+    raw_activations: dict[str, Any],
+    *,
+    master_output: dict[str, Any],
+    context: dict[str, Any],
+) -> dict[str, Any]:
+    """V24 meta(§3.4.9):汇总 V1-V23 触发记录 + 计算额外 meta 字段。
+
+    Args:
+        raw_activations: V1-V23 累计的 activations(dict 合并)
+        master_output: 经 V1-V23 处理后的 output(用于额外 meta 字段提取)
+        context: validator context
+
+    Returns:
+        完整 28 字段 dict,可直接写入 strategy_runs.constraint_activations_json
+    """
+    out = dict(_DEFAULT_ACTIVATIONS_V24)
+    out.update(raw_activations)
+
+    # 额外 meta:position_cap_compressed = master_output.new_thesis.entry_orders 实际 max size
+    new_thesis = master_output.get("new_thesis") or {}
+    eorders = new_thesis.get("entry_orders") or []
+    if eorders:
+        max_size = max(float(o.get("size_pct") or 0) for o in eorders) / 100.0
+        out["position_cap_compressed"] = round(max_size, 4)
+
+    # thesis_lock_active = active_thesis 不为 None
+    out["thesis_lock_active"] = context.get("active_thesis") is not None
+
+    # in_cooldown / cooldown_remaining_hours
+    cd = context.get("cooldown_state") or {}
+    out["in_cooldown"] = bool(cd.get("in_cooldown"))
+    out["cooldown_remaining_hours"] = float(cd.get("cooldown_remaining_hours") or 0)
+
+    return out
+
+
+def validate_master_output(
+    master_output: dict[str, Any],
+    context: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """统一 Validator 入口(v1.4 §3.4 全 24 条)。
+
+    Args:
+        master_output: master AI 原始输出 dict(含 mode 字段)
+        context: dict 含
+            - l1_output / l2_output / l3_output / l4_output / l5_output
+            - l3_grade (str: 'A','B','C','none')
+            - l4_hard_invalidation_levels (list[float])
+            - l4_position_cap_base (float)
+            - active_thesis (None or dict, 含 break_conditions / direction / is_60d_capped)
+            - current_position (None or dict)
+            - cooldown_state (dict 含 in_cooldown / cooldown_remaining_hours)
+            - fuse_state (dict 含 in_14d_fuse / in_thesis_cycle_fuse)
+            - in_protection (bool)
+            - consecutive_fuse_triggered (bool)
+            - data_completeness / historical_precedent_match (float 0-1)
+            - fallback_level (str or None)
+            - master_consecutive_failures (int)
+            - current_btc_price (float)
+            - stop_tightening_count_so_far (int)
+            - initial_stop_loss_price / active_thesis_avg_price (float)
+
+    Returns:
+        (validated_output, constraint_activations)
+        - validated_output: 经 V1-V23 应用后的 master_output(可能被覆盖)
+        - constraint_activations: V24 meta dict,28 字段
+          可直接 json.dumps 后写入 strategy_runs.constraint_activations_json
+    """
+    output = dict(master_output)
+    raw_activations: dict[str, Any] = {}
+    for _name, v_func in _VALIDATOR_PIPELINE:
+        output, act = v_func(output, context)
+        raw_activations.update(act)
+    constraint_activations = collect_meta_activations(
+        raw_activations,
+        master_output=output,
+        context=context,
+    )
+    return output, constraint_activations

@@ -34,7 +34,7 @@ from .agents import (
 from .agents.chart_renderer import ChartRenderer
 from .anti_pattern_signals import compute_anti_pattern_signals
 from .client import build_anthropic_client
-from .validator import AdjudicatorValidator
+from .validator import validate_master_output
 
 
 logger = logging.getLogger(__name__)
@@ -76,7 +76,8 @@ class AIOrchestrator:
             }
         self._agents = agents
 
-        self._validator = AdjudicatorValidator()
+        # Sprint 1.10-E:旧 AdjudicatorValidator(v1.3 H1-H10)删除,改用 v1.4 24 条
+        # 模块级函数 validate_master_output;orchestrator 调用见 run_full_a 末尾
 
     # ------------------------------------------------------------------
     # Public
@@ -149,19 +150,42 @@ class AIOrchestrator:
         )
         result["layers"]["master"] = master_out
 
-        # ---- 7. Validator ----
+        # ---- 7. Validator(v1.4 24 条,Sprint 1.10-E)----
+        # 装配 validator context — orchestrator 现有数据 + 业务态(cooldown/fuse/active_thesis)
+        # 由 1.10-D master_input_builder 装配;若 caller 未传 master_input,则用最小 context
         master_ctx = context.get("master") or {}
-        v_result = self._validator.validate(
-            master_output=master_out,
-            l1_output=l1_out, l2_output=l2_out, l3_output=l3_out,
-            l4_output=l4_out, l5_output=l5_out,
-            current_state=master_ctx.get("current_state", "FLAT"),
-        )
-        result["layers"]["master"] = v_result["validated_output"]
-        result["validator"] = {
-            "violations": v_result["violations"],
-            "passed": v_result["passed"],
+        validator_ctx = {
+            "l1_output": l1_out, "l2_output": l2_out, "l3_output": l3_out,
+            "l4_output": l4_out, "l5_output": l5_out,
+            "l3_grade": (l3_out or {}).get("opportunity_grade"),
+            "l4_hard_invalidation_levels": (
+                (l4_out or {}).get("hard_invalidation_levels") or []
+            ),
+            "l4_position_cap_base": (
+                (l4_out or {}).get("position_cap_base")
+                or (l4_out or {}).get("position_cap_pct")
+            ),
+            "in_protection": (l5_out or {}).get("extreme_event_detected") or False,
+            # 业务态字段:由 caller 装配后传入(1.10-D master_input_builder 已实施)
+            "active_thesis": master_ctx.get("active_thesis"),
+            "current_position": master_ctx.get("current_position"),
+            "cooldown_state": master_ctx.get("cooldown_state") or {},
+            "fuse_state": master_ctx.get("fuse_state") or {},
+            "consecutive_fuse_triggered": master_ctx.get("consecutive_fuse_triggered", False),
+            "data_completeness": master_ctx.get("data_completeness", 1.0),
+            "historical_precedent_match": master_ctx.get("historical_precedent_match", 1.0),
+            "fallback_level": master_ctx.get("fallback_level"),
+            "master_consecutive_failures": master_ctx.get("master_consecutive_failures", 0),
+            "current_btc_price": master_ctx.get("current_btc_price"),
+            "stop_tightening_count_so_far": master_ctx.get("stop_tightening_count_so_far", 0),
+            "initial_stop_loss_price": master_ctx.get("initial_stop_loss_price"),
+            "active_thesis_avg_price": master_ctx.get("active_thesis_avg_price"),
         }
+        validated_output, constraint_activations = validate_master_output(
+            master_out, validator_ctx,
+        )
+        result["layers"]["master"] = validated_output
+        result["constraint_activations"] = constraint_activations
 
         return result
 

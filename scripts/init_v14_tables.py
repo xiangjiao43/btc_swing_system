@@ -33,6 +33,7 @@ from src.data.storage.dao import VirtualAccountDAO  # noqa: E402
 
 _BASE_YAML = _REPO_ROOT / "config" / "base.yaml"
 _MIGRATION = _REPO_ROOT / "migrations" / "009_v14_virtual_account_thesis.sql"
+_MIGRATION_010 = _REPO_ROOT / "migrations" / "010_v14_fuse_system_states.sql"
 
 
 def load_config() -> dict:
@@ -47,10 +48,31 @@ def resolve_db_path(cfg: dict, cli_arg: str | None) -> Path:
     return (_REPO_ROOT / rel).resolve()
 
 
+def _column_exists(conn: sqlite3.Connection, table: str, column: str) -> bool:
+    rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+    return any(r[1] == column for r in rows)
+
+
 def apply_migration(conn: sqlite3.Connection) -> None:
-    """跑 migration 009(IF NOT EXISTS,幂等)。"""
-    sql = _MIGRATION.read_text(encoding="utf-8")
-    conn.executescript(sql)
+    """幂等跑 migration 009 + 010。
+
+    009:CREATE TABLE IF NOT EXISTS,executescript 幂等
+    010 SQL 部分:同 009(fuse_events / system_states 用 IF NOT EXISTS)
+    010 ALTER:Python 侧条件 ALTER(SQLite ALTER 不支持 IF NOT EXISTS)
+    """
+    # 009
+    sql_009 = _MIGRATION.read_text(encoding="utf-8")
+    conn.executescript(sql_009)
+
+    # 010 SQL 部分(fuse_events + system_states)
+    if _MIGRATION_010.exists():
+        sql_010 = _MIGRATION_010.read_text(encoding="utf-8")
+        conn.executescript(sql_010)
+        # 010 ALTER:theses.is_60d_capped(条件 ALTER)
+        if not _column_exists(conn, "theses", "is_60d_capped"):
+            conn.execute(
+                "ALTER TABLE theses ADD COLUMN is_60d_capped INTEGER NOT NULL DEFAULT 0"
+            )
 
 
 def get_latest_run_id(conn: sqlite3.Connection) -> str | None:

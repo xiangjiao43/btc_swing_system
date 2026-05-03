@@ -265,6 +265,22 @@ CREATE TABLE IF NOT EXISTS event_throttle (
 
 
 -- ============================================================
+-- Sprint 1.10-H D1=a:weekly_reviews(v1.4 §3.3.9 + §8.1)
+-- 周复盘 AI 输出一行(PK = week_start_utc YYYY-MM-DD 周一 UTC,UPSERT 幂等)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS weekly_reviews (
+    week_start_utc        TEXT PRIMARY KEY,
+    triggered_at_utc      TEXT NOT NULL,
+    output_json           TEXT NOT NULL,
+    critical_count        INTEGER DEFAULT 0,
+    notification_sent     INTEGER DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_weekly_reviews_triggered
+    ON weekly_reviews(triggered_at_utc);
+
+
+-- ============================================================
 -- Sprint 2.8-A:latest_factor_cards(每个 collector job 跑完后覆盖,单行)
 -- ============================================================
 CREATE TABLE IF NOT EXISTS latest_factor_cards (

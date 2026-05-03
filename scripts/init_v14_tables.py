@@ -37,6 +37,7 @@ _MIGRATION_010 = _REPO_ROOT / "migrations" / "010_v14_fuse_system_states.sql"
 _MIGRATION_011 = _REPO_ROOT / "migrations" / "011_v14_validator_meta.sql"
 _MIGRATION_012 = _REPO_ROOT / "migrations" / "012_v14_retry_log.sql"
 _MIGRATION_013 = _REPO_ROOT / "migrations" / "013_v14_event_throttle_class.sql"
+_MIGRATION_014 = _REPO_ROOT / "migrations" / "014_v14_weekly_reviews.sql"
 
 
 def load_config() -> dict:
@@ -96,6 +97,11 @@ def apply_migration(conn: sqlite3.Connection) -> None:
         conn.execute(
             "ALTER TABLE event_throttle ADD COLUMN event_class TEXT"
         )
+
+    # 014:weekly_reviews(全新表,CREATE TABLE IF NOT EXISTS 幂等,Sprint 1.10-H D1=a)
+    if _MIGRATION_014.exists():
+        sql_014 = _MIGRATION_014.read_text(encoding="utf-8")
+        conn.executescript(sql_014)
 
 
 def get_latest_run_id(conn: sqlite3.Connection) -> str | None:

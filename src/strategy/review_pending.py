@@ -23,10 +23,14 @@ from typing import Any, Optional
 
 _STATE_TYPE = "review_pending"
 
-# 三种出口枚举
+# 三种出口枚举(原 v1.4 §4.2.6)+ Sprint 1.10-H D4=b2 加 EXIT_D
 EXIT_A = "exit_a_threshold_adjustment"
 EXIT_B = "exit_b_thesis_renewal"
 EXIT_C = "exit_c_fuse_reset"
+# Sprint 1.10-H D4=b2:S3 过度保守(reason='overly_conservative')触发后,
+# 任一新 thesis 被创建 → 自动退出(语义清晰,周复盘 AI 可区分 exit_b
+# 用户续期 vs exit_d 自然恢复)
+EXIT_D = "exit_d_thesis_resumed"
 
 
 # ============================================================
@@ -173,4 +177,39 @@ def exit_c_fuse_reset(
             "DELETE FROM fuse_events WHERE event_type='14d_fuse_triggered'"
         )
         res["fuse_records_deleted"] = cur.rowcount
+    return res
+
+
+def exit_d_thesis_resumed(
+    conn: sqlite3.Connection, exit_at_utc: str,
+    *,
+    new_thesis_id: Optional[str] = None,
+) -> dict[str, Any]:
+    """出口 D(Sprint 1.10-H D4=b2):S3 过度保守 → 任一新 thesis 创建 → 自动退出。
+
+    与 exit_b 的区别:
+    - exit_b:用户主动续期已存在 thesis(传 new_thesis_spec)
+    - exit_d:系统自动检测新 thesis 创建后退出过度保守 review_pending
+            (语义=系统自然恢复,周复盘 AI 可 SQL 区分两类)
+
+    只对 reason='overly_conservative' 的 active review_pending 生效;
+    其他 reason(60d_cap / consecutive_fuse / master_3day_fail)即使有
+    新 thesis 也不通过本出口退出(那些必须走 exit_a/b/c)。
+    """
+    # 检测当前 active review_pending 的 reason
+    row = conn.execute(
+        "SELECT state_id, reason FROM system_states "
+        "WHERE state_type=? AND exit_at_utc IS NULL "
+        "ORDER BY entered_at_utc DESC LIMIT 1",
+        (_STATE_TYPE,),
+    ).fetchone()
+    if row is None:
+        return {"exited": False, "reason": "no_active_review_pending"}
+    if row["reason"] != "overly_conservative":
+        return {
+            "exited": False,
+            "reason": f"exit_d_only_for_overly_conservative_actual={row['reason']!r}",
+        }
+    res = _exit(conn, EXIT_D, exit_at_utc)
+    res["new_thesis_id"] = new_thesis_id
     return res

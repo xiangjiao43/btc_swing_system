@@ -36,6 +36,7 @@ _MIGRATION = _REPO_ROOT / "migrations" / "009_v14_virtual_account_thesis.sql"
 _MIGRATION_010 = _REPO_ROOT / "migrations" / "010_v14_fuse_system_states.sql"
 _MIGRATION_011 = _REPO_ROOT / "migrations" / "011_v14_validator_meta.sql"
 _MIGRATION_012 = _REPO_ROOT / "migrations" / "012_v14_retry_log.sql"
+_MIGRATION_013 = _REPO_ROOT / "migrations" / "013_v14_event_throttle_class.sql"
 
 
 def load_config() -> dict:
@@ -87,6 +88,13 @@ def apply_migration(conn: sqlite3.Connection) -> None:
     if not _column_exists(conn, "strategy_runs", "retry_log_json"):
         conn.execute(
             "ALTER TABLE strategy_runs ADD COLUMN retry_log_json TEXT"
+        )
+
+    # 013 ALTER:event_throttle.event_class(条件 ALTER,Sprint 1.10-G D2=b)
+    # 已存在 event_throttle 表(2.7-D 创建);加 event_class 标记两类节流
+    if not _column_exists(conn, "event_throttle", "event_class"):
+        conn.execute(
+            "ALTER TABLE event_throttle ADD COLUMN event_class TEXT"
         )
 
 

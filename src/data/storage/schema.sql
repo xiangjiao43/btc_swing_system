@@ -259,7 +259,8 @@ CREATE INDEX IF NOT EXISTS idx_events_type ON events_calendar(event_type);
 -- ============================================================
 CREATE TABLE IF NOT EXISTS event_throttle (
     event_type             TEXT PRIMARY KEY,
-    last_triggered_at_utc  TEXT NOT NULL
+    last_triggered_at_utc  TEXT NOT NULL,
+    event_class            TEXT  -- Sprint 1.10-G D2=b: event_price / event_invalidation 两类
 );
 
 

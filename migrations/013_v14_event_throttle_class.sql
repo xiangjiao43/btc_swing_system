@@ -1,0 +1,16 @@
+-- Sprint 1.10-G:event_throttle.event_class
+--
+-- 对齐 docs/modeling.md b25cfe6(v1.4)§6.2.3 事件触发节流规则 + D2=b 决策
+--
+-- 用途:event_throttle 表加 event_class 字段,显式标记两类节流(D2=b):
+--   - event_class = 'event_price' (event_price_flat / event_price_holding 同类)
+--   - event_class = 'event_invalidation' (硬失效位击穿,独立计数)
+--
+-- 既有 PK event_type 保留(向后兼容);event_class 是显式元数据 + 未来按类聚合查询用。
+-- ALTER 由 scripts/init_v14_tables.py 在 Python 侧条件 ALTER。
+
+-- =============================================================================
+-- event_throttle.event_class(v1.4 §6.2.3 + D2=b)
+-- =============================================================================
+-- ALTER TABLE event_throttle ADD COLUMN event_class TEXT;
+-- 注:Python 侧 PRAGMA table_info 检测后条件 ALTER。本 SQL 文件作 audit trail。

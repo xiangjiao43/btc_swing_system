@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from typing import Any, AsyncIterator
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -24,6 +25,9 @@ from ..models import HistoryPage, StrategyStateRow
 from ...web_helpers import normalize_state
 
 
+logger = logging.getLogger(__name__)
+
+
 router = APIRouter(prefix="/strategy", tags=["strategy"])
 
 
@@ -31,7 +35,11 @@ router = APIRouter(prefix="/strategy", tags=["strategy"])
 # 序列化 helper
 # ==================================================================
 
-def _row_to_model(row: dict[str, Any]) -> StrategyStateRow:
+def _row_to_model(
+    row: dict[str, Any],
+    *,
+    v14_summaries: dict[str, Any] | None = None,
+) -> StrategyStateRow:
     state = row.get("state")
     if isinstance(state, str):
         try:
@@ -60,6 +68,11 @@ def _row_to_model(row: dict[str, Any]) -> StrategyStateRow:
                       "layer_cards": [], "anti_patterns_active": [],
                       "extreme_events_active": [], "raw": state or {}}
 
+    # Sprint 1.10-I §9.5:加 4 个 v1.4 摘要字段到 normalized state(向后兼容追加)
+    if v14_summaries:
+        for k, v in v14_summaries.items():
+            normalized[k] = v
+
     return StrategyStateRow(
         run_timestamp_utc=row["run_timestamp_utc"],
         run_id=row["run_id"],
@@ -74,6 +87,118 @@ def _row_to_model(row: dict[str, Any]) -> StrategyStateRow:
 # ==================================================================
 # GET /current(建模 §9.10 #1)+ /latest alias(老路径)
 # ==================================================================
+
+def _build_v14_summaries(conn: Any) -> dict[str, Any]:
+    """Sprint 1.10-I §9.5:构造 4 个 v1.4 摘要字段(GET /current 扩展)。
+
+    向后兼容:仅**追加**字段,不动现有 state 字段顺序与值。
+    任一摘要失败 → 该字段返 null,前端可降级渲染。
+
+    Returns:
+      {
+        account_summary: dict | null,
+        active_thesis: dict | null,
+        position_summary: dict | null,
+        pending_orders_summary: dict | null,
+      }
+    """
+    out: dict[str, Any] = {
+        "account_summary": None,
+        "active_thesis": None,
+        "position_summary": None,
+        "pending_orders_summary": None,
+    }
+    try:
+        from src.data.storage.dao import (
+            ThesesDAO, VirtualAccountDAO, VirtualOrdersDAO,
+        )
+    except Exception as e:
+        logger.warning("v14_summaries: import dao failed: %s", e)
+        return out
+
+    # 1. account_summary
+    try:
+        latest_va = VirtualAccountDAO.get_latest(conn)
+        if latest_va:
+            initial = float(latest_va.get("initial_capital") or 0.0)
+            equity = float(latest_va.get("total_equity") or 0.0)
+            cash = float(latest_va.get("available_cash") or 0.0)
+            pnl_pct = (
+                ((equity - initial) / initial * 100.0) if initial > 0 else 0.0
+            )
+            out["account_summary"] = {
+                "snapshot_id": latest_va.get("snapshot_id"),
+                "snapshot_at_utc": latest_va.get("snapshot_at_utc"),
+                "initial_capital": initial,
+                "total_equity": equity,
+                "available_cash": cash,
+                "total_pnl_pct": round(pnl_pct, 4),
+            }
+    except Exception as e:
+        logger.warning("v14_summaries.account: %s", e)
+
+    # 2. active_thesis(摘要,完整数据见 GET /api/theses/active)
+    active = None
+    try:
+        active = ThesesDAO.get_active(conn)
+        if active:
+            out["active_thesis"] = {
+                "thesis_id": active.get("thesis_id"),
+                "direction": active.get("direction"),
+                "lifecycle_stage": active.get("lifecycle_stage"),
+                "confidence_score": active.get("confidence_score"),
+                "created_at_utc": active.get("created_at_utc"),
+                "last_assessment": active.get("last_assessment"),
+                "is_60d_capped": bool(active.get("is_60d_capped") or 0),
+            }
+    except Exception as e:
+        logger.warning("v14_summaries.active_thesis: %s", e)
+
+    # 3. position_summary(从 active thesis + filled entry 推算)
+    if active:
+        try:
+            filled = VirtualOrdersDAO.get_filled(
+                conn, thesis_id=active["thesis_id"],
+            )
+            entry_filled = [o for o in filled if o.get("order_type") == "entry"]
+            total_btc = sum(float(o.get("filled_btc_amount") or 0) for o in entry_filled)
+            total_cost = sum(
+                float(o.get("filled_btc_amount") or 0) * float(o.get("filled_price") or 0)
+                for o in entry_filled
+            )
+            avg_price = (total_cost / total_btc) if total_btc > 0 else None
+            out["position_summary"] = {
+                "thesis_id": active["thesis_id"],
+                "direction": active.get("direction"),
+                "btc_amount": round(total_btc, 8) if total_btc else 0.0,
+                "avg_entry_price": (
+                    round(avg_price, 2) if avg_price is not None else None
+                ),
+                "entry_orders_filled": len(entry_filled),
+            }
+        except Exception as e:
+            logger.warning("v14_summaries.position: %s", e)
+
+    # 4. pending_orders_summary(从 active thesis 的 pending 算)
+    if active:
+        try:
+            pending = VirtualOrdersDAO.get_pending(
+                conn, thesis_id=active["thesis_id"],
+            )
+            by_type: dict[str, int] = {}
+            for o in pending:
+                t = o.get("order_type") or "unknown"
+                by_type[t] = by_type.get(t, 0) + 1
+            out["pending_orders_summary"] = {
+                "thesis_id": active["thesis_id"],
+                "total": len(pending),
+                "by_type": by_type,
+            }
+        except Exception as e:
+            logger.warning("v14_summaries.pending: %s", e)
+
+    return out
+
 
 def _overlay_latest_factor_cards(
     row: dict[str, Any], conn: Any,
@@ -108,9 +233,12 @@ def _overlay_latest_factor_cards(
 def _get_current_impl(request: Request) -> StrategyStateRow:
     ctx = request.app.state.ctx
     conn = ctx.conn_factory()
+    v14_summaries: dict[str, Any] = {}
     try:
         row = StrategyStateDAO.get_latest_state(conn)
         row = _overlay_latest_factor_cards(row, conn)
+        # Sprint 1.10-I §9.5:加 4 个 v1.4 摘要字段(向后兼容)
+        v14_summaries = _build_v14_summaries(conn)
     finally:
         try:
             conn.close()
@@ -118,7 +246,7 @@ def _get_current_impl(request: Request) -> StrategyStateRow:
             pass
     if row is None:
         raise HTTPException(status_code=404, detail="No strategy state found")
-    return _row_to_model(row)
+    return _row_to_model(row, v14_summaries=v14_summaries)
 
 
 @router.get("/current", response_model=StrategyStateRow)

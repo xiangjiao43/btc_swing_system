@@ -34,6 +34,7 @@ from src.data.storage.dao import VirtualAccountDAO  # noqa: E402
 _BASE_YAML = _REPO_ROOT / "config" / "base.yaml"
 _MIGRATION = _REPO_ROOT / "migrations" / "009_v14_virtual_account_thesis.sql"
 _MIGRATION_010 = _REPO_ROOT / "migrations" / "010_v14_fuse_system_states.sql"
+_MIGRATION_011 = _REPO_ROOT / "migrations" / "011_v14_validator_meta.sql"
 
 
 def load_config() -> dict:
@@ -73,6 +74,13 @@ def apply_migration(conn: sqlite3.Connection) -> None:
             conn.execute(
                 "ALTER TABLE theses ADD COLUMN is_60d_capped INTEGER NOT NULL DEFAULT 0"
             )
+
+    # 011 ALTER:strategy_runs.constraint_activations_json(条件 ALTER)
+    # SQL 文件本身只含注释(audit trail);ALTER 在 Python 侧
+    if not _column_exists(conn, "strategy_runs", "constraint_activations_json"):
+        conn.execute(
+            "ALTER TABLE strategy_runs ADD COLUMN constraint_activations_json TEXT"
+        )
 
 
 def get_latest_run_id(conn: sqlite3.Connection) -> str | None:

@@ -1,0 +1,27 @@
+-- Sprint 1.10-E:strategy_runs.constraint_activations_json
+--
+-- 对齐 docs/modeling.md b25cfe6(v1.4)§3.4.9 Validator 24(meta 灵魂条款)
+--
+-- 用途:每次 master AI 输出经 Validator 1-23 校验后,记录每条是否激活 +
+--       关键值(如 validator_15_capped_value),写入此字段。
+--       周复盘 AI(1.10-H)消费此字段评估硬约束的"过严 / 过松"。
+--
+-- 字段格式:JSON 字符串,反序列化为 dict(完整 fields 见 v1.4 §3.4.9 28 字段)
+-- 例:
+--   {
+--     "validator_1_stop_loss_overridden": false,
+--     "validator_5_grade_permission_lock": true,
+--     "validator_15_confidence_capped": true,
+--     "validator_15_capped_value": 0.65,
+--     ...
+--   }
+--
+-- ALTER TABLE 由 Python 侧条件 ALTER(SQLite ALTER 不支持 IF NOT EXISTS),
+-- 由 scripts/init_v14_tables.py 处理。
+
+-- =============================================================================
+-- strategy_runs.constraint_activations_json(v1.4 §3.4.9 Validator 24 meta)
+-- =============================================================================
+-- ALTER TABLE strategy_runs ADD COLUMN constraint_activations_json TEXT;
+-- 注:由 scripts/init_v14_tables.py 在 Python 侧用 PRAGMA table_info 检测后
+-- 条件 ALTER。本 SQL 文件作为 audit trail。

@@ -298,3 +298,486 @@ def _deep_copy_dict(d: Any) -> Any:
     if isinstance(d, list):
         return [_deep_copy_dict(v) for v in d]
     return d
+
+
+# ============================================================
+# Sprint 1.10-E:Validator V1-V24(v1.4 §3.4)
+# ============================================================
+# 对齐 docs/modeling.md b25cfe6(v1.4)§3.4(7 类 24 条)
+#
+# 设计:
+# - 每个 V<n> 是模块级纯函数 (master_output, context) → (modified_output, activations)
+# - activations dict 累计后写入 strategy_runs.constraint_activations_json(V24 meta)
+# - 旧 AdjudicatorValidator class(H1-H10)保留至 commit 4 删除(本 commit 双体系)
+#
+# 用户决策(D1=a / D2=c / D3=a / D4=a)落地:
+# - D1 = a:原地重写 src/ai/validator.py(orchestrator import 不变)
+# - D2 = c:V12 evidence_ref 轻量校验(非空 list[str]),严校验留 1.10-L
+# - D3 = a:V13 字符串匹配(每条 evidence 含 input 字段名/数值 token)
+# - D4 = a:V21 只识别(写 activations),重试机制留 1.10-F
+
+
+# ----------------------------------------------------------------
+# 资金安全类(V1-V5,继承 v1.3 + 微调)
+# ----------------------------------------------------------------
+
+def validator_1_stop_loss(
+    master_output: dict[str, Any], context: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """V1:stop_loss 必须从 hard_invalidation_levels 选(§3.4.1)。
+
+    失败处理:强制覆盖为 hard_invalidation_levels[0],notes 添加
+    `stop_loss_overridden_by_validator`。
+
+    Returns: (modified_output, {validator_1_stop_loss_overridden: bool})
+    """
+    out = dict(master_output)
+    activations = {"validator_1_stop_loss_overridden": False}
+    new_thesis = out.get("new_thesis") or {}
+    if not new_thesis:
+        return out, activations
+    sl_obj = new_thesis.get("stop_loss") or {}
+    sl_price = sl_obj.get("price")
+    levels = context.get("l4_hard_invalidation_levels") or []
+    if sl_price is None or not levels:
+        return out, activations
+    levels_floats = [float(x) for x in levels if x is not None]
+    if not levels_floats:
+        return out, activations
+    if not any(abs(float(sl_price) - lv) < 1e-6 for lv in levels_floats):
+        # 覆盖
+        new_thesis = dict(new_thesis)
+        new_thesis["stop_loss"] = {"price": levels_floats[0],
+                                    "size_pct": sl_obj.get("size_pct", 100)}
+        out["new_thesis"] = new_thesis
+        activations["validator_1_stop_loss_overridden"] = True
+        notes = list(out.get("notes") or [])
+        notes.append("stop_loss_overridden_by_validator")
+        out["notes"] = notes
+    return out, activations
+
+
+def validator_2_position_cap(
+    master_output: dict[str, Any], context: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """V2:max_position_size_pct ≤ position_cap_base(§3.4.1)。
+
+    失败:强制 cap,notes 添加 `position_capped_by_validator`。
+    """
+    out = dict(master_output)
+    activations = {"validator_2_position_capped": False}
+    cap_base = context.get("l4_position_cap_base")
+    if cap_base is None:
+        return out, activations
+    cap_base = float(cap_base)
+    new_thesis = out.get("new_thesis") or {}
+    entry_orders = list(new_thesis.get("entry_orders") or [])
+    if not entry_orders:
+        return out, activations
+    # max size_pct(单笔)
+    max_size = max(float(o.get("size_pct") or 0) / 100.0 for o in entry_orders)
+    if max_size > cap_base + 1e-9:
+        # 按比例 cap 每个 entry order
+        ratio = cap_base / max_size
+        new_orders = [
+            {**o, "size_pct": round(float(o["size_pct"]) * ratio, 4)}
+            for o in entry_orders
+        ]
+        new_thesis = dict(new_thesis)
+        new_thesis["entry_orders"] = new_orders
+        out["new_thesis"] = new_thesis
+        activations["validator_2_position_capped"] = True
+        notes = list(out.get("notes") or [])
+        notes.append("position_capped_by_validator")
+        out["notes"] = notes
+    return out, activations
+
+
+def validator_3_entry_size_normalized(
+    master_output: dict[str, Any], context: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """V3:mode=new_thesis 时 entry_orders 总 size_pct ≤ 100(§3.4.1)。
+
+    失败:按比例缩到 100,notes 添加 `entry_size_normalized`。
+    """
+    out = dict(master_output)
+    activations = {"validator_3_entry_size_normalized": False}
+    if out.get("mode") != "new_thesis":
+        return out, activations
+    new_thesis = out.get("new_thesis") or {}
+    entry_orders = list(new_thesis.get("entry_orders") or [])
+    if not entry_orders:
+        return out, activations
+    total = sum(float(o.get("size_pct") or 0) for o in entry_orders)
+    if total > 100.0 + 1e-9:
+        ratio = 100.0 / total
+        new_orders = [
+            {**o, "size_pct": round(float(o["size_pct"]) * ratio, 4)}
+            for o in entry_orders
+        ]
+        new_thesis = dict(new_thesis)
+        new_thesis["entry_orders"] = new_orders
+        out["new_thesis"] = new_thesis
+        activations["validator_3_entry_size_normalized"] = True
+        notes = list(out.get("notes") or [])
+        notes.append("entry_size_normalized")
+        out["notes"] = notes
+    return out, activations
+
+
+def validator_4_protection_blocked(
+    master_output: dict[str, Any], context: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """V4:PROTECTION 状态不允许新 thesis / 不允许 trade_plan(§3.4.1)。
+
+    失败:强制 mode=silent_cooldown,trade_plan 强制 null。
+    """
+    out = dict(master_output)
+    activations = {"validator_4_protection_blocked": False}
+    if not bool(context.get("in_protection")):
+        return out, activations
+    if out.get("mode") == "new_thesis":
+        out["mode"] = "silent_cooldown"
+        out["silent_reason"] = "PROTECTION 状态强制 silent_cooldown(Validator 4)"
+        out.pop("new_thesis", None)
+        activations["validator_4_protection_blocked"] = True
+        notes = list(out.get("notes") or [])
+        notes.append("protection_blocked_new_thesis")
+        out["notes"] = notes
+    return out, activations
+
+
+# 5 类 grade-permission 合法表(§3.4.1 V5)
+_GRADE_PERMISSION_LEGAL = {
+    "A": {"can_open", "cautious_open"},
+    "B": {"cautious_open", "ambush_only"},
+    "C": {"ambush_only"},          # C 级强制 ambush_only(继承 v1.3)
+    "none": set(),                  # none 不允许创建 thesis
+}
+
+
+def validator_5_grade_permission_lock(
+    master_output: dict[str, Any], context: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """V5:grade 与 thesis 创建 / execution_permission 对应关系强制(§3.4.1)。
+
+    - grade=none → 不允许创建 thesis(强制 silent_cooldown)
+    - grade=A → permission ∈ {can_open, cautious_open}
+    - grade=B → permission ∈ {cautious_open, ambush_only}
+    - grade=C → permission = ambush_only
+    失败:覆盖 permission(C 强制 ambush_only),或强制 silent。
+    """
+    out = dict(master_output)
+    activations = {"validator_5_grade_permission_lock": False}
+    if out.get("mode") != "new_thesis":
+        return out, activations
+    grade = (context.get("l3_grade") or "none").upper() if isinstance(
+        context.get("l3_grade"), str) else "none"
+    if grade.lower() == "none":
+        # 强制 silent
+        out["mode"] = "silent_cooldown"
+        out["silent_reason"] = "L3 grade=none 不允许创建 thesis(Validator 5)"
+        out.pop("new_thesis", None)
+        activations["validator_5_grade_permission_lock"] = True
+        notes = list(out.get("notes") or [])
+        notes.append("permission_overridden_for_grade_none")
+        out["notes"] = notes
+        return out, activations
+    legal = _GRADE_PERMISSION_LEGAL.get(grade, set())
+    if not legal:
+        return out, activations
+    new_thesis = out.get("new_thesis") or {}
+    perm = new_thesis.get("execution_permission")
+    if perm not in legal:
+        new_thesis = dict(new_thesis)
+        # C 级强制 ambush_only;其他取 legal 中第一个
+        target = "ambush_only" if grade == "C" else sorted(legal)[0]
+        new_thesis["execution_permission"] = target
+        out["new_thesis"] = new_thesis
+        activations["validator_5_grade_permission_lock"] = True
+        notes = list(out.get("notes") or [])
+        notes.append(f"permission_overridden_for_grade_{grade}")
+        out["notes"] = notes
+    return out, activations
+
+
+# ----------------------------------------------------------------
+# thesis 主线锁类(V6-V9,v1.4 新增)
+# ----------------------------------------------------------------
+
+def validator_6_thesis_lock(
+    master_output: dict[str, Any], context: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """V6:有 active_thesis 时 mode 必须是 evaluate_existing 或 silent_cooldown(§3.4.2)。
+
+    失败:强制 mode=evaluate_existing,丢弃 new_thesis 内容。
+    """
+    out = dict(master_output)
+    activations = {"validator_6_thesis_lock": False}
+    has_active = context.get("active_thesis") is not None
+    if has_active and out.get("mode") == "new_thesis":
+        out["mode"] = "evaluate_existing"
+        out.pop("new_thesis", None)
+        # 给一个最小 thesis_assessment,用 mostly 保守
+        if "thesis_assessment" not in out:
+            out["thesis_assessment"] = {
+                "still_valid": "mostly",
+                "which_break_triggered": None,
+                "reasoning": "Validator 6 thesis_lock 强制覆盖,master 试图出 new_thesis 但有 active",
+                "stop_loss_adjustment": None,
+                "objective_evidence": ["master_overridden_by_validator_6"],
+            }
+        activations["validator_6_thesis_lock"] = True
+        notes = list(out.get("notes") or [])
+        notes.append("master_new_thesis_blocked_by_validator_6_active_thesis_exists")
+        out["notes"] = notes
+    return out, activations
+
+
+def validator_7_invalidation_check(
+    master_output: dict[str, Any], context: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """V7:still_valid=invalidated 时必须填 which_break_triggered + 必须是
+    active_thesis.break_conditions 中已客观触发的某条(§3.4.2)。
+
+    失败:降级为 weakened,notes 添加 `invalidation_rejected_no_break_triggered`。
+    """
+    out = dict(master_output)
+    activations = {"validator_7_invalidation_check": False}
+    if out.get("mode") != "evaluate_existing":
+        return out, activations
+    ta = out.get("thesis_assessment") or {}
+    if ta.get("still_valid") != "invalidated":
+        return out, activations
+    which = ta.get("which_break_triggered")
+    active_thesis = context.get("active_thesis") or {}
+    breaks = active_thesis.get("break_conditions") or []
+    # 检查 which 是否在 break_conditions 中(允许子串匹配,AI 可能精简表达)
+    matched = False
+    if which and isinstance(which, str):
+        matched = any(
+            isinstance(b, str) and (b == which or which in b or b in which)
+            for b in breaks
+        )
+    if not matched:
+        # 降级
+        ta = dict(ta)
+        ta["still_valid"] = "weakened"
+        out["thesis_assessment"] = ta
+        activations["validator_7_invalidation_check"] = True
+        notes = list(out.get("notes") or [])
+        notes.append("invalidation_rejected_no_break_triggered")
+        out["notes"] = notes
+    return out, activations
+
+
+# 主观词汇黑名单(V8 客观性检测,启发式)
+_SUBJECTIVE_KEYWORDS = (
+    "情绪", "感觉", "可能", "也许", "似乎", "好像", "应该", "建议",
+    "趋势反转", "宏观恶化", "市场转空", "市场转多",
+)
+
+
+def _is_objective_break(condition: str) -> bool:
+    """启发式:含数字 / 价格 / 指标名 / 'L1-L5' / 时间窗口 → 客观;
+    含主观词 → 主观。
+    """
+    if not isinstance(condition, str) or not condition.strip():
+        return False
+    s = condition
+    # 含主观词 → 拒
+    if any(kw in s for kw in _SUBJECTIVE_KEYWORDS):
+        return False
+    # 含数字 → 客观可判定
+    import re
+    if re.search(r"\d", s):
+        return True
+    # 含 L1-L5 / 触发 / 收盘 / 突破 等结构化词 → 客观
+    structured = ("L1", "L2", "L3", "L4", "L5", "extreme_event",
+                  "break", "1D 收盘", "1H 收盘", "4H 收盘", "突破",
+                  "跌破", "持续")
+    if any(kw in s for kw in structured):
+        return True
+    return False
+
+
+def validator_8_break_objectivity(
+    master_output: dict[str, Any], context: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """V8:new_thesis 时 break_conditions 必须 ≥ 3 条且全部客观可判定(§3.4.2)。
+
+    失败:**重试 1 次**(留 1.10-F),本 sprint 只识别 + 标 activations。
+    """
+    out = dict(master_output)
+    activations = {"validator_8_break_objectivity": False}
+    if out.get("mode") != "new_thesis":
+        return out, activations
+    new_thesis = out.get("new_thesis") or {}
+    breaks = new_thesis.get("break_conditions") or []
+    if len(breaks) < 3 or not all(_is_objective_break(b) for b in breaks):
+        activations["validator_8_break_objectivity"] = True
+        notes = list(out.get("notes") or [])
+        notes.append("v8_break_objectivity_violation_retry_pending_1.10_f")
+        out["notes"] = notes
+    return out, activations
+
+
+def validator_9_break_distance(
+    master_output: dict[str, Any], context: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """V9:new_thesis 时 break_conditions 距当前距离合理性(§3.4.2)。
+
+    - 价格类 break:距当前 ≤ 20%
+    - 指标类(DXY/VIX 等):≤ 15%
+    - 事件类(L5/macro):不限
+    失败:重试 1 次(留 1.10-F),本 sprint 只识别 + 标 activations。
+    """
+    out = dict(master_output)
+    activations = {"validator_9_break_distance": False}
+    if out.get("mode") != "new_thesis":
+        return out, activations
+    new_thesis = out.get("new_thesis") or {}
+    breaks = new_thesis.get("break_conditions") or []
+    current_btc = context.get("current_btc_price")
+    violation = False
+    import re
+    for b in breaks:
+        if not isinstance(b, str):
+            continue
+        # 事件类:不限距离
+        if any(kw in b for kw in ("L5", "extreme_event", "事件",
+                                    "FOMC", "CPI", "NFP")):
+            continue
+        # 价格类:含 BTC 价位(5 位数字 60000-200000 范围)
+        m = re.search(r"\b(\d{5,6})\b", b)
+        if m and current_btc:
+            price_in_break = float(m.group(1))
+            if 50000 <= price_in_break <= 200000:
+                # 价格类 break
+                dist_pct = abs(price_in_break - current_btc) / current_btc
+                if dist_pct > 0.20:
+                    violation = True
+                    continue
+        # 指标类(DXY/VIX 等):距当前 ≤ 15%(本 sprint 简化:无 DXY 当前值传入则跳过)
+        # 留 1.10-L 真 API 时加详细
+    if violation:
+        activations["validator_9_break_distance"] = True
+        notes = list(out.get("notes") or [])
+        notes.append("v9_break_distance_violation_retry_pending_1.10_f")
+        out["notes"] = notes
+    return out, activations
+
+
+# ----------------------------------------------------------------
+# grade 封闭类(V10-V11,v1.4 强化)
+# ----------------------------------------------------------------
+
+def validator_10_grade_lock(
+    master_output: dict[str, Any], context: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """V10:master 输出的 opportunity_grade 必须严格等于 L3 输出(§3.4.3)。
+
+    失败:覆盖为 L3 给的,notes 添加 `grade_overridden_to_l3`。
+
+    注:v1.4 master 输出 schema 不强制有 opportunity_grade 字段(只在 narrative
+    用),但若 master 输出 narrative 隐含改 grade(如 new_thesis.confidence_score
+    超出 L3 grade 范围)→ 触发本 V10。本 sprint 简化版:只检查 confidence_score 范围。
+    """
+    out = dict(master_output)
+    activations = {"validator_10_grade_lock": False}
+    if out.get("mode") != "new_thesis":
+        return out, activations
+    grade = context.get("l3_grade")
+    if grade is None:
+        return out, activations
+    grade = grade.upper() if isinstance(grade, str) else None
+    new_thesis = out.get("new_thesis") or {}
+    score = new_thesis.get("confidence_score")
+    if score is None:
+        return out, activations
+    score = int(score)
+    # v1.4 §3.3.6:A→80-100, B→60-80, C→40-60, none→不创建
+    expected_ranges = {"A": (80, 100), "B": (60, 80), "C": (40, 60)}
+    rng = expected_ranges.get(grade)
+    if rng and not (rng[0] <= score <= rng[1]):
+        # 覆盖到 grade 中位
+        new_thesis = dict(new_thesis)
+        new_thesis["confidence_score"] = (rng[0] + rng[1]) // 2
+        out["new_thesis"] = new_thesis
+        activations["validator_10_grade_lock"] = True
+        notes = list(out.get("notes") or [])
+        notes.append(f"grade_overridden_to_l3_{grade}")
+        out["notes"] = notes
+    return out, activations
+
+
+def validator_11_direction_lock(
+    master_output: dict[str, Any], context: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """V11:mode=evaluate_existing 时,master 不能改 active_thesis.direction(§3.4.3)。
+
+    失败:重试 1 次(留 1.10-F),本 sprint 只识别 + 标 activations。
+    注意:thesis_assessment schema 不直接含 direction,本检查针对 narrative
+    含 'flip' / '反向' 等 hint 的简化检测。生产严校验留 1.10-L。
+    """
+    out = dict(master_output)
+    activations = {"validator_11_direction_lock": False}
+    if out.get("mode") != "evaluate_existing":
+        return out, activations
+    active_thesis = context.get("active_thesis") or {}
+    if not active_thesis:
+        return out, activations
+    direction = active_thesis.get("direction")
+    if direction not in ("long", "short"):
+        return out, activations
+    # 检测 narrative 含相反方向的明示(简化启发式)
+    narrative = (out.get("narrative") or "")
+    one_line = (out.get("one_line_summary") or "")
+    text = narrative + " " + one_line
+    opposite_words = {
+        "long": ("做空", "翻空", "反手做空", "卖出"),
+        "short": ("做多", "翻多", "反手做多", "买入"),
+    }
+    if any(w in text for w in opposite_words.get(direction, ())):
+        activations["validator_11_direction_lock"] = True
+        notes = list(out.get("notes") or [])
+        notes.append("v11_direction_change_attempt_retry_pending_1.10_f")
+        out["notes"] = notes
+    return out, activations
+
+
+# ----------------------------------------------------------------
+# evidence 真实性类(V12,本 sprint 轻量;V13/V14 在 commit 3)
+# ----------------------------------------------------------------
+
+def validator_12_evidence_real(
+    master_output: dict[str, Any], context: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """V12:evidence_ref 必须在 evidence_cards 真实存在(§3.4.4)。
+
+    **D2=c 决策**:本 sprint 只做轻量校验(non-empty list[str]),
+    严校验(每条 ref 真在 evidence_cards 中)留 1.10-L 端到端 sprint。
+
+    失败处理(本 sprint):删除非法项,notes 添加 `missing_evidence_ref`。
+    """
+    out = dict(master_output)
+    activations = {"validator_12_evidence_real": False}
+    refs = out.get("evidence_ref")
+    if refs is None:
+        return out, activations
+    if not isinstance(refs, list):
+        out["evidence_ref"] = []
+        activations["validator_12_evidence_real"] = True
+        notes = list(out.get("notes") or [])
+        notes.append("missing_evidence_ref_not_a_list")
+        out["notes"] = notes
+        return out, activations
+    # 删除非 str / 空 str
+    cleaned = [r for r in refs if isinstance(r, str) and r.strip()]
+    if len(cleaned) != len(refs):
+        out["evidence_ref"] = cleaned
+        activations["validator_12_evidence_real"] = True
+        notes = list(out.get("notes") or [])
+        notes.append("missing_evidence_ref_invalid_items_removed")
+        out["notes"] = notes
+    return out, activations

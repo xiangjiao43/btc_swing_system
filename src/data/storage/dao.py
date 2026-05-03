@@ -1568,3 +1568,307 @@ class VirtualAccountDAO:
         ).fetchall()
         return [dict(r) for r in rows]
 
+
+class VirtualOrdersDAO:
+    """virtual_orders 表 DAO(v1.4 §5.2)。
+
+    精确管理"挂单 → 触发 → 持仓"全流程(§5.2.1)。
+    所有挂单都是精确价格(不是区间,§5.2.4)。
+    DAO 不做触发判定 / 价格穿越逻辑(留 1.10-B 的 orders_engine)。
+
+    设计要点(用户 v2 补充 C):
+      expires_at_utc 由调用方传入(读 base.yaml::virtual_orders.default_expiry_days
+      算 created_at + N * 86400)。SQL 不写 DEFAULT,因为 N 是配置项可调。
+    """
+
+    @staticmethod
+    def create_order(
+        conn: sqlite3.Connection,
+        order_id: str,
+        thesis_id: str,
+        direction: str,            # long / short
+        order_type: str,           # entry / stop_loss / take_profit
+        price: float,              # 精确挂单价
+        size_pct: float,
+        size_usdt: float,          # = initial_capital × size_pct
+        created_at_utc: str,
+        expires_at_utc: str,       # 调用方算(§5.2.6 默认 7 天,见 base.yaml)
+        status: str = "pending",
+    ) -> None:
+        """创建一条挂单(v1.4 §5.2.2)。
+
+        order_id 是 PK,重复抛 IntegrityError。
+        不隐式 commit。
+        """
+        sql = """
+            INSERT INTO virtual_orders (
+                order_id, thesis_id, direction, order_type,
+                price, size_pct, size_usdt,
+                status, created_at_utc, expires_at_utc
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        conn.execute(sql, (
+            order_id, thesis_id, direction, order_type,
+            price, size_pct, size_usdt,
+            status, created_at_utc, expires_at_utc,
+        ))
+
+    @staticmethod
+    def fill_order(
+        conn: sqlite3.Connection,
+        order_id: str,
+        filled_at_utc: str,
+        filled_price: float,        # = price(等于挂单价,§5.2.4)
+        filled_btc_amount: float,   # = size_usdt / filled_price
+    ) -> int:
+        """挂单触发:status=pending → filled,写入成交字段(v1.4 §5.2.3)。
+
+        返回受影响行数(0 = order_id 不存在或非 pending)。
+        """
+        sql = """
+            UPDATE virtual_orders
+            SET status='filled', filled_at_utc=?, filled_price=?, filled_btc_amount=?
+            WHERE order_id=? AND status='pending'
+        """
+        cur = conn.execute(sql, (
+            filled_at_utc, filled_price, filled_btc_amount, order_id,
+        ))
+        return cur.rowcount
+
+    @staticmethod
+    def cancel_order(
+        conn: sqlite3.Connection,
+        order_id: str,
+        cancelled_reason: str,      # thesis_invalidated / superseded / expired / manual
+    ) -> int:
+        """取消挂单:status=pending → cancelled(v1.4 §5.2.6)。
+
+        返回受影响行数(0 = order_id 不存在或非 pending)。
+        """
+        sql = """
+            UPDATE virtual_orders
+            SET status='cancelled', cancelled_reason=?
+            WHERE order_id=? AND status='pending'
+        """
+        cur = conn.execute(sql, (cancelled_reason, order_id))
+        return cur.rowcount
+
+    @staticmethod
+    def mark_expired(
+        conn: sqlite3.Connection,
+        now_utc: str,
+    ) -> int:
+        """批量把过期挂单标记 expired(v1.4 §5.2.6)。
+
+        条件:status=pending 且 expires_at_utc < now_utc。
+        返回受影响行数。
+        """
+        sql = """
+            UPDATE virtual_orders
+            SET status='expired', cancelled_reason='expired'
+            WHERE status='pending' AND expires_at_utc < ?
+        """
+        cur = conn.execute(sql, (now_utc,))
+        return cur.rowcount
+
+    @staticmethod
+    def get_pending(
+        conn: sqlite3.Connection,
+        thesis_id: Optional[str] = None,
+    ) -> list[dict[str, Any]]:
+        """取所有 pending 挂单(可选按 thesis_id 过滤)。
+
+        触发判定调用此方法拿候选(v1.4 §5.2.3)。
+        """
+        if thesis_id is None:
+            rows = conn.execute(
+                "SELECT * FROM virtual_orders WHERE status='pending' "
+                "ORDER BY created_at_utc ASC"
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM virtual_orders "
+                "WHERE status='pending' AND thesis_id=? "
+                "ORDER BY created_at_utc ASC",
+                (thesis_id,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    @staticmethod
+    def get_filled(
+        conn: sqlite3.Connection,
+        thesis_id: Optional[str] = None,
+    ) -> list[dict[str, Any]]:
+        """取所有 filled 挂单(可选按 thesis_id 过滤)。
+
+        持仓金额 / 均价计算调用此方法(§5.2.5 同 1H 多挂单全触发)。
+        """
+        if thesis_id is None:
+            rows = conn.execute(
+                "SELECT * FROM virtual_orders WHERE status='filled' "
+                "ORDER BY filled_at_utc ASC"
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM virtual_orders "
+                "WHERE status='filled' AND thesis_id=? "
+                "ORDER BY filled_at_utc ASC",
+                (thesis_id,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+
+class ThesesDAO:
+    """theses 表 DAO(v1.4 §5.3)。
+
+    把所有挂单/持仓/止盈止损绑到同一个 thesis(§5.3.1)。
+    DAO 不做创建条件判定 / 失效判定 / 反手通道选择(留 1.10-C 的 thesis_manager)。
+
+    设计要点(用户 v2 补充 B):
+      break_conditions 是 list[str],DAO 内 json.dumps 写 TEXT,
+      读时 json.loads 还原。JSON 反序列化合法性校验留 1.10-D。
+    """
+
+    @staticmethod
+    def create(
+        conn: sqlite3.Connection,
+        thesis_id: str,
+        created_at_run_id: str,
+        created_at_utc: str,
+        direction: str,                  # long / short
+        core_logic: str,
+        confidence_score: int,           # 0-100
+        break_conditions: list[str],     # ≥ 3 条客观条件(Validator 8/9 强制)
+        lifecycle_stage: str = "planned",
+        status: str = "active",
+    ) -> None:
+        """创建一条 thesis(v1.4 §5.3.2 + §5.3.3 创建条件由调用方把守)。
+
+        break_conditions 序列化为 JSON 字符串存入 TEXT 列。
+        thesis_id 是 PK,重复抛 IntegrityError。
+        不隐式 commit。
+        """
+        sql = """
+            INSERT INTO theses (
+                thesis_id, created_at_run_id, created_at_utc, direction,
+                core_logic, confidence_score, break_conditions,
+                lifecycle_stage, status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        conn.execute(sql, (
+            thesis_id, created_at_run_id, created_at_utc, direction,
+            core_logic, int(confidence_score), json.dumps(break_conditions, ensure_ascii=False),
+            lifecycle_stage, status,
+        ))
+
+    @staticmethod
+    def update_assessment(
+        conn: sqlite3.Connection,
+        thesis_id: str,
+        last_assessment: str,            # fully / mostly / partially / weakened / invalidated
+        last_assessment_note: str,
+        last_assessment_at_run: str,
+    ) -> int:
+        """更新评估快照(v1.4 §5.3.4 — 每天 16:00 master AI mode=evaluate_existing 写)。
+
+        返回受影响行数。
+        """
+        sql = """
+            UPDATE theses
+            SET last_assessment=?, last_assessment_note=?, last_assessment_at_run=?
+            WHERE thesis_id=?
+        """
+        cur = conn.execute(sql, (
+            last_assessment, last_assessment_note, last_assessment_at_run, thesis_id,
+        ))
+        return cur.rowcount
+
+    @staticmethod
+    def close(
+        conn: sqlite3.Connection,
+        thesis_id: str,
+        status: str,                     # closed_profit / closed_loss / closed_60d_cap / closed_protection / invalidated
+        closed_at_utc: str,
+        invalidated_reason: Optional[str] = None,
+        close_channel: Optional[str] = None,   # A / B / C(§5.4 反手 3 档)
+        final_realized_pnl: Optional[float] = None,
+        final_realized_pnl_pct: Optional[float] = None,
+        final_outcome: Optional[str] = None,   # profit / loss / breakeven / 60d_cap / protection
+        lifecycle_stage: str = "closed",
+    ) -> int:
+        """关闭 thesis,写入终态字段(v1.4 §5.3.5 / §5.3.7 / §5.4)。
+
+        返回受影响行数。
+        """
+        sql = """
+            UPDATE theses SET
+                status=?,
+                closed_at_utc=?,
+                invalidated_reason=?,
+                close_channel=?,
+                final_realized_pnl=?,
+                final_realized_pnl_pct=?,
+                final_outcome=?,
+                lifecycle_stage=?
+            WHERE thesis_id=?
+        """
+        cur = conn.execute(sql, (
+            status, closed_at_utc, invalidated_reason, close_channel,
+            final_realized_pnl, final_realized_pnl_pct, final_outcome,
+            lifecycle_stage, thesis_id,
+        ))
+        return cur.rowcount
+
+    @staticmethod
+    def get_active(conn: sqlite3.Connection) -> Optional[dict[str, Any]]:
+        """取当前唯一 active thesis(v1.4 §5.3.1 主线锁;Validator 6 强制单 active)。
+
+        返回 dict(break_conditions 已 json.loads 还原 list)或 None。
+        """
+        row = conn.execute(
+            "SELECT * FROM theses WHERE status='active' "
+            "ORDER BY created_at_utc DESC LIMIT 1"
+        ).fetchone()
+        if row is None:
+            return None
+        d = dict(row)
+        d["break_conditions"] = _safe_json_loads(d.get("break_conditions"))
+        return d
+
+    @staticmethod
+    def get_history(
+        conn: sqlite3.Connection,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """按 created_at_utc DESC 返历史 thesis,默认 100 条(v1.4 §9.2.4 时间线用)。
+
+        每条 dict 的 break_conditions 已 json.loads 还原 list。
+        """
+        rows = conn.execute(
+            "SELECT * FROM theses ORDER BY created_at_utc DESC LIMIT ?",
+            (int(limit),),
+        ).fetchall()
+        out: list[dict[str, Any]] = []
+        for r in rows:
+            d = dict(r)
+            d["break_conditions"] = _safe_json_loads(d.get("break_conditions"))
+            out.append(d)
+        return out
+
+
+def _safe_json_loads(raw: Any) -> Any:
+    """容错 JSON loads:None / 空 / 非法 → 返 [](避免 1.10-D 之前老数据 crash)。
+
+    1.10-D 的 validator 会校验 break_conditions ≥ 3 条客观条件;
+    本 DAO 层只做容错反序列化,不验内容。
+    """
+    if raw is None or raw == "":
+        return []
+    if isinstance(raw, list):
+        return raw
+    try:
+        v = json.loads(raw)
+        return v if isinstance(v, list) else []
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return []
+

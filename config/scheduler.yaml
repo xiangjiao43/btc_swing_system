@@ -140,4 +140,22 @@ jobs:
     misfire_grace_time: 30
     coalesce: true
     max_instances: 1
-    description: '事件触发器:macro(events_calendar 命中)/ price ±3% / invalidation 跌破失效位'
+    description: '事件触发器:event_macro(events_calendar 命中)+ event_price 双轨(±5% 空仓 / ±3% 持仓);1.10-G 后 event_invalidation 拆出 hard_invalidation_monitor 1h cron'
+
+  # Sprint 1.10-G v1.4 §10.4.1 新增:硬失效位独立 1h cron(规则平仓,无 AI)
+  hard_invalidation_monitor:
+    enabled: true
+    interval: '1h'
+    misfire_grace_time: 60
+    coalesce: true
+    max_instances: 1
+    description: 'event_invalidation:每 1h 检查 active thesis stop_loss 是否击穿 → 规则平仓(channel A,无 AI)'
+
+  # Sprint 1.10-G v1.4 §10.4.1 新增:持仓期 4h 健康检查(无持仓直接返回)
+  position_health_check:
+    enabled: true
+    interval: '4h'
+    misfire_grace_time: 300
+    coalesce: true
+    max_instances: 1
+    description: '持仓期 4h 健康检查;无 active thesis 直接返回(本 sprint stub,1.10-H 实施真 AI 调用)'

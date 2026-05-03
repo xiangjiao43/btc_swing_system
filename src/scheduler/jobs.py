@@ -743,34 +743,52 @@ def set_active_scheduler(scheduler: Any) -> None:
     _active_scheduler = scheduler
 
 
-def _enqueue_pipeline_run(run_trigger: str, *, delay_sec: int = 10) -> bool:
+def _enqueue_pipeline_run(
+    run_trigger: str,
+    *,
+    delay_sec: int = 10,
+    attempt: int = 1,
+    retry_start_utc: Optional[Any] = None,
+) -> bool:
     """把一次 pipeline_run 调度到 _active_scheduler,run_date=now+delay_sec。
 
+    Sprint 1.10-G(D3=a)接通 RetryPolicy 异步调度:
+      - attempt: 第几次尝试(1=首次,2/3 = retry)
+      - retry_start_utc: 首次失败的时间点(用于 RetryPolicy.is_within_window 2h 检查)
+
     Returns True 表示成功调度,False 表示无 scheduler(单测/直调路径)或失败。
-    delay_sec 默认 10s 让当前 collector job 有时间 commit。
+    delay_sec 默认 10s 让当前 collector job 有时间 commit;retry 由 RetryPolicy
+    给(5/10/20 分钟 backoff)。
     """
     sched = _active_scheduler
     if sched is None:
         logger.info(
-            "event triggered but no active scheduler: run_trigger=%s "
+            "event triggered but no active scheduler: run_trigger=%s attempt=%d "
             "(test or direct-invoke path, no enqueue)",
-            run_trigger,
+            run_trigger, attempt,
         )
         return False
     try:
         from datetime import datetime, timedelta, timezone
         run_date = datetime.now(timezone.utc) + timedelta(seconds=delay_sec)
         sched.add_job(
-            func=job_pipeline_run,
+            func=job_pipeline_run_with_retry,
             trigger="date",
             run_date=run_date,
-            kwargs={"run_trigger": run_trigger},
-            id=f"event_pipeline_{run_trigger}_{int(run_date.timestamp())}",
+            kwargs={
+                "run_trigger": run_trigger,
+                "attempt": attempt,
+                "retry_start_utc": retry_start_utc,
+            },
+            id=(
+                f"event_pipeline_{run_trigger}_attempt{attempt}_"
+                f"{int(run_date.timestamp())}"
+            ),
             replace_existing=True,
         )
         logger.info(
-            "enqueued pipeline_run for run_trigger=%s at %s",
-            run_trigger, run_date.isoformat(),
+            "enqueued pipeline_run for run_trigger=%s attempt=%d at %s",
+            run_trigger, attempt, run_date.isoformat(),
         )
         return True
     except Exception as e:
@@ -778,11 +796,242 @@ def _enqueue_pipeline_run(run_trigger: str, *, delay_sec: int = 10) -> bool:
         return False
 
 
+# ============================================================
+# Sprint 1.10-G:RetryPolicy 异步调度 wrapper(D3=a APScheduler one-shot)
+# ============================================================
+
+def job_pipeline_run_with_retry(
+    *,
+    run_trigger: str = "scheduled",
+    attempt: int = 1,
+    retry_start_utc: Optional[Any] = None,
+    conn_factory: Optional[Callable[[], Any]] = None,
+    builder_factory: Optional[Callable[[Any], Any]] = None,
+) -> dict[str, Any]:
+    """job_pipeline_run 包装 + RetryPolicy 异步重试(v1.4 §6.3 D3=a 接通)。
+
+    1. 调 job_pipeline_run(run_trigger)
+    2. 若 status='error' 或 ai_status startswith 'degraded':
+       - attempt < 3 且 in 2h window → 用 RetryPolicy.compute_backoff_seconds
+         schedule 同 job 在 backoff 秒后再跑(attempt+1)
+       - 否则 → 放弃 + 推 critical 告警(暂只 logger.error)
+    3. 成功 → 直接返回
+
+    retry_start_utc 由首次失败时记录(ISO 字符串),后续 attempt 携带传递,
+    RetryPolicy.is_within_window 用它判定 2h 总窗口。
+    """
+    from datetime import datetime, timezone
+    from src.ai.retry_policy import RetryPolicy
+
+    result = job_pipeline_run(
+        conn_factory=conn_factory, builder_factory=builder_factory,
+        run_trigger=run_trigger,
+    )
+    # 判定是否需要 retry
+    failed = (
+        result.get("status") == "error"
+        or str(result.get("ai_status", "")).startswith("degraded")
+    )
+    if not failed:
+        return result
+
+    rp = RetryPolicy()
+    now = datetime.now(timezone.utc)
+    now_iso = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+    # 首次失败:retry_start_utc 设为现在(ISO 字符串,RetryPolicy 接口要求)
+    if retry_start_utc is None:
+        retry_start_utc = now_iso
+
+    if not rp.should_retry(
+        attempt=attempt + 1,
+        run_started_at_utc=str(retry_start_utc),
+        now_utc=now_iso,
+    ):
+        logger.error(
+            "pipeline_run RETRY EXHAUSTED: run_trigger=%s attempt=%d "
+            "(超 max_attempts=3 或超 2h 窗口)— critical 告警",
+            run_trigger, attempt,
+        )
+        result["retry_exhausted"] = True
+        result["retry_attempts"] = attempt
+        return result
+
+    backoff = rp.compute_backoff_seconds(attempt + 1)
+    logger.warning(
+        "pipeline_run failed (attempt %d), scheduling retry in %ds (attempt %d)",
+        attempt, backoff, attempt + 1,
+    )
+    enq = _enqueue_pipeline_run(
+        run_trigger,
+        delay_sec=backoff,
+        attempt=attempt + 1,
+        retry_start_utc=retry_start_utc,
+    )
+    result["retry_scheduled"] = enq
+    result["retry_next_attempt"] = attempt + 1
+    result["retry_next_delay_sec"] = backoff
+    return result
+
+
+# ============================================================
+# Sprint 1.10-G:1h hard_invalidation_monitor + 4h position_health_check
+# ============================================================
+
+def job_hard_invalidation_monitor(
+    *,
+    conn_factory: Optional[Callable[[], Any]] = None,
+) -> dict[str, Any]:
+    """v1.4 §6.2.3 + §10.4.1:每 1h 检查 active thesis stop_loss 是否击穿。
+
+    击穿 → HardInvalidationMonitor.execute_invalidation 规则平仓(channel A,
+    无 AI),retry_log_marker 由 caller(本 job)塞入 event_throttle 兼容老 sink。
+
+    流程:
+      1. HardInvalidationMonitor.get_latest_btc_price(conn) 取最新 1h close
+      2. check_active_theses(conn, current_btc_price) 取击穿列表
+      3. 对每条 breach,execute_invalidation → fill + close + retry_log_marker
+      4. 写 event_throttle(event_type='event_invalidation', class='event_invalidation')
+      5. 推 critical 告警(本 sprint 用 logger.error;1.10-I 网页层加 toast)
+
+    本 job **不调 AI**(v1.4 §6.2.3 硬约束)。
+    """
+    def _body(conn: Any) -> dict[str, Any]:
+        from datetime import datetime, timezone
+        from src.strategy.event_trigger import (
+            EVENT_CLASS_INVALIDATION, EventTrigger,
+        )
+        from src.strategy.hard_invalidation_monitor import HardInvalidationMonitor
+
+        now = datetime.now(timezone.utc)
+        now_iso = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        current_px = HardInvalidationMonitor.get_latest_btc_price(conn)
+        if current_px is None:
+            return {
+                "by_collector": {"hard_invalidation": 0},
+                "total_upserted": 0,
+                "events_triggered": [],
+                "errors": {"no_kline": "no 1h close available"},
+            }
+
+        breaches = HardInvalidationMonitor.check_active_theses(
+            conn, current_btc_price=current_px, now_utc=now,
+        )
+        if not breaches:
+            return {
+                "by_collector": {"hard_invalidation": 0,
+                                  "current_btc_price": current_px},
+                "total_upserted": 0,
+                "events_triggered": [],
+                "errors": {},
+            }
+
+        # 读 initial_capital(virtual_account 第一行)
+        initial_capital = 100000.0
+        try:
+            row = conn.execute(
+                "SELECT initial_capital FROM virtual_account "
+                "ORDER BY snapshot_at_utc ASC LIMIT 1"
+            ).fetchone()
+            if row is not None:
+                initial_capital = float(
+                    row[0] if not hasattr(row, "keys") else row["initial_capital"]
+                )
+        except Exception:
+            pass  # fallback to default
+
+        executed: list[dict[str, Any]] = []
+        for b in breaches:
+            res = HardInvalidationMonitor.execute_invalidation(
+                conn,
+                thesis_id=b["thesis_id"],
+                stop_loss_order_id=b["stop_loss_order_id"],
+                current_btc_price=current_px,
+                initial_capital=initial_capital,
+                now_utc=now,
+            )
+            executed.append(res)
+            if res.get("status") == "event_invalidation_executed":
+                # 写 event_throttle 标记 event_invalidation 已触发
+                EventTrigger.record_event(
+                    conn,
+                    event_type="event_invalidation",
+                    event_class=EVENT_CLASS_INVALIDATION,
+                    triggered_at_utc=now_iso,
+                )
+                logger.error(
+                    "CRITICAL: event_invalidation TRIGGERED "
+                    "thesis=%s direction=%s stop_loss=%.2f current=%.2f",
+                    b["thesis_id"], b["direction"],
+                    b["stop_loss_price"], current_px,
+                )
+
+        return {
+            "by_collector": {
+                "hard_invalidation": len(executed),
+                "current_btc_price": current_px,
+            },
+            "total_upserted": len([
+                e for e in executed
+                if e.get("status") == "event_invalidation_executed"
+            ]),
+            "events_triggered": ["event_invalidation"] if executed else [],
+            "errors": {},
+            "executed": executed,
+        }
+
+    return _wrap_job(
+        "hard_invalidation_monitor", _body, conn_factory=conn_factory,
+    )
+
+
+def job_position_health_check(
+    *,
+    conn_factory: Optional[Callable[[], Any]] = None,
+) -> dict[str, Any]:
+    """v1.4 §10.4.1:持仓期 4h 健康检查。
+
+    本 sprint stub:仅检测 active thesis 是否存在;无 thesis → 直接返回不调 AI。
+    真 AI 调用(简化 4h health check AI / 复用 emergency_simplified_a)留 1.10-H。
+    """
+    def _body(conn: Any) -> dict[str, Any]:
+        from src.data.storage.dao import ThesesDAO
+        active = ThesesDAO.get_active(conn)
+        if active is None:
+            return {
+                "by_collector": {"position_health_check": "no_active_thesis"},
+                "total_upserted": 0,
+                "events_triggered": [],
+                "errors": {},
+            }
+        # 1.10-H 真实施;本 sprint 仅 log
+        logger.info(
+            "position_health_check: active thesis=%s direction=%s "
+            "(本 sprint stub,真 AI 调用留 1.10-H)",
+            active["thesis_id"], active.get("direction"),
+        )
+        return {
+            "by_collector": {
+                "position_health_check": "stub",
+                "active_thesis_id": active["thesis_id"],
+            },
+            "total_upserted": 0,
+            "events_triggered": [],
+            "errors": {},
+        }
+
+    return _wrap_job(
+        "position_health_check", _body, conn_factory=conn_factory,
+    )
+
+
 _JOB_FUNCTIONS: dict[str, Callable[..., Any]] = {
     "pipeline_run": job_pipeline_run,  # 单测/直调入口,生产 yaml 用下面 2 个 wrapper
     # Sprint 2.7-C:pipeline 2 个 wrapper(对应 yaml 2 个 cron 条目)
     "pipeline_run_regular": job_pipeline_run_regular,
     "pipeline_run_8h_onchain": job_pipeline_run_8h_onchain,
+    # Sprint 1.10-G:RetryPolicy 异步 wrapper(D3=a,event 触发的 pipeline_run 走它)
+    "pipeline_run_with_retry": job_pipeline_run_with_retry,
     # Sprint 2.7-A/B:5 个 collector + event_listener(2.7-D 已完整实施 +
     # 1.5q 修注释:event_listener 真在跑,4 类 event 都通,但生产 30d 0 触发
     # 是因为 ±3% 24h 阈值在中长期波段并非高频信号 — 详见 sprint_1_5q.md A.1)
@@ -792,6 +1041,9 @@ _JOB_FUNCTIONS: dict[str, Callable[..., Any]] = {
     "collect_macro": job_collect_macro,
     "collect_onchain": job_collect_onchain,
     "event_listener": job_event_listener,
+    # Sprint 1.10-G v1.4 §10.4.1 新增 2 个独立 cron job
+    "hard_invalidation_monitor": job_hard_invalidation_monitor,
+    "position_health_check": job_position_health_check,
     "cleanup": job_cleanup,
 }
 

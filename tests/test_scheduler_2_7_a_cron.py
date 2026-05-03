@@ -37,11 +37,14 @@ def test_scheduler_yaml_loads_with_bjt_timezone():
     assert cfg.get("timezone") == "Asia/Shanghai"
 
 
-def test_scheduler_yaml_has_8_entries():
-    """7 logical jobs + pipeline_run dual cron = 8 yaml entries."""
+def test_scheduler_yaml_has_10_entries():
+    """v1.4 §10.4.1 + Sprint 1.10-G:7 logical jobs + pipeline_run dual cron +
+    1.10-G 新增 2 个独立 cron(hard_invalidation_monitor / position_health_check)= 10。"""
     cfg = load_scheduler_config(_CONFIG_PATH)
     jobs = cfg.get("jobs") or {}
-    assert len(jobs) == 8, f"expected 8 entries, got {sorted(jobs.keys())}"
+    assert len(jobs) == 10, f"expected 10 entries, got {sorted(jobs.keys())}"
+    assert "hard_invalidation_monitor" in jobs
+    assert "position_health_check" in jobs
 
 
 def test_scheduler_yaml_no_legacy_data_collection_or_4h_interval():
@@ -64,10 +67,11 @@ def test_scheduler_yaml_no_legacy_data_collection_or_4h_interval():
 # Build_job_configs
 # ============================================================
 
-def test_build_job_configs_returns_8_jobs():
+def test_build_job_configs_returns_10_jobs():
+    """Sprint 1.10-G:8 + 2 个新 cron job(v1.4 §10.4.1)。"""
     cfg = load_scheduler_config(_CONFIG_PATH)
     out = build_job_configs(cfg)
-    assert len(out) == 8
+    assert len(out) == 10
 
 
 def test_pipeline_run_dual_entries_have_dedicated_wrappers():
@@ -159,8 +163,10 @@ def test_build_scheduler_uses_bjt_timezone(monkeypatch):
         assert str(sched.timezone) == "Asia/Shanghai"
         registered_ids = {j.id for j in sched.get_jobs()}
         # Sprint 1.9-B(2026-05-01)启用 pipeline_run_regular(16:05 BJT 每日);
-        # pipeline_run_8h_onchain 仍 disabled。共 7 个 cron。
-        expected_7 = {
+        # pipeline_run_8h_onchain 仍 disabled。
+        # Sprint 1.10-G(v1.4 §10.4.1)新增 hard_invalidation_monitor 1h +
+        # position_health_check 4h。共 9 个 enabled cron。
+        expected_9 = {
             "collect_klines_1h",
             "collect_klines_daily",
             "collect_klines_weekly",
@@ -168,9 +174,11 @@ def test_build_scheduler_uses_bjt_timezone(monkeypatch):
             "collect_onchain",
             "event_listener",
             "pipeline_run_regular",
+            "hard_invalidation_monitor",
+            "position_health_check",
         }
-        assert registered_ids == expected_7, (
-            f"missing={expected_7 - registered_ids}, extra={registered_ids - expected_7}"
+        assert registered_ids == expected_9, (
+            f"missing={expected_9 - registered_ids}, extra={registered_ids - expected_9}"
         )
     finally:
         if sched.running:
@@ -178,11 +186,17 @@ def test_build_scheduler_uses_bjt_timezone(monkeypatch):
 
 
 def test_all_cron_jobs_have_cron_trigger():
-    """除 event_listener 外,所有 7 logical job 都用 cron。
-    Sprint 2.8-F:低频 4 job 多档 cron → trigger_kind='cron_or'(也是 cron 类)。"""
+    """除 event_listener / hard_invalidation_monitor / position_health_check 外,
+    所有 logical job 都用 cron。
+    Sprint 2.8-F:低频 4 job 多档 cron → trigger_kind='cron_or'(也是 cron 类)。
+    Sprint 1.10-G v1.4 §10.4.1:hard_invalidation_monitor 1h interval +
+    position_health_check 4h interval(简单周期触发)。"""
+    interval_jobs = {
+        "event_listener", "hard_invalidation_monitor", "position_health_check",
+    }
     out = build_job_configs(load_scheduler_config(_CONFIG_PATH))
     for jc in out:
-        if jc.name == "event_listener":
+        if jc.name in interval_jobs:
             assert jc.trigger_kind == "interval"
         else:
             assert jc.trigger_kind in ("cron", "cron_or"), (

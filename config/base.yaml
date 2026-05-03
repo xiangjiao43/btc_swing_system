@@ -180,3 +180,21 @@ low_frequency_guard:
   # position_cap final 连续 ≥ N 次 < threshold 视为过度保守
   consecutive_low_cap_runs: 10
   consecutive_low_cap_threshold: 0.20
+
+
+# -------- v1.4 虚拟账户(Sprint 1.10-A,见 docs/modeling.md §5.1 / §10.4.3)----
+# 虚拟账户初始化参数(scripts/init_v14_tables.py 读取此段写第一行 snapshot)
+virtual_account:
+  # 初始本金(USDT 计价),首次部署后写入 virtual_account.initial_capital
+  # 永久不变;后续 total_return_pct 基于此计算
+  initial_capital: 100000
+  # 计价货币(本 v1.4 仅 USDT,留字段为以后扩展)
+  currency: "USDT"
+
+
+# -------- v1.4 挂单引擎(Sprint 1.10-A,见 docs/modeling.md §5.2 / §10.4.3)----
+# DAO 创建 virtual_orders 时 expires_at_utc 由调用方算
+# (created_at_utc + default_expiry_days * 86400)。v1.4 §5.2.6 默认 7 天
+virtual_orders:
+  # 挂单默认有效期(天)。过期由 mark_expired 批量标 cancelled,reason='expired'
+  default_expiry_days: 7

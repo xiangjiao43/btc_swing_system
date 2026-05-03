@@ -145,8 +145,8 @@ def main(argv: list[str]) -> int:
              "narrative": "无层间矛盾"},
             {"active_thesis": None, "cooldown_state": {}, "fuse_state": {}},
         )
-        check("V24 完整 28 字段",
-              len(activations) == 28,
+        check("V24 完整 32 字段(v1.4 §3.4.9 28 + 1.10-F 4 retry meta)",
+              len(activations) == 32,
               detail=f"实际 {len(activations)}")
         check("V24 全部 v1.4 §3.4.9 字段在",
               all(k in activations for k in _DEFAULT_ACTIVATIONS_V24))
@@ -215,8 +215,8 @@ def main(argv: list[str]) -> int:
             check("constraint_activations_json 不是 NULL",
                   ca_json is not None and len(ca_json) > 100)
             ca_dict = json.loads(ca_json)
-            check("constraint_activations roundtrip 28 字段",
-                  len(ca_dict) == 28)
+            check("constraint_activations roundtrip 32 字段(28 + 1.10-F 4)",
+                  len(ca_dict) == 32)
             check("V1 stop_loss_overridden 在 DB JSON 中 = True",
                   ca_dict["validator_1_stop_loss_overridden"] is True)
             check("V24 thesis_lock_active 在 DB JSON 中 = False(无 active)",

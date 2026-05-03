@@ -1057,20 +1057,24 @@ def collect_meta_activations(
     out["cooldown_remaining_hours"] = float(cd.get("cooldown_remaining_hours") or 0)
 
     # Sprint 1.10-F:聚合 V8/V9/V11/V21 needs_retry → 一个总开关
-    needs_retry = any(
-        bool(raw_activations.get(k)) for k in (
-            "validator_8_needs_retry",
-            "validator_9_needs_retry",
-            "validator_11_needs_retry",
-            "validator_21_needs_retry",
-        )
+    _per_v_retry_keys = (
+        "validator_8_needs_retry",
+        "validator_9_needs_retry",
+        "validator_11_needs_retry",
+        "validator_21_needs_retry",
     )
+    needs_retry = any(bool(raw_activations.get(k)) for k in _per_v_retry_keys)
     out["validator_needs_retry"] = needs_retry
     # 收集所有 retry hints(目前仅 V21 提供 hint;V8/V9/V11 用 notes 中的标识)
     hints: list[str] = []
     if raw_activations.get("validator_21_retry_hint"):
         hints.append(raw_activations["validator_21_retry_hint"])
     out["validator_retry_hints"] = hints
+    # 剥离 per-V 临时 _needs_retry / _retry_hint 字段(已聚合到 *_needs_retry /
+    # *_retry_hints,不重复持久化到 constraint_activations_json)
+    for k in _per_v_retry_keys:
+        out.pop(k, None)
+    out.pop("validator_21_retry_hint", None)
 
     return out
 

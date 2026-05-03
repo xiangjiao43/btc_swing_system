@@ -119,13 +119,17 @@ def check_and_fill_orders(
         # 调 fill_order + 收集 fills
         for o in triggered_this_kline:
             filled_price = float(o["price"])  # §5.2.4 入场价 = 挂单价
-            filled_btc_amount = float(o["size_usdt"]) / filled_price  # §5.2.4 公式
+            # §5.2.4 公式;不预 round —— round 会让 compute_snapshot 反推
+            # avg_price 时丢精度(实测 verify_orders_engine 0.27027027 反推
+            # → 74000.000074 而非 74000)。SQLite REAL 是 64-bit double,
+            # 直接存全精度。
+            filled_btc_amount = float(o["size_usdt"]) / filled_price
             n = VirtualOrdersDAO.fill_order(
                 conn,
                 order_id=o["order_id"],
                 filled_at_utc=str(kl_close_time),
                 filled_price=filled_price,
-                filled_btc_amount=round(filled_btc_amount, 8),
+                filled_btc_amount=filled_btc_amount,
             )
             if n == 1:
                 fills.append({
@@ -135,7 +139,7 @@ def check_and_fill_orders(
                     "order_type": o["order_type"],
                     "size_usdt": float(o["size_usdt"]),
                     "filled_price": filled_price,
-                    "filled_btc_amount": round(filled_btc_amount, 8),
+                    "filled_btc_amount": filled_btc_amount,
                     "filled_at_utc": str(kl_close_time),
                 })
 

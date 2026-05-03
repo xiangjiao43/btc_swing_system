@@ -781,3 +781,411 @@ def validator_12_evidence_real(
         notes.append("missing_evidence_ref_invalid_items_removed")
         out["notes"] = notes
     return out, activations
+
+
+# ----------------------------------------------------------------
+# evidence 真实性 / 信心质量(V13-V17,§3.4.4-§3.4.5)
+# ----------------------------------------------------------------
+
+def _objective_evidence_tokens_from_context(context: dict) -> set[str]:
+    """提取 input context 中可能在 objective_evidence 引用的字段名 / 数值 token。
+
+    D3=a 字符串匹配:每条 evidence 必须含 input 中某字段名或数值。
+    """
+    tokens: set[str] = set()
+    # 字段名(常见)
+    field_names = (
+        "DXY", "VIX", "L1", "L2", "L3", "L4", "L5",
+        "regime", "stance", "grade", "funding", "OI", "open_interest",
+        "stop_loss", "BTC", "EMA", "ATR", "ADX", "MVRV", "NUPL",
+        "thesis", "break_conditions",
+    )
+    tokens.update(field_names)
+    # 从 layer outputs 提取数值
+    for layer_key in ("l1_output", "l2_output", "l3_output", "l4_output", "l5_output"):
+        layer = context.get(layer_key) or {}
+        if isinstance(layer, dict):
+            for v in layer.values():
+                if isinstance(v, (int, float)):
+                    # 截短到 4 位有效数字
+                    tokens.add(str(v))
+                    tokens.add(str(int(v)))
+                elif isinstance(v, str) and v:
+                    tokens.add(v)
+    # 从 active_thesis 提取
+    at = context.get("active_thesis") or {}
+    if isinstance(at, dict):
+        for v in at.values():
+            if isinstance(v, (int, float)):
+                tokens.add(str(v))
+                tokens.add(str(int(v)))
+            elif isinstance(v, str) and v:
+                tokens.add(v)
+    # 从 current_position 提取
+    cp = context.get("current_position") or {}
+    if isinstance(cp, dict):
+        for v in cp.values():
+            if isinstance(v, (int, float)):
+                tokens.add(str(v))
+                tokens.add(str(int(v)))
+    # current_btc_price
+    cbp = context.get("current_btc_price")
+    if cbp is not None:
+        tokens.add(str(cbp))
+        tokens.add(str(int(cbp)))
+    return tokens
+
+
+def validator_13_objective_evidence(
+    master_output: dict[str, Any], context: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """V13:objective_evidence 必须引用 input 真实字段值(D3=a 字符串匹配,§3.4.4)。
+
+    每条 evidence 必须含 input context 中某个字段名或数值 token。
+    失败:删除该项,notes 添加 `missing_objective_evidence_token`(本 sprint 不重试,
+    严校验 + 重试留 1.10-F + 1.10-L)。
+    """
+    out = dict(master_output)
+    activations = {"validator_13_objective_evidence": False}
+    # 收集 master_output 中所有 objective_evidence(可能在 thesis_assessment / new_thesis / 顶层)
+    candidates = []
+    if isinstance(out.get("thesis_assessment"), dict):
+        oe = out["thesis_assessment"].get("objective_evidence") or []
+        if isinstance(oe, list):
+            candidates.extend([("thesis_assessment", i, e) for i, e in enumerate(oe)])
+    if isinstance(out.get("new_thesis"), dict):
+        oe = out["new_thesis"].get("objective_evidence") or []
+        if isinstance(oe, list):
+            candidates.extend([("new_thesis", i, e) for i, e in enumerate(oe)])
+    if not candidates:
+        return out, activations
+
+    tokens = _objective_evidence_tokens_from_context(context)
+    invalid_count = 0
+    for path, idx, e in candidates:
+        if not isinstance(e, str) or not e.strip():
+            invalid_count += 1
+            continue
+        if not any(tok in e for tok in tokens if tok):
+            invalid_count += 1
+
+    if invalid_count > 0:
+        activations["validator_13_objective_evidence"] = True
+        notes = list(out.get("notes") or [])
+        notes.append(
+            f"v13_objective_evidence_token_missing_{invalid_count}_items"
+        )
+        out["notes"] = notes
+    return out, activations
+
+
+def validator_14_counter_argument(
+    master_output: dict[str, Any], context: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """V14:narrative 必须含至少 1 条 counter_arguments(强制自我审查,§3.4.4)。
+
+    失败:notes 添加 `missing_counter_argument`,不强制覆盖(留 master AI 重试)。
+    """
+    out = dict(master_output)
+    activations = {"validator_14_counter_argument": False}
+    counters = out.get("counter_arguments")
+    if not isinstance(counters, list) or len([
+        c for c in counters if isinstance(c, str) and c.strip()
+        or isinstance(c, dict) and c.get("text")
+    ]) < 1:
+        activations["validator_14_counter_argument"] = True
+        notes = list(out.get("notes") or [])
+        notes.append("missing_counter_argument")
+        out["notes"] = notes
+    return out, activations
+
+
+def validator_15_confidence_cap(
+    master_output: dict[str, Any], context: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """V15:confidence ≤ data_completeness × historical_precedent_match(§3.4.5)。
+
+    Fallback Level 1+ 时 confidence 必须 < 0.7。
+    失败:cap 到合法值,notes 添加 `confidence_capped`。
+    """
+    out = dict(master_output)
+    activations = {"validator_15_confidence_capped": False, "validator_15_capped_value": None}
+    # 提取 confidence(thesis_assessment / new_thesis / 顶层)
+    confidence = None
+    confidence_path = None
+    if isinstance(out.get("new_thesis"), dict):
+        c = out["new_thesis"].get("confidence_score")
+        if c is not None:
+            try:
+                confidence = float(c) / 100.0  # 0-100 → 0-1
+                confidence_path = ("new_thesis", "confidence_score", True)  # 保留 0-100
+            except (ValueError, TypeError):
+                pass
+    if confidence is None:
+        return out, activations
+
+    dc = float(context.get("data_completeness") or 1.0)  # 0-1
+    hpm = float(context.get("historical_precedent_match") or 1.0)
+    fallback_level = context.get("fallback_level")
+    cap_max = dc * hpm
+    if fallback_level and str(fallback_level) in ("level_1", "level_2", "level_3"):
+        # 严格 < 0.7,cap 到 0.699(避免 round 边界 0.6999... → 0.70)
+        cap_max = min(cap_max, 0.699)
+
+    if confidence > cap_max + 1e-9:
+        new_conf = cap_max
+        if confidence_path[2]:  # 0-100 范围
+            new_conf_val = round(new_conf * 100, 2)
+        else:
+            new_conf_val = round(new_conf, 4)
+        if confidence_path[0] == "new_thesis":
+            new_thesis = dict(out["new_thesis"])
+            new_thesis[confidence_path[1]] = new_conf_val
+            out["new_thesis"] = new_thesis
+        activations["validator_15_confidence_capped"] = True
+        activations["validator_15_capped_value"] = new_conf_val
+        notes = list(out.get("notes") or [])
+        notes.append("confidence_capped_by_validator_15")
+        out["notes"] = notes
+    return out, activations
+
+
+def validator_16_change_mind(
+    master_output: dict[str, Any], context: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """V16:what_would_change_mind 必须 ≥ 3 条且全部客观可判定(§3.4.5)。
+
+    失败:重试 1 次(留 1.10-F),本 sprint 只标 activations。
+    """
+    out = dict(master_output)
+    activations = {"validator_16_change_mind": False}
+    items = out.get("what_would_change_mind") or []
+    valid = [i for i in items if isinstance(i, str) and i.strip()
+             and _is_objective_break(i)]
+    if len(valid) < 3:
+        activations["validator_16_change_mind"] = True
+        notes = list(out.get("notes") or [])
+        notes.append(f"what_would_change_mind_insufficient_{len(valid)}_objective")
+        out["notes"] = notes
+    return out, activations
+
+
+def validator_17_stop_tightening(
+    master_output: dict[str, Any], context: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """V17:weakened 状态 stop_loss 收紧上限(§3.4.5)。
+
+    - 同一 thesis 内最多收紧 2 次
+    - 新 stop_loss 距离不能高于初始 stop 距离的 50%
+    失败:拒绝收紧,notes 添加 `stop_tightening_capped`。
+    """
+    out = dict(master_output)
+    activations = {"validator_17_stop_tightening": False}
+    if out.get("mode") != "evaluate_existing":
+        return out, activations
+    ta = out.get("thesis_assessment") or {}
+    if ta.get("still_valid") != "weakened":
+        return out, activations
+    new_stop = ta.get("stop_loss_adjustment")
+    if new_stop is None:
+        return out, activations
+
+    # 检查 1:历史收紧次数(从 context 读)
+    tightening_count = int(context.get("stop_tightening_count_so_far") or 0)
+    if tightening_count >= 2:
+        ta = dict(ta)
+        ta["stop_loss_adjustment"] = None
+        out["thesis_assessment"] = ta
+        activations["validator_17_stop_tightening"] = True
+        notes = list(out.get("notes") or [])
+        notes.append("stop_tightening_capped_already_2_times")
+        out["notes"] = notes
+        return out, activations
+
+    # 检查 2:新 stop 距离不超过初始 50%
+    initial_stop = context.get("initial_stop_loss_price")
+    initial_avg = context.get("active_thesis_avg_price")
+    if initial_stop is not None and initial_avg is not None:
+        initial_dist = abs(float(initial_avg) - float(initial_stop)) / float(initial_avg)
+        new_dist = abs(float(initial_avg) - float(new_stop)) / float(initial_avg)
+        if new_dist < initial_dist * 0.5:
+            # 收紧过多
+            ta = dict(ta)
+            ta["stop_loss_adjustment"] = None
+            out["thesis_assessment"] = ta
+            activations["validator_17_stop_tightening"] = True
+            notes = list(out.get("notes") or [])
+            notes.append("stop_tightening_capped_distance_below_50pct_initial")
+            out["notes"] = notes
+    return out, activations
+
+
+# ----------------------------------------------------------------
+# 系统级反复横跳类(V18-V20,FuseMonitor 包装,§3.4.6)
+# ----------------------------------------------------------------
+
+def validator_18_14d_fuse(
+    master_output: dict[str, Any], context: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """V18:14 天反复横跳熔断(§3.4.6)。
+
+    包装 FuseMonitor.check_14d_fuse 结果(由调用方传 fuse_state 入 context):
+    - 14d 内 thesis 完整周期 ≥ 2 → in_thesis_cycle_fuse(强制 FLAT 14 天)
+    - 14d 内通道 C ≥ 2 → channel_c_disabled
+    - 已在熔断期 + master 试图 new_thesis → 拒绝创建
+    """
+    out = dict(master_output)
+    activations = {"validator_18_14d_fuse_active": False}
+    fuse_state = context.get("fuse_state") or {}
+    in_fuse = bool(fuse_state.get("in_thesis_cycle_fuse")) or bool(
+        fuse_state.get("in_14d_fuse"),
+    )
+    if not in_fuse:
+        return out, activations
+    activations["validator_18_14d_fuse_active"] = True
+    if out.get("mode") == "new_thesis":
+        out["mode"] = "silent_cooldown"
+        out["silent_reason"] = "14 天熔断期,拒绝创建 thesis(Validator 18)"
+        out.pop("new_thesis", None)
+        notes = list(out.get("notes") or [])
+        notes.append("v18_14d_fuse_blocked_new_thesis")
+        out["notes"] = notes
+    return out, activations
+
+
+def validator_19_60d_cap(
+    master_output: dict[str, Any], context: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """V19:60 天 thesis 上限(§3.4.6)。
+
+    包装 FuseMonitor.check_60d_cap 结果(由调用方传 thesis_60d_capped 入 context)。
+    失败处理:挂单仍按 thesis 触发(由 1.10-C 实施),但不允许新加仓 / 调整 stop。
+    本 V19 检测:active_thesis.is_60d_capped → 标 activations,后续 master 不允许
+    出现 stop_loss_adjustment(由 V17 已部分覆盖)。
+    """
+    out = dict(master_output)
+    activations = {"validator_19_60d_cap": False}
+    active_thesis = context.get("active_thesis") or {}
+    if not active_thesis.get("is_60d_capped"):
+        return out, activations
+    activations["validator_19_60d_cap"] = True
+    # 60d-capped 时若 master 试图 stop_loss_adjustment → 拒
+    if out.get("mode") == "evaluate_existing":
+        ta = out.get("thesis_assessment") or {}
+        if ta.get("stop_loss_adjustment") is not None:
+            ta = dict(ta)
+            ta["stop_loss_adjustment"] = None
+            out["thesis_assessment"] = ta
+            notes = list(out.get("notes") or [])
+            notes.append("v19_60d_cap_blocked_stop_adjustment")
+            out["notes"] = notes
+    return out, activations
+
+
+def validator_20_consecutive_fuse(
+    master_output: dict[str, Any], context: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """V20:连续 2 次 14 天熔断 → review_pending(§3.4.6)。
+
+    包装 FuseMonitor.check_consecutive_fuse 结果(由调用方传入 context)。
+    本 V20 检测:consecutive_fuse_triggered=True → 标 activations。
+    实际"进 review_pending"动作由 1.10-C review_pending.enter_review_pending 完成。
+    """
+    out = dict(master_output)
+    activations = {"validator_20_consecutive_fuse": False}
+    if not bool(context.get("consecutive_fuse_triggered")):
+        return out, activations
+    activations["validator_20_consecutive_fuse"] = True
+    notes = list(out.get("notes") or [])
+    notes.append("v20_consecutive_fuse_triggers_review_pending")
+    out["notes"] = notes
+    return out, activations
+
+
+# ----------------------------------------------------------------
+# master AI 软抗拒识别(V21-V22,§3.4.7)
+# ----------------------------------------------------------------
+
+def validator_21_soft_resistance(
+    master_output: dict[str, Any], context: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """V21:master AI 软抗拒识别(§3.4.7)。
+
+    触发条件(全部满足):
+    - active_thesis is None
+    - cooldown_state.in_cooldown=False
+    - fuse_state.in_14d_fuse=False
+    - L3 grade ∈ {A, B, C}
+    - master 输出 mode='silent_cooldown'(应该出 new_thesis)
+
+    **D4=a 决策**:本 sprint 只识别(标 activations),重试机制留 1.10-F。
+    """
+    out = dict(master_output)
+    activations = {"validator_21_soft_resistance": False}
+    if out.get("mode") != "silent_cooldown":
+        return out, activations
+    if context.get("active_thesis") is not None:
+        return out, activations
+    cd = context.get("cooldown_state") or {}
+    if cd.get("in_cooldown"):
+        return out, activations
+    fs = context.get("fuse_state") or {}
+    if fs.get("in_14d_fuse") or fs.get("in_thesis_cycle_fuse"):
+        return out, activations
+    grade = context.get("l3_grade")
+    if not isinstance(grade, str) or grade.upper() not in ("A", "B", "C"):
+        return out, activations
+    # 满足创建条件但 silent → 软抗拒
+    activations["validator_21_soft_resistance"] = True
+    notes = list(out.get("notes") or [])
+    notes.append(
+        "v21_soft_resistance_detected_retry_pending_1.10_f"
+    )
+    out["notes"] = notes
+    return out, activations
+
+
+def validator_22_3day_fail(
+    master_output: dict[str, Any], context: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """V22:master AI 连续 3 天失败 → review_pending(§3.4.7)。
+
+    本 sprint 只识别(标 activations),实际进入 review_pending 由调用方触发。
+    """
+    out = dict(master_output)
+    activations = {"validator_22_3day_fail": False}
+    if int(context.get("master_consecutive_failures") or 0) >= 3:
+        activations["validator_22_3day_fail"] = True
+        notes = list(out.get("notes") or [])
+        notes.append("v22_3day_fail_triggers_review_pending")
+        out["notes"] = notes
+    return out, activations
+
+
+# ----------------------------------------------------------------
+# conflict_resolution(V23,§3.4.8)
+# ----------------------------------------------------------------
+
+def validator_23_conflict_resolution(
+    master_output: dict[str, Any], context: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """V23:必须输出 conflict_resolution 字段(可"无层间矛盾",§3.4.8)。
+
+    失败:notes 添加 `conflict_resolution_missing`,不强制覆盖(留 master 重试)。
+
+    注:v1.4 §3.3.6 的 master output schema 没有 conflict_resolution 顶层字段,
+    本 V23 检测 narrative 含 "层间" / "冲突" / "矛盾" / "一致" 等关键词作 proxy。
+    严校验留 1.10-L。
+    """
+    out = dict(master_output)
+    activations = {"validator_23_conflict_missing": False}
+    narrative = out.get("narrative") or ""
+    one_line = out.get("one_line_summary") or ""
+    text = narrative + " " + one_line
+    keywords = ("层间", "矛盾", "冲突", "一致", "齐心", "分歧", "对齐")
+    if not any(k in text for k in keywords):
+        activations["validator_23_conflict_missing"] = True
+        notes = list(out.get("notes") or [])
+        notes.append("conflict_resolution_missing")
+        out["notes"] = notes
+    return out, activations

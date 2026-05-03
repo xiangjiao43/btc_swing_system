@@ -269,6 +269,7 @@ def test_master_fallback_on_error():
     client = _make_mock_client("", raises=Exception("boom"))
     agent = MasterAdjudicator(client=client)
     out = agent.analyze({})
-    # fallback 给 watch
-    assert out["action"] == "watch"
-    assert out["opportunity_grade"] == "none"
+    # Sprint 1.10-D v1.4 §6.4 改造:fallback 给 silent_cooldown(无 active_thesis 默认)
+    # 旧 v1.3 的 action="watch" / opportunity_grade="none" 字段已被 mode/silent_reason 取代
+    assert out["mode"] == "silent_cooldown"
+    assert "silent_reason" in out

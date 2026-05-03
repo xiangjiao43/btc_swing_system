@@ -143,17 +143,20 @@ def test_master_prompt_contains_v2_fields(empty_db_ctx):
         "current_close": 75749,
     }
     prompt = agent._build_user_prompt(master_ctx)
-    assert "current_state" in prompt
-    assert "previous_strategy_run" in prompt
-    assert "_system_provided" in prompt
+    # Sprint 1.10-D v1.4 §3.3.6 改造:旧 14 档字段(current_state /
+    # previous_strategy_run / _system_provided)已被 thesis-aware 字段取代。
+    # 新字段:active_thesis / current_position / pending_orders /
+    # cooldown_state / fuse_state / last_5_assessments(由 master_input_builder 装配)
+    # L1-L5 仍在
     assert "l1_output" in prompt
     assert "l2_output" in prompt
     assert "l3_output" in prompt
     assert "l4_output" in prompt
     assert "l5_output" in prompt
-    # 不应含旧字段名
+    # 不应含旧字段名(14 档 / state_machine 老逻辑)
     assert "state_machine_current" not in prompt
     assert "allowed_transitions" not in prompt
+    assert "current_state" not in prompt    # v1.4 删,thesis-aware 取代
 
 
 # ============================================================

@@ -38,6 +38,18 @@ function app() {
         ordersPending: {                // 模块 3 — 当前 pending 挂单
             active_thesis_id: null, items: [],
         },
+        thesesHistory: [],              // 模块 4 — thesis 历史时间线
+        weeklyReviewSelected: null,     // 模块 5 — 当前选中周复盘
+        weeklyReviewHistory: [],        // 模块 5 — 历史 12 周(D3=a)
+        weeklyReviewSelectedIdx: 0,     // 模块 5 下拉切换 index
+
+        // RP 红色横幅(D2=a 来自 health.review_pending)+ 模态框(D4=b)
+        reviewPending: null,
+        rpModalOpen: false,
+        rpExitType: 'a',
+        rpReason: '',
+        rpResolveError: '',
+
         _v14ModulesTimer: null,         // 5 分钟刷一次新模块数据
 
         // ============== 初始化 ==============
@@ -63,7 +75,7 @@ function app() {
         },
 
         // Sprint 1.10-I §9.2:刷新 5 模块数据(account / thesis / orders /
-        //                    weekly_review / pending_orders 一波 fetch)
+        //                    weekly_review / pending_orders + thesis_history + RP 一波 fetch)
         async _refreshV14Modules() {
             const fetchJson = async (url, fallback) => {
                 try {
@@ -72,7 +84,8 @@ function app() {
                 } catch (e) { /* 静默 */ }
                 return fallback;
             };
-            const [acc, accRet, accHist, active, orders] = await Promise.all([
+            const [acc, accRet, accHist, active, orders, thHistory,
+                   wrLatest, wrHistory, health] = await Promise.all([
                 fetchJson('/api/account/current', {}),
                 fetchJson('/api/account/returns', {
                     daily_pct: null, weekly_pct: null, monthly_pct: null,
@@ -83,16 +96,156 @@ function app() {
                 fetchJson('/api/orders/pending', {
                     active_thesis_id: null, items: [],
                 }),
+                fetchJson('/api/theses/history?limit=20', { items: [] }),
+                fetchJson('/api/review/weekly/latest', {}),
+                fetchJson('/api/review/weekly/history?limit=12', { items: [] }),
+                fetchJson('/api/health', {}),
             ]);
             this.virtualAccount = (acc && acc.snapshot_id) ? acc : null;
             this.accountReturns = accRet || this.accountReturns;
             this.accountHistory = (accHist && accHist.snapshots) || [];
             this.activeThesis = (active && active.thesis_id) ? active : null;
             this.ordersPending = orders || this.ordersPending;
+            this.thesesHistory = (thHistory && thHistory.items) || [];
+            this.weeklyReviewHistory = (wrHistory && wrHistory.items) || [];
+            // 默认选中最新(D3=a)
+            this.weeklyReviewSelected = (wrLatest && wrLatest.week_start_utc)
+                ? wrLatest : null;
+            this.weeklyReviewSelectedIdx = 0;
+            // RP 红色横幅(D2=a)
+            this.reviewPending = (health && health.review_pending) || null;
             // position_summary 从 strategy/current 复用(commit 3 加的字段)
             this.positionSummary = (
                 this.state && this.state.position_summary
             ) || null;
+        },
+
+        // Sprint 1.10-I §9.2.4 模块 4:thesis 时间线辅助函数
+        thesisDurationDays(t) {
+            if (!t || !t.created_at_utc) return '—';
+            try {
+                const start = new Date(t.created_at_utc);
+                const end = t.closed_at_utc ? new Date(t.closed_at_utc) : new Date();
+                const days = Math.max(0, Math.round((end - start) / 86400000));
+                return days + 'd';
+            } catch (e) { return '—'; }
+        },
+        thesisStatusColor(status) {
+            if (status === 'active') return 'text-blue-600 dark:text-blue-400';
+            if (status === 'closed_profit') return 'text-emerald-600 dark:text-emerald-400';
+            if (status === 'closed_loss') return 'text-rose-600 dark:text-rose-400';
+            if (status === 'invalidated') return 'text-amber-600 dark:text-amber-400';
+            return 'text-slate-500';
+        },
+
+        // Sprint 1.10-I §9.2.5 模块 5:23 V key list(给 hard_constraint 表用)
+        validatorKeys() {
+            return [
+                'validator_1_stop_loss_overridden',
+                'validator_2_position_capped',
+                'validator_3_entry_size_normalized',
+                'validator_4_protection_blocked',
+                'validator_5_grade_permission_lock',
+                'validator_6_thesis_lock',
+                'validator_7_invalidation_check',
+                'validator_8_break_objectivity',
+                'validator_9_break_distance',
+                'validator_10_grade_lock',
+                'validator_11_direction_lock',
+                'validator_12_evidence_real',
+                'validator_13_objective_evidence',
+                'validator_14_counter_argument',
+                'validator_15_confidence_capped',
+                'validator_16_change_mind',
+                'validator_17_stop_tightening',
+                'validator_18_14d_fuse_active',
+                'validator_19_60d_cap',
+                'validator_20_consecutive_fuse',
+                'validator_21_soft_resistance',
+                'validator_22_3day_fail',
+                'validator_23_conflict_missing',
+            ];
+        },
+
+        // Sprint 1.10-I §9.4:AI 失败状态显示(替换"无机会"模糊)
+        // 数据源:state.raw.retry_log_json(commit 1.10-F migration 012)
+        aiFailureStatus() {
+            const raw = (this.state && this.state.raw) || {};
+            const rl = raw.retry_log || raw.retry_log_json || {};
+            // retry_log_json 可能是字符串
+            const rlObj = (typeof rl === 'string') ? this._safeParseJson(rl) : rl;
+            if (!rlObj || Object.keys(rlObj).length === 0) return null;
+
+            const failedLayers = rlObj.failed_layers || [];
+            const macroFb = rlObj.macro_fallback_applied;
+            const thesisFb = rlObj.thesis_aware_fallback_applied;
+            const retryExhausted = rlObj.retry_exhausted;
+            const retryNext = rlObj.retry_next_attempt;
+
+            if (retryExhausted) {
+                return 'AI 介入失败 — 请人工介入(超 2h 重试窗口或 max_attempts)';
+            }
+            if (failedLayers.length > 0) {
+                const layers = failedLayers.join('/');
+                if (failedLayers.includes('master')) {
+                    if (thesisFb) {
+                        return 'master AI 失败,thesis_aware fallback 已接管(等下次重试)';
+                    }
+                    return `${layers} 失败,Master 已短路`;
+                }
+                return `${layers} 失败,下游已短路`;
+            }
+            if (macroFb) {
+                return 'L5 macro AI 失败,使用硬编码 macro fallback';
+            }
+            if (retryNext) {
+                return `AI 介入失败,重试中(第 ${retryNext} 次)`;
+            }
+            return null;
+        },
+        aiFailureDetail() {
+            const raw = (this.state && this.state.raw) || {};
+            const rl = raw.retry_log || raw.retry_log_json || {};
+            const rlObj = (typeof rl === 'string') ? this._safeParseJson(rl) : rl;
+            if (!rlObj || Object.keys(rlObj).length === 0) return null;
+            return JSON.stringify(rlObj);
+        },
+        _safeParseJson(s) {
+            try { return JSON.parse(s); } catch (e) { return null; }
+        },
+
+        // Sprint 1.10-I D4=b+c:POST /api/review_pending/resolve
+        async resolveReviewPending() {
+            this.rpResolveError = '';
+            const reasonText = (this.rpReason || '').trim();
+            if (reasonText.length < 10) {
+                this.rpResolveError = '理由至少 10 字符';
+                return;
+            }
+            try {
+                const r = await fetch('/api/review_pending/resolve', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        exit_type: this.rpExitType,
+                        reason: reasonText,
+                    }),
+                });
+                if (!r.ok) {
+                    const body = await r.json().catch(() => ({}));
+                    this.rpResolveError = (body.detail && (
+                        typeof body.detail === 'string'
+                            ? body.detail : JSON.stringify(body.detail)
+                    )) || `HTTP ${r.status}`;
+                    return;
+                }
+                // 成功 → 关闭模态框 + 刷新 RP 状态
+                this.rpModalOpen = false;
+                this.rpReason = '';
+                await this._refreshV14Modules();
+            } catch (e) {
+                this.rpResolveError = String(e);
+            }
         },
 
         // Sprint 1.10-I §9.2.1 D1=c:30 天资金曲线 sparkline(纯 SVG polyline)

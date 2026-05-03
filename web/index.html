@@ -68,6 +68,88 @@
     </div>
   </header>
 
+  <!-- ============================================================ -->
+  <!-- 🚨 review_pending 红色全局横幅(Sprint 1.10-I §9.3 + D2=a)  -->
+  <!-- 数据源:GET /api/system/health (HealthResponse.review_pending)-->
+  <!-- ============================================================ -->
+  <div x-show="reviewPending && reviewPending.active"
+       class="bg-rose-600 dark:bg-rose-700 text-white border-b-2 border-rose-800
+              shadow-lg z-20 sticky top-10">
+    <div class="max-w-7xl mx-auto px-3 lg:px-4 py-2.5 flex flex-wrap items-center
+                justify-between gap-3 text-[12px] font-mono">
+      <div class="flex items-center gap-2">
+        <span class="text-base">🚨</span>
+        <span class="font-bold">系统进入 review_pending</span>
+        <span class="opacity-90"
+              x-text="'reason=' + (reviewPending && reviewPending.reason)"></span>
+        <span class="opacity-75 text-[11px]"
+              x-text="'entered=' + (reviewPending && reviewPending.entered_at_utc)"></span>
+      </div>
+      <button @click="rpModalOpen = true"
+              class="px-3 py-1 bg-white text-rose-700 rounded font-bold hover:bg-rose-50
+                     transition-colors text-[12px]">
+        解除 review_pending →
+      </button>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- 解除 review_pending 模态框(D4=b 二次确认)                    -->
+  <!-- ============================================================ -->
+  <div x-show="rpModalOpen" x-cloak
+       class="fixed inset-0 z-50 bg-black/50 flex items-center justify-center px-4">
+    <div class="bg-white dark:bg-slate-900 rounded-lg shadow-xl
+                max-w-lg w-full p-5 space-y-4 text-[13px]">
+      <h3 class="text-base font-bold flex items-center gap-2">
+        <span>🚨</span><span>解除 review_pending</span>
+      </h3>
+      <div class="bg-slate-50 dark:bg-slate-800 rounded p-2 text-[11px] font-mono">
+        <div>reason:<span x-text="reviewPending && reviewPending.reason"></span></div>
+        <div>entered:<span x-text="reviewPending && reviewPending.entered_at_utc"></span></div>
+      </div>
+      <div>
+        <label class="block text-[11px] font-mono text-slate-500 mb-1">
+          出口类型(D4=b 二次确认):
+        </label>
+        <select x-model="rpExitType"
+                class="w-full font-mono text-[12px] border border-slate-300
+                       dark:border-slate-700 rounded px-2 py-1
+                       bg-white dark:bg-slate-950">
+          <option value="a">EXIT_A — 调阈值(降 grade 门槛 / 调 cooldown)</option>
+          <option value="b">EXIT_B — 续期 thesis(master AI 重出 break_conditions)</option>
+          <option value="c">EXIT_C — reset 熔断(清 14d_fuse 历史)</option>
+          <option value="d">EXIT_D — 自然恢复(只对 overly_conservative 生效)</option>
+        </select>
+      </div>
+      <div>
+        <label class="block text-[11px] font-mono text-slate-500 mb-1">
+          解除理由(D4=c min 10 字符,写入 system_states.exit_reason):
+        </label>
+        <textarea x-model="rpReason" rows="3"
+                  class="w-full text-[12px] border border-slate-300
+                         dark:border-slate-700 rounded px-2 py-1
+                         bg-white dark:bg-slate-950"
+                  placeholder="为什么要解除?(min 10 字符,记入审计)"></textarea>
+        <div class="text-[10px] text-slate-500 mt-0.5"
+             x-text="'当前 ' + (rpReason || '').trim().length + ' 字符 / 至少 10'"></div>
+      </div>
+      <div x-show="rpResolveError"
+           class="text-[11px] text-rose-600 dark:text-rose-400"
+           x-text="rpResolveError"></div>
+      <div class="flex justify-end gap-2 pt-2">
+        <button @click="rpModalOpen = false; rpResolveError = ''"
+                class="px-3 py-1 text-[12px] border border-slate-300
+                       dark:border-slate-700 rounded hover:bg-slate-100
+                       dark:hover:bg-slate-800">取消</button>
+        <button @click="resolveReviewPending()"
+                :disabled="(rpReason || '').trim().length < 10"
+                class="px-3 py-1 text-[12px] bg-rose-600 text-white rounded
+                       hover:bg-rose-700 disabled:opacity-40
+                       disabled:cursor-not-allowed">确认解除</button>
+      </div>
+    </div>
+  </div>
+
   <template x-if="loading">
     <div class="max-w-7xl mx-auto px-3 lg:px-4 py-6 text-xs text-slate-500">加载中…</div>
   </template>
@@ -336,6 +418,25 @@
     </section>
 
     </div> <!-- /grid 核心建议与高阶信号 -->
+
+    <!-- ============================================================ -->
+    <!-- ⚠️ AI 失败状态显示(Sprint 1.10-I §9.4 + §6.3.4)            -->
+    <!-- 替换"无机会"模糊显示;数据源 strategy_runs.retry_log_json     -->
+    <!-- ============================================================ -->
+    <section x-show="aiFailureStatus()"
+             class="audit-card border-amber-300 dark:border-amber-800
+                    bg-amber-50/30 dark:bg-amber-950/20 px-3 py-2.5">
+      <div class="flex items-start gap-2 text-[12px]">
+        <span class="text-base shrink-0">⚠️</span>
+        <div class="space-y-0.5">
+          <div class="font-bold text-amber-700 dark:text-amber-400"
+               x-text="aiFailureStatus()"></div>
+          <div x-show="aiFailureDetail()"
+               class="text-[11px] text-slate-600 dark:text-slate-400 font-mono"
+               x-text="aiFailureDetail()"></div>
+        </div>
+      </div>
+    </section>
 
     <!-- ============================================================ -->
     <!-- 💼 模块 1:虚拟账户面板(Sprint 1.10-I §9.2.1)              -->
@@ -651,6 +752,71 @@
          健康信号已在顶部「🩺 系统自检」面板里展示)。 -->
 
     <!-- ============================================================ -->
+    <!-- 📅 模块 4:thesis 历史时间线(Sprint 1.10-I §9.2.4)         -->
+    <!-- 位置:五层分析 ↓                                              -->
+    <!-- ============================================================ -->
+    <section id="region-thesis-timeline" class="audit-card">
+      <header class="px-4 py-2.5 border-b border-slate-200 dark:border-slate-800">
+        <h2 class="text-base font-semibold flex items-center gap-2">
+          <span>📅</span><span>thesis 历史时间线</span>
+          <span class="text-[11px] font-normal text-slate-500 ml-1">v1.4 §9.2.4</span>
+        </h2>
+      </header>
+      <div class="p-3 text-[12px]">
+        <template x-if="(thesesHistory || []).length === 0">
+          <div class="text-slate-500 dark:text-slate-400 italic">
+            暂无 thesis 历史(冷启动)
+          </div>
+        </template>
+        <template x-if="(thesesHistory || []).length > 0">
+          <table class="w-full text-[11px] font-mono tabular-nums">
+            <thead class="text-slate-500 border-b border-slate-200 dark:border-slate-800">
+              <tr>
+                <th class="text-left py-1">thesis_id</th>
+                <th class="text-left">方向</th>
+                <th class="text-right">置信度</th>
+                <th class="text-left">状态</th>
+                <th class="text-right">持续</th>
+                <th class="text-right">PnL%</th>
+                <th class="text-left">通道</th>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-for="t in (thesesHistory || [])" :key="t.thesis_id">
+                <tr class="border-b border-slate-100 dark:border-slate-900">
+                  <td class="py-0.5 truncate" x-text="t.thesis_id"></td>
+                  <td>
+                    <span class="px-1 rounded text-[10px] font-bold"
+                          :class="t.direction === 'long'
+                                    ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400'
+                                    : 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-400'"
+                          x-text="t.direction"></span>
+                  </td>
+                  <td class="text-right" x-text="t.confidence_score ?? '—'"></td>
+                  <td>
+                    <span :class="thesisStatusColor(t.status)"
+                          x-text="t.status"></span>
+                  </td>
+                  <td class="text-right"
+                      x-text="thesisDurationDays(t)"></td>
+                  <td class="text-right"
+                      :class="(t.final_realized_pnl_pct ?? 0) >= 0
+                                ? 'text-emerald-600 dark:text-emerald-400'
+                                : 'text-rose-600 dark:text-rose-400'"
+                      x-text="t.final_realized_pnl_pct != null
+                                ? (t.final_realized_pnl_pct >= 0 ? '+' : '') +
+                                  t.final_realized_pnl_pct.toFixed(2) + '%'
+                                : '—'"></td>
+                  <td x-text="t.close_channel || '—'"></td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </template>
+      </div>
+    </section>
+
+    <!-- ============================================================ -->
     <!-- 📂 区域 4:原始因子(5 组,主要平铺 + 次要折叠)              -->
     <!-- ============================================================ -->
     <section id="region-4" class="audit-card">
@@ -785,6 +951,144 @@
             暂无历史节点(Sprint 2.4 会接入完整 /api/strategy/history)。
           </div>
         </div>
+      </div>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- 📊 模块 5:周复盘报告(Sprint 1.10-I §9.2.5 + D3=a)         -->
+    <!-- 位置:页面底部,与事件日历同级                                -->
+    <!-- 数据源:GET /api/review/weekly/latest + history?limit=12     -->
+    <!-- ============================================================ -->
+    <section id="region-weekly-review" class="audit-card">
+      <header class="px-4 py-2.5 border-b border-slate-200 dark:border-slate-800
+                     flex items-center justify-between flex-wrap gap-2">
+        <h2 class="text-base font-semibold flex items-center gap-2">
+          <span>📊</span><span>周复盘</span>
+          <span class="text-[11px] font-normal text-slate-500 ml-1">v1.4 §9.2.5</span>
+        </h2>
+        <!-- D3=a:下拉切换 12 周历史 -->
+        <select x-show="(weeklyReviewHistory || []).length > 1"
+                x-model="weeklyReviewSelectedIdx"
+                @change="weeklyReviewSelected = weeklyReviewHistory[weeklyReviewSelectedIdx]"
+                class="text-[11px] font-mono border border-slate-300
+                       dark:border-slate-700 rounded px-2 py-0.5
+                       bg-white dark:bg-slate-950">
+          <template x-for="(w, idx) in (weeklyReviewHistory || [])" :key="w.week_start_utc">
+            <option :value="idx"
+                    x-text="w.week_start_utc + (idx === 0 ? ' (最新)' : '')"></option>
+          </template>
+        </select>
+      </header>
+      <div class="p-3 text-[12px]">
+        <template x-if="!weeklyReviewSelected || !weeklyReviewSelected.output">
+          <div class="text-slate-500 dark:text-slate-400 italic">
+            暂无周复盘报告(每周日 22:00 BJT 自动生成)
+          </div>
+        </template>
+        <template x-if="weeklyReviewSelected && weeklyReviewSelected.output">
+          <div class="space-y-3">
+            <!-- performance_summary -->
+            <div>
+              <div class="stat-label mb-1">周表现摘要</div>
+              <div class="grid grid-cols-2 md:grid-cols-4 gap-2 font-mono tabular-nums">
+                <div>
+                  <span class="text-slate-500">runs</span>
+                  <span class="ml-1 font-bold"
+                        x-text="(weeklyReviewSelected.output.performance_summary || {}).total_runs ?? '—'"></span>
+                </div>
+                <div>
+                  <span class="text-slate-500">AI 失败</span>
+                  <span class="ml-1 font-bold"
+                        x-text="(weeklyReviewSelected.output.performance_summary || {}).ai_failures ?? '—'"></span>
+                </div>
+                <div>
+                  <span class="text-slate-500">PnL</span>
+                  <span class="ml-1 font-bold"
+                        :class="((weeklyReviewSelected.output.performance_summary || {}).weekly_pnl_pct ?? 0) >= 0
+                                  ? 'text-emerald-600' : 'text-rose-600'"
+                        x-text="formatPct((weeklyReviewSelected.output.performance_summary || {}).weekly_pnl_pct, true)"></span>
+                </div>
+                <div>
+                  <span class="text-slate-500">最大回撤</span>
+                  <span class="ml-1 font-bold text-rose-600"
+                        x-text="formatPct((weeklyReviewSelected.output.performance_summary || {}).max_drawdown_pct, true)"></span>
+                </div>
+              </div>
+            </div>
+            <!-- system_health_diagnosis -->
+            <div x-show="(weeklyReviewSelected.output.system_health_diagnosis || []).length > 0">
+              <div class="stat-label mb-1">系统健康诊断</div>
+              <ul class="space-y-1">
+                <template x-for="(d, i) in (weeklyReviewSelected.output.system_health_diagnosis || [])"
+                          :key="i">
+                  <li class="text-[11px] leading-snug border-l-2 pl-2"
+                      :class="d.severity === 'critical' ? 'border-rose-500'
+                            : d.severity === 'warning' ? 'border-amber-500'
+                            : 'border-slate-300'">
+                    <span class="font-bold"
+                          :class="d.severity === 'critical' ? 'text-rose-600'
+                                : d.severity === 'warning' ? 'text-amber-600'
+                                : 'text-slate-700 dark:text-slate-300'"
+                          x-text="(d.severity || '').toUpperCase()"></span>
+                    —
+                    <span x-text="d.issue"></span>
+                    <div class="text-slate-500"
+                         x-text="'evidence: ' + (d.evidence || '—')"></div>
+                    <div class="text-slate-500"
+                         x-text="'建议: ' + (d.suggested_action || '—')"></div>
+                  </li>
+                </template>
+              </ul>
+            </div>
+            <!-- adjustment_recommendations(按优先级排序) -->
+            <div x-show="(weeklyReviewSelected.output.adjustment_recommendations || []).length > 0">
+              <div class="stat-label mb-1">调整建议</div>
+              <ul class="space-y-1">
+                <template x-for="(r, i) in (weeklyReviewSelected.output.adjustment_recommendations || [])"
+                          :key="i">
+                  <li class="text-[11px] leading-snug">
+                    <span class="font-bold px-1 rounded"
+                          :class="r['优先级'] === 'high' ? 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-400'
+                                : r['优先级'] === 'medium' ? 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-400'
+                                : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'"
+                          x-text="(r['优先级'] || 'low').toUpperCase()"></span>
+                    <span x-text="r['目标']"></span>
+                    <div class="text-slate-500" x-text="'建议: ' + (r['建议'] || '')"></div>
+                    <div class="text-slate-500" x-text="'影响: ' + (r['影响'] || '')"></div>
+                  </li>
+                </template>
+              </ul>
+            </div>
+            <!-- 23 V evaluation 表(可折叠) -->
+            <details class="border-t border-slate-200 dark:border-slate-800 pt-2">
+              <summary class="cursor-pointer text-[11px] font-mono text-slate-500
+                              hover:text-slate-700 dark:hover:text-slate-300">
+                展开 23 条 Validator 激活率表
+              </summary>
+              <div class="mt-2">
+                <table class="w-full text-[10px] font-mono tabular-nums">
+                  <thead class="text-slate-500 border-b border-slate-200 dark:border-slate-800">
+                    <tr><th class="text-left">Validator</th><th class="text-right">激活</th>
+                        <th class="text-right">rate</th><th class="text-left">评估</th></tr>
+                  </thead>
+                  <tbody>
+                    <template x-for="vk in validatorKeys()" :key="vk">
+                      <tr class="border-b border-slate-100 dark:border-slate-900">
+                        <td class="py-0.5" x-text="vk.replace('validator_', 'V').replace(/_/g, ' ')"></td>
+                        <td class="text-right"
+                            x-text="((weeklyReviewSelected.output.hard_constraint_activation_review || {})[vk] || {}).activations ?? '—'"></td>
+                        <td class="text-right"
+                            x-text="((weeklyReviewSelected.output.hard_constraint_activation_review || {})[vk] || {}).rate || '—'"></td>
+                        <td class="text-slate-500"
+                            x-text="((weeklyReviewSelected.output.hard_constraint_activation_review || {})[vk] || {}).evaluation || '—'"></td>
+                      </tr>
+                    </template>
+                  </tbody>
+                </table>
+              </div>
+            </details>
+          </div>
+        </template>
       </div>
     </section>
 

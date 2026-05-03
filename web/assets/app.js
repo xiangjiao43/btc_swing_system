@@ -26,6 +26,20 @@ function app() {
         systemHealth: null,
         _healthTimer: null,
 
+        // Sprint 1.10-I §9.2:5 模块数据
+        virtualAccount: null,           // 模块 1 — virtual_account 最新快照
+        accountReturns: {               // 模块 1 — 各周期收益率
+            daily_pct: null, weekly_pct: null, monthly_pct: null,
+            yearly_pct: null, total_pct: null,
+        },
+        accountHistory: [],             // 模块 1 — 30 天 snapshots(sparkline 数据)
+        activeThesis: null,             // 模块 2 — 当前 active thesis
+        positionSummary: null,          // 模块 3 — 持仓摘要(从 strategy/current 复用)
+        ordersPending: {                // 模块 3 — 当前 pending 挂单
+            active_thesis_id: null, items: [],
+        },
+        _v14ModulesTimer: null,         // 5 分钟刷一次新模块数据
+
         // ============== 初始化 ==============
         async init() {
             this._initDarkMode();
@@ -41,6 +55,79 @@ function app() {
             this._healthTimer = setInterval(
                 () => this._refreshSystemHealth(), 5 * 60 * 1000,
             );
+            // Sprint 1.10-I:5 模块数据,首次拉 + 5 分钟刷新
+            await this._refreshV14Modules();
+            this._v14ModulesTimer = setInterval(
+                () => this._refreshV14Modules(), 5 * 60 * 1000,
+            );
+        },
+
+        // Sprint 1.10-I §9.2:刷新 5 模块数据(account / thesis / orders /
+        //                    weekly_review / pending_orders 一波 fetch)
+        async _refreshV14Modules() {
+            const fetchJson = async (url, fallback) => {
+                try {
+                    const r = await fetch(url, { cache: 'no-cache' });
+                    if (r.ok) return await r.json();
+                } catch (e) { /* 静默 */ }
+                return fallback;
+            };
+            const [acc, accRet, accHist, active, orders] = await Promise.all([
+                fetchJson('/api/account/current', {}),
+                fetchJson('/api/account/returns', {
+                    daily_pct: null, weekly_pct: null, monthly_pct: null,
+                    yearly_pct: null, total_pct: null,
+                }),
+                fetchJson('/api/account/history?days=30', { snapshots: [] }),
+                fetchJson('/api/theses/active', {}),
+                fetchJson('/api/orders/pending', {
+                    active_thesis_id: null, items: [],
+                }),
+            ]);
+            this.virtualAccount = (acc && acc.snapshot_id) ? acc : null;
+            this.accountReturns = accRet || this.accountReturns;
+            this.accountHistory = (accHist && accHist.snapshots) || [];
+            this.activeThesis = (active && active.thesis_id) ? active : null;
+            this.ordersPending = orders || this.ordersPending;
+            // position_summary 从 strategy/current 复用(commit 3 加的字段)
+            this.positionSummary = (
+                this.state && this.state.position_summary
+            ) || null;
+        },
+
+        // Sprint 1.10-I §9.2.1 D1=c:30 天资金曲线 sparkline(纯 SVG polyline)
+        sparklinePoints(snapshots) {
+            if (!snapshots || snapshots.length < 2) return '';
+            const equities = snapshots.map(s => Number(s.total_equity || 0));
+            const minE = Math.min(...equities);
+            const maxE = Math.max(...equities);
+            const range = (maxE - minE) || 1;
+            const w = 300, h = 60, pad = 2;
+            const xStep = (w - pad * 2) / (equities.length - 1);
+            return equities.map((e, i) => {
+                const x = pad + i * xStep;
+                // y 反转:高 equity 在上
+                const y = pad + (h - pad * 2) * (1 - (e - minE) / range);
+                return `${x.toFixed(1)},${y.toFixed(1)}`;
+            }).join(' ');
+        },
+
+        // Sprint 1.10-I §9.2.1:USD 格式化(简化版,不引入 Intl)
+        formatUsd(v) {
+            if (v == null || isNaN(v)) return '—';
+            const n = Number(v);
+            if (Math.abs(n) >= 1000) return '$' + n.toLocaleString(undefined, {
+                maximumFractionDigits: 0,
+            });
+            return '$' + n.toFixed(2);
+        },
+
+        // Sprint 1.10-I §9.2.3:挂单价距当前 BTC 现价的 %(带 ± 号)
+        distanceFromLive(orderPrice) {
+            const live = this.livePrice();
+            if (!live || !orderPrice) return '—';
+            const pct = ((Number(orderPrice) - live) / live) * 100;
+            return (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%';
         },
 
         async _refreshSystemHealth() {

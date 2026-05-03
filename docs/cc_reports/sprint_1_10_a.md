@@ -110,66 +110,71 @@
 
 > 每个 commit 完成立即 push + 等用户"继续"再做下一个;每个 commit 在下面对应小节实时填具体改动。
 
-### Commit 1:调研 + 报告骨架(本 commit)
+### Commit 1:调研 + 报告骨架 ✅
 
-- 写 `docs/cc_reports/sprint_1_10_a.md`(本文件)— 任务 1 全部 6 项调研结果 + 任务 2-6 骨架
-- 0 代码改动 / 0 测试改动
+- hash: `df1ee63`
+- `docs/cc_reports/sprint_1_10_a.md`(本文件)+ 任务 1 全部 6 项调研结果 + 任务 2-6 骨架
+- 0 代码改动
+
+### Commit 2:migration 009 ✅
+
+- hash: `8f4d435`
+- `migrations/009_v14_virtual_account_thesis.sql`(+121 行)
+  - `virtual_account`(15 列 + idx_va_time)— §5.1.2
+  - `virtual_orders`(13 列 + idx_vo_status / idx_vo_thesis)— §5.2.2
+  - `theses`(17 列 + idx_theses_status / idx_theses_created)— §5.3.2
+- 字段 / 类型 / 约束严格对齐 v1.4 b25cfe6,无自由发挥
+- in-memory sqlite3 dry-run 验证 schema 跑通
+
+### Commit 3:VirtualAccountDAO + 7 单测 ✅
+
+- hash: `70e38e3`
+- `src/data/storage/dao.py` 新增 `class VirtualAccountDAO`(3 方法)
+- `tests/test_virtual_account_dao.py`(7 单测,3 happy + 3 edge + 1 持仓)
+- pytest:`tests/test_virtual_account_dao.py 7 passed` + 全套 987 passed
+
+### Commit 4:VirtualOrdersDAO + ThesesDAO + 24 单测 ✅
+
+- hash: `f5cc227`
+- `src/data/storage/dao.py` 新增:
+  - `class VirtualOrdersDAO`(6 方法:create_order / fill_order / cancel_order / mark_expired / get_pending / get_filled)
+  - `class ThesesDAO`(5 方法:create / update_assessment / close / get_active / get_history)
+  - `_safe_json_loads` helper(容错 None / 空 / 非法 JSON)
+- 用户 v2 补充 B/C 落地:
+  - `theses.break_conditions`:DAO `json.dumps` 写,`json.loads` 读
+  - `virtual_orders.expires_at_utc`:DAO 接 `expires_at_utc` 参数,调用方读 `base.yaml::virtual_orders.default_expiry_days` 算
+- pytest:`tests/test_virtual_orders_dao.py 11 + tests/test_theses_dao.py 13 = 24 passed`
+
+### Commit 5:init_v14_tables.py + base.yaml ✅
+
+- hash: `18b86f6`
+- `config/base.yaml` 末尾新增 2 段(用户 v2 补充 A):
+  - `virtual_account.initial_capital: 100000` / `virtual_account.currency: "USDT"`
+  - `virtual_orders.default_expiry_days: 7`
+- `scripts/init_v14_tables.py` 幂等:apply migration 009 + 检测 already_initialized + 写第一行 snapshot
+- smoke test(临时 DB,跑 2 次):Run 1 INITIALIZED ✅ / Run 2 ALREADY INITIALIZED skip ✅
+
+### Commit 6:verify_v14_tables.py + 报告收尾(本 commit)
+
 - hash: 待 push 后填
-
-### Commit 2:migration 009(待执行)
-
-预计改动:
-- 新建 `migrations/009_v14_virtual_account_thesis.sql`
-  - `virtual_account`(§5.1.2,15 列 + 1 索引)
-  - `virtual_orders`(§5.2.2,13 列 + 2 索引)
-  - `theses`(§5.3.2,17 列 + 2 索引)
-  - 严格按 v1.4 字段名 / 类型 / 约束,无自由发挥
-
-### Commit 3:VirtualAccountDAO(待执行)
-
-预计改动:
-- `src/data/storage/dao.py` 新增 `class VirtualAccountDAO`(insert_snapshot / get_latest / get_history)
-- `tests/test_virtual_account_dao.py`(in-memory SQLite + happy/edge)
-
-### Commit 4:VirtualOrdersDAO + ThesesDAO(待执行)
-
-预计改动:
-- `src/data/storage/dao.py` 新增 `class VirtualOrdersDAO`(create_order / fill_order / cancel_order / get_pending / get_filled / mark_expired)+ `class ThesesDAO`(create / update_assessment / close / get_active / get_history)
-- `tests/test_virtual_orders_dao.py` + `tests/test_theses_dao.py`
-- 按用户补充 B/C:
-  - `theses.break_conditions` DAO `json.dumps` 写入,`json.loads` 读出
-  - `virtual_orders.expires_at_utc` DAO 内计算 `created_at + default_expiry_days * 86400`(读 base.yaml)
-
-### Commit 5:init_v14_tables.py + base.yaml 配置(待执行)
-
-预计改动:
-- `scripts/init_v14_tables.py` 幂等初始化(读 base.yaml `virtual_account.initial_capital`,关联最新 strategy_run)
-- `config/base.yaml` 新增段(按用户补充 A 字段名严格对齐):
-  ```yaml
-  virtual_account:
-    initial_capital: 100000
-    currency: "USDT"
-  virtual_orders:
-    default_expiry_days: 7
-  ```
-
-### Commit 6:verify_v14_tables.py + 报告收尾(待执行)
-
-预计改动:
-- `scripts/verify_v14_tables.py`(连真 DB,SQL 断言三表存在 + 索引 + virtual_account 行数 = 1 + initial_capital = 100000)
-- 本报告 4 段总结填完
+- `scripts/verify_v14_tables.py`(端到端真实断言,§Z 纪律):
+  - 12 项断言:3 表存在 / 5 索引存在 / virtual_account 行数=1 / initial_capital=100000 / available_cash=100000 / total_equity=100000 / virtual_orders 行数=0 / theses 行数=0
+  - 退出码:0 全通过 / 1 任一失败
+- 防御:OperationalError 包 try/except,表不存在不 crash,作为 assertion 失败汇总报告
+- 本报告 4 段填完
 
 ---
 
-## 部署状态四件事清单(commit-by-commit 实时填)
+## 部署状态四件事清单
 
 | 步骤 | 状态 |
 |---|---|
-| 本地 pytest 通过 | 待 commit 3/4 完成填 |
-| GitHub push | 每 commit 完成立即 push,hash 见上 |
-| 服务器 git pull | 1.10-A 不需要服务器部署(纯 DB schema + DAO + 脚本),用户 1.10-B 后再统一部署 |
-| 服务器 systemctl restart | N/A 本 sprint |
-| 端到端真实断言(§Z) | commit 6 verify_v14_tables.py + 用户 SSH 跑 |
+| 本地 pytest 通过 | ✅ 1011 passed, 1 skipped(从 980 + 31 本 sprint 新增) |
+| GitHub push(commit 1-6 hash 列表) | ✅ df1ee63 / 8f4d435 / 70e38e3 / f5cc227 / 18b86f6 / 待填(commit 6) |
+| 服务器 git pull | 待用户(1.10-A 是数据层,可跟 1.10-B 一起部署) |
+| 服务器 systemctl restart | **不需要**(本 sprint 0 服务代码改动) |
+| 端到端真实断言(§Z) | ✅ scripts/verify_v14_tables.py 已写 + 本机 smoke 通过(positive 14 通过 / negative 12 失败 exit 1) |
+| 生产 DB 迁移 | 待用户在服务器跑 `python scripts/init_v14_tables.py` 后再跑 verify(段 2 完整命令) |
 
 ## 本 sprint 删除清单
 
@@ -179,6 +184,50 @@
 
 **本 sprint 无替代关系,无删除项**(纯新增 3 表 + DAO + 单测 + 脚本)。
 
-## 测试记录(commit-by-commit 实时填)
+## 测试记录
 
-待 commit 3/4 完成填。
+```
+$ python -m pytest tests/ -q --tb=no
+1011 passed, 1 skipped, 360 warnings in 10.12s
+```
+
+本 sprint 新增 31 单测(全部 in-memory SQLite,不污染真实 DB):
+- `tests/test_virtual_account_dao.py`:7 单测
+- `tests/test_virtual_orders_dao.py`:11 单测
+- `tests/test_theses_dao.py`:13 单测
+
+全套 980 → 1011(新增 31,全部 pass)。
+
+## 段 2 用户验证脚本(SSH 服务器 + Mac 本地都适用)
+
+```bash
+# 假设已 git pull origin main(commit hash 见上)
+cd ~/Projects/btc_swing_system  # 或服务器路径
+
+# 1. 跑幂等初始化(第一次写 virtual_account 第一行;再跑会跳过)
+.venv/bin/python scripts/init_v14_tables.py
+
+# 2. 跑端到端真实断言(§Z 纪律)
+.venv/bin/python scripts/verify_v14_tables.py
+# 期望:14 项全部 ✅,exit 0
+
+# 3.(可选)pytest 本 sprint 新加 31 单测
+.venv/bin/python -m pytest tests/test_virtual_account_dao.py \
+    tests/test_virtual_orders_dao.py \
+    tests/test_theses_dao.py -v
+# 期望:31 passed
+```
+
+服务器 DB 路径用 `config/base.yaml::paths.db_path`(默认 `data/btc_strategy.db`),如要指定其他路径:`scripts/init_v14_tables.py /path/to/db` + `scripts/verify_v14_tables.py /path/to/db`。
+
+## 段 3 同类风险扫描
+
+1. **DAO 跨模块依赖**:本 sprint 加的 3 DAO 在 `src/data/storage/dao.py`(单文件),无新跨模块。1.10-B/C/D 的 manager 模块再 import 这 3 DAO。
+2. **JSON 反序列化容错**:`_safe_json_loads` 容忍 None / 空 / 非法 → 返 `[]`,1.10-D validator 才会强校验 break_conditions ≥ 3 条客观。本 sprint 不强校验,允许早期数据宽松。
+3. **`expires_at_utc` 由调用方算**:DAO 不读 base.yaml(保持 DAO 纯净),由 1.10-B 的 orders_engine 模块读配置算 + 传给 DAO。本 sprint 测试 fixture 直接传 ISO 字符串,无副作用。
+4. **`init_v14_tables.py` 在 strategy_runs 表不存在时**:用 `'init_v14_bootstrap'` 字符串占位作 run_id(FK 软约束 SQLite 默认未 enforce),保证全新 DB 也能初始化。生产 DB 已有 strategy_runs,会用真实最新 run_id。
+5. **migration 编号 009**:连续现有 008,无冲突。
+
+## 段 4 详细报告路径
+
+`docs/cc_reports/sprint_1_10_a.md`(本文件)。

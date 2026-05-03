@@ -35,6 +35,7 @@ _BASE_YAML = _REPO_ROOT / "config" / "base.yaml"
 _MIGRATION = _REPO_ROOT / "migrations" / "009_v14_virtual_account_thesis.sql"
 _MIGRATION_010 = _REPO_ROOT / "migrations" / "010_v14_fuse_system_states.sql"
 _MIGRATION_011 = _REPO_ROOT / "migrations" / "011_v14_validator_meta.sql"
+_MIGRATION_012 = _REPO_ROOT / "migrations" / "012_v14_retry_log.sql"
 
 
 def load_config() -> dict:
@@ -80,6 +81,12 @@ def apply_migration(conn: sqlite3.Connection) -> None:
     if not _column_exists(conn, "strategy_runs", "constraint_activations_json"):
         conn.execute(
             "ALTER TABLE strategy_runs ADD COLUMN constraint_activations_json TEXT"
+        )
+
+    # 012 ALTER:strategy_runs.retry_log_json(条件 ALTER)
+    if not _column_exists(conn, "strategy_runs", "retry_log_json"):
+        conn.execute(
+            "ALTER TABLE strategy_runs ADD COLUMN retry_log_json TEXT"
         )
 
 

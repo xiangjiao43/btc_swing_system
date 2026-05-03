@@ -1,0 +1,27 @@
+-- Sprint 1.10-F:strategy_runs.retry_log_json
+--
+-- 对齐 docs/modeling.md b25cfe6(v1.4)§6.3.4(网页失败显示)+ §3.4.7(V22)
+--
+-- 用途:每次 master AI 失败 / 重试时,记录重试历史 + 失败分类 + 短路状态
+-- 周复盘 AI(1.10-H)消费此字段评估"系统稳定性"
+-- V22 检测(D2=a):SELECT WHERE generated_at_utc >= now-72h AND
+--     retry_log_json LIKE '%master_fail%' COUNT(*) ≥ 3 → review_pending
+--
+-- 字段格式:JSON dict 或 NULL
+-- 例:
+--   {
+--     "layers_status": {"l1": "success", "l2": "success", ..., "master": "fallback"},
+--     "failed_layers": ["master"],
+--     "shortcut_applied": [],
+--     "macro_fallback_applied": false,
+--     "thesis_aware_fallback_applied": true,
+--     "thesis_aware_fallback_reason": "master_failed_keep_thesis"
+--   }
+--
+-- ALTER 由 scripts/init_v14_tables.py 在 Python 侧条件 ALTER。
+
+-- =============================================================================
+-- strategy_runs.retry_log_json(v1.4 §6.3.4)
+-- =============================================================================
+-- ALTER TABLE strategy_runs ADD COLUMN retry_log_json TEXT;
+-- 注:Python 侧 PRAGMA table_info 检测后条件 ALTER。本 SQL 文件作 audit trail。

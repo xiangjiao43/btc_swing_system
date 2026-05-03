@@ -37,7 +37,9 @@ CREATE TABLE IF NOT EXISTS strategy_runs (
     ai_model_actual          TEXT,
     full_state_json          TEXT NOT NULL,
     -- Sprint 1.10-E:V24 meta(v1.4 §3.4.9)— Validator 24 条触发记录 + 额外 meta
-    constraint_activations_json TEXT
+    constraint_activations_json TEXT,
+    -- Sprint 1.10-F:retry/fallback log(v1.4 §6.3.4)— 失败重试历史 + 短路状态
+    retry_log_json TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_runs_time          ON strategy_runs(generated_at_utc);

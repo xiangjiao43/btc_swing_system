@@ -33,6 +33,7 @@ from .agents import (
 )
 from .agents.chart_renderer import ChartRenderer
 from .anti_pattern_signals import compute_anti_pattern_signals
+from .circuit_breaker import CircuitBreaker
 from .client import build_anthropic_client
 from .validator import validate_master_output
 
@@ -408,8 +409,9 @@ class AIOrchestrator:
         context: dict[str, Any],
         result: dict[str, Any],
     ) -> dict[str, Any]:
+        """L5 独立做宏观判断。Sprint 1.10-F:失败时用 CircuitBreaker.apply_macro_fallback()
+        硬编码兜底(D4=a),master 仍跑(§6.4.2)。"""
         t0 = time.time()
-        # L5 独立做宏观判断,不消费 L1-L4 输出
         l5_input = dict(context.get("l5") or {})
         try:
             out = self._agents["l5"].analyze(
@@ -419,6 +421,19 @@ class AIOrchestrator:
             logger.warning("orchestrator: L5 analyze raised: %s", e)
             out = self._agents["l5"]._fallback_output()
             out["status"] = "degraded_l5_failed"
+
+        # Sprint 1.10-F:L5 失败时,用 CircuitBreaker.apply_macro_fallback() 硬编码 macro 替代
+        # master 仍跑,但用此硬编码 macro 而非 _fallback_output(后者无 macro 字段)
+        if not str(out.get("status", "")).startswith("success"):
+            macro_fb = CircuitBreaker.apply_macro_fallback()
+            # 保留原 status 字段(降级标记)+ 注入硬编码 macro 关键字段
+            macro_fb["status"] = out.get("status", "degraded_l5_failed_macro_fallback")
+            out = macro_fb
+            # retry_log 标记
+            result.setdefault("retry_log", {}).update({
+                "macro_fallback_applied": True,
+                "macro_fallback_reason": "l5_failed_apply_hardcoded_macro_d4_a",
+            })
 
         result["latency_ms"]["l5"] = int((time.time() - t0) * 1000)
         if not str(out.get("status", "")).startswith("success"):
@@ -457,8 +472,21 @@ class AIOrchestrator:
             )
         except Exception as e:
             logger.warning("orchestrator: master analyze raised: %s", e)
-            out = self._agents["master"]._fallback_output()
-            out["status"] = "degraded_master_failed"
+            # Sprint 1.10-F:接通 1.10-D 的 thesis_aware_fallback(D2 = silent / evaluate_existing)
+            # has_active_thesis 从 master_ctx 读(由 master_input_builder 装配)
+            master_ctx = context.get("master") or {}
+            has_active = bool(master_ctx.get("active_thesis"))
+            out = MasterAdjudicator.thesis_aware_fallback(
+                has_active_thesis=has_active,
+            )
+            # retry_log 标记 fallback 接通
+            result.setdefault("retry_log", {}).update({
+                "thesis_aware_fallback_applied": True,
+                "thesis_aware_fallback_reason": (
+                    "master_failed_keep_thesis" if has_active
+                    else "master_failed_silent"
+                ),
+            })
 
         result["latency_ms"]["master"] = int((time.time() - t0) * 1000)
         if not str(out.get("status", "")).startswith("success"):

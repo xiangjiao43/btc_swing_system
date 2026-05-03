@@ -1017,6 +1017,10 @@ class StrategyStateDAO:
         ca = state.get("constraint_activations")
         ca_json = json.dumps(ca, ensure_ascii=False) if ca else None
 
+        # Sprint 1.10-F:retry_log — orchestrator 装入 state["retry_log"]
+        rl = state.get("retry_log")
+        rl_json = json.dumps(rl, ensure_ascii=False) if rl else None
+
         sql = """
             INSERT INTO strategy_runs
                 (run_id, generated_at_utc, generated_at_bjt,
@@ -1026,8 +1030,8 @@ class StrategyStateDAO:
                  fallback_level, system_version, rules_version,
                  strategy_flavor, observation_category,
                  cold_start, ai_model_actual, full_state_json,
-                 constraint_activations_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 constraint_activations_json, retry_log_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(run_id) DO UPDATE SET
                 generated_at_utc = excluded.generated_at_utc,
                 generated_at_bjt = excluded.generated_at_bjt,
@@ -1044,7 +1048,8 @@ class StrategyStateDAO:
                 cold_start = excluded.cold_start,
                 ai_model_actual = excluded.ai_model_actual,
                 full_state_json = excluded.full_state_json,
-                constraint_activations_json = excluded.constraint_activations_json
+                constraint_activations_json = excluded.constraint_activations_json,
+                retry_log_json = excluded.retry_log_json
         """
         cur = conn.execute(
             sql,
@@ -1057,7 +1062,7 @@ class StrategyStateDAO:
                 strategy_flavor, observation_category,
                 cold_start_flag, ai_model_actual,
                 json.dumps(state, ensure_ascii=False),
-                ca_json,
+                ca_json, rl_json,
             ),
         )
         return cur.rowcount

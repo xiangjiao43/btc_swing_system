@@ -1850,6 +1850,24 @@ class ThesesDAO:
         return d
 
     @staticmethod
+    def get_by_id(
+        conn: sqlite3.Connection, thesis_id: str,
+    ) -> Optional[dict[str, Any]]:
+        """按 thesis_id PK 查单个 thesis(Sprint 1.10-I 加,1.10-A DAO 完整性补漏)。
+
+        返回 dict(break_conditions 已 json.loads 还原 list)或 None(不存在)。
+        """
+        row = conn.execute(
+            "SELECT * FROM theses WHERE thesis_id=?",
+            (thesis_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        d = dict(row)
+        d["break_conditions"] = _safe_json_loads(d.get("break_conditions"))
+        return d
+
+    @staticmethod
     def get_history(
         conn: sqlite3.Connection,
         limit: int = 100,

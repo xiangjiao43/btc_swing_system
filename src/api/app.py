@@ -36,6 +36,12 @@ from .routes import pipeline as pipeline_routes
 from .routes import review as review_routes
 from .routes import strategy as strategy_routes
 from .routes import system as system_routes
+# Sprint 1.10-I 新增 5 个路由(account / theses / orders / review_weekly / review_pending)
+from .routes import account as account_routes
+from .routes import theses as theses_routes
+from .routes import orders as orders_routes
+from .routes import review_weekly as review_weekly_routes
+from .routes import review_pending as review_pending_routes
 from .state import AppState
 
 
@@ -137,6 +143,12 @@ def create_app(
     app.include_router(fallback_routes.router, prefix="/api")
     app.include_router(data_routes.router, prefix="/api")
     app.include_router(alerts_routes.router, prefix="/api")
+    # Sprint 1.10-I 5 个新路由(v1.4 §9.5 #8-#18)
+    app.include_router(account_routes.router, prefix="/api")
+    app.include_router(theses_routes.router, prefix="/api")
+    app.include_router(orders_routes.router, prefix="/api")
+    app.include_router(review_weekly_routes.router, prefix="/api")
+    app.include_router(review_pending_routes.router, prefix="/api")
 
     # Sprint 2.6-D.1:events_calendar 在 FastAPI startup 时 seed
     # (systemd 跑的是 uvicorn → src.api.app:app,不会走 scheduler/main.run_forever)

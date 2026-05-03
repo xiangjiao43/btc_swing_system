@@ -29,6 +29,14 @@ class HealthResponse(BaseModel):
         0,
         description="Sprint 2.8-D:已注册的 cron job 数(scheduler 不活时为 0)",
     )
+    review_pending: dict[str, Any] | None = Field(
+        None,
+        description=(
+            "Sprint 1.10-I D2=a:review_pending 状态(active / reason / "
+            "entered_at_utc / state_id)。无 active 时为 null。前端健康灯组件 + "
+            "RP 红色横幅复用此字段。"
+        ),
+    )
 
 
 class StrategyStateRow(BaseModel):

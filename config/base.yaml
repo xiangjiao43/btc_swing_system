@@ -49,20 +49,16 @@ timezone:
 
 
 # -------- 运行模式(M38)---------------------------------------------
+# Sprint 1.10-G §X:整段 runtime 仅保留 declare/开关;真实 cron 调度由
+# scheduler.yaml 唯一权威源管理(v1.4 §10.4.2)。
+# 已删:
+#   - runtime.scheduled.cron_hours_utc(scheduler.yaml::pipeline_run_regular 是真源)
+#   - runtime.event_driven.throttle(已迁移到 event_trigger 段单一配置源)
 runtime:
-  # 定时基线运行:北京时间每日 6 次,整点。
-  # cron 表达式用 UTC 计算(因为 APScheduler 在 UTC 时区跑)。
-  # 北京 00/04/08/12/16/20 ≡ UTC 16/20/00/04/08/12。
   scheduled:
     enabled: true
-    cron_timezone: "UTC"
-    # APScheduler CronTrigger 的标准 cron 字段。多个时刻用列表形式。
-    cron_hours_utc: [0, 4, 8, 12, 16, 20]
-    # 每次 scheduled run 在 StrategyState.run_trigger 里写的值
     run_trigger_tag: "scheduled"
 
-  # 事件触发运行(v1.2 新增第二层)。
-  # 类型与 run_trigger 枚举见 3.3.3,这里只打开/关闭开关。
   event_driven:
     enabled: true
     types:
@@ -70,16 +66,8 @@ runtime:
       event_onchain: true     # Glassnode 日级更新(北京 08:15-08:30)
       event_funding: true     # 资金费率结算后 15 min
       event_options: true     # 期权月/季到期前 1 h
-      event_price: true       # ±3% 价格异动
-      event_invalidation: true  # 硬失效位触发
-    # 节流规则(3.3.2):防止事件风暴导致 AI 配额烧光
-    throttle:
-      # 同类事件 N 秒内只触发一次
-      same_type_cooldown_sec: 7200
-      # 整点运行进行中,事件触发推迟 N 秒
-      defer_during_scheduled_sec: 300
-      # 距上次整点运行 < N 秒,跳过本次事件触发(避免噪音)
-      skip_if_recent_scheduled_sec: 1800
+      event_price: true       # ±5%(空仓)/ ±3%(持仓)价格异动 — 阈值见 event_trigger 段
+      event_invalidation: true  # 硬失效位击穿 → 规则平仓(无 AI,§6.2.3)
 
   # 手动触发(调试 / 人工介入)
   manual:
@@ -217,3 +205,20 @@ ai_retry:
     window_hours: 72
     # 触发 review_pending 阈值(连续失败次数)
     threshold: 3
+
+
+# -------- 事件触发(v1.4 §6.2.3 + §10.4.3,Sprint 1.10-G)---------
+# 双轨设计(继承 v1.3 §5.2):
+# - 空仓 / planned / cooldown:风险低,5% 才响应
+# - 持仓中(opened/holding/trim):风险高,3% 就响应
+# baseline_price 取上次任一 strategy_run 的 BTC 价格(D1=b,Sprint 1.10-G 改造
+# 2.7-D 现有 24h 滚动 → 上次 run 决策窗口语义,§6.2.3 节流"距上次主 AI 介入 <
+# 30min 跳过"暗示 baseline 应是上次 run)。
+# §X:本段是事件触发节流的单一配置源。已删 runtime.event_driven.throttle 老路径。
+event_trigger:
+  # 双轨阈值
+  price_pct_flat: 0.05              # 空仓 / planned / cooldown 状态
+  price_pct_holding: 0.03           # 持仓中(opened/holding/trim)
+  # 节流(D2=b:event_price_* 一类 + event_invalidation 另一类,两类独立计数)
+  event_cooldown_seconds: 7200      # 同类事件 2h 节流(event_price 类内独立)
+  skip_if_recent_scheduled_seconds: 1800   # 距上次主 AI 介入 < 30min 跳过

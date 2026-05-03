@@ -198,3 +198,22 @@ virtual_account:
 virtual_orders:
   # 挂单默认有效期(天)。过期由 mark_expired 批量标 cancelled,reason='expired'
   default_expiry_days: 7
+
+
+# -------- v1.4 AI 重试机制(Sprint 1.10-F,见 docs/modeling.md §6.3)----
+# orchestrator 层失败重试(整层/整次 run 失败 → 等 5/10/20 分钟跨 cron 重试)
+# 注:不同于 BaseAgent._call_ai_with_retry 的 2-attempt 即时重试(API 网络抖动)
+ai_retry:
+  # 指数退避间隔(分钟):第 1/2/3 次重试分别等 5 / 10 / 20 分钟
+  intervals_minutes: [5, 10, 20]
+  # 单层最多重试次数(超过 → 短路下游)
+  max_attempts_per_layer: 3
+  # 整次 run 总窗口(小时):超过 → 放弃所有重试,fallback Level 2
+  total_window_hours: 2
+
+  # V22 master 连续失败检测(D2=a 滑动 72h)
+  master_consecutive_fail:
+    # 检测窗口(小时):72h(滑动,非自然日,避跨 0:00 边界歧义)
+    window_hours: 72
+    # 触发 review_pending 阈值(连续失败次数)
+    threshold: 3

@@ -74,26 +74,60 @@ def compute_snapshot(
         available_cash = float(prev_snapshot.get("available_cash") or initial_capital)
         realized_pnl_total = float(prev_snapshot.get("realized_pnl_total") or 0.0)
 
-    # 应用 entry fills(本 sprint 只处理 entry)
+    # 应用 fills,顺序敏感(entry 先,close 用更新后的 avg_price)
+    # 1.10-C 扩展:同时处理 entry / stop_loss / take_profit 三种 order_type
     for fill in fills_since_last:
-        if fill.get("order_type") != "entry":
-            # stop_loss / take_profit 的 fill 留 1.10-C ThesisManager 处理(close 流程会动 realized_pnl_total)
-            continue
+        order_type = fill.get("order_type")
         direction = fill.get("direction")
         size_usdt = float(fill.get("size_usdt") or 0.0)
+        filled_price = float(fill.get("filled_price") or 0.0)
         filled_btc_amount = float(fill.get("filled_btc_amount") or 0.0)
 
-        if direction == "long":
-            long_position_usdt += size_usdt
-            long_btc_amount += filled_btc_amount
-            long_avg_price = (long_position_usdt / long_btc_amount) if long_btc_amount > 0 else None
-            available_cash -= size_usdt
-        elif direction == "short":
-            short_position_usdt += size_usdt
-            short_btc_amount += filled_btc_amount
-            short_avg_price = (short_position_usdt / short_btc_amount) if short_btc_amount > 0 else None
-            available_cash -= size_usdt
-        # 其他 direction(异常)— 静默跳过,Validator 应在更上层拦截
+        if order_type == "entry":
+            # 加仓:position_usdt + cost_basis,available_cash 扣
+            if direction == "long":
+                long_position_usdt += size_usdt
+                long_btc_amount += filled_btc_amount
+                long_avg_price = (long_position_usdt / long_btc_amount) if long_btc_amount > 0 else None
+                available_cash -= size_usdt
+            elif direction == "short":
+                short_position_usdt += size_usdt
+                short_btc_amount += filled_btc_amount
+                short_avg_price = (short_position_usdt / short_btc_amount) if short_btc_amount > 0 else None
+                available_cash -= size_usdt
+            # 其他 direction(异常)— 静默跳过,Validator 应在更上层拦截
+
+        elif order_type in ("stop_loss", "take_profit"):
+            # 1.10-C 扩展:close 流程(扣减 position + 算 realized_pnl)。
+            # 不预 round(继承 1.10-B 教训:SQLite REAL = 64-bit double 不丢精度)。
+            # 按 thesis 方向反向扣减:long thesis 的 close 卖 BTC,short thesis 的 close 买回 BTC。
+            if direction == "long" and long_btc_amount > 0 and long_avg_price is not None:
+                # 防 over-fill:实际平的 BTC 不能超过现持仓
+                btc_to_close = min(filled_btc_amount, long_btc_amount)
+                pnl_this_fill = btc_to_close * (filled_price - long_avg_price)
+                cost_basis_closed = btc_to_close * long_avg_price
+                # 持仓扣减 + 现金回收
+                long_position_usdt -= cost_basis_closed
+                long_btc_amount -= btc_to_close
+                available_cash += btc_to_close * filled_price
+                realized_pnl_total += pnl_this_fill
+                if long_btc_amount <= 0:
+                    long_btc_amount = 0.0
+                    long_position_usdt = 0.0
+                    long_avg_price = None
+            elif direction == "short" and short_btc_amount > 0 and short_avg_price is not None:
+                btc_to_close = min(filled_btc_amount, short_btc_amount)
+                pnl_this_fill = btc_to_close * (short_avg_price - filled_price)
+                cost_basis_closed = btc_to_close * short_avg_price
+                short_position_usdt -= cost_basis_closed
+                short_btc_amount -= btc_to_close
+                available_cash += btc_to_close * filled_price
+                realized_pnl_total += pnl_this_fill
+                if short_btc_amount <= 0:
+                    short_btc_amount = 0.0
+                    short_position_usdt = 0.0
+                    short_avg_price = None
+            # 无对应持仓 → 静默跳过(1.10-D Validator 应在更上层拦截)
 
     # mark-to-market:浮盈浮亏
     unrealized_long = (

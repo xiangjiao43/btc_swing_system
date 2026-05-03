@@ -32,6 +32,7 @@ from .agents import (
     MasterAdjudicator,
 )
 from .agents.chart_renderer import ChartRenderer
+from .agents.emergency_simplified_a import EmergencySimplifiedA
 from .anti_pattern_signals import compute_anti_pattern_signals
 from .circuit_breaker import CircuitBreaker
 from .client import build_anthropic_client
@@ -74,6 +75,10 @@ class AIOrchestrator:
                 "l4": L4RiskAnalyst(client=anthropic_client),
                 "l5": L5MacroAnalyst(client=anthropic_client),
                 "master": MasterAdjudicator(client=anthropic_client),
+                # Sprint 1.10-G:简化 A 应急 AI(event_price 触发时走它,不跑完整 6 AI)
+                "emergency_simplified_a": EmergencySimplifiedA(
+                    client=anthropic_client,
+                ),
             }
         self._agents = agents
 
@@ -246,6 +251,75 @@ class AIOrchestrator:
         result["constraint_activations"] = constraint_activations
 
         return result
+
+    # ------------------------------------------------------------------
+    # Sprint 1.10-G:简化 A 应急 AI 入口(event_price 触发用)
+    # ------------------------------------------------------------------
+
+    def run_event_a(
+        self,
+        *,
+        event_type: str,
+        triggered_at_price: float,
+        baseline_price: float,
+        current_strategy_state: str,
+        key_factors: Optional[dict[str, Any]] = None,
+        active_thesis: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
+        """v1.4 §3.3.8 简化 A 应急 AI 入口。
+
+        触发场景:event_price(±5% 空仓 / ±3% 持仓)异动。
+        本入口走单 AI(EmergencySimplifiedA),不跑完整 6 AI pipeline。
+
+        Args:
+            event_type: 'event_price' / 'event_invalidation'(后者由 caller 区分;
+                event_invalidation 实际不应走本入口 — 走 HardInvalidationMonitor 规则平仓)
+            triggered_at_price: 异动后 BTC 价格
+            baseline_price: 上次 strategy_run BTC 价格(D1=b)
+            current_strategy_state: 14 档当前状态
+            key_factors: 关键因子最新快照(funding / OI / lsr 等)
+            active_thesis: 当前 active thesis dict(可空)
+
+        Returns:
+            {layers: {emergency_simplified_a: {...}},
+             status: 'ok' | 'degraded',
+             run_trigger: event_type,
+             pct_change: float}
+        """
+        agent = self._agents.get("emergency_simplified_a")
+        if agent is None:
+            agent = EmergencySimplifiedA(client=self._client)
+        pct = (
+            (triggered_at_price - baseline_price) / baseline_price
+            if baseline_price else 0.0
+        )
+        ctx = {
+            "current_strategy_state": current_strategy_state,
+            "triggered_at_price": triggered_at_price,
+            "baseline_price": baseline_price,
+            "pct_change": pct,
+            "key_factors": key_factors or {},
+            "active_thesis": active_thesis,
+        }
+        try:
+            out = agent.analyze(ctx, client=build_anthropic_client())
+        except Exception as e:
+            logger.warning("orchestrator.run_event_a: agent raised: %s", e)
+            out = agent._fallback_output()
+
+        # 轻量 normalize(非法 immediate_action 改 maintain)
+        out = EmergencySimplifiedA.normalize_output(out)
+
+        status = (
+            "ok" if str(out.get("status", "")).startswith("success") else "degraded"
+        )
+        return {
+            "layers": {"emergency_simplified_a": out},
+            "status": status,
+            "run_trigger": event_type,
+            "pct_change": pct,
+            "current_strategy_state": current_strategy_state,
+        }
 
     # ------------------------------------------------------------------
     # _system_provided 计算函数

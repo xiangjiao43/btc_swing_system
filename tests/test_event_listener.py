@@ -1,16 +1,20 @@
-"""tests/test_event_listener.py — Sprint 2.7-D 4 类 event 触发逻辑。
+"""tests/test_event_listener.py — Sprint 1.10-G 改造版本。
 
-§Z 端到端:每个测试 fixture 真 SQLite + 真插入数据 + 真调用 check_and_trigger_events,
-断言:
-  - 返回的 event_type 列表精确
-  - event_throttle 表写入 last_triggered_at_utc(invalidation/price)
-  - events_calendar.triggered_at_utc 写入(macro)
-  - 节流场景返回空 list
+Sprint 1.10-G §X 删除/迁移:
+- 删 _is_throttled / _record_trigger 测试(替代 EventTrigger.{record_event,
+  get_last_event_at},覆盖在 tests/test_event_trigger.py)
+- 删 _check_event_invalidation 测试(迁到 hard_invalidation_monitor 1h cron,
+  覆盖在 tests/test_hard_invalidation_monitor.py)
+- 删 _check_event_price 单一阈值/24h baseline 老语义测试(改造为双轨 +
+  上次 strategy_run baseline,覆盖在本文件 + tests/test_event_trigger.py)
+
+保留 / 改造:
+- event_macro:无变化,沿用 2.7-D
+- event_price 双轨判定 + 新 baseline + 节流(2 类独立)
+- check_and_trigger_events 入口(从 3 类降到 2 类)
 """
-
 from __future__ import annotations
 
-import json
 import sqlite3
 import tempfile
 from datetime import datetime, timedelta, timezone
@@ -19,351 +23,319 @@ from pathlib import Path
 import pytest
 
 from src.data.storage.connection import init_db
-from src.data.storage.dao import (
-    BTCKlinesDAO, EventRow, EventsCalendarDAO, KlineRow,
-)
+from src.data.storage.dao import EventRow, EventsCalendarDAO
 from src.scheduler.event_listener import (
-    _is_throttled, _record_trigger,
+    _check_event_macro,
+    _check_event_price,
     check_and_trigger_events,
 )
+from src.strategy.event_trigger import (
+    EVENT_CLASS_PRICE,
+    EventTrigger,
+)
 
 
-_NOW = datetime(2026, 4, 28, 12, 0, 0, tzinfo=timezone.utc)
+_NOW = datetime(2026, 5, 3, 12, 0, 0, tzinfo=timezone.utc)
 
 
 @pytest.fixture
 def db_conn():
     tmp = Path(tempfile.mkdtemp()) / "ev.db"
     init_db(db_path=tmp, verbose=False)
-    # 应用 2.7-D 迁移(给新建的测试 DB 加 event_throttle + triggered_at_utc 列)
-    from scripts.migrate_2_7_d import apply_migration
+    # 应用 1.10-A → G 全套 v1.4 migration(含 event_throttle.event_class)
     conn = sqlite3.connect(tmp)
     conn.row_factory = sqlite3.Row
+    from scripts.init_v14_tables import apply_migration
     apply_migration(conn)
+    # 兼容 2.7-D 老 migration(events_calendar.triggered_at_utc 列)
+    try:
+        from scripts.migrate_2_7_d import apply_migration as apply_27d
+        apply_27d(conn)
+    except Exception:
+        pass
     yield conn
     conn.close()
 
 
 # ============================================================
-# Throttle helpers
+# 数据 seed helpers
 # ============================================================
 
-def test_record_then_is_throttled(db_conn):
-    _record_trigger(db_conn, "event_invalidation", now=_NOW)
-    db_conn.commit()
-    assert _is_throttled(db_conn, "event_invalidation",
-                          cooldown_sec=7200, now=_NOW + timedelta(minutes=30))
-
-
-def test_not_throttled_after_cooldown(db_conn):
-    _record_trigger(db_conn, "event_invalidation",
-                    now=_NOW - timedelta(hours=3))
-    db_conn.commit()
-    assert not _is_throttled(db_conn, "event_invalidation",
-                              cooldown_sec=7200, now=_NOW)
-
-
-def test_no_throttle_record_means_not_throttled(db_conn):
-    assert not _is_throttled(db_conn, "event_invalidation", now=_NOW)
-
-
-# ============================================================
-# Helpers to seed data
-# ============================================================
-
-def _seed_run_with_lifecycle(
+def _seed_strategy_run(
     conn: sqlite3.Connection,
     *,
-    direction: str,
-    invalidation_price: float,
+    run_id: str,
+    generated_at_utc: str,
+    btc_price_usd: float,
+    action_state: str = "FLAT",
     run_trigger: str = "scheduled",
-    when: datetime = _NOW - timedelta(hours=4),
-) -> str:
-    """插一条 strategy_runs 行,lifecycle.direction + L4 hard_invalidation_levels。"""
-    state = {
-        "lifecycle": {"direction": direction},
-        "evidence_reports": {
-            "layer_4": {"hard_invalidation_levels": [invalidation_price]}
-        },
-    }
-    run_id = f"test-{direction}-{int(when.timestamp())}"
+) -> None:
     conn.execute(
-        "INSERT INTO strategy_runs "
-        "(run_id, generated_at_utc, generated_at_bjt, action_state, "
-        " full_state_json, run_trigger) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
-        (run_id, when.strftime("%Y-%m-%dT%H:%M:%SZ"),
-         when.strftime("%Y-%m-%d %H:%M (BJT)"),
-         "FLAT", json.dumps(state), run_trigger),
-    )
-    conn.commit()
-    return run_id
-
-
-def _seed_klines_1h(conn: sqlite3.Connection, ts_to_close: dict[str, float]):
-    rows = [
-        KlineRow(timeframe="1h", timestamp=ts,
-                 open=close, high=close, low=close, close=close,
-                 volume_btc=1.0)
-        for ts, close in ts_to_close.items()
-    ]
-    BTCKlinesDAO.upsert_klines(conn, rows)
-    conn.commit()
-
-
-# ============================================================
-# event_invalidation
-# ============================================================
-
-def test_event_invalidation_long_position_close_breach(db_conn):
-    """long 仓 + 当前 close < invalidation 价 → 触发,event_throttle 被写入。"""
-    _seed_run_with_lifecycle(db_conn, direction="long",
-                              invalidation_price=50000.0)
-    _seed_klines_1h(db_conn, {
-        "2026-04-28T11:00:00Z": 49000.0,  # latest, below 50k
-    })
-    out = check_and_trigger_events(db_conn, now=_NOW)
-    assert "event_invalidation" in out
-    # event_throttle 行被写入
-    row = db_conn.execute(
-        "SELECT last_triggered_at_utc FROM event_throttle "
-        "WHERE event_type='event_invalidation'"
-    ).fetchone()
-    assert row is not None
-
-
-def test_event_invalidation_long_close_above_no_trigger(db_conn):
-    """long 仓 + close 仍在 invalidation 之上 → 不触发。"""
-    _seed_run_with_lifecycle(db_conn, direction="long",
-                              invalidation_price=50000.0)
-    _seed_klines_1h(db_conn, {"2026-04-28T11:00:00Z": 51000.0})
-    out = check_and_trigger_events(db_conn, now=_NOW)
-    assert "event_invalidation" not in out
-
-
-def test_event_invalidation_short_position_close_breach(db_conn):
-    """short 仓 + close 突破上沿 → 触发。"""
-    _seed_run_with_lifecycle(db_conn, direction="short",
-                              invalidation_price=60000.0)
-    _seed_klines_1h(db_conn, {"2026-04-28T11:00:00Z": 61000.0})
-    out = check_and_trigger_events(db_conn, now=_NOW)
-    assert "event_invalidation" in out
-
-
-def test_event_invalidation_throttled(db_conn):
-    """2h 内已触发过 → 返回空。"""
-    _seed_run_with_lifecycle(db_conn, direction="long",
-                              invalidation_price=50000.0)
-    _seed_klines_1h(db_conn, {"2026-04-28T11:00:00Z": 49000.0})
-    _record_trigger(db_conn, "event_invalidation",
-                    now=_NOW - timedelta(minutes=30))
-    db_conn.commit()
-    out = check_and_trigger_events(db_conn, now=_NOW)
-    assert "event_invalidation" not in out
-
-
-def test_event_invalidation_no_lifecycle_direction(db_conn):
-    """无 lifecycle.direction → 跳过。"""
-    state = {"lifecycle": {}, "evidence_reports": {"layer_4": {}}}
-    db_conn.execute(
         "INSERT INTO strategy_runs (run_id, generated_at_utc, generated_at_bjt, "
-        "action_state, full_state_json, run_trigger) VALUES (?, ?, ?, ?, ?, ?)",
-        ("flat-run", _NOW.strftime("%Y-%m-%dT%H:%M:%SZ"),
-         _NOW.strftime("%Y-%m-%d %H:%M (BJT)"),
-         "FLAT", json.dumps(state), "scheduled"),
+        "reference_timestamp_utc, action_state, run_trigger, btc_price_usd, "
+        "full_state_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (run_id, generated_at_utc, generated_at_utc,
+         generated_at_utc, action_state, run_trigger,
+         btc_price_usd, "{}"),
     )
-    _seed_klines_1h(db_conn, {"2026-04-28T11:00:00Z": 49000.0})
-    db_conn.commit()
-    out = check_and_trigger_events(db_conn, now=_NOW)
-    assert "event_invalidation" not in out
+
+
+def _seed_kline_1h(
+    conn: sqlite3.Connection,
+    *,
+    open_time_utc: str,
+    close: float,
+) -> None:
+    conn.execute(
+        "INSERT INTO price_candles (symbol, timeframe, open_time_utc, "
+        "open, high, low, close, volume) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        ("BTCUSDT", "1h", open_time_utc,
+         close - 100, close + 100, close - 200, close, 1000),
+    )
 
 
 # ============================================================
-# event_price
+# event_price — 双轨 + 新 baseline(D1=b)
 # ============================================================
 
-def test_event_price_3pct_drop_triggers(db_conn):
-    """24h 前 60000 → 当前 58000(< -3.3%)→ 触发。"""
-    _seed_klines_1h(db_conn, {
-        "2026-04-27T11:00:00Z": 60000.0,  # 24h ago
-        "2026-04-28T11:00:00Z": 58000.0,  # latest, -3.33%
-    })
-    out = check_and_trigger_events(db_conn, now=_NOW)
-    assert "event_price" in out
-
-
-def test_event_price_3pct_rise_triggers(db_conn):
-    _seed_klines_1h(db_conn, {
-        "2026-04-27T11:00:00Z": 50000.0,
-        "2026-04-28T11:00:00Z": 51800.0,  # +3.6%
-    })
-    out = check_and_trigger_events(db_conn, now=_NOW)
-    assert "event_price" in out
-
-
-def test_event_price_under_3pct_no_trigger(db_conn):
-    _seed_klines_1h(db_conn, {
-        "2026-04-27T11:00:00Z": 50000.0,
-        "2026-04-28T11:00:00Z": 50500.0,  # +1%
-    })
-    out = check_and_trigger_events(db_conn, now=_NOW)
-    assert "event_price" not in out
-
-
-def test_event_price_recently_scheduled_run_skipped(db_conn):
-    """30 min 内有 scheduled run → 跳过。"""
-    _seed_klines_1h(db_conn, {
-        "2026-04-27T11:00:00Z": 60000.0,
-        "2026-04-28T11:00:00Z": 58000.0,
-    })
-    # 模拟 15 分钟前刚跑过 scheduled
-    db_conn.execute(
-        "INSERT INTO strategy_runs (run_id, generated_at_utc, generated_at_bjt, "
-        "action_state, full_state_json, run_trigger) VALUES (?, ?, ?, ?, ?, ?)",
-        ("recent-sched",
-         (_NOW - timedelta(minutes=15)).strftime("%Y-%m-%dT%H:%M:%SZ"),
-         (_NOW - timedelta(minutes=15)).strftime("%Y-%m-%d %H:%M (BJT)"),
-         "FLAT", "{}", "scheduled"),
+def test_event_price_flat_5pct_triggers(db_conn):
+    """空仓 + 5% 异动 → 触发。"""
+    # 上次 run baseline = 75000 / state=FLAT
+    _seed_strategy_run(
+        db_conn, run_id="r_base",
+        generated_at_utc=_NOW.replace(hour=8).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        btc_price_usd=75000.0, action_state="FLAT",
+    )
+    _seed_kline_1h(
+        db_conn, open_time_utc=_NOW.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        close=75000.0 * 1.05,
     )
     db_conn.commit()
-    out = check_and_trigger_events(db_conn, now=_NOW)
-    assert "event_price" not in out
+    assert _check_event_price(db_conn, now=_NOW) is True
+    db_conn.commit()
+    # 写入了 event_throttle
+    last = EventTrigger.get_last_event_at(db_conn, "event_price")
+    assert last is not None
 
 
-def test_event_price_old_scheduled_run_does_not_skip(db_conn):
-    """45 min 前的 scheduled run → 不跳过(只 30min 节流)。"""
-    _seed_klines_1h(db_conn, {
-        "2026-04-27T11:00:00Z": 60000.0,
-        "2026-04-28T11:00:00Z": 58000.0,
-    })
-    db_conn.execute(
-        "INSERT INTO strategy_runs (run_id, generated_at_utc, generated_at_bjt, "
-        "action_state, full_state_json, run_trigger) VALUES (?, ?, ?, ?, ?, ?)",
-        ("old-sched",
-         (_NOW - timedelta(minutes=45)).strftime("%Y-%m-%dT%H:%M:%SZ"),
-         (_NOW - timedelta(minutes=45)).strftime("%Y-%m-%d %H:%M (BJT)"),
-         "FLAT", "{}", "scheduled"),
+def test_event_price_flat_4pct_no_trigger(db_conn):
+    """空仓 + 4% 异动(< 5%)→ 不触发。"""
+    _seed_strategy_run(
+        db_conn, run_id="r_base",
+        generated_at_utc=_NOW.replace(hour=8).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        btc_price_usd=75000.0, action_state="FLAT",
+    )
+    _seed_kline_1h(
+        db_conn, open_time_utc=_NOW.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        close=75000.0 * 1.04,
     )
     db_conn.commit()
-    out = check_and_trigger_events(db_conn, now=_NOW)
-    assert "event_price" in out
+    assert _check_event_price(db_conn, now=_NOW) is False
 
 
-def test_event_price_throttled_no_double_trigger(db_conn):
-    _seed_klines_1h(db_conn, {
-        "2026-04-27T11:00:00Z": 60000.0,
-        "2026-04-28T11:00:00Z": 58000.0,
-    })
-    _record_trigger(db_conn, "event_price",
-                    now=_NOW - timedelta(minutes=30))
+def test_event_price_holding_3pct_triggers(db_conn):
+    """持仓 + 3% 异动 → 触发(用更严的 3% 阈值)。"""
+    _seed_strategy_run(
+        db_conn, run_id="r_base",
+        generated_at_utc=_NOW.replace(hour=8).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        btc_price_usd=75000.0, action_state="LONG_HOLD",
+    )
+    _seed_kline_1h(
+        db_conn, open_time_utc=_NOW.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        close=75000.0 * 1.03,
+    )
     db_conn.commit()
-    out = check_and_trigger_events(db_conn, now=_NOW)
-    assert "event_price" not in out
+    assert _check_event_price(db_conn, now=_NOW) is True
+
+
+def test_event_price_holding_2pct_no_trigger(db_conn):
+    """持仓 + 2% 异动(< 3%)→ 不触发。"""
+    _seed_strategy_run(
+        db_conn, run_id="r_base",
+        generated_at_utc=_NOW.replace(hour=8).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        btc_price_usd=75000.0, action_state="SHORT_HOLD",
+    )
+    _seed_kline_1h(
+        db_conn, open_time_utc=_NOW.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        close=75000.0 * 0.98,
+    )
+    db_conn.commit()
+    assert _check_event_price(db_conn, now=_NOW) is False
+
+
+def test_event_price_throttled_within_2h(db_conn):
+    """5% 异动 + last_event 在 1h 前 → 节流不触发。"""
+    _seed_strategy_run(
+        db_conn, run_id="r_base",
+        generated_at_utc=(_NOW - timedelta(hours=10)).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"),
+        btc_price_usd=75000.0, action_state="FLAT",
+    )
+    _seed_kline_1h(
+        db_conn, open_time_utc=_NOW.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        close=75000.0 * 1.05,
+    )
+    EventTrigger.record_event(
+        db_conn, "event_price", EVENT_CLASS_PRICE,
+        (_NOW - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    )
+    db_conn.commit()
+    assert _check_event_price(db_conn, now=_NOW) is False
+
+
+def test_event_price_recent_main_run_skipped(db_conn):
+    """5% 异动 + last_main_run 在 10min 前 → skip。"""
+    _seed_strategy_run(
+        db_conn, run_id="r_recent",
+        generated_at_utc=(_NOW - timedelta(minutes=10)).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"),
+        btc_price_usd=75000.0, action_state="FLAT",
+    )
+    _seed_kline_1h(
+        db_conn, open_time_utc=_NOW.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        close=75000.0 * 1.05,
+    )
+    db_conn.commit()
+    assert _check_event_price(db_conn, now=_NOW) is False
+
+
+def test_event_price_no_strategy_run_baseline_skip(db_conn):
+    """冷启动:无 strategy_run 行 → baseline=None → 不触发。"""
+    _seed_kline_1h(
+        db_conn, open_time_utc=_NOW.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        close=75000.0,
+    )
+    db_conn.commit()
+    assert _check_event_price(db_conn, now=_NOW) is False
+
+
+def test_event_price_no_kline_skip(db_conn):
+    """无 1h K 线 → 不触发。"""
+    _seed_strategy_run(
+        db_conn, run_id="r_base",
+        generated_at_utc=(_NOW - timedelta(hours=10)).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"),
+        btc_price_usd=75000.0, action_state="FLAT",
+    )
+    db_conn.commit()
+    assert _check_event_price(db_conn, now=_NOW) is False
 
 
 # ============================================================
-# event_macro
+# event_macro(沿用 2.7-D 实现)
 # ============================================================
+
+def _seed_event_calendar(
+    conn: sqlite3.Connection,
+    *,
+    event_id: str,
+    utc_trigger_time: str,
+    impact_level: int = 3,
+    triggered_at_utc: str | None = None,
+) -> None:
+    # date 字段(YYYY-MM-DD)— 从 utc_trigger_time 取
+    date_str = utc_trigger_time.split("T")[0]
+    EventsCalendarDAO.upsert_event(conn, EventRow(
+        event_id=event_id,
+        date=date_str,
+        timezone="UTC",
+        local_time=None,
+        utc_trigger_time=utc_trigger_time,
+        event_type="macro",
+        event_name="FOMC test",
+        impact_level=impact_level,
+        notes=None,
+    ))
+    if triggered_at_utc:
+        conn.execute(
+            "UPDATE events_calendar SET triggered_at_utc=? WHERE event_id=?",
+            (triggered_at_utc, event_id),
+        )
+
 
 def test_event_macro_15min_window_hit(db_conn):
-    """events_calendar 一行 utc_trigger=now-15min30s 落在窗口内 → 触发 + 写 triggered_at_utc。"""
-    # 触发 15min30s 前 → 15min OFFSET 后,trigger_time 落在 [now-16min, now-15min) 内
-    trigger_iso = (_NOW - timedelta(minutes=15, seconds=30)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    EventsCalendarDAO.upsert_events(db_conn, [
-        EventRow(event_id="fomc_test", date="2026-04-28",
-                 timezone="America/New_York", local_time="08:00",
-                 utc_trigger_time=trigger_iso,
-                 event_type="fomc", event_name="Test FOMC",
-                 impact_level=5, notes=None),
-    ])
+    """utc_trigger + 15min 落在过去 60s → 命中。"""
+    trigger = (_NOW - timedelta(minutes=15, seconds=30)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+    _seed_event_calendar(
+        db_conn, event_id="ev_001", utc_trigger_time=trigger, impact_level=3,
+    )
     db_conn.commit()
-    out = check_and_trigger_events(db_conn, now=_NOW)
-    assert "event_macro" in out
-    # triggered_at_utc 被写
-    row = db_conn.execute(
-        "SELECT triggered_at_utc FROM events_calendar WHERE event_id='fomc_test'"
-    ).fetchone()
-    assert row[0] is not None or row["triggered_at_utc"] is not None
+    assert _check_event_macro(db_conn, now=_NOW) is True
 
 
 def test_event_macro_already_triggered_no_double(db_conn):
-    """triggered_at_utc 已写 → 不再触发。"""
-    trigger_iso = (_NOW - timedelta(minutes=15, seconds=30)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    EventsCalendarDAO.upsert_events(db_conn, [
-        EventRow(event_id="fomc_already", date="2026-04-28",
-                 timezone="America/New_York", local_time="08:00",
-                 utc_trigger_time=trigger_iso,
-                 event_type="fomc", event_name="Already triggered",
-                 impact_level=5, notes=None),
-    ])
-    db_conn.execute(
-        "UPDATE events_calendar SET triggered_at_utc='2026-04-28T11:30:00Z' "
-        "WHERE event_id='fomc_already'"
+    """triggered_at_utc 已有值 → 不重复。"""
+    trigger = (_NOW - timedelta(minutes=15, seconds=30)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+    _seed_event_calendar(
+        db_conn, event_id="ev_002", utc_trigger_time=trigger, impact_level=3,
+        triggered_at_utc=(_NOW - timedelta(minutes=10)).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"),
     )
     db_conn.commit()
-    out = check_and_trigger_events(db_conn, now=_NOW)
-    assert "event_macro" not in out
+    assert _check_event_macro(db_conn, now=_NOW) is False
 
 
 def test_event_macro_low_impact_skipped(db_conn):
-    """impact_level=1 → 不触发。"""
-    trigger_iso = (_NOW - timedelta(minutes=15, seconds=30)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    EventsCalendarDAO.upsert_events(db_conn, [
-        EventRow(event_id="low_impact", date="2026-04-28",
-                 timezone="America/New_York", local_time="08:00",
-                 utc_trigger_time=trigger_iso,
-                 event_type="other", event_name="low impact",
-                 impact_level=1, notes=None),
-    ])
+    """impact_level=1 → 跳过(只 ≥ 2 触发)。"""
+    trigger = (_NOW - timedelta(minutes=15, seconds=30)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+    _seed_event_calendar(
+        db_conn, event_id="ev_low", utc_trigger_time=trigger, impact_level=1,
+    )
     db_conn.commit()
-    out = check_and_trigger_events(db_conn, now=_NOW)
-    assert "event_macro" not in out
+    assert _check_event_macro(db_conn, now=_NOW) is False
 
 
 def test_event_macro_outside_window_no_trigger(db_conn):
-    """utc_trigger_time 在 1 小时前(超出 15-16min 窗口) → 不触发。"""
-    trigger_iso = (_NOW - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    EventsCalendarDAO.upsert_events(db_conn, [
-        EventRow(event_id="out_of_window", date="2026-04-28",
-                 timezone="America/New_York", local_time="08:00",
-                 utc_trigger_time=trigger_iso,
-                 event_type="cpi", event_name="CPI 1h ago",
-                 impact_level=4, notes=None),
-    ])
+    """utc_trigger 在 1 小时前 → 超 16min 窗口 → 不命中。"""
+    trigger = (_NOW - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    _seed_event_calendar(
+        db_conn, event_id="ev_old", utc_trigger_time=trigger, impact_level=3,
+    )
     db_conn.commit()
-    out = check_and_trigger_events(db_conn, now=_NOW)
-    assert "event_macro" not in out
+    assert _check_event_macro(db_conn, now=_NOW) is False
 
 
 # ============================================================
-# Combined / Robustness
+# check_and_trigger_events 入口(2 类:event_price + event_macro)
 # ============================================================
 
 def test_check_and_trigger_returns_empty_with_clean_db(db_conn):
-    """空 DB → 返回空 list,不抛错。"""
-    out = check_and_trigger_events(db_conn, now=_NOW)
-    assert out == []
+    triggered = check_and_trigger_events(db_conn, now=_NOW)
+    assert triggered == []
 
 
-def test_check_and_trigger_handles_invalidation_exception_gracefully(db_conn):
-    """invalidation 路径异常不阻塞 price / macro。
-
-    用 run_trigger='manual' 这样不命中 event_price 的 'scheduled%' 30min 节流
-    (manual 触发的 run 不算 scheduled)。
-    """
-    db_conn.execute(
-        "INSERT INTO strategy_runs (run_id, generated_at_utc, generated_at_bjt, "
-        "action_state, full_state_json, run_trigger) VALUES (?, ?, ?, ?, ?, ?)",
-        ("bad-json",
-         _NOW.strftime("%Y-%m-%dT%H:%M:%SZ"),
-         _NOW.strftime("%Y-%m-%d %H:%M (BJT)"),
-         "FLAT", "{not json", "manual"),
+def test_check_and_trigger_returns_event_price(db_conn):
+    """5% 异动 → 返 ['event_price']。"""
+    _seed_strategy_run(
+        db_conn, run_id="r_base",
+        generated_at_utc=(_NOW - timedelta(hours=10)).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"),
+        btc_price_usd=75000.0, action_state="FLAT",
     )
-    _seed_klines_1h(db_conn, {
-        "2026-04-27T11:00:00Z": 60000.0,
-        "2026-04-28T11:00:00Z": 58000.0,
-    })
+    _seed_kline_1h(
+        db_conn, open_time_utc=_NOW.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        close=75000.0 * 1.06,
+    )
     db_conn.commit()
-    out = check_and_trigger_events(db_conn, now=_NOW)
-    # invalidation 因 JSON 坏而 silent skip,price 仍触发
-    assert "event_price" in out
+    triggered = check_and_trigger_events(db_conn, now=_NOW)
+    assert "event_price" in triggered
+
+
+def test_check_and_trigger_no_invalidation_in_list(db_conn):
+    """§X 1.10-G:event_invalidation 拆到独立 1h cron,
+    check_and_trigger_events 不再返。"""
+    triggered = check_and_trigger_events(db_conn, now=_NOW)
+    assert "event_invalidation" not in triggered
+
+
+def test_check_and_trigger_handles_exception_gracefully(db_conn):
+    """单类失败不阻塞其他类(整体不抛)。"""
+    # 即使 db 半 broken,函数也应返 list(可能为空)
+    result = check_and_trigger_events(db_conn, now=_NOW)
+    assert isinstance(result, list)

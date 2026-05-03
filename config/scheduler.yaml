@@ -151,11 +151,21 @@ jobs:
     max_instances: 1
     description: 'event_invalidation:每 1h 检查 active thesis stop_loss 是否击穿 → 规则平仓(channel A,无 AI)'
 
-  # Sprint 1.10-G v1.4 §10.4.1 新增:持仓期 4h 健康检查(无持仓直接返回)
+  # Sprint 1.10-G v1.4 §10.4.1 新增:持仓期 4h 健康检查
+  # Sprint 1.10-H D2=a:接通 EmergencySimplifiedA 真 AI(trigger='health_check' 区分场景)
   position_health_check:
     enabled: true
     interval: '4h'
     misfire_grace_time: 300
     coalesce: true
     max_instances: 1
-    description: '持仓期 4h 健康检查;无 active thesis 直接返回(本 sprint stub,1.10-H 实施真 AI 调用)'
+    description: '持仓期 4h 健康检查;无 active thesis 直接返回;有 thesis 调 EmergencySimplifiedA(trigger=health_check)真 AI 评估'
+
+  # Sprint 1.10-H v1.4 §3.3.9 + §8.1 新增:周复盘 AI(每周日 22:00 BJT)
+  weekly_review:
+    enabled: true
+    cron: {day_of_week: 'sun', hour: 22, minute: 0}    # 周日 22:00 BJT
+    misfire_grace_time: 3600                            # 1h 容忍度
+    coalesce: true
+    max_instances: 1
+    description: '周复盘 AI(WeeklyReviewAnalyst);周日 22:00 BJT 自动跑,输出 4 段 JSON 写 weekly_reviews 表 + alerts'

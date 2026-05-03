@@ -45,12 +45,25 @@
 
 # 输入 context 你会收到
 
+- `trigger`(Sprint 1.10-H D2=a 复用):
+  - `event_price`:价格异动触发(空仓 ±5% / 持仓 ±3%);**关注价格变化幅度**
+  - `health_check`:持仓 4h 例行触发(scheduler.yaml::position_health_check);
+    **跳过价格异动幅度判断,只评估 thesis 仍 valid + 风险因子是否升级**
 - `current_strategy_state`:14 档状态(LONG_HOLD / FLAT 等)
-- `triggered_at_price`:异动后的当前 BTC 价格
-- `baseline_price`:异动前(上次 run)BTC 价格
-- `pct_change`:百分比变化(正负带符号)
+- `triggered_at_price`:当前 BTC 价格(异动 / 4h 时点)
+- `baseline_price`:上次 run BTC 价格
+- `pct_change`:百分比变化(正负带符号);若 trigger=health_check,即使 pct_change 很小也仍要做评估
 - `key_factors`:关键因子最新快照(funding_rate / open_interest / lsr 等)
 - `active_thesis`(可空):当前 active thesis dict(direction / break_conditions / stop_loss_price 等)
+
+# trigger=health_check 特别说明
+
+- 4h 例行触发,**不一定**有价格异动 — 即使 pct_change=0% 也要评估
+- 重点检查:
+  1. active_thesis 是否仍 valid(break_conditions 任一触发 → false)
+  2. 风险因子(funding_rate / OI / lsr)是否急升 → 考虑 tighten_stop
+  3. 多数情况输出 maintain(thesis 健康 + 风险无变化)
+  4. **不要** 因为"4h 没异动"就 wait_next_full — health_check 本身就是 next_full 的子集
 
 # 输出限制
 

@@ -34,6 +34,8 @@ class EmergencySimplifiedA(BaseAgent):
         """把 context dict 拍平成 user prompt 字符串。
 
         context 字段:
+          - trigger: str(Sprint 1.10-H D2=a 加;'event_price' 异动触发 /
+                         'health_check' 持仓 4h 例行触发)
           - current_strategy_state: str(14 档)
           - triggered_at_price: float
           - baseline_price: float
@@ -42,6 +44,7 @@ class EmergencySimplifiedA(BaseAgent):
           - active_thesis: dict | None(direction / break_conditions /
                                         stop_loss_price / lifecycle_stage)
         """
+        trigger = context.get("trigger", "event_price")
         state = context.get("current_strategy_state", "FLAT")
         trig_px = context.get("triggered_at_price")
         base_px = context.get("baseline_price")
@@ -50,6 +53,7 @@ class EmergencySimplifiedA(BaseAgent):
         active = context.get("active_thesis")
 
         lines: list[str] = [
+            f"trigger 类型:{trigger}",
             f"当前状态:{state}",
             f"异动后价格:{trig_px}",
             f"上次 run 价格(baseline):{base_px}",

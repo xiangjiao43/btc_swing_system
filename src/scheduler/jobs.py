@@ -74,12 +74,51 @@ def job_pipeline_run(
     conn = None
     try:
         conn = cf()
+        # Sprint 1.10-H D3=a:S3 过度保守监控同步检查(builder.run 之前)
+        # 规则计算 < 1ms;告警立即体现在 16:05 BJT 网页(1.10-I)
+        try:
+            from src.strategy.conservative_monitor import ConservativeMonitor
+            ConservativeMonitor.check_and_alert(conn)
+            conn.commit()
+        except Exception as _e:
+            logger.warning("conservative_monitor pre-check raised: %s", _e)
+
         if builder_factory is None:
             from ..pipeline import StrategyStateBuilder
             builder = StrategyStateBuilder(conn)
         else:
             builder = builder_factory(conn)
         result = builder.run(run_trigger=run_trigger)
+
+        # Sprint 1.10-H D4=b2:thesis 创建后联动 EXIT_D
+        # 检测:builder.run 期间是否有新 thesis 创建 → 调 exit_d_thesis_resumed
+        # 退出 active 'overly_conservative' review_pending(若有)
+        try:
+            from datetime import datetime as _dt, timezone as _tz
+            from src.data.storage.dao import ThesesDAO
+            from src.strategy.review_pending import (
+                exit_d_thesis_resumed, is_in_review_pending,
+            )
+            rp = is_in_review_pending(conn)
+            if rp.get("in_review_pending") and rp.get("reason") == "overly_conservative":
+                # 检测最新一条 thesis 是否在本次 run 后创建
+                # 简化:取最新 thesis,若 created_at_utc > 本次 run 起始 → 触发 exit_d
+                row = conn.execute(
+                    "SELECT thesis_id FROM theses ORDER BY created_at_utc DESC LIMIT 1"
+                ).fetchone()
+                if row is not None:
+                    now_iso = _dt.now(_tz.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                    exit_d_thesis_resumed(
+                        conn, exit_at_utc=now_iso,
+                        new_thesis_id=row["thesis_id"]
+                                       if hasattr(row, "keys") else row[0],
+                    )
+                    conn.commit()
+                    logger.info(
+                        "exit_d_thesis_resumed triggered after new thesis creation",
+                    )
+        except Exception as _e:
+            logger.warning("exit_d post-check raised: %s", _e)
         return {
             "status": "ok",
             "run_id": result.run_id,
@@ -989,13 +1028,27 @@ def job_position_health_check(
     *,
     conn_factory: Optional[Callable[[], Any]] = None,
 ) -> dict[str, Any]:
-    """v1.4 §10.4.1:持仓期 4h 健康检查。
+    """v1.4 §10.4.1 + Sprint 1.10-H D2=a:持仓期 4h 健康检查接通真 AI。
 
-    本 sprint stub:仅检测 active thesis 是否存在;无 thesis → 直接返回不调 AI。
-    真 AI 调用(简化 4h health check AI / 复用 emergency_simplified_a)留 1.10-H。
+    流程:
+      1. ThesesDAO.get_active → 无 active 直接返(节约 AI 成本)
+      2. 调 EmergencySimplifiedA.analyze(trigger='health_check')
+         - baseline = 上次 strategy_run BTC 价格
+         - current = 最新 1h K 线 close
+         - active_thesis 注入 ctx
+      3. 不真改持仓 / stop_loss(本 sprint 只输出建议,执行留 1.10-I 网页 + 用户确认)
+      4. immediate_action 写 alerts 用 info severity 通知
+
+    输入复用 1.10-G EventTrigger.get_baseline_price + HardInvalidationMonitor
+    .get_latest_btc_price helper。
     """
     def _body(conn: Any) -> dict[str, Any]:
+        from src.ai.agents.emergency_simplified_a import EmergencySimplifiedA
+        from src.ai.client import build_anthropic_client
         from src.data.storage.dao import ThesesDAO
+        from src.strategy.event_trigger import EventTrigger
+        from src.strategy.hard_invalidation_monitor import HardInvalidationMonitor
+
         active = ThesesDAO.get_active(conn)
         if active is None:
             return {
@@ -1004,24 +1057,222 @@ def job_position_health_check(
                 "events_triggered": [],
                 "errors": {},
             }
-        # 1.10-H 真实施;本 sprint 仅 log
-        logger.info(
-            "position_health_check: active thesis=%s direction=%s "
-            "(本 sprint stub,真 AI 调用留 1.10-H)",
-            active["thesis_id"], active.get("direction"),
-        )
+
+        baseline = EventTrigger.get_baseline_price(conn)
+        current = HardInvalidationMonitor.get_latest_btc_price(conn)
+        if baseline is None or current is None:
+            logger.warning(
+                "position_health_check: 缺 baseline (%s) 或 current_price (%s),跳过",
+                baseline, current,
+            )
+            return {
+                "by_collector": {"position_health_check": "skipped_no_price_data"},
+                "total_upserted": 0,
+                "events_triggered": [],
+                "errors": {"price_data": "missing"},
+            }
+
+        pct = (current - baseline) / baseline if baseline > 0 else 0.0
+        ctx = {
+            "trigger": "health_check",      # D2=a 区分 event_price
+            "current_strategy_state": _state_from_thesis(active),
+            "triggered_at_price": current,
+            "baseline_price": baseline,
+            "pct_change": pct,
+            "key_factors": {},               # 本 sprint 简化:留 1.10-L 真 API 时丰富
+            "active_thesis": active,
+        }
+        agent = EmergencySimplifiedA()
+        try:
+            out = agent.analyze(ctx, client=build_anthropic_client())
+        except Exception as e:
+            logger.warning("position_health_check: agent raised: %s", e)
+            out = agent._fallback_output()
+        out = EmergencySimplifiedA.normalize_output(out)
+
+        # 写一行 alerts 通知(severity 由 immediate_action 决定)
+        action = out.get("immediate_action", "maintain")
+        sev_map = {
+            "emergency_exit": "critical",
+            "tighten_stop": "warning",
+            "wait_next_full": "info",
+            "maintain": "info",
+        }
+        severity = sev_map.get(action, "info")
+        from datetime import datetime as _dt, timezone as _tz
+        now_iso = _dt.now(_tz.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        try:
+            conn.execute(
+                "INSERT INTO alerts "
+                "(alert_type, severity, message, raised_at_utc, related_run_id) "
+                "VALUES (?, ?, ?, ?, ?)",
+                ("position_health_check", severity,
+                 f"position_health_check: {action}; "
+                 f"reason={out.get('reasoning', '')[:120]}",
+                 now_iso, active["thesis_id"]),
+            )
+        except Exception as e:
+            logger.warning("position_health_check: write alert failed: %s", e)
+
+        conn.commit()
         return {
             "by_collector": {
-                "position_health_check": "stub",
+                "position_health_check": "ai_evaluated",
                 "active_thesis_id": active["thesis_id"],
+                "immediate_action": action,
+                "thesis_still_valid": out.get("thesis_still_valid"),
             },
-            "total_upserted": 0,
-            "events_triggered": [],
+            "total_upserted": 1,  # alerts 写一行
+            "events_triggered": (
+                ["position_health_check_critical"]
+                if severity == "critical" else []
+            ),
             "errors": {},
+            "ai_output": out,
         }
 
     return _wrap_job(
         "position_health_check", _body, conn_factory=conn_factory,
+    )
+
+
+def _state_from_thesis(active: dict[str, Any]) -> str:
+    """根据 thesis.lifecycle_stage + direction 推导 14 档状态。"""
+    direction = (active.get("direction") or "").upper()
+    stage = (active.get("lifecycle_stage") or "").lower()
+    if direction == "LONG":
+        return {
+            "planned": "LONG_PLANNED", "opened": "LONG_OPEN",
+            "holding": "LONG_HOLD", "trim": "LONG_TRIM",
+            "closed": "FLAT",
+        }.get(stage, "LONG_HOLD")
+    if direction == "SHORT":
+        return {
+            "planned": "SHORT_PLANNED", "opened": "SHORT_OPEN",
+            "holding": "SHORT_HOLD", "trim": "SHORT_TRIM",
+            "closed": "FLAT",
+        }.get(stage, "SHORT_HOLD")
+    return "FLAT"
+
+
+# ============================================================
+# Sprint 1.10-H:weekly_review cron job(每周日 22:00 BJT)
+# ============================================================
+
+def job_weekly_review(
+    *,
+    conn_factory: Optional[Callable[[], Any]] = None,
+) -> dict[str, Any]:
+    """v1.4 §3.3.9 + §8.1:周复盘 AI 自动跑。
+
+    流程:
+      1. build_weekly_review_input(conn) → 7 类聚合 dict
+      2. WeeklyReviewAnalyst.analyze(input) → 4 段 JSON
+      3. normalize_output(out) 补漏 V
+      4. UPSERT weekly_reviews 表(PK = week_start_utc 周一 UTC,幂等)
+      5. critical_count = count_critical_recommendations(out)
+      6. 写 alerts(severity = critical_count > 0 ? 'critical' : 'info';
+         alert_type='weekly_review' 或 'weekly_review_critical_recommendation')
+
+    triggered_at_utc = now;week_start_utc = 周一 00:00 UTC of the most recent Monday before now。
+    """
+    def _body(conn: Any) -> dict[str, Any]:
+        from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+        import json as _json
+        from src.ai.agents.weekly_review_analyst import WeeklyReviewAnalyst
+        from src.ai.client import build_anthropic_client
+        from src.ai.weekly_review_input_builder import build_weekly_review_input
+
+        now = _dt.now(_tz.utc)
+        # week_start_utc = 周一 00:00 UTC(Python weekday: Mon=0, Sun=6)
+        days_since_monday = now.weekday()
+        monday = (now - _td(days=days_since_monday)).replace(
+            hour=0, minute=0, second=0, microsecond=0,
+        )
+        week_start_iso = monday.strftime("%Y-%m-%d")
+        triggered_iso = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        # 1. 聚合输入
+        try:
+            inp = build_weekly_review_input(conn, now_utc=now, window_days=7)
+        except Exception as e:
+            logger.warning("weekly_review: input_builder raised: %s", e)
+            return {
+                "by_collector": {"weekly_review": "input_builder_failed"},
+                "total_upserted": 0,
+                "events_triggered": [],
+                "errors": {"input_builder": str(e)[:200]},
+            }
+
+        # 2. 调 AI(失败 fallback)
+        agent = WeeklyReviewAnalyst()
+        try:
+            out = agent.analyze(inp, client=build_anthropic_client())
+        except Exception as e:
+            logger.warning("weekly_review: agent raised: %s", e)
+            out = agent._fallback_output()
+
+        # 3. normalize 补漏 V
+        out = WeeklyReviewAnalyst.normalize_output(out)
+
+        # 4. UPSERT weekly_reviews
+        critical_count = WeeklyReviewAnalyst.count_critical_recommendations(out)
+        out_json = _json.dumps(out, ensure_ascii=False)
+        try:
+            conn.execute(
+                "INSERT INTO weekly_reviews "
+                "(week_start_utc, triggered_at_utc, output_json, "
+                " critical_count, notification_sent) "
+                "VALUES (?, ?, ?, ?, ?) "
+                "ON CONFLICT(week_start_utc) DO UPDATE SET "
+                "  triggered_at_utc = excluded.triggered_at_utc, "
+                "  output_json = excluded.output_json, "
+                "  critical_count = excluded.critical_count",
+                (week_start_iso, triggered_iso, out_json, critical_count, 0),
+            )
+        except Exception as e:
+            logger.warning("weekly_review: upsert weekly_reviews failed: %s", e)
+
+        # 5. 写 alerts(D1=a)
+        severity = "critical" if critical_count > 0 else "info"
+        alert_type = (
+            "weekly_review_critical_recommendation"
+            if critical_count > 0 else "weekly_review"
+        )
+        msg = (
+            f"weekly_review {week_start_iso} 完成:"
+            f"{critical_count} 条 high priority 建议;"
+            f"weekly_pnl_pct="
+            f"{(out.get('performance_summary') or {}).get('weekly_pnl_pct', 'N/A')}"
+        )
+        try:
+            conn.execute(
+                "INSERT INTO alerts "
+                "(alert_type, severity, message, raised_at_utc, related_run_id) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (alert_type, severity, msg, triggered_iso, None),
+            )
+        except Exception as e:
+            logger.warning("weekly_review: write alert failed: %s", e)
+
+        conn.commit()
+        return {
+            "by_collector": {
+                "weekly_review": "completed",
+                "week_start_utc": week_start_iso,
+                "critical_count": critical_count,
+                "ai_status": out.get("status", "unknown"),
+            },
+            "total_upserted": 1,
+            "events_triggered": (
+                ["weekly_review_critical_recommendation"]
+                if critical_count > 0 else []
+            ),
+            "errors": {},
+        }
+
+    return _wrap_job(
+        "weekly_review", _body, conn_factory=conn_factory,
     )
 
 
@@ -1044,6 +1295,8 @@ _JOB_FUNCTIONS: dict[str, Callable[..., Any]] = {
     # Sprint 1.10-G v1.4 §10.4.1 新增 2 个独立 cron job
     "hard_invalidation_monitor": job_hard_invalidation_monitor,
     "position_health_check": job_position_health_check,
+    # Sprint 1.10-H v1.4 §3.3.9 + §8.1 周复盘 cron(每周日 22:00 BJT)
+    "weekly_review": job_weekly_review,
     "cleanup": job_cleanup,
 }
 

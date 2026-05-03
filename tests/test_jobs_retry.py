@@ -225,8 +225,9 @@ def test_position_health_check_no_active_thesis(in_memory_db_factory):
     assert body.get("position_health_check") == "no_active_thesis"
 
 
-def test_position_health_check_with_active_thesis(in_memory_db_factory):
-    """有 active thesis → stub 返(本 sprint 不调 AI;真 AI 留 1.10-H)。"""
+def test_position_health_check_with_active_thesis_no_baseline(in_memory_db_factory):
+    """1.10-H 改造后:有 active thesis 但无 baseline(无 strategy_run + 无 1h K 线)
+    → skipped_no_price_data。完整 AI 接通验证见 tests/test_jobs_weekly_review_and_health_check.py。"""
     conn = in_memory_db_factory()
     from src.strategy import thesis_manager
     spec = {
@@ -243,5 +244,4 @@ def test_position_health_check_with_active_thesis(in_memory_db_factory):
     conn.commit()
     result = job_position_health_check(conn_factory=lambda: conn)
     body = result.get("by_collector") or {}
-    assert body.get("position_health_check") == "stub"
-    assert body.get("active_thesis_id") == "t_health_001"
+    assert body.get("position_health_check") == "skipped_no_price_data"

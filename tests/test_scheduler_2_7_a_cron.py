@@ -37,14 +37,15 @@ def test_scheduler_yaml_loads_with_bjt_timezone():
     assert cfg.get("timezone") == "Asia/Shanghai"
 
 
-def test_scheduler_yaml_has_10_entries():
-    """v1.4 §10.4.1 + Sprint 1.10-G:7 logical jobs + pipeline_run dual cron +
-    1.10-G 新增 2 个独立 cron(hard_invalidation_monitor / position_health_check)= 10。"""
+def test_scheduler_yaml_has_11_entries():
+    """v1.4 §10.4.1 + Sprint 1.10-G/H:8 + 2 (1.10-G hard_invalidation +
+    position_health_check) + 1 (1.10-H weekly_review) = 11。"""
     cfg = load_scheduler_config(_CONFIG_PATH)
     jobs = cfg.get("jobs") or {}
-    assert len(jobs) == 10, f"expected 10 entries, got {sorted(jobs.keys())}"
+    assert len(jobs) == 11, f"expected 11 entries, got {sorted(jobs.keys())}"
     assert "hard_invalidation_monitor" in jobs
     assert "position_health_check" in jobs
+    assert "weekly_review" in jobs
 
 
 def test_scheduler_yaml_no_legacy_data_collection_or_4h_interval():
@@ -67,11 +68,11 @@ def test_scheduler_yaml_no_legacy_data_collection_or_4h_interval():
 # Build_job_configs
 # ============================================================
 
-def test_build_job_configs_returns_10_jobs():
-    """Sprint 1.10-G:8 + 2 个新 cron job(v1.4 §10.4.1)。"""
+def test_build_job_configs_returns_11_jobs():
+    """Sprint 1.10-G:8 + 2 cron(§10.4.1) + Sprint 1.10-H:1 weekly_review = 11。"""
     cfg = load_scheduler_config(_CONFIG_PATH)
     out = build_job_configs(cfg)
-    assert len(out) == 10
+    assert len(out) == 11
 
 
 def test_pipeline_run_dual_entries_have_dedicated_wrappers():
@@ -164,9 +165,9 @@ def test_build_scheduler_uses_bjt_timezone(monkeypatch):
         registered_ids = {j.id for j in sched.get_jobs()}
         # Sprint 1.9-B(2026-05-01)启用 pipeline_run_regular(16:05 BJT 每日);
         # pipeline_run_8h_onchain 仍 disabled。
-        # Sprint 1.10-G(v1.4 §10.4.1)新增 hard_invalidation_monitor 1h +
-        # position_health_check 4h。共 9 个 enabled cron。
-        expected_9 = {
+        # Sprint 1.10-G(§10.4.1)+ 1.10-H(§3.3.9 weekly_review)新增。
+        # 共 10 个 enabled cron。
+        expected_10 = {
             "collect_klines_1h",
             "collect_klines_daily",
             "collect_klines_weekly",
@@ -176,9 +177,10 @@ def test_build_scheduler_uses_bjt_timezone(monkeypatch):
             "pipeline_run_regular",
             "hard_invalidation_monitor",
             "position_health_check",
+            "weekly_review",
         }
-        assert registered_ids == expected_9, (
-            f"missing={expected_9 - registered_ids}, extra={registered_ids - expected_9}"
+        assert registered_ids == expected_10, (
+            f"missing={expected_10 - registered_ids}, extra={registered_ids - expected_10}"
         )
     finally:
         if sched.running:

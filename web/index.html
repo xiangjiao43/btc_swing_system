@@ -224,11 +224,17 @@
         </div>
         <div>
           <div class="stat-label">生命周期</div>
-          <div class="text-[13px]" x-text="state.main_strategy.lifecycle_phase || '-'"></div>
+          <div :class="(state.main_strategy.lifecycle_phase || '-') === '-'
+                       ? 'text-[13px] placeholder-dash'
+                       : 'text-[13px]'"
+               x-text="state.main_strategy.lifecycle_phase || '-'"></div>
         </div>
         <div>
           <div class="stat-label">机会 / 许可</div>
-          <div class="text-[13px] font-mono"
+          <div :class="((state.main_strategy.opportunity_grade || '-') + ' / ' +
+                        (state.main_strategy.execution_permission || '-')) === '- / -'
+                       ? 'text-[13px] placeholder-dash'
+                       : 'text-[13px] font-mono'"
                x-text="(state.main_strategy.opportunity_grade || '-') + ' / ' +
                        (state.main_strategy.execution_permission || '-')"></div>
         </div>
@@ -240,14 +246,19 @@
         </div>
         <div>
           <div class="stat-label">下次运行</div>
-          <div class="text-[13px] font-mono tabular-nums" x-text="countdownLabel"></div>
+          <div :class="(countdownLabel === '-' || !countdownLabel)
+                       ? 'text-[13px] placeholder-dash'
+                       : 'text-[13px] font-mono tabular-nums'"
+               x-text="countdownLabel || '-'"></div>
         </div>
         <div class="col-span-2 md:col-span-1">
           <div class="stat-label">数据 / Fallback</div>
           <div class="flex items-center gap-1.5 text-[11px]">
             <span class="inline-block w-1.5 h-1.5 rounded-full"
                   :class="healthColor(state.data_health && state.data_health.overall)"></span>
-            <span class="font-mono tabular-nums"
+            <span :class="(state.data_health && state.data_health.data_completeness_pct != null)
+                          ? 'font-mono tabular-nums'
+                          : 'placeholder-dash'"
                   x-text="(state.data_health && state.data_health.data_completeness_pct != null
                            ? state.data_health.data_completeness_pct.toFixed(0) + '%'
                            : '-')"></span>
@@ -347,10 +358,15 @@
       <header class="px-4 py-2.5 border-b border-slate-200 dark:border-slate-800">
         <h2 class="text-base font-semibold flex items-center gap-2">
           <span>🎯</span><span>AI 策略建议</span>
-          <span class="ml-auto text-[10px] text-slate-500" x-show="state.meta?.generated_at_bjt"
-                x-text="'AI 输出于 ' + (state.meta?.generated_at_bjt || '-') +
-                        (state.meta?.ai_model_actual
-                         ? ' · ' + simplifyAiModel(state.meta.ai_model_actual)
+          <!-- v1.4.2 fix(问题 2):双字段兜底 — v14 schema gate 跳过
+               _to_display_state_v13 后 state.meta.generated_at_bjt 经常 null
+               (用户截图:hard refresh 后右侧仍空)。改读 summary_card.decision_time
+               + state.ai_model_actual 兜底。-->
+          <span class="ml-auto text-[10px] text-slate-500"
+                x-show="state.meta?.generated_at_bjt || state.summary_card?.decision_time"
+                x-text="'AI 输出于 ' + (state.meta?.generated_at_bjt || state.summary_card?.decision_time || '-') +
+                        ((state.meta?.ai_model_actual || state.ai_model_actual)
+                         ? ' · ' + simplifyAiModel(state.meta?.ai_model_actual || state.ai_model_actual)
                          : '')"></span>
         </h2>
       </header>
@@ -359,62 +375,98 @@
       <div class="p-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-x-8 gap-y-6">
         <div>
           <div class="stat-label">方向</div>
-          <div class="text-[13px] font-bold text-slate-900 dark:text-slate-100"
+          <div class="text-[13px]"
+               :class="(state.summary_card?.stance_label || '-') === '-'
+                       ? 'placeholder-dash'
+                       : 'font-bold text-slate-900 dark:text-slate-100'"
                x-text="state.summary_card?.stance_label || '-'"></div>
         </div>
         <div>
           <div class="stat-label">状态</div>
-          <div class="text-[13px] font-bold text-slate-900 dark:text-slate-100"
+          <div class="text-[13px]"
+               :class="(state.summary_card?.action_state_label || '-') === '-'
+                       ? 'placeholder-dash'
+                       : 'font-bold text-slate-900 dark:text-slate-100'"
                x-text="state.summary_card?.action_state_label || '-'"></div>
         </div>
         <div>
           <div class="stat-label">机会等级</div>
-          <div class="text-[13px] font-bold text-slate-900 dark:text-slate-100"
+          <div class="text-[13px]"
+               :class="cardOpportunityGrade() === '-'
+                       ? 'placeholder-dash'
+                       : 'font-bold text-slate-900 dark:text-slate-100'"
                x-text="cardOpportunityGrade()"></div>
         </div>
         <div>
           <div class="stat-label">信心指数</div>
-          <div class="text-[13px] font-bold text-slate-900 dark:text-slate-100"
+          <div class="text-[13px]"
+               :class="cardConfidence() === '-'
+                       ? 'placeholder-dash'
+                       : 'font-bold text-slate-900 dark:text-slate-100'"
                x-text="cardConfidence()"></div>
         </div>
         <div>
           <div class="stat-label">入场区间</div>
-          <div class="text-[13px] font-bold font-mono text-slate-900 dark:text-slate-100"
+          <div class="text-[13px]"
+               :class="cardEntryZones() === '-'
+                       ? 'placeholder-dash'
+                       : 'font-bold font-mono text-slate-900 dark:text-slate-100'"
                x-text="cardEntryZones()"></div>
         </div>
         <div>
           <div class="stat-label">止损价</div>
-          <div class="text-[13px] font-bold font-mono text-slate-900 dark:text-slate-100"
+          <div class="text-[13px]"
+               :class="cardStopLoss() === '-'
+                       ? 'placeholder-dash'
+                       : 'font-bold font-mono text-slate-900 dark:text-slate-100'"
                x-text="cardStopLoss()"></div>
         </div>
         <div>
           <div class="stat-label">止盈分批</div>
-          <div class="text-[13px] font-bold font-mono text-slate-900 dark:text-slate-100"
+          <div class="text-[13px]"
+               :class="cardTakeProfits() === '-'
+                       ? 'placeholder-dash'
+                       : 'font-bold font-mono text-slate-900 dark:text-slate-100'"
                x-text="cardTakeProfits()"></div>
         </div>
         <div>
           <div class="stat-label">仓位上限</div>
-          <div class="text-[13px] font-bold text-slate-900 dark:text-slate-100"
+          <div class="text-[13px]"
+               :class="cardPositionCap() === '-'
+                       ? 'placeholder-dash'
+                       : 'font-bold text-slate-900 dark:text-slate-100'"
                x-text="cardPositionCap()"></div>
         </div>
         <div>
           <div class="stat-label">当前浮盈</div>
-          <div class="text-[13px] font-bold text-slate-900 dark:text-slate-100"
+          <div class="text-[13px]"
+               :class="cardCurrentPnl() === '-'
+                       ? 'placeholder-dash'
+                       : 'font-bold text-slate-900 dark:text-slate-100'"
                x-text="cardCurrentPnl()"></div>
         </div>
         <div>
           <div class="stat-label">距离止损</div>
-          <div class="text-[13px] font-bold font-mono text-slate-900 dark:text-slate-100"
+          <div class="text-[13px]"
+               :class="cardDistanceToStop() === '-'
+                       ? 'placeholder-dash'
+                       : 'font-bold font-mono text-slate-900 dark:text-slate-100'"
                x-text="cardDistanceToStop()"></div>
         </div>
         <div>
           <div class="stat-label">持仓时长</div>
-          <div class="text-[13px] font-bold text-slate-900 dark:text-slate-100"
+          <div class="text-[13px]"
+               :class="cardHoldingDuration() === '-'
+                       ? 'placeholder-dash'
+                       : 'font-bold text-slate-900 dark:text-slate-100'"
                x-text="cardHoldingDuration()"></div>
         </div>
         <div>
           <div class="stat-label">硬失效位</div>
-          <div class="text-[13px] font-bold font-mono text-slate-900 dark:text-slate-100"
+          <div class="text-[13px]"
+               :class="cardHardInvalidations() === '-'
+                       ? 'placeholder-dash'
+                       : 'font-bold font-mono text-slate-900 dark:text-slate-100'"
                x-text="cardHardInvalidations()"></div>
         </div>
       </div>

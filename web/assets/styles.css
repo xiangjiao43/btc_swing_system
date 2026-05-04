@@ -73,3 +73,19 @@ details:not([open]) > summary::after { content: " ▾"; color: #94a3b8; }
 }
 
 article[id^="card-"] { transition: box-shadow 0.3s; }
+
+/* -------- v1.4.2 占位符样式 --------
+ * cell 显示 '-' 占位符时套此 class(via :class 条件)
+ * - 强制等宽字体:跨 cell 占位符粗细 100% 一致
+ * - 不依赖父 cell 字体(font-mono / font-sans 各自保留真值时的字体)
+ * - slate-400 灰浅,占位符不抢眼
+ * - normal weight,覆盖父 font-bold(Tailwind cascade :class 互斥分支无需 !important)
+ */
+.placeholder-dash {
+    font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+    color: #94a3b8;          /* slate-400 */
+    font-weight: 400;
+}
+.dark .placeholder-dash {
+    color: #64748b;          /* slate-500,深色模式稍亮 */
+}

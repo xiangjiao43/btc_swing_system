@@ -1992,6 +1992,75 @@ event_trigger:
 - 1 个 AI agent(weekly_review_analyst)
 - 配置项(virtual_account / thesis / cooldown / fuse / review_pending / ai_retry / event_trigger)
 
+## 11.5 v1.4 实施期发现的修订项(Sprint 1.10-L 归档)
+
+本节记录 v1.4 实施期(Sprint 1.10-A → 1.10-L)中发现并已修复 / 标记的设计层修订项。
+
+### 修订项 1 — V24 写入通路 1.10-E 实施漏洞 + 1.10-L commit 11a 修复
+
+**背景**:1.10-E 引入 Validator 24 条 + 28 字段 meta(§3.4.9),设计意图是
+独立 SQL 列 `strategy_runs.constraint_activations_json` 方便周复盘 AI 聚合
+(`weekly_review_input_builder._aggregate_constraint_activations`)。
+
+**实施漏洞**(1.10-E 起 4+ sprint 静默失效):
+- migration 011 加列 ✅
+- `dao.py:StrategyStateDAO.insert_state` 写入逻辑完整 ✅(但生产不走该路径)
+- 生产走 `state_builder._run_v13_orchestrator` 路径 → 经
+  `_orchestrator_mapper._map_orchestrator_result_to_state` 映射 →
+  **mapped 输出 17 列遗漏 `constraint_activations_json`** ❌
+- INSERT 17 列不写 → DB 138 行全 NULL(SSH 真核确认)
+- `orchestrator.result["constraint_activations"]` 算好后被 mapper 静默丢弃
+- 0 错误日志(systemd 1h 检查)
+
+**Sprint 1.10-L commit 11a 修复**:
+- `_orchestrator_mapper.py`:mapped 加 `constraint_activations_json` 字段
+  (`json.dumps(ca, ensure_ascii=False, default=str)`)
+- `state_builder._run_v13_orchestrator`:INSERT SQL 17 → 18 列 + params
+- `tests/pipeline/test_orchestrator_mapper.py`:test_returns_all_17 → 18 + 5 新单测
+- `dao.py` 老路径不破(K-A commit 2 review 过)
+- `weekly_review_input_builder._aggregate_constraint_activations` 已有
+  `WHERE constraint_activations_json IS NOT NULL` 跳过 NULL 老历史保护
+
+**真接通验证**(用户 SSH 跑 `scripts/run_pipeline_once.py --trigger manual`):
+- run_id `753cd250...`,V meta 1181 字符 JSON 完整 28 字段
+- 累计:null=138, has_data=1, total=139(老 138 不可回填)
+- 1.10-E 设计意图首次真接通,v1.4 完整版而非半残版
+
+### 修订项 2 — lifecycle ↔ thesis 表 FK 关联缺失(future v1.5b 标记)
+
+**背景**:`lifecycles` 表无 `thesis_id` 字段(`schema.sql` 早期设计),
+跟 `theses` 表无 FK 关联。
+
+**绕过方案**(K-A commit 5 + 1.10-L commit 5):
+- `lifecycle_manager._archive_lifecycle` 不能直接拿 thesis_id
+- 用 `ThesesDAO.get_active(self.conn)` 找当前唯一 active thesis
+- 利用 v1.4 §5.3.1 主线锁 + Validator 6 单 active 强制保证
+
+**限制**:
+- 若未来支持多 active thesis(多策略并行),`get_active` 路径失效(返不确定)
+- 性能上每次 archive 多 1 次 SQL 查询(主线锁下可接受)
+- lifecycle 跟 thesis 是两套独立轨道,缺乏 SQL 层一致性约束
+
+**v1.5b 启动时考虑**:
+- `lifecycles` 表加 `thesis_id` 字段(schema migration)
+- `_create_pending_lifecycle` 创建时记录关联 thesis_id
+- `_archive_lifecycle` 直接读 `lifecycle.thesis_id` 而不走 `get_active`
+- FK 约束保证一致性
+
+### 修订项 3 — PROTECTION 全局入口 §4.2.8 部分实施(future 完整接通)
+
+**1.10-L commit 1-3 实施**(P0 #1 P1A 双向):
+- ✅ 进 PROTECTION 时 active thesis 进 review_pending(`protection_handler.on_protection_entered`)
+- ✅ 退 PROTECTION 时 system_state='review_pending'(commit 7 镜像 + commit 8 网页)
+
+**未完整实施**(留 future):
+- ❌ §4.2.8 "挂单暂停" — orders_engine 未读 system_state 阻断挂单
+- ❌ §4.2.8 "AI 调用暂停 30 分钟" — scheduler 未读 PROTECTION 状态阻断 cron
+- ❌ `check_protection_exit_conditions` 未被 caller 自动消费(留用户手动确认 + 后续 sprint 自动检测)
+- ❌ thesis_manager 反手出口未真接通 — close → cooldown 状态接通(commit 7 测过),
+  但 master AI 在 cooldown 结束后真创建反手 thesis 的 e2e 留 future(架构已就绪:
+  `master_input_builder.is_in_cooldown` 已消费,Validator 6 主线锁约束)
+
 ---
 
 # 第十二部分:v1.4 修订清单(28 条对照表)

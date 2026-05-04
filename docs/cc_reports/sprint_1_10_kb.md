@@ -1,4 +1,4 @@
-# Sprint 1.10-K-B 报告(进行中 — 阶段 1)
+# Sprint 1.10-K-B 报告(完整 — 阶段 1 + 阶段 2)
 
 ## Triggers(本 sprint 启动决策记录)
 
@@ -14,16 +14,17 @@
 
 ---
 
-## 阶段 1 计划(commits 1-3,Mode B 中断点 3)
+## 全 6 commits 完整状态
 
 | Commit | 内容 | 状态 |
 |---|---|---|
 | 1 | 报告骨架 + 5 项调研(V 频率分析 + prompt 覆盖率 cross-check) | ✅ `1ecb63f` |
-| 2 | 任务 1+2:master_adjudicator.txt 加 4 条 hard constraints(V3 / V9 / V21 / V23) | ✅ `9e8bc90` |
-| 3 | 任务 3:migration 015 自适应 DROP COLUMN + 7 单测 | ✅ 待 push |
-| **==中断点 3==** | 用户审 → 授权才进 commit 4-6 | 🛑 已到达 |
-
-**绝对不做**(本批次):commits 4-6(normalize_state v14 detect / ThesesDAO 微调 / AlertsDAO mark_*)。
+| 2 | master_adjudicator.txt 加 4 条 hard constraints(V3 / V9 / V21 / V23) | ✅ `9e8bc90` |
+| 3 | migration 015 自适应 DROP COLUMN + 7 单测(opt-in 安全门) | ✅ `5279a5d` |
+| **==中断点 3==** | 用户审 → 方案 A 延后,授权 commits 4-6 | ✅ 已通过 |
+| 4 | normalize_state.py 三态(v14/v13/v12) + explicit schema_version | ✅ `f8c2e97` |
+| 5 | ThesesDAO docstring + AlertsDAO mark_acknowledged / mark_notified | ✅ `dca8ed2` |
+| 6 | verify_cleanup_kb.py(40 §Z 项)+ 最终报告 + checklist | ✅ 待 push |
 
 ---
 
@@ -139,53 +140,78 @@ SELECT COUNT(*) FROM strategy_runs WHERE constraint_activations_json IS NOT NULL
 - 启动烟测:in-memory schema → apply_migration → drop_obsolete_columns
   → 两列从 True/True → False/False(`native_alter` 路径走通)
 
+### Commit 4(normalize_state.py 三态)
+- 文本验证:
+  - 删 `schema_version='v13'` hardcode(行 156)
+  - `_detect_schema` 三态分支:explicit > run_mode='ai_orchestrator' > layers > evidence_reports
+  - `_normalize_v13(schema_version='v14')` 参数化输出(v14 与 v13 layered 兼容)
+- pytest 验证:`tests/web_helpers/test_normalize_state.py` → **44/44 passed**
+  (39 旧 → 5 新:explicit v14/v13/v12 + default v14 by run_mode + default v14 by layers)
+- 全量回归:`tests/` → **1484 passed, 4 skipped**(基准 1479 → +5 新,0 回归)
+
+### Commit 5(ThesesDAO + AlertsDAO mark_*)
+- 文本验证:
+  - `ThesesDAO.__doc__` 加"统一 DAO 风格"对齐说明(review only,不改造)
+  - `AlertsDAO.mark_acknowledged(conn, alert_id)` → UPDATE acknowledged=1
+  - `AlertsDAO.mark_notified(conn, alert_id)` → UPDATE notification_sent=1
+  - 两方法均返回 rowcount(0=不存在,1=成功)
+- pytest 验证:`tests/test_alerts_dao.py` → **24/24 passed**(18 旧 → 6 新)
+- 全量回归:`tests/` → **1490 passed, 4 skipped**(基准 1484 → +6 新,0 回归)
+
+### Commit 6(verify_cleanup_kb.py + 报告)
+- 文本验证:`scripts/verify_cleanup_kb.py` 创建,40 项 §Z 全部通过
+- 真启动验证:
+  - GET / → 200(uvicorn TestClient)
+  - GET /api/strategy/latest → 200
+  - 真 DB AlertsDAO insert + mark_acknowledged + mark_notified 端到端
+  - in-memory smoke:apply_migration → drop_obsolete_columns 两列删
+- pytest 全量:1490/4(无新测试,本 commit 仅加 verify 脚本 + 报告)
+
 ---
 
-## ⚠️ 中断点 3:本批次结束,等用户审
+## ⚠️ 中断点 3 决策(已通过)
 
-### 安全门设计(commit 3 关键决策)
+**用户决策**:方案 A 延后(精确版)
+- migration 015 工具状态:**就绪 + 7 单测过 + 40 §Z 项验证通过**
+- migration 015 实际 DDL:**未执行**(opt-in,因 30+ 处写入方未清)
+- 写入方清理 + migration 真跑:留 1.10-K-A(state_builder.py 已在 K-A 范围内)
+  或新增 1.10-K-C(写入方清理 + migration 真跑,工程量 0.5-1 天)
 
-**migration 015 不挂 apply_migration() 主流程**,需调用方明确 opt-in:
-```python
-from scripts.init_v14_tables import drop_obsolete_columns
-drop_obsolete_columns(conn, backup_path=Path("/tmp/db.before_015.bak"))
-```
+### 仍需用户决策的地方(本 sprint 收尾)
 
-理由:`grep -rn "observation_category|cold_start"` 在 src/ 仍有 30+ 处引用(主要在
-`src/data/storage/dao.py` INSERT 语句 + `src/pipeline/state_builder.py` INSERT 语句 +
-`src/ai/weekly_review_input_builder.py` SELECT 语句)。如果 migration 015 自动
-跑了 DROP COLUMN,下次 pipeline INSERT 会崩(`no such column: cold_start`)。
+- 1.10-K-C 是否单独成 sprint?vs 跟 1.10-K-A 合并(state_builder.py 已经在 K-A 范围内)
 
-### 用户决策点(中断点 3 后请审)
+### migration 015 真跑前置清单(供 1.10-K-A 或 1.10-K-C 参考)
 
-请用户在以下三选一:
+部署前必须完成(否则 DROP COLUMN 后下次 INSERT 崩):
+1. `src/data/storage/dao.py:1124-1156`(StrategyRunsDAO.upsert)— 删两列字段 + ON CONFLICT 子句
+2. `src/pipeline/state_builder.py:395-416`(strategy_runs INSERT)— 删两列写入
+3. `src/ai/weekly_review_input_builder.py:87`(SELECT)— 不再读 observation_category
+4. `src/data/storage/schema.sql:35-36`(CREATE TABLE)— 删两列定义
+5. 相关 tests:
+   - `tests/pipeline/test_orchestrator_mapper.py:239-250, 318-319, 409, 416, 476`
+   - `tests/test_weekly_review_input_builder.py:42-52, 124`
+   - `tests/test_alerts.py:49-57`(cold_start 字段引用)
+   - `tests/test_kpi_collector.py:59-72, 157-169`(cold_start_runs / warming_up)
+   - `tests/test_no_opportunity_*.py`(SCENARIO_COLD_START 路径)
+6. `scripts/verify_cleanup_v14.py:329-357`(Section K cold_start/observation_category graceful 检查)
+7. 真跑:`drop_obsolete_columns(conn, backup_path=Path('/tmp/db.before_015.bak'))`
 
-1. **方案 A:延后部署 migration 015**(推荐)
-   - 本 sprint commits 1-3 push 即可,生产暂不跑 `drop_obsolete_columns()`
-   - 在后续 sprint(commits 4-6 或 1.10-K-C)清理 dao.py / state_builder.py /
-     weekly_review_input_builder.py 的两列引用,然后再跑 migration 015
-   - 风险:零(代码 / DB 都没动)
+## 1.10-K 累积清单消化情况
 
-2. **方案 B:本 sprint 加 commit 3.5 → 同步清理写者**
-   - 加 commit 3.5:dao.py 删两列 INSERT、state_builder.py 删两列 INSERT、
-     weekly_review_input_builder.py SELECT 不再读 observation_category、schema.sql
-     CREATE TABLE 删两列、相关 tests 一起改
-   - 然后用户 SSH 跑 `python scripts/init_v14_tables.py` 触发 apply_migration +
-     在 init_v14_tables main() 里添加 `drop_obsolete_columns(conn, backup_path=...)` 调用
-   - 风险:中(改动面 ~10+ 文件,需仔细回归)
+### 1.10-K-B 已消化(3 项)
+- (5) master_adjudicator.txt 部分硬约束未直接 prompt 化 → commit 2 ✅(加 4 V)
+- (6) strategy_runs 残留 `observation_category` / `cold_start` 列 → commit 3 ✅
+  **工具就绪**(实际 DDL 待 1.10-K-A 或 1.10-K-C)
+- (7) Validator 真触发频率从无可视性 → commit 1 ✅(数据驱动失败 → 结构化分析)
 
-3. **方案 C:跳过删列**
-   - DB 列保留(graceful NULL/0 状态维持),migration 015 + 自适应函数 + 单测
-     仍 commit(留作未来基础设施)
-   - 风险:零,但累积清单第 (6) 项"strategy_runs 残留 observation_category /
-     cold_start 列"无法在 1.10-K 关账
+### 1.10-K-A 累积清单(本 sprint 新增 1 项)
+- 写入方清理(dao.py / state_builder.py / weekly_review_input_builder.py)+
+  migration 015 真跑(opt-in)+ 相关 tests 一起改
+  **跟 K-A 合并 vs 独立成 1.10-K-C 待用户决策**
 
-## 1.10-K 累积清单(本 sprint 内消化的 7 项,1.10-K-A 已消化 4,1.10-K-B 消化 3)
-
-详见 `docs/cc_reports/sprint_1_10_ka.md` 的 1.10-K 累积清单。本 sprint 拟消化:
-- (5) master_adjudicator.txt 部分硬约束未直接 prompt 化 → commit 2
-- (6) strategy_runs 残留 `observation_category` / `cold_start` 列 → commit 3
-- (7) Validator 真触发频率从无可视性 → commit 1 调研 + 文档化
+### 1.10-L 累积清单(本 sprint 不加新条)
+写入方清理跟 K-A 绑定,L 阶段不再分担。
 
 ## 本 sprint 删除清单
 
@@ -207,8 +233,16 @@ drop_obsolete_columns(conn, backup_path=Path("/tmp/db.before_015.bak"))
 
 | 步骤 | 状态 |
 |---|---|
-| 本地 pytest 通过 | ✅ 1479 / 4(commits 1-3 累计) |
-| GitHub push commits | ✅ `1ecb63f` (c1) + `9e8bc90` (c2) + 待 push (c3) |
-| 服务器 git pull | ⏳ 待用户执行(在审完中断点 3 后) |
+| 本地 pytest 通过 | ✅ **1490 / 4 skipped**(基准 1471 → +19 新,0 回归) |
+| GitHub push 6 commits | ✅ `1ecb63f` + `9e8bc90` + `5279a5d` + `f8c2e97` + `dca8ed2` + 待 push c6 |
+| 服务器 git pull | ⏳ 待用户执行 |
 | 服务器 systemctl restart | ⏳ 待用户执行 |
-| 生产 DB migration 015 跑 | 🛑 **不要直接跑** — 见中断点 3 三方案;推荐方案 A(延后) |
+| 生产 DB migration 015 跑 | 🛑 **方案 A 延后** — 30+ 处写者未清,留 1.10-K-A 或 1.10-K-C |
+| `verify_cleanup_kb.py` 在生产 DB 跑 | ⏳ 待用户 SSH 执行(`.venv/bin/python scripts/verify_cleanup_kb.py`) |
+
+### 关键状态标注(避免 1.10-L 误判)
+
+> ⚠ **migration 015 工具状态**:就绪 + 7 单测 + 40 §Z 全过
+> ⚠ **migration 015 实际 DDL**:**未执行**(opt-in)
+> ⚠ **写入方清理 + migration 真跑**:留 1.10-K-A(state_builder.py 已在 K-A)
+>   或新增 1.10-K-C(独立 sprint)— 待用户决策

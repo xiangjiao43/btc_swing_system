@@ -69,9 +69,9 @@
 | **阶段 1:写入方清理 + migration**| | | |
 | 1 | 启动 + 报告骨架 + 接受 P0/P1 决策 | 1 | ✅ `9d26b73` |
 | 2 | dao.py + schema.sql + state_builder + orchestrator_mapper + weekly_review + 4 测试 fixture(scope 扩展)| 9 | ✅ `ee46335` |
-| 3 | 残留 §X 注释压缩 + §Z 三重验证(中断点 4 准备)| 3 | ✅ 待 push |
-| **==中断点 4:写入方清理完成,1490+ 测试 0 regression==**| | | 🛑 已到达 |
-| 4 | migration 015 真跑(本地备份 + DROP + 验证)+ verify_cleanup_v14 / kb 全过 | 0 代码 | — |
+| 3 | 残留 §X 注释压缩 + §Z 三重验证(中断点 4 准备)| 3 | ✅ `4b3f8bf` |
+| **==中断点 4:写入方清理完成,1490+ 测试 0 regression==**| | | ✅ 已通过 |
+| 4 | migration 015 本地真跑(备份 + DROP + 21→19 / 12→12 / 7→7 + verify K 段更新)| 3 | ✅ 待 push |
 | **==中断点 5:migration 015 真跑后,本地 + 生产 21→19 列==**| | | 🛑 |
 | **阶段 2:state_machine 重写**| | | |
 | 5 | _from_FLIP_WATCH 整删 + _calc_flip_watch_bounds 删 + _on_enter_effects FLIP_WATCH 分支删 + state_machine_inputs._flip_watch_bounds_state + _prev_cycle_side 删 | 2 | — |
@@ -238,6 +238,40 @@
 **全量回归**:`tests/` → **1490 passed, 4 skipped, 0 failed**(基准 1490 → 0 净增,3 测试改造 + 写入方清理后维持)
 
 **commit 3 重新定义**:测试 fixtures 中 cold_start_warming_up / SCENARIO_COLD_START 等纯叙事场景测试残留(~10 测试),不影响生产代码 INSERT/SELECT。本来在 commit 3 计划里的 19 测试改造,大部分已在 commit 2 内顺手完成。commit 3 改为收尾测试残留 + 必要文档。
+
+### Commit 4(migration 015 本地真跑)
+**实际执行**:
+1. 备份双份:
+   - `data/btc_strategy.db.before_015.bak`(固定名,符合用户清单)
+   - `data/btc_strategy.db.before_015_20260504_150642.bak`(时间戳归档)
+2. 调 `drop_obsolete_columns(conn, backup_path=...)` → 返回
+   `{'strategy_runs.observation_category': 'native_alter', 'strategy_runs.cold_start': 'native_alter'}`
+3. 验证(对照启动确认验证标准):
+   - **列数 21 → 19** ✅(SQLite 3.50.4 走原生 ALTER TABLE … DROP COLUMN)
+   - **行数 12 → 12** ✅(零数据丢失)
+   - **索引 7 → 7** ✅(idx_runs_action_state / ai_model / flavor / reference / rules_version / time / trigger 全保留)
+   - 19 列详情:run_id / generated_at_utc / generated_at_bjt / reference_timestamp_utc /
+     previous_run_id / action_state / stance / btc_price_usd / state_transitioned /
+     run_trigger / run_mode / fallback_level / system_version / rules_version /
+     strategy_flavor / ai_model_actual / full_state_json / constraint_activations_json /
+     retry_log_json
+4. **K 段 graceful 验证更新**(用户指令 "verify_cleanup_v14 K 段如果因 migration 015 跑通而需要更新,在本 commit 一并更新"):
+   - `scripts/verify_cleanup_v14.py:325-365`:K 段从"DAO graceful 写 0/NULL"
+     改为"DAO 不再写 cold_start / observation_category 列 + PRAGMA 验证两列已删 + 列数 = 19"
+   - `scripts/verify_cleanup_kb.py:164-189`:Section B 烟测从"apply_migration 后两列仍在(opt-in 安全门)"
+     改为"K-A 后 schema.sql 不再含两列 → apply_migration 后两列从未存在;模拟老 schema(手动
+     ALTER ADD)→ drop_obsolete_columns 仍可工作"
+
+**§Z 三重验证(commit 4)**:
+- ✅ **真跑** drop_obsolete_columns 在生产形态本地 DB(非 in-memory)→ 21→19 / 12→12 / 7→7
+- ✅ 全量回归:`tests/` → **1490 passed, 4 skipped, 0 failed**(K-A 阶段 1 4 commit 累计基准维持)
+- ✅ `verify_cleanup_v14.py` → **37/37 §Z**(K 段 4 项更新后全过)
+- ✅ `verify_cleanup_kb.py` → **40/40 §Z**(B 段烟测 5 项更新后全过)
+
+**备份文件**:
+- `data/btc_strategy.db.before_015.bak`(2026-05-04 15:06)
+- `data/btc_strategy.db.before_015_20260504_150642.bak`(同上,时间戳归档)
+- 失败回滚:`mv data/btc_strategy.db.before_015.bak data/btc_strategy.db`(用户可执行)
 
 ### Commit 3(残留 §X 注释压缩 + 中断点 4 §Z 三重验证)
 **实际 scope**(scope 比 commit 2 小,因 commit 2 已吸收大部分测试改造):

@@ -161,28 +161,36 @@ def main(argv: list[str]) -> int:
             "apply_migration 不能自动调 drop_obsolete_columns(防写者未清崩溃)",
         )
 
-        # 端到端烟测:in-memory schema → drop_obsolete_columns → 两列删
+        # 端到端烟测(更新于 1.10-K-A commit 4):
+        # K-A commit 2 已从 schema.sql 删两列定义,K-A commit 4 已 ALTER 删生产 DB 列。
+        # 新烟测验证:
+        #  1. 新建 in-memory(schema.sql 不再含两列)→ apply_migration → 两列从未存在
+        #  2. 模拟"老 schema 还有列"场景(手动 ALTER ADD)→ drop_obsolete_columns → 两列删
         smoke_conn = sqlite3.connect(":memory:")
         smoke_conn.row_factory = sqlite3.Row
         with open("src/data/storage/schema.sql", encoding="utf-8") as f:
             smoke_conn.executescript(f.read())
         apply_migration(smoke_conn)
-        cols_before = [r[1] for r in smoke_conn.execute(
+        cols_after_apply = [r[1] for r in smoke_conn.execute(
             "PRAGMA table_info(strategy_runs)").fetchall()]
-        check("烟测:apply_migration 后 strategy_runs 仍含 observation_category",
-              "observation_category" in cols_before,
-              "(确认 apply_migration 未自动删)")
-        check("烟测:apply_migration 后 strategy_runs 仍含 cold_start",
-              "cold_start" in cols_before)
+        check("烟测:apply_migration 后 strategy_runs **不再含** observation_category"
+              "(K-A commit 2 schema.sql 已删定义)",
+              "observation_category" not in cols_after_apply,
+              f"实际列:{cols_after_apply}")
+        check("烟测:apply_migration 后 strategy_runs **不再含** cold_start",
+              "cold_start" not in cols_after_apply)
+        check(f"烟测:strategy_runs 列数 = 19(K-A 后,实际 {len(cols_after_apply)})",
+              len(cols_after_apply) == 19)
+        # 模拟老 DB(K-A 之前)→ drop_obsolete_columns 仍可工作(K-A commit 4 真跑过的路径)
+        smoke_conn.execute("ALTER TABLE strategy_runs ADD COLUMN observation_category TEXT")
+        smoke_conn.execute("ALTER TABLE strategy_runs ADD COLUMN cold_start INTEGER DEFAULT 0")
+        smoke_conn.commit()
         res = drop_obsolete_columns(smoke_conn)
-        cols_after = [r[1] for r in smoke_conn.execute(
+        cols_after_drop = [r[1] for r in smoke_conn.execute(
             "PRAGMA table_info(strategy_runs)").fetchall()]
-        check("烟测:drop_obsolete_columns 后 observation_category 删",
-              "observation_category" not in cols_after,
-              f"实际结果:{res}")
-        check("烟测:drop_obsolete_columns 后 cold_start 删",
-              "cold_start" not in cols_after,
-              f"实际结果:{res}")
+        check("烟测:drop_obsolete_columns 仍可 DROP(模拟老 schema → K-A commit 4 路径)",
+              "observation_category" not in cols_after_drop and "cold_start" not in cols_after_drop,
+              f"实际结果:{res} / 列:{cols_after_drop}")
         smoke_conn.close()
 
         # ============================================================

@@ -323,38 +323,46 @@ def main(argv: list[str]) -> int:
               "cold_start_warming_up" not in STATE_MACHINE_STATES)
 
         # ============================================================
-        # Section K:DAO graceful 写 cold_start = 0 / observation_category = NULL
+        # Section K:DAO 不再写 cold_start / observation_category 列
+        # (Sprint 1.10-K-A commit 2 + 4:列已 ALTER TABLE DROP COLUMN,
+        #  原 1.10-J 时代 graceful 写 0/NULL 假设已废)
         # ============================================================
-        print("\n=== K. DAO graceful(列保留写 0/NULL)===")
-        # 直接 INSERT 一条 strategy_run 模拟,验证 cold_start_flag = 0,
-        # observation_category = NULL
+        print("\n=== K. DAO 不再写 cold_start / observation_category(1.10-K-A 后)===")
+        # 直接 INSERT 一条 strategy_run 模拟,验证 INSERT 不再涉及两列
         from src.data.storage.dao import StrategyStateDAO
         StrategyStateDAO.insert_state(
             conn,
             run_timestamp_utc="2099-05-04T16:00:00Z",
-            run_id=f"{_PREFIX}graceful_test",
+            run_id=f"{_PREFIX}post_drop_test",
             run_trigger="manual",
             rules_version="v1.4",
             ai_model_actual="claude-test",
             state={
                 "schema_version": "v14",
-                "run_id": f"{_PREFIX}graceful_test",
+                "run_id": f"{_PREFIX}post_drop_test",
                 "generated_at_utc": "2099-05-04T16:00:00Z",
                 "state_machine": {"current_state": "FLAT"},
                 "market_snapshot": {"btc_price_usd": 75000.0},
-                "observation": {},  # 空 → observation_category=NULL
             },
         )
         conn.commit()
+        # 验证两列从 PRAGMA table_info 已不存在(migration 015 已 DROP)
+        cols = [r[1] for r in conn.execute(
+            "PRAGMA table_info(strategy_runs)").fetchall()]
+        check("strategy_runs 不再有 observation_category 列(migration 015)",
+              "observation_category" not in cols,
+              f"实际列:{cols}")
+        check("strategy_runs 不再有 cold_start 列(migration 015)",
+              "cold_start" not in cols)
+        check("strategy_runs 列数 = 19(原 21,删 2 列)",
+              len(cols) == 19, f"实际 {len(cols)}")
+        # INSERT 仍能成功(行数 +1)
         row = conn.execute(
-            "SELECT cold_start, observation_category FROM strategy_runs "
-            "WHERE run_id = ?",
-            (f"{_PREFIX}graceful_test",),
+            "SELECT run_id FROM strategy_runs WHERE run_id = ?",
+            (f"{_PREFIX}post_drop_test",),
         ).fetchone()
-        check("cold_start 列写 0(graceful)",
-              row is not None and row["cold_start"] == 0)
-        check("observation_category 列写 NULL(graceful)",
-              row is not None and row["observation_category"] is None)
+        check("DAO.insert_state 不再写两列后仍可 INSERT(行已写入)",
+              row is not None)
 
     finally:
         print("\n=== Cleanup ===")

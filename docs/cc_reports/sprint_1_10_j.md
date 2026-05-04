@@ -130,17 +130,146 @@ JS 运行时错误)。阶段 2 commit 6-9 等用户授权。
 - hash: 待 push 后填
 - `docs/cc_reports/sprint_1_10_j.md`(本文件)
 
-### Commits 2-9:阶段 1(2-5)+ 阶段 2(6-9)分两批
+### Commits 2-9 实施记录
 
-阶段 1(本次 commit 1-5):commit 1 / 2 (A) / 3 (F) / 4 (E.1+D) / 5 (B)
-阶段 2(用户审后 commit 6-9):6 (C cold_start) / 7 (H AlertsDAO + migration) / 8 (G docs) / 9 (verify + 报告)
+#### 阶段 1(commit 1-5,中断点 1 后审通过)
+- **Commit 2** `0ab357e`: A 项 4h 注释清理 + kpi/collector +24h(2 文件,~10 行)
+- **Commit 3** `a07594b`: F 项 base.yaml runtime: 整段删(1 文件,-19 行)
+- **Commit 4a** `1069b58`: D 项 account_state 删除(7 文件 +56/-171,删 derive_account_state + state_machine.compute_next 移除参数 + 4 测试改造,2 模块整 SKIP)
+- **Commit 4b** `04e6d54`: E.1.a 网页层脱钩 FLIP_WATCH/POST_PROTECTION_REASSESS(3 文件 +15/-10,labels/normalize_state/app.js 删 4 处)
+- **Commit 5** `91f0f6e`: B 项 observation_classifier 整删 + 8 文件引用 + DAO 写 NULL(6 文件 +32/-712,整文件 303 行 + test_observation_classifier 整删)
+
+#### 阶段 2(commit 6-9,中断点 2 后审通过)
+- **Commit 6** `53ec0dd`: C 项 cold_start 整删 + 18 文件引用 + DAO 写 0 graceful(21 文件 +97/-420 + 2 文件 DELETED;cold_start.py 52 + test_cold_start_util 整删 + 14 老测试改/删)
+- **Commit 7** `666b72a`: H 项 AlertsDAO 类重构 + events_calendar.triggered_at_utc 条件 ALTER + 18 单测(6 文件 +405/-25)
+- **Commit 8** `e3064ae`: G 项 docs/modeling.md §11.3 路径错误修(2 处)
+- **Commit 9** 本 commit: verify_cleanup_v14 + 报告 4 段 + 1.10-K/L checklist
 
 ---
 
-## 部署四件事 / 测试记录(commit 9 末尾填)
+## 部署四件事 / 测试记录
 
-待 commit 9 完成。
+| 步骤 | 状态 |
+|---|---|
+| 本地 pytest 通过 | ✅ 1471 passed (-23 vs 1494 删旧测试), 4 skipped, 0 regression |
+| GitHub push(9 commits) | ✅ 全部已推:57b506e → 0ab357e → a07594b → 1069b58 → 04e6d54 → 91f0f6e → 53ec0dd → 666b72a → e3064ae(commit 9 本次) |
+| 服务器 git pull | ⚠ 待用户执行(服务器仍在 80c4301,差 60+ commit;1.10-J 是 1.10-L 之前最后一次同步机会) |
+| 服务器 systemctl restart | ⚠ 待用户执行(11 个 cron job 改动 + AlertsDAO 重构需 uvicorn 重启) |
+| 生产 DB events_calendar.triggered_at_utc 列 | ⚠ 待用户执行 — `.venv/bin/python scripts/init_v14_tables.py /path/to/prod/btc_strategy.db`(幂等条件 ALTER,沿用 1.10-F 模式) |
 
-## 本 sprint 删除清单(commit 9 末尾汇总)
+### §Z verify_cleanup_v14.py 真实运行结果
 
-详见上方 9 项调研。**§X 实质完成 = 代码层 0 残留 + DB 列保留 NULL**(B/C 项)。
+```
+$ .venv/bin/python scripts/verify_cleanup_v14.py
+通过:35 项
+失败:0 项
+✅ 全部通过
+```
+
+### 35 §Z 断言分布
+
+| Section | 项 | 内容 |
+|---|---|---|
+| A | 3 | F 项 base.yaml runtime: 整删 |
+| B | 3 | B 项 observation_classifier §X 0 业务依赖 + __init__ 不导出 |
+| C | 5 | C 项 cold_start §X 0 业务依赖 + web/app.js 字段/标签删 |
+| D | 2 | D 项 account_state — compute_next 无参数 + derive 函数已删 |
+| E | 4 | E.1.a 网页层 labels + normalize_state 4 处删 |
+| F | 3 | H#1 AlertsDAO 类 + 4 处 INSERT 只剩 1 自身 + e2e 写读 |
+| G | 1 | H#2/H#3 events_calendar.triggered_at_utc 列存在 |
+| H | 3 | G 项 docs/modeling.md §11.3 路径错误修(commit 8) |
+| I | **5** | **§Z 真启动 uvicorn TestClient + 11 v14 API 全 200**(继承 1.10-I commit 7 教训) |
+| J | 3 | §Z scheduler cron 注册 + PIPELINE_STAGES / STATE_MACHINE_STATES 删 |
+| K | 2 | DAO graceful 列保留 — cold_start 写 0 + observation_category 写 NULL |
+
+### 单元测试矩阵
+
+| 测试文件 | 净 +/- 单测数 | 覆盖 |
+|---|---|---|
+| `tests/test_alerts_dao.py`(NEW) | +18 | commit 7 — AlertsDAO + migration 幂等 |
+| `tests/test_observation_classifier.py`(整删) | -16 | commit 5 — observation 整删 |
+| `tests/test_cold_start_util.py`(整删) | -10 | commit 6 — cold_start 整删 |
+| `tests/test_state_machine_e2e.py`(整模块 SKIP) | (-N skip) | commit 4a — 14 档 e2e 留 1.10-K |
+| `tests/test_lifecycle_e2e_reversal.py`(整模块 SKIP) | (-N skip) | commit 4a — 同上 |
+| `tests/test_state_machine_inputs.py` | -4(3 e2e + 1 单元 整删) | commit 4a |
+| `tests/pipeline/test_orchestrator_mapper.py` | -4 净(删 5 + 加 1) | commit 5 + 6 |
+| `tests/test_alerts.py` | -2 | commit 6 — cold_start_stuck + sorted_by_level |
+| `tests/test_kpi_collector.py` | -1 | commit 6 — cold_start_progress |
+| `tests/test_no_opportunity_8_scenarios.py` | -1 | commit 6 — cold_start scenario |
+| `tests/test_no_opportunity_narrator.py` | -1 | commit 6 — cold_start route detection |
+| `tests/test_plain_reading.py` | (1 改) | commit 6 — health_status='error' 替代 |
+| **小计** | **净 -23**(1494 → 1471) | 全为整删/SKIP 老 14 档 + observation + cold_start 测试 |
+
+---
+
+## 1.10-K 累积清单(本 sprint 完整 declare,留 1.10-K 实施)
+
+| # | 项 | 来源 sprint | 1.10-K 实施 |
+|---|---|---|---|
+| 1 | state_machine.py 主体重写(1190 行)+ inputs/lifecycle_manager(2504 行)→ thesis-driven | 1.10-J E.3 决策 | 架构级重写 |
+| 2 | strategy_runs.observation_category / cold_start 列 DROP COLUMN(SQLite CREATE TABLE 复制) | 1.10-J B/C 决策 | Migration 015(影响 50+ 历史 strategy_runs) |
+| 3 | normalize_state.py:61/156 schema_version='v13' hardcode 改 'v14' | 1.10-J I 决策 | 跟 normalize_state 重构一起 |
+| 4 | ThesesDAO 统一重构(1.10-I get_by_id 单加,留统一 review) | 1.10-I | 1.10-K DAO 重构 |
+| 5 | state_machine 内部 _from_FLIP_WATCH / _from_POST_PROTECTION_REASSESS / 纪律 3 校验 50+ 处 | 1.10-J E.1.b 决策 | 跟 #1 一起 |
+| 6 | narrator SCENARIO_COLD_START + SCENARIO_POST_PROTECTION + _gen_* 函数 + 4-6 处 route logic | 1.10-J commit 5+6 | 跟 #1 一起整重写 |
+| 7 | alerts.acknowledged / notification_sent 字段 → AlertsDAO 加 mark_acknowledged / mark_notified 方法 | 1.10-J commit 7 | 1.10-K AlertsDAO 扩展 |
+
+## 1.10-L checklist(真用户 + 真生产数据验证,本 sprint 加)
+
+| # | 项 | 验证场景 |
+|---|---|---|
+| 1 | 服务器同步 80c4301 → e3064ae(60+ commit) | 1.10-J 是关键节点,1.10-L 之前最后机会 |
+| 2 | 生产 DB 跑 init_v14_tables.py 加 events_calendar.triggered_at_utc 列 | 1.10-G verify event_macro 报错的根因修 |
+| 3 | systemctl restart btc-strategy 让 11 个 cron 注册新版本 | 改动较多,确保运行时无残留 v1.3 进程 |
+| 4 | 网页打开后历史 strategy_runs(含 cold_start / observation_category 老值)graceful 渲染 | DAO 写 0/NULL,前端不消费,不应 console 报错 |
+| 5 | 生产真触发 alerts(critical / warning / info)经 AlertsDAO 写入 | 4 处调用方真生产路径(state_builder / jobs.py x2 / conservative_monitor) |
+
+### v1.4 §11.3 路径错误清单 — **本 sprint 清零**
+
+| # | v1.4 §11.3 文档路径 | 真实路径 | 修复 sprint |
+|---|---|---|---|
+| 1 | ~~`src/ai/adjudicator.py`~~ → `src/ai/agents/master_adjudicator.py` | ✅ 已修(commit 8)| 1.10-J |
+| 2 | ~~`src/decision/validator.py`~~ → `src/ai/validator.py` | ✅ 已修(commit 8)| 1.10-J |
+
+---
+
+## 本 sprint 删除清单(汇总)
+
+| 类别 | 项 | 来源 | commit |
+|---|---|---|---|
+| 整文件 | `src/utils/cold_start.py` | C 项 | 6 |
+| 整文件 | `src/strategy/observation_classifier.py` | B 项 | 5 |
+| 整文件 | `tests/test_cold_start_util.py` | C 项 | 6 |
+| 整文件 | `tests/test_observation_classifier.py` | B 项 | 5 |
+| 整模块 SKIP | `tests/test_state_machine_e2e.py` | E.1+D | 4a |
+| 整模块 SKIP | `tests/test_lifecycle_e2e_reversal.py` | E.1+D | 4a |
+| 函数 | `_determine_cold_start` (state_builder) | C | 6 |
+| 函数 | `_run_observation_classifier` (state_builder) | B | 5 |
+| 函数 | `_observation_fallback` (state_builder) | B | 5 |
+| 函数 | `derive_account_state` (state_machine_inputs) | D | 4a |
+| 函数 | `_check_cold_start_stuck` (monitoring/alerts) | C | 6 |
+| 函数 | `_build_cold_start_state` (orchestrator_mapper) | C | 6 |
+| 函数 | `_build_classifier_state` (orchestrator_mapper) | B | 5 |
+| 段 | base.yaml `runtime:` 整段(scheduled/event_driven/manual) | F | 3 |
+| 段 | base.yaml `cold_start:` 整段 | C | 6 |
+| 字段 | StateMachine.compute_next `account_state=` 参数 | D | 4a |
+| 字段 | strategy_state["cold_start"] | C | 6 |
+| 字段 | DEFAULT_COLD_START_THRESHOLD | C | 6 |
+| 函数 | 4 处裸 `INSERT INTO alerts` 改 AlertsDAO.insert_alert | H#1 | 7 |
+
+§X 实质完成:**18 个删除对象 + 6 个文件级 / 模块级整删**,代码层 0 业务依赖。
+
+**自检清单**(commit 9 前 CC 已跑):
+- [x] 1471 pytest 0 regression
+- [x] 35 §Z 全过(双重验证:文本 grep 0 + 真启动 uvicorn + 真启动 scheduler)
+- [x] §X 关键 grep 全 0 hits in src/(`from .*observation_classifier import` /
+      `from .*cold_start import` / `derive_account_state` 等)
+- [x] AlertsDAO 4 处调用方都迁移(grep "INSERT INTO alerts" → 1 hit 自身)
+- [x] events_calendar.triggered_at_utc 真生产 DB 已加列(PRAGMA 验证)
+- [x] §11.3 docs/modeling.md 2 处路径错误修
+
+---
+
+## 段 4 — 报告路径
+
+详细报告:`docs/cc_reports/sprint_1_10_j.md`

@@ -1,28 +1,28 @@
-"""tests/test_lifecycle_e2e_reversal.py — Sprint 1.5b-C 反向交易完整路径。
+"""tests/test_lifecycle_e2e_reversal.py — Sprint 1.5b-C 反向交易完整路径
++ 1.10-K-A commit 10 重写。
 
-验证 LONG_HOLD → LONG_TRIM → LONG_EXIT → FLIP_WATCH → SHORT_PLANNED 完整推进:
+验证 LONG_HOLD → LONG_TRIM → LONG_EXIT → FLIP_WATCH 完整推进:
 - 每步真跑 build_state_machine_fields + LifecycleManager.compute_post_sm +
   state_machine.compute_next
 - lifecycles 表行数 + review_reports 表行数 都正确反映
-- 最终 lifecycle_id 切换到新的(SHORT_PLANNED 是新 lc,不复用旧的)
+- LONG_EXIT → FLIP_WATCH 后 stay(_from_FLIP_WATCH stub,5A)
 
 §Z:不 mock 字段,用真 dict + 真 DAO。
 
-Sprint 1.10-J commit 4a §X:整模块 SKIP — D 项 account_state 删除 +
-E.1.b state_machine FLIP_WATCH 主体留 1.10-K,本 e2e 测试涉及
-LONG_HOLD/TRIM/EXIT/FLIP_WATCH 全 14 档转换;留 1.10-K 重写后 thesis
-lifecycle e2e 重新覆盖。
+历史 + 重写注:
+- Sprint 1.10-J commit 4a §X:整模块 SKIP — D 项 account_state 删除 +
+  E.1.b state_machine FLIP_WATCH 主体留 1.10-K
+- Sprint 1.10-K-A commit 10 重写:
+  - 删 `derive_account_state` 引用 + `account_state=` 参数(已不存在)
+  - 14 档 transition Tick 1-6 仍可发生(方案 C 保留 14 档枚举)
+  - 加 thesis dict + system_state 断言(commit 7 镜像)
+  - **Tick 7 FLIP_WATCH → SHORT_PLANNED 反手测试已删**:
+    _from_FLIP_WATCH stub(commit 5,方案 5A)后 FLIP_WATCH 是叶状态(stay),
+    反手出口由 thesis_manager 接管 — **留 1.10-L 真接通后重新覆盖**。
+    本 e2e 验证到 LONG_EXIT → FLIP_WATCH stub stay 即止。
 """
 
 from __future__ import annotations
-
-import pytest
-
-# Sprint 1.10-J commit 4a §X:整模块 SKIP
-pytestmark = pytest.mark.skip(
-    reason="1.10-J commit 4a:account_state 删 + FLIP_WATCH 主体留 1.10-K;"
-           "1.10-K 重写后 thesis-driven e2e 重新覆盖"
-)
 
 import sqlite3
 import tempfile
@@ -88,11 +88,12 @@ def _step(
     state_input: dict,
     context: dict,
     prev_entered_at: str,
-    prev_flip_bounds: dict | None,
     now_iso: str,
     run_id: str,
 ) -> tuple[dict, dict | None, str]:
-    """单步推进:pre_sm → state_machine → post_sm。返回 (sm_result, lifecycle, current_state)。"""
+    """单步推进:pre_sm → state_machine → post_sm。返回 (sm_result, lifecycle, current_state)。
+    Sprint 1.10-K-A commit 10:删 derive_account_state + account_state= 参数(已不存在)+
+    prev_flip_bounds 参数(_calc_flip_watch_bounds 整删)。"""
     # pre_sm
     lifecycle_pre = lc_mgr.compute_pre_sm(
         prev_state=prev_state, prev_lifecycle=prev_lifecycle,
@@ -110,20 +111,18 @@ def _step(
         now_utc=now_iso,
     )
     apply_inputs_to_strategy_state(state_input, fields)
-    account = derive_account_state(fields)
 
     prev_record = {
         "state": {
             "state_machine": {
                 "current_state": prev_state,
                 "state_entered_at_utc": prev_entered_at,
-                "flip_watch_bounds": prev_flip_bounds,
             },
         },
     }
     sm_result = sm.compute_next(
         state_input, previous_record=prev_record,
-        account_state=account, now_utc=now_iso,
+        now_utc=now_iso,
     )
     state_input["state_machine"] = sm_result
 
@@ -140,7 +139,13 @@ def _step(
     return sm_result, lifecycle_post, sm_result["current_state"]
 
 
-def test_full_long_to_short_reversal():
+def test_full_long_lifecycle_to_flip_watch_stay():
+    """1.10-K-A commit 10 重写:LONG 完整生命周期 + LONG_EXIT → FLIP_WATCH stub stay。
+
+    Tick 1-5: FLAT → LONG_PLANNED → LONG_OPEN → LONG_HOLD → LONG_TRIM → LONG_EXIT
+    Tick 6:   LONG_EXIT → FLIP_WATCH(_from_LONG_EXIT 不动)
+    Tick 7:   FLIP_WATCH → FLIP_WATCH stub stay(原反手测试已删,留 1.10-L)
+    """
     tmp = Path(tempfile.mkdtemp()) / "rev.db"
     init_db(db_path=tmp, verbose=False)
     conn = _row_conn(tmp)
@@ -149,9 +154,7 @@ def test_full_long_to_short_reversal():
         lc_mgr = LifecycleManager(conn=conn)
         review_gen = ReviewReportGenerator(conn=conn)
 
-        # 用相对时间避免 flip_watch hours_in 计算依赖 wall clock
         T0 = datetime.now(timezone.utc) - timedelta(hours=200)
-        # 给 flip_watch eff_min 足够余量(默认 18h),Tick 7 设 30h 后
 
         def t(h: float) -> str:
             return (T0 + timedelta(hours=h)).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -161,60 +164,66 @@ def test_full_long_to_short_reversal():
                   "trade_plan": {"entry_zones": [{"price_low": 67000, "price_high": 68000}],
                                  "stop_loss": 65000},
                   "adjudicator": {"narrative": "BTC 趋势 up,L2 bullish"}}
-        _, lc1, st1 = _step(
+        sm1, lc1, st1 = _step(
             sm, lc_mgr,
             prev_state="FLAT", prev_strategy_state=None,
             prev_lifecycle=None,
             state_input=state1,
             context={"klines_1h": _df([69500])},
-            prev_entered_at=t(-1), prev_flip_bounds=None,
+            prev_entered_at=t(-1),
             now_iso=t(0), run_id="r1",
         )
         assert st1 == "LONG_PLANNED", f"Tick1 expected LONG_PLANNED, got {st1}"
         assert lc1["status"] == "pending_open"
-        # lifecycles 表有 1 行
         assert conn.execute("SELECT COUNT(*) FROM lifecycles").fetchone()[0] == 1
+        # 1.10-K-A commit 7 方案 C 镜像
+        assert sm1["thesis"] == {
+            "direction": "long", "lifecycle_stage": "planned", "status": "active",
+        }
+        assert sm1["system_state"] == "normal"
 
-        # ---- Tick 2: LONG_PLANNED → LONG_OPEN(1H 收盘 67500 入区间)----
+        # ---- Tick 2: LONG_PLANNED → LONG_OPEN ----
         state2 = {"evidence_reports": _bullish_evidence(),
                   "trade_plan": {"entry_zones": [{"price_low": 67000, "price_high": 68000}],
                                  "stop_loss": 65000}}
-        _, lc2, st2 = _step(
+        sm2, lc2, st2 = _step(
             sm, lc_mgr,
             prev_state="LONG_PLANNED",
             prev_strategy_state={"state": state1},
             prev_lifecycle=lc1,
             state_input=state2,
             context={"klines_1h": _df([68500, 67500])},
-            prev_entered_at=t(0), prev_flip_bounds=None,
+            prev_entered_at=t(0),
             now_iso=t(2), run_id="r2",
         )
         assert st2 == "LONG_OPEN", f"Tick2 expected LONG_OPEN, got {st2}"
         assert lc2["status"] == "active"
         assert lc2["average_entry_price"] == 67500
+        assert sm2["thesis"]["lifecycle_stage"] == "opened"
 
-        # ---- Tick 3: LONG_OPEN → LONG_HOLD(25h + 3% PnL)----
+        # ---- Tick 3: LONG_OPEN → LONG_HOLD ----
         state3 = {"evidence_reports": _bullish_evidence(),
                   "trade_plan": {"stop_loss": 65000}}
-        _, lc3, st3 = _step(
+        sm3, lc3, st3 = _step(
             sm, lc_mgr,
             prev_state="LONG_OPEN",
             prev_strategy_state={"state": state2},
             prev_lifecycle=lc2,
             state_input=state3,
             context={"klines_1h": _df([69525])},  # 67500 * 1.03
-            prev_entered_at=t(2), prev_flip_bounds=None,
+            prev_entered_at=t(2),
             now_iso=t(28), run_id="r3",
         )
         assert st3 == "LONG_HOLD", f"Tick3 expected LONG_HOLD, got {st3}"
         assert lc3["stage"] == "holding"
+        assert sm3["thesis"]["lifecycle_stage"] == "holding"
 
-        # ---- Tick 4: LONG_HOLD → LONG_TRIM(TP1 = 80000 触达)----
+        # ---- Tick 4: LONG_HOLD → LONG_TRIM ----
         state4 = {"evidence_reports": _bullish_evidence(),
                   "trade_plan": {"take_profit_plan": [
                       {"tp_id": "tp1", "target_price": 80000, "size_pct": 0.3},
                   ]}}
-        _, lc4, st4 = _step(
+        sm4, lc4, st4 = _step(
             sm, lc_mgr,
             prev_state="LONG_HOLD",
             prev_strategy_state={"state": state3},
@@ -224,46 +233,41 @@ def test_full_long_to_short_reversal():
                 "klines_1h": _df([79900]),
                 "klines_1d": _df([79800], highs=[80100], lows=[79500]),
             },
-            prev_entered_at=t(28), prev_flip_bounds=None,
+            prev_entered_at=t(28),
             now_iso=t(72), run_id="r4",
         )
         assert st4 == "LONG_TRIM", f"Tick4 expected LONG_TRIM, got {st4}"
-        # position_adjustments 已含 trim
         assert any(
             a["adjustment_type"] == "trim"
             for a in lc4.get("position_adjustments", [])
         )
+        assert sm4["thesis"]["lifecycle_stage"] == "trim"
 
-        # ---- Tick 5: LONG_TRIM → LONG_EXIT(stop_loss 触发)----
-        # 我们用 stop_loss_hit 触发 EXIT(state_machine 在 _from_LONG_TRIM 没有
-        # 直接 EXIT 路径,但 _from_LONG_TRIM is_final_trim_or_exhausted=True 进 EXIT)
-        # 简化:模拟 "is_final_trim_or_exhausted=True" via lifecycle 字段
+        # ---- Tick 5: LONG_TRIM → LONG_EXIT ----
         prev_lc_with_final = dict(lc4)
         prev_lc_with_final["is_final_trim_or_exhausted"] = True
-
         state5 = {"evidence_reports": _bullish_evidence(),
                   "trade_plan": {}}
-        # state_machine 读 lifecycle.is_final_trim_or_exhausted via _build_field_snapshot
         state5["lifecycle"] = prev_lc_with_final
-        _, lc5, st5 = _step(
+        sm5, lc5, st5 = _step(
             sm, lc_mgr,
             prev_state="LONG_TRIM",
             prev_strategy_state={"state": state4},
             prev_lifecycle=prev_lc_with_final,
             state_input=state5,
             context={"klines_1h": _df([79000])},
-            prev_entered_at=t(72), prev_flip_bounds=None,
+            prev_entered_at=t(72),
             now_iso=t(96), run_id="r5",
         )
         assert st5 == "LONG_EXIT", f"Tick5 expected LONG_EXIT, got {st5}"
+        # 1.10-K-A commit 7:LONG_EXIT → thesis(long, closed, closed_pending)
+        assert sm5["thesis"] == {
+            "direction": "long", "lifecycle_stage": "closed", "status": "closed_pending",
+        }
 
-        # ---- Tick 6: LONG_EXIT → FLIP_WATCH(positions_flat + L1 down + L2 hint bearish)----
-        # account_has_long=False 需要 hours_since_open > 48h(state_machine_inputs 简化)
-        # 我们 origin_time_utc 是 t(2),now=t(150),hours = 148h > 48 → flat
+        # ---- Tick 6: LONG_EXIT → FLIP_WATCH(_from_LONG_EXIT 不动)----
         state6 = {"evidence_reports": _bearish_evidence(),
                   "trade_plan": {}}
-        # 模拟 lc 已归档(state_machine 也认 positions_flat)
-        # LONG_EXIT 状态下 _infer_account_status 看 hours_since_open 决定平仓
         sm6, lc6, st6 = _step(
             sm, lc_mgr,
             prev_state="LONG_EXIT",
@@ -271,66 +275,68 @@ def test_full_long_to_short_reversal():
             prev_lifecycle=lc5,
             state_input=state6,
             context={"klines_1h": _df([78000])},
-            prev_entered_at=t(96), prev_flip_bounds=None,
+            prev_entered_at=t(96),
             now_iso=t(150), run_id="r6",
         )
         assert st6 == "FLIP_WATCH", f"Tick6 expected FLIP_WATCH, got {st6}"
-        # lifecycle 已归档:post_sm 返回 closed 字典(让 DAO 写库 + review 触发用)
         assert lc6 is not None
         assert lc6["status"] == "closed"
-        # lifecycles 表里这条 lc status='closed'
         old_lc_id = lc1["lifecycle_id"]
         archived = LifecyclesDAO.get_lifecycle(conn, old_lc_id)
         assert archived["status"] == "closed"
         assert archived["exit_time_utc"]
+        # 1.10-K-A commit 7 方案 C:FLIP_WATCH 是冷却态(thesis=None,system='normal',
+        # 不是系统态;由 thesis.closed_at 隐式驱动出口)
+        assert sm6["thesis"] is None
+        assert sm6["system_state"] == "normal"
+        # 1.10-K-A commit 5 §X:_calc_flip_watch_bounds 整删,bounds 永远 None
+        assert sm6["flip_watch_bounds"] is None
 
-        # 自动复盘触发(prev=lc5 active → curr=lc6 closed,触发 review)
+        # 自动复盘触发(prev=lc5 active → curr=lc6 closed)
         review = review_gen.maybe_generate_for_closed_lifecycle(lc5, lc6)
         assert review is not None
         assert review["lifecycle_id"] == old_lc_id
-        # review_reports 表 +1
         n_reviews = conn.execute(
             "SELECT COUNT(*) FROM review_reports WHERE lifecycle_id=?",
             (old_lc_id,),
         ).fetchone()[0]
         assert n_reviews == 1
 
-        # ---- Tick 7: FLIP_WATCH → SHORT_PLANNED(冷却 30h,L2 bearish 0.75,
-        #             long_thesis_invalidated=true,L3 grade=A)----
+        # ---- Tick 7: FLIP_WATCH → FLIP_WATCH stub stay(原反手测试已删)----
+        # Sprint 1.10-K-A commit 10 重写:_from_FLIP_WATCH stub(方案 5A)后
+        # FLIP_WATCH 是叶状态(stay),反手出口由 thesis_manager 接管 —
+        # 留 1.10-L 真接通后重新覆盖 FLIP_WATCH → SHORT_PLANNED 反手路径。
+        # 本 e2e 验证到 stub stay 即止。
         state7 = {"evidence_reports": _bearish_evidence(),
                   "trade_plan": {},
-                  # AI 输出 thesis_still_valid=invalidated,filler 从而推 long_thesis_invalidated=True
+                  # 即使给"反手条件齐全"的 fields,stub 也忽略
                   "adjudicator": {
                       "narrative": "原多头论点失效,转空头",
                       "thesis_still_valid": "invalidated",
                   }}
-        # state6 的 lifecycle = lc6 closed dict,direction=long,
-        # _prev_cycle_side 兜底用 direction → "long"
-        prev_flip = sm6["flip_watch_bounds"]
-        _, lc7, st7 = _step(
+        sm7, lc7, st7 = _step(
             sm, lc_mgr,
             prev_state="FLIP_WATCH",
             prev_strategy_state={"state": state6},
             prev_lifecycle=None,
             state_input=state7,
             context={"klines_1h": _df([78000])},
-            prev_entered_at=t(150),  # FLIP_WATCH 进入时
-            prev_flip_bounds=prev_flip,
-            now_iso=t(180),  # +30h,过 effective_min(默认 18h)
+            prev_entered_at=t(150),
+            now_iso=t(180),  # +30h,即使过原 effective_min 18h 也 stay
             run_id="r7",
         )
-        assert st7 == "SHORT_PLANNED", f"Tick7 expected SHORT_PLANNED, got {st7}"
-        assert lc7 is not None
-        assert lc7["status"] == "pending_open"
-        assert lc7["direction"] == "short"
-        # 新 lifecycle_id != 旧的
-        assert lc7["lifecycle_id"] != old_lc_id
+        # 1.10-K-A commit 5/8:stub stay,thesis=None,system='normal'
+        assert st7 == "FLIP_WATCH", (
+            f"Tick7 expected FLIP_WATCH stub stay, got {st7}"
+            f"(_from_FLIP_WATCH 业务已 stub,反手路径留 1.10-L thesis_manager 接管)"
+        )
+        assert sm7["thesis"] is None
+        assert sm7["system_state"] == "normal"
+        assert sm7["stable_in_state"] is True
 
-        # lifecycles 表此时应有 2 条:closed long + pending short
+        # lifecycles 表此时仍只有 1 条:closed long(无新 SHORT pending,反手未实现)
         all_lc = LifecyclesDAO.list_lifecycles(conn)
-        assert len(all_lc) == 2
-        statuses = {l["status"] for l in all_lc}
-        assert "closed" in statuses
-        assert "pending_open" in statuses
+        assert len(all_lc) == 1
+        assert all_lc[0]["status"] == "closed"
     finally:
         conn.close()

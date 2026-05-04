@@ -78,7 +78,8 @@
 | 7 | compute_next 输出 thesis dict + system_state 镜像(方案 C 关键)+ _orchestrator_mapper 镜像字段 + 6 新单测 | 3 | ✅ `584c49a` |
 | **==中断点 6:commit 7 完成,thesis dict + system_state 输出验证==**| | | ✅ 已通过 |
 | 8 | 9 K-A skip 测试 unskip:2 改造(test_19/23/30)+ 7 删除(test_21/22/24/29/36/41/42)| 1 | ✅ `b533823` |
-| 9 | state_machine_inputs.py 26 测试 + lifecycle_manager.py 19 测试 review:**0 changes needed** | 1(报告)| ✅ 待 push |
+| 9 | state_machine_inputs.py 26 测试 + lifecycle_manager.py 19 测试 review:**0 changes needed** | 1(报告)| ✅ `bd54b74` |
+| 10 | 2 老 SKIP unskip + thesis-driven 重写(test_state_machine_e2e + test_lifecycle_e2e_reversal)| 2 | ✅ 待 push |
 | **==中断点 5:migration 015 真跑后,本地 + 生产 21→19 列==**| | | 🛑 |
 | **阶段 2:state_machine 重写**| | | |
 | 5 | _from_FLIP_WATCH 整删 + _calc_flip_watch_bounds 删 + _on_enter_effects FLIP_WATCH 分支删 + state_machine_inputs._flip_watch_bounds_state + _prev_cycle_side 删 | 2 | — |
@@ -245,6 +246,32 @@
 **全量回归**:`tests/` → **1490 passed, 4 skipped, 0 failed**(基准 1490 → 0 净增,3 测试改造 + 写入方清理后维持)
 
 **commit 3 重新定义**:测试 fixtures 中 cold_start_warming_up / SCENARIO_COLD_START 等纯叙事场景测试残留(~10 测试),不影响生产代码 INSERT/SELECT。本来在 commit 3 计划里的 19 测试改造,大部分已在 commit 2 内顺手完成。commit 3 改为收尾测试残留 + 必要文档。
+
+### Commit 10(2 老 SKIP unskip + thesis-driven 重写)
+**1.10-J 留 K-A 必须处理的 2 个 e2e SKIP**:
+- `tests/test_state_machine_e2e.py`(整模块 SKIP from 1.10-J commit 4a)
+- `tests/test_lifecycle_e2e_reversal.py`(整模块 SKIP from 1.10-J commit 4a)
+
+**重写要点**:
+- 删 `derive_account_state` 引用 + `account_state=` 参数(已不存在,1.10-J 删)
+- 14 档 transition 仍可发生(方案 C)
+- 加 thesis dict + system_state 断言每步(commit 7 镜像)
+- `test_state_machine_e2e.py`:FLAT → LONG_PLANNED → LONG_OPEN → LONG_HOLD → LONG_TRIM,2 测试全过
+- `test_lifecycle_e2e_reversal.py`:**Tick 7 反手测试已删**(原 FLIP_WATCH → SHORT_PLANNED 路径,_from_FLIP_WATCH stub 后 stub stay,反手出口由 thesis_manager 接管,留 1.10-L 真接通后重新覆盖)
+  - Tick 1-6 LONG 完整生命周期 + Tick 7 改为验证 FLIP_WATCH stub stay 行为
+  - lifecycles 表 1 行(closed long;无新 SHORT pending,反手未实现)
+
+**§Z 三重验证**:
+- ✅ pytest tests/test_state_machine_e2e.py → 2 passed
+- ✅ pytest tests/test_lifecycle_e2e_reversal.py → 1 passed
+- ✅ 全量 **1492 passed, 1 skipped, 0 failed**(基准 1489+4 → 1492+1 = 1493 总数维持,+3 unskip)
+- ✅ 数学验证:1489+3(e2e unskip pass)=1492;4-3(2 老 e2e SKIP 全清)=1 ✅
+
+**1 个剩余 skipped 测试**(基线遗留):非 K-A 范围,留下游 sprint 处理。
+
+**留 1.10-L checklist**:
+- (新增)反手出口实现:`FLIP_WATCH → SHORT_PLANNED` / `LONG_PLANNED` 路径由 thesis_manager 接管
+- 1.10-L 完成后 unskip + 重新覆盖 test_lifecycle_e2e_reversal Tick 7 反手部分
 
 ### Commit 9(state_machine_inputs + lifecycle_manager 测试 review)
 **Review 结论**:**0 changes needed** — 两文件 45 个测试全过(26 + 19)。

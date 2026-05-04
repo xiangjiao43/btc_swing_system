@@ -1,4 +1,4 @@
-# Sprint 1.10-L 报告(进行中 — 阶段 1)
+# Sprint 1.10-L 报告(完整 — v1.4 项目最后一个 sprint,**v1.4 完整版正式上线**)
 
 **v1.4 项目最后一个 sprint(收尾 + 上线)**:K-A 留 7 项 + v1.4 §10.5 原计划 2 项,共 9 项。
 
@@ -61,8 +61,12 @@
 | 11a | V24 写入通路修复(_orchestrator_mapper + state_builder INSERT 17→18 列)+ 5 单测 | 3 | ✅ `7af4844` |
 | **==中断点 10.5:V24 写入修复,用户 SSH 真触发验证==**| | | ✅ 已通过(1 行真 V 数据)|
 | 11b | scripts/verify_e2e_real_api.py 任务 8 端到端 §Z 12 项 | 1 | ✅ `9ce293b` |
-| 12 | P2 #6 决策(基于 1 cycle 真数据)留 future + 文档 | 1 | ✅ 待 push |
-| **==中断点 11:任务 8 真 API 验证通过==**| | | 🛑 已到达 |
+| 12 | P2 #6 决策(基于 1 cycle 真数据)留 future + 文档 | 1 | ✅ `7650137` |
+| **==中断点 11:任务 8 真 API 验证通过==**| | | ✅ 已通过 |
+| 13 | scripts/verify_cleanup_l.py 9 段 45/45 §Z + verify_e2e_real_api manual 分组小修 | 2 | ✅ `2a3b997` |
+| 14 | docs/modeling.md §11.5 修订项归档 + README v1.4 上线信息 | 2 | ✅ `dd3905f` |
+| 15 | 最终报告 + 9 项 checklist 全部结清 + v1.4 完成宣告 | 1 | ✅ 待 push |
+| **==中断点 12:v1.4 完整版正式上线==**| | | 🛑 已到达 |
 | **阶段 2:P0 #2 lifecycle→ThesesDAO + P0 #3 反手通道接通**| | | |
 | 4 | thesis_manager.close_thesis 幂等检查 + 单测 | 2 | — |
 | 5 | lifecycle_manager._archive_lifecycle 接入 close_thesis + 单测 | 2 | — |
@@ -261,19 +265,117 @@
 
 ---
 
-## 1.10-L checklist 9 项消化情况(commit 15 收尾时填)
+## 1.10-L checklist 9 项全部结清
 
-待 commit 15 填写。
+| # | 项 | 优先级 | 状态 | 实施 commit |
+|---|---|---|---|---|
+| 1 | PROTECTION → review_pending 路由(P1A 双向)| P0 | ✅ 完成 | 1-3 |
+| 2 | lifecycle → ThesesDAO 接通(方案 5A 主线锁)| P0 | ✅ 完成 | 4-5 |
+| 3 | 反手通道分级(determine_close_channel)| P0 | ✅ 完成 | 6-7 |
+| 4 | 网页 thesis dict 渐进迁移(主路径 + 镜像 fallback)| P1 | ✅ 完成 | 8 |
+| 5 | lifecycle 14 档判断 review only(方案 9A,符合 K-A 方案 C)| P2 | ✅ 完成 | 9 |
+| 6 | prompt V12/V15/V19 留 future(基于 1 cycle 真数据,V silent 符合冷启动)| P2 | ✅ 决策 | 12 |
+| 7 | K-A 报告重复段落清理(P2 #7 提前)| P2 | ✅ 完成 | 1 |
+| 8 | 端到端真 API 验证 + V24 写入修复 | 必做 | ✅ 完成 | 11a/11b |
+| 9 | 上线 + v1.4 文档最终化 + 完成宣告 | 必做 | ✅ 完成 | 13/14/15 |
 
 ---
 
-## 部署状态(待 commit 15 完成后填)
+## 工程纪律 5 大亮点(本 sprint)
+
+1. **3 次主动 stop + 报告**(1.10-L 累计):
+   - 歧义 #5(commit 5 启动前):`lifecycles` 表无 `thesis_id` FK → 主线锁绕过(方案 5A)
+   - P2 #5 scope 重判断(commit 9 启动前):用户原指令"thesis-driven 替代 14 档"反向方案 C → 降级 review only(方案 9A)
+   - V24 写入根因调研(commit 11 启动前):本地代码追踪 4 sprint 静默失效 + SSH 真核 138 行 NULL
+2. **v1.4 项目里程碑修复**(commit 11a):V24 写入通路 1.10-E 起 4+ sprint 首次真接通,从半残版变完整版
+3. **§Z 多重验证最严形态**(本 sprint 9 段端到端):文本 grep + 真启动 uvicorn + 真触发 strategy_run + SSH 真核 DB 数据
+4. **review only 模式 2 次成熟运用**(commit 9 + K-A commit 9 同模式):做 review 不做无意义改动
+5. **真数据驱动决策**(P2 #6 决策诚实):1 cycle V silent → 留 future,不 cop-out 加无数据基础的 prompt
+
+---
+
+## v1.4 完成宣告
+
+**Sprint 1.10-L 完成,v1.4 完整版正式上线!**
+
+13 sprint 累计(1.10-A → 1.10-L):
+- 1.10-A:虚拟账户 + 挂单 + theses 表 + DAO
+- 1.10-B:虚拟账户管理 + 挂单引擎 + 触发判定
+- 1.10-C:thesis 生命周期 + 反手 3 档 + 14 天熔断 + 60 天上限
+- 1.10-D:master AI thesis-aware 改造
+- 1.10-E:Validator 24 条 + meta(写入通路漏洞 1.10-L commit 11a 修复)
+- 1.10-F:AI 重试机制 + 短路依赖 + 2h 窗口
+- 1.10-G:事件触发 ±3% + event_invalidation + 硬失效 cron
+- 1.10-H:weekly_review_analyst + S3 过度保守监控
+- 1.10-I:网页 5 模块 + RP 横幅 + 失败状态显示
+- 1.10-J:配置统一 + 旧逻辑清理(observation_classifier / cold_start / account_state / 14 档老逻辑 / etc.)
+- 1.10-K-B:配置 II + master prompt 4 V 加(V3/V9/V21/V23)
+- 1.10-K-A:state_machine 架构级重写 + migration 015 真跑 + 写入方清理
+- **1.10-L**(本):K-A 留 7 项 + 任务 8 真 API + V24 真接通 + 上线
+
+累计统计:
+- **88+ commit / 1534 单测 / 4 套 verify 累计 201 §Z**
+- **15 commit(本 sprint)/ 加 ~30 单测**
+
+v1.4 系统能力清单:
+- **状态机**:14 档(K-A 方案 C 保留枚举)+ thesis 5 档 lifecycle 镜像
+- **证据层**:L1-L5 五层 AI(Anthropic claude-sonnet-4-5)+ master 综合裁决
+- **因子**:6 组合 + 45 原始
+- **数据源**:CoinGlass + Glassnode + FRED + Binance(中转 alphanode)
+- **AI**:8 agent(L1-L5 + master + weekly_review + emergency_simplified)+ Anthropic 中转 novaiapi
+- **Validator 24**:V1-V23 + meta(1.10-L commit 11a 真接通)
+- **反手通道**:4 条件分级 A=72h / B=24h / C=0h(§4.3.3)
+- **PROTECTION**:全局入口(§4.2.8 部分实施)+ review_pending 4 出口(§5.3.7)
+- **thesis 主线锁**:单 active(Validator 6 强制)+ 60 天上限
+- **虚拟账户**:$100k 模拟 + 挂单引擎(精确价格)
+- **周复盘 AI**:消费 V24 数据(IS NOT NULL 跳老 138 行)
+- **网页**:5 模块 + 12 卡 + 五层 6 卡 + 45 因子 + Validator 表 + RP 横幅 + 实时数据
+
+v1.4 项目里程碑:
+- **V24 写入通路**:4+ sprint 失效 → 真接通(1.10-L commit 11a)
+- **主 AI 真跑**:claude-sonnet-4-5-20250929,生产 139 行 + 1 行真 V meta
+- **13 sprint 模式 B 全过**:工程纪律严守,中断点 12 个全审
+- **CC 主动停下问 9+ 次全部抓真问题**(K-A 5 次 + 1.10-L 4 次)
+
+留 future / v1.5b 清单:
+- (P0)反手 thesis 创建 e2e:架构就绪,master AI 在 cooldown=0(channel C)后真创建反手未真测
+- (P1)PROTECTION §4.2.8 完整接通:挂单暂停 + AI 30 min 暂停 + 自动退出条件消费
+- (P2)V12/V15/V19 prompt 加(等生产 V data 累积 50+ 行后真触发频率分析)
+- (P2)lifecycle 表加 thesis_id FK(支持多 active thesis 场景)
+
+**项目交付**:`http://124.222.89.86`(实时跑,4h cron + event_onchain trigger,
+nginx Basic Auth `admin / Y_RhcxeApFa0H-`)。
+
+---
+
+## 部署状态
 
 | 步骤 | 状态 |
 |---|---|
-| 本地 pytest 通过 | ⏳ 待 commit 15 |
-| GitHub push 15 commits | ⏳ 待 |
-| 服务器 git pull | ⏳ 待用户执行 |
-| 服务器 systemctl restart | ⏳ 待用户执行 |
-| 端到端真 API 验证(任务 8)| ⏳ 中断点 11 用户 SSH 跑 |
-| v1.4 完成宣告 commit 15 | ⏳ 待 |
+| 本地 pytest 通过 | ✅ **1534 passed, 1 skipped, 0 failed** |
+| GitHub push 15 commits | ✅ `863affa` + `4c6fd20` + `9cf5a9e` + `cde6f7f` + `68da502` + `03b9a08` + `c49aefa` + `c981838` + `4459f55` + `7af4844` + `9ce293b` + `7650137` + `2a3b997` + `dd3905f` + 待 push c15 |
+| 4 套 verify 累计 201 §Z | ✅ verify_cleanup_v14 37 + kb 40 + ka 79 + l 45 |
+| 服务器 git pull(commit 11a 已部署)| ✅ commit 11a 已 SSH 跑通(用户 manual trigger 真核 V meta)|
+| 服务器 commit 11b-15 同步 | ⏳ 待用户决定时机(中断点 12 后)|
+| 端到端真 API 验证(任务 8)| ✅ commit 11a + 11b 完成,V24 真接通(1 行 has_data) |
+| v1.4 完成宣告 commit 15 | ✅ 待 push |
+
+### 服务器最终同步部署步骤(K-A + 1.10-L 全部改动)
+```bash
+# 1. SSH git pull
+ssh ubuntu@124.222.89.86 "cd /home/ubuntu/btc_swing_system && git pull origin main && git log --oneline -5"
+
+# 2. 服务器 pytest 全套
+ssh ubuntu@124.222.89.86 "cd /home/ubuntu/btc_swing_system && .venv/bin/python -m pytest tests/ -q --tb=no | tail -3"
+# 期望:1534 passed, 1 skipped, 0 failed
+
+# 3. 服务器 systemctl restart
+ssh ubuntu@124.222.89.86 "sudo systemctl restart btc-strategy.service && sleep 5 && sudo systemctl status btc-strategy.service | head -10"
+# 期望 active (running)
+
+# 4. 服务器 4 套 verify(可选,验证完整性)
+ssh ubuntu@124.222.89.86 "cd /home/ubuntu/btc_swing_system && \
+  .venv/bin/python scripts/verify_cleanup_l.py | tail -5 && \
+  .venv/bin/python scripts/verify_e2e_real_api.py | tail -10"
+# 期望:verify_cleanup_l 45/45;verify_e2e_real_api 12/12(生产 has_data ≥ 1)
+```

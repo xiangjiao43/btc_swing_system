@@ -1121,9 +1121,9 @@ class StrategyStateDAO:
         evidence = state.get("evidence_reports") or {}
         composite = state.get("composite_factors") or {}
         sm = state.get("state_machine") or {}
-        observation = state.get("observation") or {}
-        # Sprint 1.10-J commit 6 §X:cold_start 字段已删
-        # (v1.4 §11.2;DB 列保留写 0 graceful,Migration 删列留 1.10-K)
+        # Sprint 1.10-K-A commit 2 §X(v1.4 §11.2):
+        # observation_category / cold_start 字段及 INSERT 列引用全删
+        # (1.10-J 已删业务逻辑,本 sprint commit 4 跑 migration 015 删 DB 列)
         pipeline_meta = state.get("pipeline_meta") or {}
         adjudicator = state.get("adjudicator") or {}
 
@@ -1136,8 +1136,6 @@ class StrategyStateDAO:
         state_transitioned = 0 if sm.get("stable_in_state") else 1
         fallback_level = pipeline_meta.get("fallback_level")
         strategy_flavor = (state.get("meta") or {}).get("strategy_flavor", "swing")
-        observation_category = observation.get("observation_category")
-        cold_start_flag = 0  # Sprint 1.10-J commit 6 §X:写死 0 graceful
 
         generated_at_utc = state.get("generated_at_utc") or _utc_now_iso()
         generated_at_bjt = state.get("generated_at_bjt") or generated_at_utc
@@ -1159,10 +1157,9 @@ class StrategyStateDAO:
                  action_state, stance, btc_price_usd,
                  state_transitioned, run_trigger, run_mode,
                  fallback_level, system_version, rules_version,
-                 strategy_flavor, observation_category,
-                 cold_start, ai_model_actual, full_state_json,
+                 strategy_flavor, ai_model_actual, full_state_json,
                  constraint_activations_json, retry_log_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(run_id) DO UPDATE SET
                 generated_at_utc = excluded.generated_at_utc,
                 generated_at_bjt = excluded.generated_at_bjt,
@@ -1175,8 +1172,6 @@ class StrategyStateDAO:
                 fallback_level = excluded.fallback_level,
                 rules_version = excluded.rules_version,
                 strategy_flavor = excluded.strategy_flavor,
-                observation_category = excluded.observation_category,
-                cold_start = excluded.cold_start,
                 ai_model_actual = excluded.ai_model_actual,
                 full_state_json = excluded.full_state_json,
                 constraint_activations_json = excluded.constraint_activations_json,
@@ -1190,8 +1185,7 @@ class StrategyStateDAO:
                 action_state, stance, btc_price_usd,
                 state_transitioned, run_trigger, None,
                 fallback_level, None, rules_version,
-                strategy_flavor, observation_category,
-                cold_start_flag, ai_model_actual,
+                strategy_flavor, ai_model_actual,
                 json.dumps(state, ensure_ascii=False),
                 ca_json, rl_json,
             ),
@@ -1223,8 +1217,7 @@ class StrategyStateDAO:
 
     @staticmethod
     def get_count(conn: sqlite3.Connection) -> int:
-        """历史 run 条数(Sprint 1.10-J commit 6 §X:cold_start 判定已删,
-        本方法保留作 generic counter,可能仍被 KPI / 监控用)。"""
+        """历史 run 条数(generic counter,可能仍被 KPI / 监控用)。"""
         row = conn.execute(
             "SELECT COUNT(*) AS n FROM strategy_runs"
         ).fetchone()

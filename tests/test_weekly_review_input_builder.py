@@ -39,17 +39,19 @@ def _seed_strategy_run(
     conn, *, run_id, generated_at_utc,
     fallback_level=None, ca_json=None, retry_log_json=None,
     btc_price_usd=75000.0, action_state="FLAT",
-    run_trigger="scheduled", observation_category=None,
+    run_trigger="scheduled",
 ):
+    # Sprint 1.10-K-A commit 2 §X(v1.4 §11.2):删 observation_category INSERT 列引用
+    # (列已从 schema.sql 删除,配合 dao.py + state_builder.py + migration 015 真跑)
     conn.execute(
         "INSERT INTO strategy_runs (run_id, generated_at_utc, generated_at_bjt, "
         "reference_timestamp_utc, action_state, run_trigger, btc_price_usd, "
-        "fallback_level, observation_category, full_state_json, "
+        "fallback_level, full_state_json, "
         "constraint_activations_json, retry_log_json) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (run_id, generated_at_utc, generated_at_utc,
          generated_at_utc, action_state, run_trigger, btc_price_usd,
-         fallback_level, observation_category, "{}",
+         fallback_level, "{}",
          json.dumps(ca_json) if ca_json else None,
          json.dumps(retry_log_json) if retry_log_json else None),
     )

@@ -218,6 +218,27 @@
 - 文本验证:本 commit 仅写报告 + 决策记录,无代码改动 → N/A
 - 启动验证:N/A
 
+### Commit 2(scope 调整 — 见下面备注)
+**实际 scope**(超出原计划"dao.py + schema.sql + dao 测试"):
+- `src/data/storage/schema.sql`:删 line 17 注释 + line 35-36 字段定义(3 处)
+- `src/data/storage/dao.py:StrategyStateDAO.insert_state`:删 9 处(observation/cold_start 提取 + INSERT 列名 + ON CONFLICT 子句 + params + 注释)
+- `src/pipeline/_orchestrator_mapper.py`:删 mapped["observation_category"] / ["cold_start"](2 处 + 8 行注释)
+- `src/pipeline/state_builder.py:_v13_path INSERT`:删 INSERT 列名 + params(4 处)
+- `src/ai/weekly_review_input_builder.py:_aggregate_strategy_runs`:删 SELECT 含 observation_category(1 处)
+- `tests/test_init_v14_drop_columns.py`:_make_conn_with_schema 加 ALTER ADD COLUMN 还原老 schema(模拟 1.10-K-A commit 2 之前生产 DB,验证 DROP 仍可工作)
+- `tests/test_weekly_review_input_builder.py:_seed_strategy_run`:删 INSERT observation_category 引用(1 处)
+- `tests/pipeline/test_orchestrator_mapper.py`:test_col_16/17 改为"字段不在 mapped" + test_returns_all_19 → 17(3 测试改造)
+
+**为什么 scope 比原计划大**:schema.sql 改动**强制**触发所有 reader/writer 同步改 — 不改的话 in-memory DB 测试会全失败 25 个。这是"production code coupling",不是"test 改造适配"。原计划 commit 2(dao.py only)/ commit 3(其他 writer)的拆分在物理上不可分割。
+
+**§Z 文本验证**:`grep observation_category|cold_start src/data/storage/dao.py src/data/storage/schema.sql src/pipeline/_orchestrator_mapper.py src/pipeline/state_builder.py src/ai/weekly_review_input_builder.py` → 0 hits in INSERT/SELECT/CREATE TABLE 语句(只剩注释引用,详见 §X 注释格式遵循)
+
+**§Z 启动烟测**:in-memory schema → strategy_runs 19 列 → StrategyStateDAO.insert_state rowcount=1 → _aggregate_strategy_runs 返回正确 dict ✅
+
+**全量回归**:`tests/` → **1490 passed, 4 skipped, 0 failed**(基准 1490 → 0 净增,3 测试改造 + 写入方清理后维持)
+
+**commit 3 重新定义**:测试 fixtures 中 cold_start_warming_up / SCENARIO_COLD_START 等纯叙事场景测试残留(~10 测试),不影响生产代码 INSERT/SELECT。本来在 commit 3 计划里的 19 测试改造,大部分已在 commit 2 内顺手完成。commit 3 改为收尾测试残留 + 必要文档。
+
 ---
 
 ## 1.10-K-A 累积清单(本 sprint 内消化 + 待 1.10-L)

@@ -384,6 +384,8 @@ class StrategyStateBuilder:
         persisted = False
         if persist and self.conn is not None:
             try:
+                # Sprint 1.10-K-A commit 2 §X(v1.4 §11.2):删 observation_category
+                # / cold_start INSERT 列引用(配合 schema.sql / dao.py / migration 015)
                 self.conn.execute(
                     """
                     INSERT INTO strategy_runs (
@@ -392,9 +394,8 @@ class StrategyStateBuilder:
                         action_state, stance, btc_price_usd,
                         state_transitioned, run_trigger, run_mode,
                         fallback_level, system_version, rules_version,
-                        strategy_flavor, observation_category,
-                        cold_start, ai_model_actual, full_state_json
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        strategy_flavor, ai_model_actual, full_state_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         mapped["run_id"],
@@ -412,8 +413,6 @@ class StrategyStateBuilder:
                         mapped["system_version"],
                         mapped["rules_version"],
                         mapped["strategy_flavor"],
-                        mapped["observation_category"],
-                        mapped["cold_start"],
                         mapped["ai_model_actual"],
                         mapped["full_state_json"],
                     ),

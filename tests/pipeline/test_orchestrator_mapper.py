@@ -234,20 +234,19 @@ def test_col_15_strategy_flavor_v13_ai_majority(conn):
     assert out["strategy_flavor"] == "v1.3_ai_majority"
 
 
-# Sprint 1.10-J commit 5 §X:test_col_16_observation_category_* 整删
-# (v1.4 §11.2 删 observation_classifier;mapper 直接写 None,DAO 落 NULL)
-def test_col_16_observation_category_is_null(conn):
-    """1.10-J commit 5 后:observation_category 永远 None(DAO 写 NULL)。"""
+# Sprint 1.10-K-A commit 2 §X(v1.4 §11.2):
+# observation_category / cold_start mapped 字段整删(配合 schema.sql / dao.py /
+# state_builder.py / migration 015 真跑)。原 1.10-J graceful NULL/0 测试改为"字段不存在"。
+def test_col_observation_category_not_in_mapped_output(conn):
+    """1.10-K-A commit 2 后:mapped 字典不再含 observation_category key。"""
     out = _map_orchestrator_result_to_state(_make_result(), _make_context(), conn)
-    assert out["observation_category"] is None
+    assert "observation_category" not in out
 
 
-# Sprint 1.10-J commit 6 §X:删 cold_start 1/0 老测试(2 个)
-# 改成单一"永远 0 graceful"测试
-def test_col_17_cold_start_always_zero(conn):
-    """1.10-J commit 6 后:cold_start 永远 0(DAO 写 0 graceful,留 1.10-K 删列)。"""
+def test_col_cold_start_not_in_mapped_output(conn):
+    """1.10-K-A commit 2 后:mapped 字典不再含 cold_start key。"""
     out = _map_orchestrator_result_to_state(_make_result(), _make_context(), conn)
-    assert out["cold_start"] == 0
+    assert "cold_start" not in out
 
 
 def test_col_18_ai_model_actual_from_first_layer_with_model(conn):
@@ -307,7 +306,8 @@ def test_col_19_full_state_json_does_not_contain_pandas_objects(conn):
 # 完整 19 列 schema 断言
 # ============================================================
 
-def test_returns_all_19_strategy_runs_columns(conn):
+def test_returns_all_17_strategy_runs_columns(conn):
+    """1.10-K-A commit 2 §X:从 19 列降到 17 列(删 observation_category / cold_start)。"""
     out = _map_orchestrator_result_to_state(_make_result(), _make_context(), conn)
     expected_keys = {
         "run_id", "generated_at_utc", "generated_at_bjt",
@@ -315,8 +315,7 @@ def test_returns_all_19_strategy_runs_columns(conn):
         "action_state", "stance", "btc_price_usd",
         "state_transitioned", "run_trigger", "run_mode",
         "fallback_level", "system_version", "rules_version",
-        "strategy_flavor", "observation_category",
-        "cold_start", "ai_model_actual", "full_state_json",
+        "strategy_flavor", "ai_model_actual", "full_state_json",
     }
     assert set(out.keys()) == expected_keys
 

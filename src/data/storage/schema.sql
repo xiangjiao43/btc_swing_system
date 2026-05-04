@@ -14,8 +14,10 @@
 -- ============================================================
 -- run_timestamp_utc 唯一 == 原 strategy_state_history.run_timestamp_utc
 -- v1.2 新增:reference_timestamp_utc / rules_version / strategy_flavor /
---           observation_category / cold_start / ai_model_actual
+--           ai_model_actual
 -- run_mode / system_version / previous_run_id / state_transitioned 也按 §10.4 字段。
+-- Sprint 1.10-K-A commit 2 §X(v1.4 §11.2):删 observation_category / cold_start
+-- 字段定义(配合 migration 015 真跑;30+ 处写入方一并清理)。
 CREATE TABLE IF NOT EXISTS strategy_runs (
     run_id                   TEXT PRIMARY KEY,
     generated_at_utc         TEXT NOT NULL,
@@ -32,8 +34,6 @@ CREATE TABLE IF NOT EXISTS strategy_runs (
     system_version           TEXT,
     rules_version            TEXT,
     strategy_flavor          TEXT DEFAULT 'swing',
-    observation_category     TEXT,
-    cold_start               INTEGER DEFAULT 0,
     ai_model_actual          TEXT,
     full_state_json          TEXT NOT NULL,
     -- Sprint 1.10-E:V24 meta(v1.4 §3.4.9)— Validator 24 条触发记录 + 额外 meta

@@ -117,18 +117,13 @@ def _map_orchestrator_result_to_state(
     # ---- 15. strategy_flavor ----
     strategy_flavor = "v1.3_ai_majority"
 
-    # ---- 16. observation_category(Sprint 1.10-J commit 5 §X 删 classify;
-    #          v1.4 §11.2 删整套机制;DAO 写 NULL,DB 列保留留 1.10-K 删列)----
-    observation_category = None
+    # Sprint 1.10-K-A commit 2 §X(v1.4 §11.2):删 observation_category /
+    # cold_start mapped 字段(配合 schema.sql + dao.py + migration 015 真跑)。
 
-    # ---- 17. cold_start(Sprint 1.10-J commit 6 §X 删整套机制;
-    #          v1.4 §11.2;DAO 写 0 graceful,DB 列保留留 1.10-K 删列)----
-    cold_start_int = 0
-
-    # ---- 18. ai_model_actual ----
+    # ---- 16. ai_model_actual ----
     ai_model_actual = _derive_ai_model(layers)
 
-    # ---- 19. full_state_json ----
+    # ---- 17. full_state_json ----
     full_state_json = _build_full_state_json(result, context)
 
     return {
@@ -147,8 +142,6 @@ def _map_orchestrator_result_to_state(
         "system_version": system_version,
         "rules_version": rules_version,
         "strategy_flavor": strategy_flavor,
-        "observation_category": observation_category,
-        "cold_start": cold_start_int,
         "ai_model_actual": ai_model_actual,
         "full_state_json": full_state_json,
     }

@@ -83,8 +83,10 @@ def _aggregate_strategy_runs(
 
     Returns: {total_runs, successful_runs, ai_failures, runs_by_trigger}
     """
+    # Sprint 1.10-K-A commit 2 §X(v1.4 §11.2):
+    # SELECT 不再读 observation_category(列已删 / 业务逻辑 1.10-J 已废)。
     rows = conn.execute(
-        "SELECT run_trigger, fallback_level, observation_category "
+        "SELECT run_trigger, fallback_level "
         "FROM strategy_runs "
         "WHERE generated_at_utc >= ? AND generated_at_utc < ?",
         (_to_iso(week_start), _to_iso(week_end)),

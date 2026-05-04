@@ -24,10 +24,16 @@ from scripts.init_v14_tables import (
 
 
 def _make_conn_with_schema() -> sqlite3.Connection:
+    """模拟"migration 015 跑前的生产 DB":schema.sql 已删两列(1.10-K-A commit 2),
+    但生产 DB 仍有这两列。测试手动 ALTER ADD COLUMN 还原老 schema 来验证 DROP。"""
     c = sqlite3.connect(":memory:")
     c.row_factory = sqlite3.Row
     with open("src/data/storage/schema.sql", encoding="utf-8") as f:
         c.executescript(f.read())
+    # 手动加回两列(模拟 1.10-K-A commit 2 之前的 schema 状态)
+    c.execute("ALTER TABLE strategy_runs ADD COLUMN observation_category TEXT")
+    c.execute("ALTER TABLE strategy_runs ADD COLUMN cold_start INTEGER DEFAULT 0")
+    c.commit()
     return c
 
 

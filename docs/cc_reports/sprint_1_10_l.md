@@ -47,8 +47,13 @@
 | **阶段 1:报告骨架 + P0 #1 review_pending 路由**| | | |
 | 1 | 启动 + 报告骨架 + 接受 P0 决策 + 1.10-K-A 报告重复段落清理 | 2 | ✅ `863affa` |
 | 2 | protection_handler.py 新建(on_protection_entered + check_protection_exit_conditions)+ 14 单测 | 2 | ✅ `4c6fd20` |
-| 3 | state_builder 接入 protection_handler + §Z 真启动验证 | 1 | ✅ 待 push |
-| **==中断点 8:P0 #1 完成,僵尸状态修复==**| | | 🛑 已到达 |
+| 3 | state_builder 接入 protection_handler + §Z 真启动验证 | 1 | ✅ `9cf5a9e` |
+| **==中断点 8:P0 #1 完成,僵尸状态修复==**| | | ✅ 已通过(服务器同步成功)|
+| 4 | thesis_manager.close_thesis 幂等检查 + 5 单测 | 2 | ✅ `cde6f7f` |
+| 5 | _archive_lifecycle 接通 close_thesis(P0 #2 5A)+ 5 单测 | 2 | ✅ `68da502` |
+| 6 | hard_invalidation_monitor + lifecycle_manager 改 determine_close_channel + 6 单测 | 3 | ✅ `03b9a08` |
+| 7 | test_lifecycle_e2e_reversal 反手 channel C 端到端重新覆盖 + 2 新 e2e | 1 | ✅ 待 push |
+| **==中断点 9:P0 #2/#3 反向闭环完成==**| | | 🛑 已到达 |
 | **阶段 2:P0 #2 lifecycle→ThesesDAO + P0 #3 反手通道接通**| | | |
 | 4 | thesis_manager.close_thesis 幂等检查 + 单测 | 2 | — |
 | 5 | lifecycle_manager._archive_lifecycle 接入 close_thesis + 单测 | 2 | — |
@@ -102,6 +107,38 @@
 - 模块常量:REASON_EXTREME_EVENT_PROTECTION / COOLING_PERIOD_MINUTES=30 / EXTREME_EVENT_RESOLVED_BTC_PCT=0.10 / VIX_MAX=25.0
 - 2 函数:on_protection_entered(进 PROTECTION 时调,active thesis 进 review_pending)+ check_protection_exit_conditions(§4.2.9 三条件)
 - 14 单测覆盖:0/1 active thesis + 幂等 + 各退出条件单独/全部/全部不满足/VIX 缺失/BTC 缺失/边界(10%/10.01%/30 min)/无效 ISO graceful
+
+### Commit 4(thesis_manager.close_thesis 幂等 + 5 单测)
+- 加 `_CLOSED_STATUSES = {closed_profit, closed_loss, invalidated, closed_60d_cap, closed_protection}`
+- 顶部 `if existing.status in _CLOSED_STATUSES: return early(noop_already_closed=True)`
+- 5 测试覆盖:已 closed_loss / 已 closed_profit / 已 invalidated → 二次 close noop;第一次正常 close 无 noop 标记;thesis 不存在仍正常走流程
+- §Z:pytest 1511 / 1 / 0(基准 1506 → +5 新)
+
+### Commit 5(_archive_lifecycle 接通 close_thesis — P0 #2 5A + 5 单测)
+- `_archive_lifecycle` 末尾调 `_close_active_thesis_for_archive`
+- helper 用 `ThesesDAO.get_active`(主线锁单 active)定位 thesis,close_thesis 默认 reason='invalidated' + channel='B'(commit 6 改函数)
+- 边界覆盖:conn=None / 0 active / 双调用幂等 / btc_price 缺失全跳过
+- 5 测试 + §Z pytest 1516 / 1 / 0
+
+### Commit 6(determine_close_channel 改造 + 4 条件提取 + 6 单测)
+- `hard_invalidation_monitor:189`:写死 `'A'` → `determine_close_channel('stop_loss_filled', stop_loss_breached=True)`
+- `lifecycle_manager`:模块级新增 `_extract_4_conditions(state, direction)` 提取 §4.3.3 4 条件
+- `_close_active_thesis_for_archive`:`'B'` → `determine_close_channel('invalidated', **conds)`
+- 6 测试覆盖:default(无 state)/ long 完全反转 3/4 → C / short 1/4 → B / L5 极端单独 / transition_down 不算完全反转 / 端到端 channel C
+- §Z pytest 1522 / 1 / 0
+
+### Commit 7(反手 e2e 重新覆盖 — 替代 K-A commit 10 删除的 Tick 7)
+**背景**:K-A commit 10 删除原 Tick 7 "FLIP_WATCH → SHORT_PLANNED 反手" 测试(理由:_from_FLIP_WATCH stub stay,反手出口由 thesis_manager 接管)。1.10-L commit 5/6 完成后,反手通道分级**真接通**(close_thesis 写入 close_channel='C'/'B'/'A',cooldown_manager.is_in_cooldown 据 channel 算 cooldown_end)。
+
+**新加 2 端到端测试**(替代删除的 Tick 7):
+- `test_lifecycle_archive_channel_c_zero_cooldown_e2e`:LONG_HOLD → LONG_EXIT(L1 trend_down + L2 bearish 0.85 + L5 risk_off + extreme_event,3/4)→ _archive_lifecycle 触发 → close_thesis(channel='C')→ is_in_cooldown 返 in_cooldown=False(C 是 0h)→ master AI 看到 cooldown_state.in_cooldown=False 后理论可创建反手
+- `test_lifecycle_archive_channel_b_24h_cooldown_e2e`:0/4 invalidated 默认 channel B → 1h 后仍 in_cooldown=True / 25h 后已退出
+
+**反手 thesis 创建留 future sprint**(master AI mock 跨多模块,本测试覆盖到 cooldown 真触发即止,Validator 6 主线锁 + master_input_builder 已消费 cooldown_state)。
+
+**§Z 验证**:
+- ✅ pytest tests/test_lifecycle_e2e_reversal.py → 3 passed(1 existing + 2 new)
+- ✅ 全量回归 1524 passed, 1 skipped, 0 failed(基准 1522 → +2 新)
 
 ### Commit 3(state_builder 接入 protection_handler + §Z 三重验证)
 - 文本接入位置:`src/pipeline/state_builder.py` 在 `state["state_machine"] = sm_block` 后(line 740 后)

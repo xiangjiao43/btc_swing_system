@@ -340,3 +340,216 @@ def test_full_long_lifecycle_to_flip_watch_stay():
         assert all_lc[0]["status"] == "closed"
     finally:
         conn.close()
+
+
+# ============================================================
+# Sprint 1.10-L commit 7(P0 #3 反手闭环重新覆盖)— 替代 K-A commit 10 删除的 Tick 7
+# ============================================================
+#
+# K-A commit 10 删除原 Tick 7 "FLIP_WATCH → SHORT_PLANNED 反手" 测试,理由:
+# _from_FLIP_WATCH stub stay(方案 5A),反手出口由 thesis_manager 接管。
+#
+# 1.10-L commit 5/6 完成后,**反手通道分级真接通**:
+# - lifecycle_manager._archive_lifecycle 调 close_thesis(commit 5)
+# - 4 条件分级用 cooldown_manager.determine_close_channel(commit 6)
+# - close_thesis 写入 thesis.close_channel='C' / 'B' / 'A'
+# - cooldown_manager.is_in_cooldown 据 channel 算 cooldown_end(C=0h / B=24h / A=72h)
+#
+# 但 — **反手 thesis 创建仍需 master AI 在 cooldown 结束后跑 mode='new_thesis'**
+# (Validator 6 主线锁 + master_input_builder 已消费 cooldown_state),mock master AI
+# 复杂 + 跨多模块,不在 1.10-L scope。本测试覆盖到 cooldown 真触发即止
+# (反手 thesis 创建留 future sprint 真 master AI 接通后端到端)。
+
+def test_lifecycle_archive_channel_c_zero_cooldown_e2e():
+    """端到端:LONG_HOLD → LONG_EXIT(stop_loss filled + 4 条件 3/4)→
+    _archive_lifecycle 触发 close_thesis(channel='C')→
+    cooldown_manager.is_in_cooldown 返 in_cooldown=False(C 是 0h cooldown)。
+
+    对应 v1.4 §4.3.3 4 条件分级 + §4.3.5 纪律 1(必经 thesis 关闭走通道)。
+    """
+    import json
+    from src.data.storage.dao import (
+        LifecyclesDAO, ThesesDAO, VirtualAccountDAO,
+    )
+    from src.strategy.cooldown_manager import is_in_cooldown
+    from src.strategy.lifecycle_manager import LifecycleManager
+    from scripts.init_v14_tables import apply_migration
+
+    # In-memory schema + v14 migrations
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    with open("src/data/storage/schema.sql", encoding="utf-8") as f:
+        conn.executescript(f.read())
+    apply_migration(conn)
+    conn.commit()
+
+    # Seed long active thesis(K-B/K-A 后路径,简化 setup)
+    conn.execute(
+        "INSERT INTO theses (thesis_id, created_at_run_id, created_at_utc, "
+        "direction, core_logic, confidence_score, break_conditions, "
+        "lifecycle_stage, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        ("th_rev_c", "r_seed", "2026-05-01T00:00:00Z", "long",
+         "test long thesis", 75, json.dumps(["1D 跌破 70k"]),
+         "holding", "active"),
+    )
+    conn.execute(
+        "INSERT INTO virtual_account (snapshot_id, run_id, snapshot_at_utc, "
+        "btc_price_at_snapshot, initial_capital, available_cash, total_equity) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        ("snap_init", "r_seed", "2026-05-01T00:00:00Z", 75000.0,
+         100000.0, 100000.0, 100000.0),
+    )
+    conn.commit()
+
+    # 模拟 LONG_HOLD → LONG_EXIT,bearish + L1 trend_down + L2 bearish 0.85 +
+    # L5 极端事件 → 4 条件 3/4 → channel C
+    mgr = LifecycleManager(conn=conn)
+    lc_to_archive = {
+        "lifecycle_id": "lc_rev_c",
+        "status": "active", "direction": "long",
+        "current_floating_pnl_pct": -3.0,
+    }
+    state = {
+        "market_snapshot": {"btc_price_usd": 67000.0},
+        "evidence_reports": {
+            "layer_1": {"regime": "trend_down"},        # ✓ long 完全反转
+            "layer_2": {"stance": "bearish", "stance_confidence": 0.85},  # ✓ 强翻
+            "layer_5": {                                  # ✓ 极端事件 + risk_off
+                "extreme_event_detected": True,
+                "macro_stance": "risk_off",
+            },
+        },
+    }
+    out = mgr.compute_post_sm(
+        prev_state="LONG_EXIT", current_state="FLIP_WATCH",  # archive 触发条件之一
+        lifecycle=lc_to_archive,
+        strategy_state=state,
+        context={},
+        run_id="r_archive_c", now_utc="2026-05-04T16:00:00Z",
+    )
+    conn.commit()
+
+    # 验证 1:lifecycle 归档生效
+    assert out["status"] == "closed"
+
+    # 验证 2:thesis close_channel='C'(4 条件 3/4 满足)
+    th = conn.execute(
+        "SELECT close_channel, status, closed_at_utc FROM theses WHERE thesis_id=?",
+        ("th_rev_c",),
+    ).fetchone()
+    assert th["status"] == "invalidated"
+    assert th["close_channel"] == "C", (
+        f"4 条件 3/4 满足应是 channel C,实际 {th['close_channel']}"
+    )
+
+    # 验证 3:is_in_cooldown 返 in_cooldown=False(channel C 是 0h cooldown)
+    closed_thesis_dict = {
+        "thesis_id": "th_rev_c",
+        "close_channel": th["close_channel"],
+        "closed_at_utc": th["closed_at_utc"],
+    }
+    cooldown_status = is_in_cooldown(
+        now_utc="2026-05-04T16:00:01Z",  # 1 秒后
+        latest_closed_thesis=closed_thesis_dict,
+    )
+    assert cooldown_status["in_cooldown"] is False, (
+        f"channel C 是 0h cooldown,1 秒后应已退出冷却,实际 {cooldown_status}"
+    )
+    assert cooldown_status["channel"] == "C"
+    assert cooldown_status["remaining_hours"] == 0.0
+
+    # 验证 4:**反手 thesis 创建留 future sprint**(master AI mock 复杂 + 跨模块)
+    # 本测试只验证 cooldown 真触发 → master AI 看到 in_cooldown=False 后理论可创建反手
+    n_active = conn.execute(
+        "SELECT COUNT(*) FROM theses WHERE status='active'"
+    ).fetchone()[0]
+    assert n_active == 0, "channel C close 后无 active(反手由 master AI 在下次 run 创建)"
+
+    conn.close()
+
+
+def test_lifecycle_archive_channel_b_24h_cooldown_e2e():
+    """端到端:invalidated 但 4 条件仅 1/4 满足 → channel B(默认)→ 24h cooldown。
+
+    验证 commit 6 改造在不同条件组合下行为正确(cooldown_manager 默认路径)。
+    """
+    import json
+    from src.data.storage.dao import VirtualAccountDAO
+    from src.strategy.cooldown_manager import is_in_cooldown
+    from src.strategy.lifecycle_manager import LifecycleManager
+    from scripts.init_v14_tables import apply_migration
+
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    with open("src/data/storage/schema.sql", encoding="utf-8") as f:
+        conn.executescript(f.read())
+    apply_migration(conn)
+    conn.commit()
+
+    conn.execute(
+        "INSERT INTO theses (thesis_id, created_at_run_id, created_at_utc, "
+        "direction, core_logic, confidence_score, break_conditions, "
+        "lifecycle_stage, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        ("th_rev_b", "r_seed", "2026-05-01T00:00:00Z", "long",
+         "test long thesis", 75, json.dumps(["1D 跌破 70k"]),
+         "holding", "active"),
+    )
+    conn.execute(
+        "INSERT INTO virtual_account (snapshot_id, run_id, snapshot_at_utc, "
+        "btc_price_at_snapshot, initial_capital, available_cash, total_equity) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        ("snap_init_b", "r_seed", "2026-05-01T00:00:00Z", 75000.0,
+         100000.0, 100000.0, 100000.0),
+    )
+    conn.commit()
+
+    mgr = LifecycleManager(conn=conn)
+    lc_to_archive = {
+        "lifecycle_id": "lc_rev_b",
+        "status": "active", "direction": "long",
+        "current_floating_pnl_pct": -1.5,
+    }
+    state = {
+        "market_snapshot": {"btc_price_usd": 71000.0},
+        "evidence_reports": {
+            "layer_1": {"regime": "transition_down"},  # 不算完全反转
+            "layer_2": {"stance": "neutral", "stance_confidence": 0.6},  # 不强翻
+            "layer_5": {"macro_stance": "risk_neutral", "extreme_event_detected": False},
+        },
+    }
+    out = mgr.compute_post_sm(
+        prev_state="LONG_EXIT", current_state="FLAT",
+        lifecycle=lc_to_archive,
+        strategy_state=state,
+        context={},
+        run_id="r_archive_b", now_utc="2026-05-04T16:00:00Z",
+    )
+    conn.commit()
+    assert out["status"] == "closed"
+
+    th = conn.execute(
+        "SELECT close_channel FROM theses WHERE thesis_id='th_rev_b'",
+    ).fetchone()
+    # 0/4 满足 → invalidated 默认 channel B
+    assert th["close_channel"] == "B"
+
+    # is_in_cooldown:1 小时后仍在 cooldown(B = 24h)
+    closed_dict = {
+        "thesis_id": "th_rev_b",
+        "close_channel": "B",
+        "closed_at_utc": "2026-05-04T16:00:00Z",
+    }
+    cooldown_1h = is_in_cooldown(
+        now_utc="2026-05-04T17:00:00Z",  # +1h
+        latest_closed_thesis=closed_dict,
+    )
+    assert cooldown_1h["in_cooldown"] is True
+    assert 22.9 < cooldown_1h["remaining_hours"] < 23.1   # ~23h 剩
+
+    # 25h 后已退出 cooldown
+    cooldown_25h = is_in_cooldown(
+        now_utc="2026-05-05T17:00:00Z",  # +25h
+        latest_closed_thesis=closed_dict,
+    )
+    assert cooldown_25h["in_cooldown"] is False
+    conn.close()

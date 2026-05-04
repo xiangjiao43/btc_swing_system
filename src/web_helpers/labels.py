@@ -118,9 +118,12 @@ MASTER_STATE = {
     "SHORT_HOLD": "持有空单",
     "SHORT_TRIM": "空单减仓中",
     "SHORT_EXIT": "空单清仓",
-    "FLIP_WATCH": "反手冷却期(刚平仓,不能立刻反手)",
     "PROTECTION": "保护模式(极端事件,只清仓不开新仓)",
-    "POST_PROTECTION_REASSESS": "保护后重新评估",
+    # Sprint 1.10-J commit 4b §X(E.1.a 网页层脱钩):
+    # 删 FLIP_WATCH / POST_PROTECTION_REASSESS label(v1.4 §11.2);
+    # state_machine 内部 _from_FLIP_WATCH / _from_POST_PROTECTION_REASSESS
+    # 主体留 1.10-K 整删(架构级改造)。底层若仍输出这两档,前端会显示
+    # raw 字符串(graceful degradation,不挂)。
 }
 
 MASTER_ACTION = {

@@ -503,10 +503,10 @@ def _build_headline(
         return "准备做多(等待入场)"
     if action_state == "SHORT_PLANNED":
         return "准备做空(等待入场)"
-    if action_state == "FLIP_WATCH":
-        return "刚平仓,反手冷却中"
-    if action_state == "POST_PROTECTION_REASSESS":
-        return "保护后重新评估"
+    # Sprint 1.10-J commit 4b §X(E.1.a 网页层脱钩):
+    # 删 FLIP_WATCH / POST_PROTECTION_REASSESS 渲染分支(v1.4 §11.2);
+    # state_machine 主体若仍输出这两档,fallthrough 到 FLAT 兜底逻辑显示
+    # "空仓观察"(graceful)。state_machine 主体重写留 1.10-K(E.3)。
     # FLAT
     if grade == "A":
         return "建议开仓(高级别机会)"

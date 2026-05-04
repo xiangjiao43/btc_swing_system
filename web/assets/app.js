@@ -676,9 +676,10 @@ function app() {
                 '持有空单': 'SHORT_HOLD',
                 '空单减仓中': 'SHORT_TRIM',
                 '空单清仓': 'SHORT_EXIT',
-                '反手冷却期(刚平仓,不能立刻反手)': 'FLIP_WATCH',
                 '保护模式(极端事件,只清仓不开新仓)': 'PROTECTION',
-                '保护后重新评估': 'POST_PROTECTION_REASSESS',
+                // Sprint 1.10-J commit 4b §X(E.1.a 网页脱钩):
+                // FLIP_WATCH / POST_PROTECTION_REASSESS label 反向映射删
+                // (v1.4 §11.2);state_machine 主体重写留 1.10-K
             };
             return m[label] || null;
         },
@@ -820,9 +821,10 @@ function app() {
                 SHORT_HOLD: 'bg-rose-200 text-rose-900 dark:bg-rose-800 dark:text-rose-100',
                 SHORT_TRIM: 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300',
                 SHORT_EXIT: 'bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-200',
-                FLIP_WATCH: 'bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300',
                 PROTECTION: 'bg-red-500 text-white dark:bg-red-700',
-                POST_PROTECTION_REASSESS: 'bg-orange-100 text-orange-800 dark:bg-orange-950 dark:text-orange-300',
+                // Sprint 1.10-J commit 4b §X:删 FLIP_WATCH / POST_PROTECTION_REASSESS
+                // 颜色映射(v1.4 §11.2);若底层仍输出这两档,fallthrough
+                // 到默认灰色样式(graceful)。state_machine 主体重写留 1.10-K
             }[s] || 'bg-slate-100 text-slate-700';
         },
 

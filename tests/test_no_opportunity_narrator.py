@@ -46,12 +46,9 @@ class TestScenarioDetection:
         }
         assert detect_scenario(facts, {}) == SCENARIO_PROTECTION
 
-    def test_cold_start_above_fallback(self):
-        facts = {
-            "cold_start_warming_up": True,
-            "fallback_level": "level_2",
-        }
-        assert detect_scenario(facts, {}) == SCENARIO_COLD_START
+    # Sprint 1.10-J commit 6 §X:test_cold_start_above_fallback 整删
+    # (cold_start_warming_up 路由已删,SCENARIO_COLD_START 不再可达;
+    # SCENARIO_COLD_START + _gen_cold_start 留 1.10-K 跟 narrator 整重写)
 
     def test_fallback_above_post_protection(self):
         facts = {

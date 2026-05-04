@@ -10,8 +10,8 @@ state_builder.py — Sprint 1.12
 核心契约:
   * 单阶段失败**不抛异常**,用 FallbackLogDAO 记 level_1,其余阶段继续。
   * 返回 BuildResult(state, run_id, failures, ...)给调用方处理。
-  * 冷启动由 base.yaml → cold_start.warming_up_runs(默认 42)决定:
-      StrategyStateDAO.get_count() < 阈值 → warming_up=True,注入 context。
+  * (Sprint 1.10-J commit 6 §X 删 cold_start 字段及所有相关逻辑;
+    v1.4 §11.2;冷启动期早过去,不再判定。)
   * CyclePosition 的 last_stable 通过 context['cycle_position_last_stable']
     预注入,避免 factor 内部再调 DAO。
 
@@ -202,7 +202,8 @@ class StrategyStateBuilder:
     """
 
     _STAGES: tuple[str, ...] = (
-        "cold_start_check",
+        # Sprint 1.10-J commit 6 §X:删 "cold_start_check" stage
+        # (v1.4 §11.2 删 cold_start 字段及所有相关逻辑)
         "cycle_position_last_stable_lookup",
         "composite.truth_trend",
         "composite.band_position",
@@ -502,14 +503,10 @@ class StrategyStateBuilder:
                 logger.warning("pre_flight stage exception: %s", e)
                 degraded_stages.append("pre_flight.exception")
 
-        # === Stage 1: cold_start 判定 ===
-        cold_start_info = self._run_stage(
-            "cold_start_check", failures, degraded_stages, run_ts_utc,
-            lambda: self._determine_cold_start(context),
-            default={"warming_up": False, "runs_completed": 0,
-                     "threshold": 42, "reason": "cold_start_check failed"},
-        )
-        context["cold_start"] = cold_start_info
+        # Sprint 1.10-J commit 6 §X:删 cold_start_check stage
+        # (v1.4 §11.2 删 cold_start 字段及所有相关逻辑)
+        # 调用方读 context.get("cold_start") 时拿 None,所有 cold_start 路径
+        # 已在本 sprint 删除。schema_version='v14' 起冷启动期早过去,无需再判定。
 
         # === Stage 2: cycle_position last_stable 预查 ===
         last_stable = self._run_stage(
@@ -909,37 +906,8 @@ class StrategyStateBuilder:
     # Cold start & last_stable
     # ------------------------------------------------------------------
 
-    def _determine_cold_start(self, context: dict[str, Any]) -> dict[str, Any]:
-        """
-        对比 StrategyStateDAO.get_count() 与 base.yaml → cold_start.warming_up_runs
-        (默认 42)。conn 缺失时默认 not warming(单测友好)。
-        """
-        cs_cfg = (self._base_cfg.get("cold_start") or {})
-        threshold = int(cs_cfg.get("warming_up_runs", 42))
-        enabled = bool(cs_cfg.get("enabled", True))
-
-        if not enabled:
-            return {
-                "warming_up": False, "runs_completed": 0,
-                "threshold": threshold, "reason": "cold_start.enabled=false",
-            }
-        if self.conn is None:
-            # build() 不带 DB 跑时,直接接受 context 预注入的 cold_start
-            existing = context.get("cold_start")
-            if isinstance(existing, dict):
-                return existing
-            return {
-                "warming_up": False, "runs_completed": 0,
-                "threshold": threshold, "reason": "no_conn_and_no_context_hint",
-            }
-        runs = int(StrategyStateDAO.get_count(self.conn))
-        warming = runs < threshold
-        return {
-            "warming_up": warming,
-            "runs_completed": runs,
-            "threshold": threshold,
-            "days_elapsed": cs_cfg.get("warming_up_days", 7) if warming else None,
-        }
+    # Sprint 1.10-J commit 6 §X:_determine_cold_start 整删
+    # (v1.4 §11.2 删 cold_start 字段及所有相关逻辑)
 
     def _lookup_last_stable_cycle(self, context: dict[str, Any]) -> Optional[str]:
         """预注入的优先,否则查 DB。"""
@@ -972,7 +940,8 @@ class StrategyStateBuilder:
         Sprint 1.12 只写 Builder 必须保留的字段;State Machine 相关的
         state_key / transition_reason 等留到 1.13。
         """
-        cold_start = context.get("cold_start") or {}
+        # Sprint 1.10-J commit 6 §X:cold_start 字段已删
+        # (v1.4 §11.2 删 cold_start 字段及所有相关逻辑)
         market_snapshot = _derive_market_snapshot(context.get("klines_1d"))
         return {
             # Sprint 1.10-I commit 7 fix:schema_version 标记(v1.4)
@@ -987,9 +956,6 @@ class StrategyStateBuilder:
             "run_trigger": run_trigger,
             "rules_version": self.rules_version,
             "ai_model_actual": ai_result.get("model_used"),
-
-            # --- cold start ---
-            "cold_start": cold_start,
 
             # --- market snapshot(Sprint 2.2 hotfix:真实 BTC 价格从 1D K 线派生)---
             "market_snapshot": market_snapshot,

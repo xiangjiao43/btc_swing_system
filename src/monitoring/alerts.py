@@ -12,8 +12,7 @@ level_1 / level_2 / level_3。
   1. ai_high_failure_rate      AI 失败率 > 30% 且样本 ≥ 5 次 → level_2
   2. collector_consecutive_fail 某 collector 在窗口内失败 > 3 次 → level_2
   3. collector_mass_failure     同时多个 collector(≥ 2)在最近 1h 内失败 → level_3
-  4. cold_start_stuck           最新 state warming_up=True 且 runs_completed
-                                在 12h 内未增长 → level_1
+  # Sprint 1.10-J commit 6 §X:删 4. cold_start_stuck(v1.4 §11.2 删 cold_start)
 """
 
 from __future__ import annotations
@@ -196,55 +195,8 @@ def _check_collector_mass_failure(
     return None
 
 
-def _check_cold_start_stuck(
-    rows: list[dict[str, Any]],
-    *,
-    now_utc: datetime,
-    stuck_hours: float = 12.0,
-) -> Optional[dict[str, Any]]:
-    if not rows:
-        return None
-    latest = rows[-1]
-    state = latest.get("state") or {}
-    cs = state.get("cold_start") or {}
-    if not cs.get("warming_up"):
-        return None
-
-    latest_runs = int(cs.get("runs_completed") or 0)
-    latest_ts = _parse_iso(latest.get("run_timestamp_utc"))
-    if latest_ts is None:
-        return None
-
-    # 找 stuck_hours 之前最后一条同样 warming_up 的状态
-    earlier_ref_ts = now_utc - timedelta(hours=stuck_hours)
-    earlier: Optional[dict[str, Any]] = None
-    for r in reversed(rows[:-1]):
-        ts = _parse_iso(r.get("run_timestamp_utc"))
-        if ts is None:
-            continue
-        if ts <= earlier_ref_ts:
-            earlier = r
-            break
-    if earlier is None:
-        return None
-    earlier_cs = (earlier.get("state") or {}).get("cold_start") or {}
-    earlier_runs = int(earlier_cs.get("runs_completed") or 0)
-
-    if latest_runs <= earlier_runs:
-        return {
-            "level": "level_1",
-            "type": "cold_start_stuck",
-            "stage": "cold_start",
-            "count": latest_runs,
-            "first_seen": earlier.get("run_timestamp_utc"),
-            "last_seen": latest.get("run_timestamp_utc"),
-            "message": (
-                f"冷启动进度卡住:runs_completed 在 {stuck_hours}h 内 "
-                f"未从 {earlier_runs} 增长(当前 {latest_runs}/"
-                f"{cs.get('threshold', 42)})。"
-            ),
-        }
-    return None
+# Sprint 1.10-J commit 6 §X:_check_cold_start_stuck 整删
+# (v1.4 §11.2 删 cold_start 字段及所有相关逻辑;冷启动期早过去,不再监控)
 
 
 # ============================================================
@@ -307,10 +259,8 @@ def check_alerts(
     if mass:
         alerts.append(mass)
 
-    # 4. cold start stuck (level_1)
-    cs_alert = _check_cold_start_stuck(state_rows, now_utc=now)
-    if cs_alert:
-        alerts.append(cs_alert)
+    # Sprint 1.10-J commit 6 §X:删 #4 cold start stuck 检查
+    # (v1.4 §11.2 删 cold_start;_check_cold_start_stuck 整删)
 
     # 按 level desc, last_seen desc 排序
     alerts.sort(

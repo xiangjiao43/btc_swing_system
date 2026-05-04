@@ -67,19 +67,10 @@ def _composite_sample() -> dict:
 
 # ============================================================
 # 1. cold_start
+# Sprint 1.10-J commit 6 §X:test_scenario_cold_start 整删
+# (cold_start_warming_up 路由已删,v1.4 §11.2 删 cold_start)
+# SCENARIO_COLD_START 留 1.10-K 跟 narrator 整重写
 # ============================================================
-
-def test_scenario_cold_start():
-    facts = {"cold_start_warming_up": True}
-    state = {
-        "meta": {"cold_start": {"days_remaining": 5}},
-        "factor_cards": _factor_cards_sample(),
-    }
-    assert detect_scenario(facts, state) == SCENARIO_COLD_START
-    out = generate_no_opportunity_narrative(facts, state)
-    assert "【结构】" in out["narrative"]
-    assert "5 天" in out["narrative"] or "天" in out["narrative"]
-    assert not _has_old_template(out["narrative"])
 
 
 # ============================================================

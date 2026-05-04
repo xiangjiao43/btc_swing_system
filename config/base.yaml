@@ -115,29 +115,10 @@ fallback:
     alert_severity: "critical"
 
 
-# -------- 冷启动(M35)-----------------------------------------------
-# v0.1 启动前必须先 backfill,前 7 天各层宽松处理。
-cold_start:
-  enabled: true
-
-  # 启动时历史数据回填的天数(scripts/backfill_data.py 参考此值)
-  backfill_days: 180
-
-  # 系统实际上线后前 N 天视为冷启动期
-  warming_up_days: 7
-  # 对应 6 次/天的运行数(纯派生,方便监控模块对照)
-  warming_up_runs: 42
-
-  # 冷启动期间的宽松处理开关(对齐 §8.10)
-  during_warming_up:
-    # observation_classifier 跳过 possibly_suppressed 的持续性检查
-    skip_possibly_suppressed_persistence_check: true
-    # observation_category 允许输出 cold_start_warming_up
-    allow_cold_start_warming_up_category: true
-    # KPI 不累计进 kpi_snapshots
-    kpi_accumulation_enabled: false
-    # Fallback 阈值宽松一档(L1 阈值 +1 次,L2 等待 +N 秒)
-    fallback_threshold_relaxation: true
+# -------- 冷启动(已删,Sprint 1.10-J commit 6 §X)-----------------------
+# v1.4 §11.2 删 cold_start 字段及所有相关逻辑。冷启动期早过去,系统稳定运行。
+# 老配置块整删:enabled / backfill_days / warming_up_days / warming_up_runs /
+#               during_warming_up.* 全部 0 src/ 消费(grep 真核实)。
 
 
 # -------- 低频保守边界(M25 监控常量)---------------------------------

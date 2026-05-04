@@ -484,9 +484,8 @@ def _adjust_for_scenario(cand: dict[str, Any], scenario: str) -> int:
     if scenario == "fallback_degraded":
         # 数据不可信时不靠 picker 选指标,降权所有 candidate
         return max(0, s - 30)
-    if scenario == "cold_start":
-        # 冷启动期信号都不可靠,降权
-        return max(0, s - 20)
+    # Sprint 1.10-J commit 6 §X:删 scenario == "cold_start" 分支
+    # (v1.4 §11.2 删 cold_start 字段及所有相关逻辑)
     return s
 
 

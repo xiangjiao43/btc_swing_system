@@ -17,7 +17,7 @@ import pytest
 from src.data.storage.connection import init_db
 from src.pipeline._orchestrator_mapper import (
     # Sprint 1.10-J commit 5 §X:_build_classifier_state 已删
-    _build_cold_start_state,
+    # Sprint 1.10-J commit 6 §X:_build_cold_start_state 已删
     _build_full_state_json,
     _build_summary_v13,
     _derive_ai_model,
@@ -242,22 +242,10 @@ def test_col_16_observation_category_is_null(conn):
     assert out["observation_category"] is None
 
 
-def test_col_17_cold_start_1_when_runs_below_threshold(conn):
-    """空 DB → runs=0 < 42 → cold_start=1。"""
-    out = _map_orchestrator_result_to_state(_make_result(), _make_context(), conn)
-    assert out["cold_start"] == 1
-
-
-def test_col_17_cold_start_0_when_runs_above_threshold(conn):
-    """种 50 行 strategy_runs → runs=50 ≥ 42 → cold_start=0。"""
-    for i in range(50):
-        conn.execute(
-            "INSERT INTO strategy_runs "
-            "(run_id, generated_at_utc, generated_at_bjt, action_state, "
-            " full_state_json) VALUES (?, ?, ?, ?, '{}')",
-            (f"r{i}", "2026-04-01T00:00:00Z", "2026-04-01 08:00:00", "FLAT"),
-        )
-    conn.commit()
+# Sprint 1.10-J commit 6 §X:删 cold_start 1/0 老测试(2 个)
+# 改成单一"永远 0 graceful"测试
+def test_col_17_cold_start_always_zero(conn):
+    """1.10-J commit 6 后:cold_start 永远 0(DAO 写 0 graceful,留 1.10-K 删列)。"""
     out = _map_orchestrator_result_to_state(_make_result(), _make_context(), conn)
     assert out["cold_start"] == 0
 
@@ -348,13 +336,8 @@ def test_derive_fallback_level_buckets():
     assert _derive_fallback_level("unknown_status") == "level_3"
 
 
-def test_build_cold_start_state_returns_dict_with_3_keys(conn):
-    cs = _build_cold_start_state(conn)
-    assert set(cs.keys()) == {"warming_up", "runs_completed", "threshold"}
-    assert cs["threshold"] == 42
-    assert cs["runs_completed"] == 0
-    assert cs["warming_up"] is True
-
+# Sprint 1.10-J commit 6 §X:test_build_cold_start_state_returns_dict_with_3_keys
+# 整删(_build_cold_start_state 函数已删,cold_start 整套机制删)
 
 # Sprint 1.10-J commit 5 §X:test_build_classifier_state_shape 整删
 # (_build_classifier_state 函数已删,observation_classifier 整删)
@@ -430,7 +413,7 @@ def test_build_summary_v13_extracts_real_fields():
     # metadata
     assert summary["run_id"] == "abc123"
     assert summary["reference_ts"] == "2026-05-01T08:00:00Z"
-    assert summary["cold_start"]["warming_up"] is False
+    # Sprint 1.10-J commit 6 §X:删 cold_start 字段断言(_build_summary_v13 已删此 key)
 
     # L1
     assert summary["L1.regime"] == "transition_up"

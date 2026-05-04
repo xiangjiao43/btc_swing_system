@@ -106,8 +106,9 @@ def test_l2_low_confidence_does_not_open():
 
 
 def test_l2_insufficient():
-    s = plain_reading_l2({"health_status": "cold_start_warming_up"})
-    assert "数据不足" in s or "冷启动" in s
+    # Sprint 1.10-J commit 6 §X:cold_start_warming_up 已删,改测 health_status='error'
+    s = plain_reading_l2({"health_status": "error"})
+    assert "数据不足" in s
 
 
 # ================== L3 ==================

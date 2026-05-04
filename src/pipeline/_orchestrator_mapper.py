@@ -4,7 +4,6 @@
 strategy_runs INSERT 用的 19 列 dict。
 
 设计决策(已锁定,见 docs/cc_reports/sprint_1_9_a_step5_0_*.md):
-- cold_start:调 src/utils/cold_start::is_cold_start(state),写 1/0
 - previous_l*-l5 已在 ContextBuilder.build_full_context 内填(从
   strategy_runs.full_state_json 解析)
 - full_state_json 必须含 layers 子结构(下次 parse_previous 依赖)
@@ -12,6 +11,9 @@ strategy_runs INSERT 用的 19 列 dict。
 Sprint 1.10-J commit 5 §X:删 observation_classifier 调用
 (v1.4 §11.2 删 "observation_category / observation_classifier 整套机制");
 strategy_runs.observation_category 列写 NULL,DB 列保留(留 1.10-K migration 删列)
+
+Sprint 1.10-J commit 6 §X:删 cold_start 字段及所有相关逻辑(v1.4 §11.2);
+strategy_runs.cold_start 列写 0 graceful,DB 列保留(留 1.10-K migration 删列)
 """
 
 from __future__ import annotations
@@ -25,7 +27,6 @@ from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
 from ..data.storage.dao import StrategyStateDAO
-from ..utils.cold_start import DEFAULT_COLD_START_RUNS, is_cold_start
 
 
 logger = logging.getLogger(__name__)
@@ -51,7 +52,8 @@ def _map_orchestrator_result_to_state(
     Args:
         result: AIOrchestrator.run_full_a() 返回 {layers, validator, status, ...}
         context: ContextBuilder.build_full_context() 返回(per-agent 嵌套)
-        conn: SQLite 连接(给 cold_start tracker 用)
+        conn: SQLite 连接(读 strategy_runs 历史用;Sprint 1.10-J commit 6
+              起 cold_start tracker 已删 § X)
         run_trigger: "scheduled" / "scheduled_8h_onchain" / "manual" / "event_*"
         rules_version: 默认 "v1.3.0"
         system_version: 默认 "1.9-A"
@@ -117,14 +119,11 @@ def _map_orchestrator_result_to_state(
 
     # ---- 16. observation_category(Sprint 1.10-J commit 5 §X 删 classify;
     #          v1.4 §11.2 删整套机制;DAO 写 NULL,DB 列保留留 1.10-K 删列)----
-    cold_start_dict = _build_cold_start_state(conn)
     observation_category = None
 
-    # ---- 17. cold_start(0/1,从 cold_start_dict)----
-    cold_start_int = 1 if is_cold_start(
-        {"cold_start": cold_start_dict},
-        threshold_runs=DEFAULT_COLD_START_RUNS,
-    ) else 0
+    # ---- 17. cold_start(Sprint 1.10-J commit 6 §X 删整套机制;
+    #          v1.4 §11.2;DAO 写 0 graceful,DB 列保留留 1.10-K 删列)----
+    cold_start_int = 0
 
     # ---- 18. ai_model_actual ----
     ai_model_actual = _derive_ai_model(layers)
@@ -179,19 +178,8 @@ def _derive_fallback_level(status: str) -> Optional[str]:
     return "level_3"
 
 
-def _build_cold_start_state(conn: sqlite3.Connection) -> dict[str, Any]:
-    """构造 is_cold_start() 需要的 cold_start dict(复用 v1.2 逻辑)。"""
-    try:
-        runs = int(StrategyStateDAO.get_count(conn))
-    except Exception as e:
-        logger.warning("StrategyStateDAO.get_count failed: %s", e)
-        runs = 0
-    return {
-        "warming_up": runs < DEFAULT_COLD_START_RUNS,
-        "runs_completed": runs,
-        "threshold": DEFAULT_COLD_START_RUNS,
-    }
-
+# Sprint 1.10-J commit 6 §X:_build_cold_start_state helper 整删
+# (cold_start 整套机制删,无 caller)v1.4 §11.2
 
 # Sprint 1.10-J commit 5 §X:_build_classifier_state 整删
 # (observation_classifier 已删,本 helper 无 caller)
@@ -243,7 +231,7 @@ def _build_summary_v13(
         # metadata
         "run_id": mapped.get("run_id"),
         "reference_ts": mapped.get("reference_timestamp_utc"),
-        "cold_start": {"warming_up": mapped.get("cold_start") == 1},
+        # Sprint 1.10-J commit 6 §X:删 "cold_start" key(v1.4 §11.2)
         # L1
         "L1.regime": l1.get("regime"),
         "L1.volatility": l1.get("volatility_regime"),

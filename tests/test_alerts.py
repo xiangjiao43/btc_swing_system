@@ -185,47 +185,6 @@ class TestCheckAlerts:
         assert len(mass) == 1
         assert mass[0]["level"] == "level_3"
 
-    def test_cold_start_stuck_alert(self, conn):
-        now = datetime(2026, 4, 24, 12, 0, 0, tzinfo=timezone.utc)
-        # 13 小时前 runs_completed=5,现在还是 5 且 warming_up=True
-        old_ts = _iso(now - timedelta(hours=13))
-        new_ts = _iso(now - timedelta(minutes=5))
-        _insert_state(conn, old_ts, "old",
-                      _state_fixture(ref_ts=old_ts,
-                                     cold_start_runs=5, warming_up=True))
-        _insert_state(conn, new_ts, "new",
-                      _state_fixture(ref_ts=new_ts,
-                                     cold_start_runs=5, warming_up=True))
-        alerts = check_alerts(conn, lookback_hours=24, now_utc=now)
-        stuck = [a for a in alerts if a["type"] == "cold_start_stuck"]
-        assert len(stuck) == 1
-        assert stuck[0]["level"] == "level_1"
-
-    def test_alerts_sorted_by_level_desc(self, conn):
-        now = datetime(2026, 4, 24, 12, 0, 0, tzinfo=timezone.utc)
-        # 制造 level_1(cold_start_stuck) + level_2(AI 失败率)
-        for i in range(5):
-            ts = _iso(now - timedelta(hours=i))
-            _insert_state(conn, ts, f"r{i}", _state_fixture(
-                ref_ts=ts, ai_status="degraded_error",
-                cold_start_runs=5, warming_up=True,
-            ))
-        # 再插 13h 前同等 runs → 触发 cold_start_stuck
-        old = _iso(now - timedelta(hours=14))
-        _insert_state(conn, old, "older", _state_fixture(
-            ref_ts=old, ai_status="success",
-            cold_start_runs=5, warming_up=True,
-        ))
-        alerts = check_alerts(conn, lookback_hours=24, now_utc=now)
-        # 至少两种类型
-        types = [a["type"] for a in alerts]
-        assert "ai_high_failure_rate" in types
-        assert "cold_start_stuck" in types
-        # 高 level 在前
-        levels = [a["level"] for a in alerts]
-        # level_2 应排在 level_1 前
-        l2_idx = next(i for i, a in enumerate(alerts)
-                      if a["level"] == "level_2")
-        l1_idx = next(i for i, a in enumerate(alerts)
-                      if a["level"] == "level_1")
-        assert l2_idx < l1_idx
+    # Sprint 1.10-J commit 6 §X:test_cold_start_stuck_alert + test_alerts_sorted_by_level_desc 整删
+    # (_check_cold_start_stuck 已删,v1.4 §11.2 删 cold_start;
+    # 排序逻辑由 check_alerts 内部 sort 保证,1.10-K 重构 alerts 时补 thesis-level 测试)

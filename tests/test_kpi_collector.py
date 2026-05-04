@@ -260,25 +260,8 @@ def test_lookback_window_filters_old_rows(conn):
 # 7. Cold-start progress
 # ==================================================================
 
-def test_cold_start_progress(conn):
-    now = datetime(2026, 4, 24, 12, 0, 0, tzinfo=timezone.utc)
-    ts = _iso(now - timedelta(hours=1))
-    _insert_state(
-        conn, run_ts=ts, run_id="r",
-        state=_state(
-            ref_ts=ts, gen_ts=ts,
-            cold_start_runs=10,
-            cold_start_warming=True,
-        ),
-    )
-    dist = KPICollector(conn, now_utc=now).compute_state_distribution(
-        lookback_days=7
-    )
-    cs = dist["cold_start_progress"]
-    assert cs["runs_completed"] == 10
-    assert cs["threshold"] == 42
-    assert cs["percent"] == pytest.approx(23.81, abs=0.01)
-    assert cs["warming_up"] is True
+# Sprint 1.10-J commit 6 §X:test_cold_start_progress 整删
+# (cold_start_progress 字段已删,v1.4 §11.2)
 
 
 # ==================================================================

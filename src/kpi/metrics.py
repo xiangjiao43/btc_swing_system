@@ -18,7 +18,7 @@ KPI_CATEGORIES: tuple[str, ...] = (
 
 
 PIPELINE_STAGES: tuple[str, ...] = (
-    "cold_start_check",
+    # Sprint 1.10-J commit 6 §X:删 "cold_start_check" stage(v1.4 §11.2)
     "cycle_position_last_stable_lookup",
     "composite.truth_trend",
     "composite.band_position",
@@ -40,7 +40,8 @@ PIPELINE_STAGES: tuple[str, ...] = (
 
 
 STATE_MACHINE_STATES: tuple[str, ...] = (
-    "cold_start_warming_up",
+    # Sprint 1.10-J commit 6 §X:删 "cold_start_warming_up"
+    # (observation 4 取值之一,observation_classifier 删了)
     "degraded_data_mode",
     "stop_triggered",
     "chaos_pause",
@@ -74,4 +75,6 @@ ADJUDICATOR_ACTIONS: tuple[str, ...] = (
 )
 
 
-DEFAULT_COLD_START_THRESHOLD: int = 42
+# Sprint 1.10-J commit 6 §X:删 DEFAULT_COLD_START_THRESHOLD(v1.4 §11.2)
+# 老消费方:src/kpi/collector.py(已删 cold_start_progress 计算)+
+# src/utils/cold_start.py(整文件已删)

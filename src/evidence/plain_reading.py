@@ -32,9 +32,8 @@ def _fmt_conf(v: Any) -> str:
 
 def plain_reading_l1(layer_1_output: dict[str, Any]) -> str:
     """L1:regime + volatility + stability 三维组合翻译成人话。"""
-    if not layer_1_output or layer_1_output.get("health_status") in (
-        "error", "cold_start_warming_up",
-    ):
+    if not layer_1_output or layer_1_output.get("health_status") == "error":
+        # Sprint 1.10-J commit 6 §X:删 cold_start_warming_up 检测(v1.4 §11.2)
         return (
             "市场状态数据不足或处于冷启动期。目前不能判断是趋势期还是震荡期,"
             "也不能确认市场稳定性。建议等更多数据积累后再下结论。"
@@ -120,9 +119,8 @@ def plain_reading_l1(layer_1_output: dict[str, Any]) -> str:
 # ============================================================
 
 def plain_reading_l2(layer_2_output: dict[str, Any]) -> str:
-    if not layer_2_output or layer_2_output.get("health_status") in (
-        "error", "cold_start_warming_up",
-    ):
+    if not layer_2_output or layer_2_output.get("health_status") == "error":
+        # Sprint 1.10-J commit 6 §X:删 cold_start_warming_up 检测(v1.4 §11.2)
         return (
             "方向判断数据不足或冷启动期。多空置信度都未达到门槛,"
             "系统按纪律保持中性观望。"

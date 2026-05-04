@@ -5,7 +5,8 @@ collector.py — Sprint 1.16a KPI Tracker
 
   execution          总次数 / 日均次数 / 首末时间戳
   stage_success      每个 stage 的成功率 + ai_summary / adjudicator 成功率
-  state_distribution state_machine / lifecycle 分布 + cold_start_progress
+  state_distribution state_machine / lifecycle 分布(Sprint 1.10-J commit 6
+    §X 删 cold_start_progress)
   decision           action / stance / grade 分布 + 平均 confidence
   data_quality       macro_completeness 均值 / data_freshness 占位
   fallback           总事件数 / 日均 / top_3_stages
@@ -24,7 +25,7 @@ from typing import Any, Optional
 
 from .metrics import (
     ADJUDICATOR_ACTIONS,
-    DEFAULT_COLD_START_THRESHOLD,
+    # Sprint 1.10-J commit 6 §X:删 DEFAULT_COLD_START_THRESHOLD import
     LIFECYCLE_STATES,
     PIPELINE_STAGES,
     STATE_MACHINE_STATES,
@@ -308,9 +309,10 @@ class KPICollector:
     def _compute_state_distribution(
         self, rows: list[dict[str, Any]],
     ) -> dict[str, Any]:
+        # Sprint 1.10-J commit 6 §X:删 cold_start_progress 计算
+        # (v1.4 §11.2 删 cold_start 字段及所有相关逻辑)
         sm_counter: Counter = Counter()
         life_counter: Counter = Counter()
-        latest_cold_start: Optional[dict[str, Any]] = None
 
         for r in rows:
             state = r["state"] or {}
@@ -320,25 +322,6 @@ class KPICollector:
             life = (state.get("lifecycle") or {}).get("current_lifecycle")
             if life:
                 life_counter[life] += 1
-            cs = state.get("cold_start") or {}
-            if cs:
-                latest_cold_start = cs
-
-        # cold start progress
-        cold_start_progress = None
-        if latest_cold_start:
-            runs = int(latest_cold_start.get("runs_completed") or 0)
-            threshold = int(
-                latest_cold_start.get("threshold")
-                or DEFAULT_COLD_START_THRESHOLD
-            )
-            pct = min(100.0, round(100.0 * runs / max(1, threshold), 2))
-            cold_start_progress = {
-                "runs_completed": runs,
-                "threshold": threshold,
-                "percent": pct,
-                "warming_up": bool(latest_cold_start.get("warming_up")),
-            }
 
         return {
             "state_machine_distribution": _pct_dict(
@@ -347,7 +330,7 @@ class KPICollector:
             "lifecycle_distribution": _pct_dict(
                 life_counter, LIFECYCLE_STATES,
             ),
-            "cold_start_progress": cold_start_progress,
+            # Sprint 1.10-J commit 6 §X:cold_start_progress key 删
             "total_runs": len(rows),
         }
 

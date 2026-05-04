@@ -597,7 +597,7 @@ function app() {
                 generated_at_bjt: sc.decision_time || m.generated_at_bjt
                     || this.formatBJT(m.generated_at_utc),
                 fallback_level: m.fallback_level,
-                cold_start: m.cold_start || {},
+                // Sprint 1.10-J commit 6 §X:删 cold_start 字段(v1.4 §11.2)
                 next_run_eta_bjt: m.next_run_eta_bjt || null,
             };
 
@@ -829,17 +829,19 @@ function app() {
         },
 
         observationLabel(c) {
+            // Sprint 1.10-J commit 6 §X:删 cold_start_warming_up label(observation
+            // 4 取值之一,observation_classifier 整删,见 commit 5)
             return {
                 disciplined: '纪律性观望', watchful: '正常等待',
-                possibly_suppressed: '疑似被压制', cold_start_warming_up: '冷启动升温中',
+                possibly_suppressed: '疑似被压制',
             }[c] || c || '—';
         },
         observationColor(c) {
+            // Sprint 1.10-J commit 6 §X:删 cold_start_warming_up 颜色映射
             return {
                 disciplined: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
                 watchful: 'bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300',
                 possibly_suppressed: 'bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300',
-                cold_start_warming_up: 'bg-cyan-50 text-cyan-700 dark:bg-cyan-950 dark:text-cyan-300',
             }[c] || 'bg-slate-100 text-slate-700';
         },
 
@@ -906,22 +908,23 @@ function app() {
         },
 
         timelineNodeColor(t) {
+            // Sprint 1.10-J commit 6 §X:删 cold_start_tick 类型(v1.4 §11.2)
             return { state_enter: 'bg-blue-500', position_open: 'bg-emerald-500',
                      position_trim: 'bg-amber-400', position_exit: 'bg-slate-400',
-                     flip: 'bg-purple-500', cold_start_tick: 'bg-cyan-400' }[t] || 'bg-slate-400';
+                     flip: 'bg-purple-500' }[t] || 'bg-slate-400';
         },
         timelineNodeTypeLabel(t) {
             return { state_enter: '状态', position_open: '开仓', position_trim: '减仓',
-                     position_exit: '离场', flip: '切换', cold_start_tick: '冷启动' }[t] || t;
+                     position_exit: '离场', flip: '切换' }[t] || t;
         },
         timelineNodeBadgeClass(t) {
+            // Sprint 1.10-J commit 6 §X:删 cold_start_tick badge
             return {
                 state_enter: 'bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300',
                 position_open: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300',
                 position_trim: 'bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300',
                 position_exit: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-400',
                 flip: 'bg-purple-50 text-purple-700 dark:bg-purple-950 dark:text-purple-300',
-                cold_start_tick: 'bg-cyan-50 text-cyan-700 dark:bg-cyan-950 dark:text-cyan-300',
             }[t] || 'bg-slate-100 text-slate-700';
         },
     };

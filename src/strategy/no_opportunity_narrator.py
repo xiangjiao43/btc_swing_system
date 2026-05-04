@@ -56,8 +56,10 @@ def detect_scenario(facts: dict[str, Any], state: dict[str, Any]) -> str:
         return SCENARIO_EXTREME_EVENT
     if facts.get("state_machine_current") == "PROTECTION":
         return SCENARIO_PROTECTION
-    if facts.get("cold_start_warming_up"):
-        return SCENARIO_COLD_START
+    # Sprint 1.10-J commit 6 §X:删 SCENARIO_COLD_START 路由
+    # (v1.4 §11.2 删 cold_start;cold_start_warming_up 永远 False)
+    # SCENARIO_COLD_START + _gen_cold_start 函数留 1.10-K 跟 SCENARIO_POST_PROTECTION
+    # 一起整删(narrator 改造一次到位)
     fl = facts.get("fallback_level")
     if fl in ("level_2", "level_3", "l2", "l3", 2, 3):
         return SCENARIO_FALLBACK_DEGRADED

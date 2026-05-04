@@ -16,7 +16,7 @@ Context 约定(由调用方构造):
   * events_upcoming_48h            list[dict]
   * reference_timestamp_utc        ISO 8601 字符串(数据采集完成时刻,§3.2.2 M29)
   * run_trigger                    scheduled / event_* / manual(§3.3.3 M38)
-  * cold_start                     dict{warming_up: bool, days_elapsed: int}(可选)
+  # Sprint 1.10-J commit 6 §X:删 cold_start 字段(v1.4 §11.2)
   * state_history_dao              optional
 """
 
@@ -132,8 +132,8 @@ class EvidenceLayerBase:
     `compute(context, rules_version)` 是**模板方法**:先构造通用字段,再合并
     层专属字段,返回**完整 EvidenceReport dict**。
 
-    冷启动(§8.10):context['cold_start']['warming_up'] = True 时,
-    confidence_tier 自动降 1 档,health_status 标 'cold_start_warming_up'。
+    Sprint 1.10-J commit 6 §X 删冷启动降级路径(v1.4 §11.2 删 cold_start
+    字段及所有相关逻辑)。
     """
 
     layer_id: ClassVar[int] = 0
@@ -175,16 +175,8 @@ class EvidenceLayerBase:
         common = self._build_common_fields(context, rules_version)
         merged = {**common, **specific}
 
-        # 冷启动降级
-        cold_start = context.get("cold_start") or {}
-        if cold_start.get("warming_up"):
-            merged["health_status"] = "cold_start_warming_up"
-            merged["confidence_tier"] = downgrade_tier(
-                merged.get("confidence_tier", "medium"), steps=1
-            )
-            merged.setdefault("notes", []).append(
-                f"cold_start warming_up(days_elapsed={cold_start.get('days_elapsed')})"
-            )
+        # Sprint 1.10-J commit 6 §X:删冷启动降级路径
+        # (v1.4 §11.2 删 cold_start 字段及所有相关逻辑)
 
         return merged
 

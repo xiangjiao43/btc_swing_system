@@ -992,7 +992,8 @@ class StrategyStateDAO:
         composite = state.get("composite_factors") or {}
         sm = state.get("state_machine") or {}
         observation = state.get("observation") or {}
-        cold_start = state.get("cold_start") or {}
+        # Sprint 1.10-J commit 6 §X:cold_start 字段已删
+        # (v1.4 §11.2;DB 列保留写 0 graceful,Migration 删列留 1.10-K)
         pipeline_meta = state.get("pipeline_meta") or {}
         adjudicator = state.get("adjudicator") or {}
 
@@ -1006,7 +1007,7 @@ class StrategyStateDAO:
         fallback_level = pipeline_meta.get("fallback_level")
         strategy_flavor = (state.get("meta") or {}).get("strategy_flavor", "swing")
         observation_category = observation.get("observation_category")
-        cold_start_flag = 1 if cold_start.get("warming_up") else 0
+        cold_start_flag = 0  # Sprint 1.10-J commit 6 §X:写死 0 graceful
 
         generated_at_utc = state.get("generated_at_utc") or _utc_now_iso()
         generated_at_bjt = state.get("generated_at_bjt") or generated_at_utc
@@ -1092,7 +1093,8 @@ class StrategyStateDAO:
 
     @staticmethod
     def get_count(conn: sqlite3.Connection) -> int:
-        """历史 run 条数,用于 cold_start 判定。"""
+        """历史 run 条数(Sprint 1.10-J commit 6 §X:cold_start 判定已删,
+        本方法保留作 generic counter,可能仍被 KPI / 监控用)。"""
         row = conn.execute(
             "SELECT COUNT(*) AS n FROM strategy_runs"
         ).fetchone()

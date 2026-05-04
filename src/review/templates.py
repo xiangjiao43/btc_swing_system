@@ -54,23 +54,15 @@ def _top_n_distribution(
 # ============================================================
 
 def _section_overview(kpi: dict[str, Any], period_label: str) -> str:
+    # Sprint 1.10-J commit 6 §X:删 cold_start_progress 字段
+    # (v1.4 §11.2 删 cold_start 字段及所有相关逻辑)
     exe = kpi.get("execution") or {}
-    sd = kpi.get("state_distribution") or {}
-    cs = sd.get("cold_start_progress") or {}
     runs_total = exe.get("runs_total") or 0
     runs_per_day = exe.get("runs_per_day") or 0
-    if cs:
-        cs_line = (
-            f"- 冷启动进度:{cs.get('runs_completed', 0)}/"
-            f"{cs.get('threshold', 42)}({cs.get('percent', 0):.1f}%)"
-        )
-    else:
-        cs_line = "- 冷启动进度:无数据"
 
     return (
         "## 一、总览\n\n"
         f"- 本周期执行 {runs_total} 次(平均每日 {runs_per_day} 次)\n"
-        f"{cs_line}\n"
         f"- 最近一次运行:{exe.get('last_run_at') or _N_A}\n"
         f"- 下次预计运行:{exe.get('next_expected_at') or _N_A}\n"
     )

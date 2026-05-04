@@ -18,8 +18,8 @@
 
 | Commit | 内容 | 状态 |
 |---|---|---|
-| 1 | 报告骨架 + 5 项调研(V 频率分析 + prompt 覆盖率 cross-check) | 进行中 |
-| 2 | 任务 1+2:master_adjudicator.txt 加 4 条 hard constraints(V3 / V9 / V21 / V23) | 待 |
+| 1 | 报告骨架 + 5 项调研(V 频率分析 + prompt 覆盖率 cross-check) | ✅ `1ecb63f` |
+| 2 | 任务 1+2:master_adjudicator.txt 加 4 条 hard constraints(V3 / V9 / V21 / V23) | ✅ 进行中 push |
 | 3 | 任务 3:migration 015 自适应 DROP COLUMN + 单测 | 待 |
 | **==中断点 3==** | 用户审 → 授权才进 commit 4-6 | — |
 
@@ -109,10 +109,17 @@ SELECT COUNT(*) FROM strategy_runs WHERE constraint_activations_json IS NOT NULL
 
 ---
 
-## §Z 双验证记录(commit 1)
+## §Z 双验证记录
 
+### Commit 1
 - 文本验证:本 commit 仅写报告,无代码改动 → N/A
 - 启动验证:N/A
+
+### Commit 2(prompt 增量 + 1 单测)
+- 文本验证:`wc -l master_adjudicator.txt` → 187 → **204**(+17 行,< 30 line budget ✅)
+- pytest 验证:`tests/test_master_adjudicator_v14.py` → **21/21 passed**(20 旧 + 1 新)
+- 全量回归:`tests/` → **1472 passed, 4 skipped**(基准 1471,+1 新测试,0 回归)
+- 4 V 关键词全部命中:Validator 3 / 9 / 21 / 23 + 软抗拒 + 层间
 
 ## 1.10-K 累积清单(本 sprint 内消化的 7 项,1.10-K-A 已消化 4,1.10-K-B 消化 3)
 

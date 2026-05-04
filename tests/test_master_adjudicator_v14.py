@@ -332,3 +332,33 @@ def test_analyze_unparseable_ai_response_returns_fallback():
 
 def test_valid_modes_const_matches_v14_spec():
     assert set(VALID_MODES) == {"evaluate_existing", "new_thesis", "silent_cooldown"}
+
+
+# ============================================================
+# Sprint 1.10-K-B commit 2:prompt 含 V3 / V9 / V21 / V23 hard constraints
+# ============================================================
+
+def test_master_prompt_includes_v3_v9_v21_v23_hard_constraints():
+    """1.10-K-B:master_adjudicator.txt §三 应含 V3 / V9 / V21 / V23 显式条款。
+
+    覆盖 commit 2 prompt 增量(基于 1.10-K-B 调研选的 4 条 V):
+    - V3: entry_orders 总 size_pct ≤ 100%
+    - V9: break_conditions 距当前 ≤ 20%(价格类)
+    - V21: 不能在该出 new_thesis 时 silent_cooldown(软抗拒)
+    - V23: narrative 必须含层间一致性表达
+    """
+    agent = MasterAdjudicator()
+    prompt = agent._load_system_prompt()
+
+    # V3
+    assert "Validator 3" in prompt
+    assert "size_pct" in prompt and "100" in prompt
+    # V9
+    assert "Validator 9" in prompt
+    assert "20%" in prompt or "≤ 20" in prompt
+    # V21 软抗拒
+    assert "Validator 21" in prompt
+    assert "软抗拒" in prompt
+    # V23 narrative 一致性
+    assert "Validator 23" in prompt
+    assert "层间" in prompt or "矛盾" in prompt

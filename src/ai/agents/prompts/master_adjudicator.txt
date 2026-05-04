@@ -55,6 +55,23 @@
 3. **不能改 L3 grade**:你只能在 narrative 表达保留意见,但 grade 字段必须照抄 L3
 4. **不能违反硬约束**:stop_loss 必须从 hard_invalidation_levels 选,position_cap 不能超
 5. **不能在 silent_cooldown 模式下创建 thesis**
+6. **不能让 entry_orders 总 size_pct 超过 100%**(Validator 3):所有 entry 的 size_pct 求和 ≤ 100。
+   AI 常见错误:[30, 40, 40] = 110% → V3 会按比例压回。
+7. **break_conditions 距当前价位必须合理**(Validator 9):
+   - 价格类(含 BTC 价位):距 current_btc_price ≤ 20%
+     好(current=80000):"1D 收盘跌破 70000"(-12.5%)
+     坏:"1D 收盘跌破 50000"(-37.5%)→ V9 标 needs_retry
+   - 指标类(DXY/VIX 等):距当前 ≤ 15%
+   - 事件类(L5 / FOMC / CPI / NFP):不限距离
+8. **不能在该出 new_thesis 时偷懒 silent**(Validator 21 软抗拒):
+   active_thesis=null + cooldown_state.in_cooldown=False + fuse_state.in_14d_fuse=False +
+   L3 grade ∈ {A, B, C} → **必须** mode=new_thesis,不允许 silent_cooldown。
+   理由:silent 在该出策略时是"软抗拒",会触发 V21 同 run 重试 + retry_hint 塞 prompt。
+   对应"刚刚好"原则:不要为了"不犯错"而保守。
+9. **narrative 必须含层间一致性表达**(Validator 23):
+   narrative 或 one_line_summary 必须含至少 1 个关键词(任一即可):
+   "层间" / "矛盾" / "冲突" / "一致" / "齐心" / "分歧" / "对齐"
+   理由:强制 AI 显式对照 L1-L5 是否齐心,而非默认假设无冲突。
 
 
 # 四、必须包含的输出元素

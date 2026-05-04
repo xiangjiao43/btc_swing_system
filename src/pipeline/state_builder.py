@@ -992,6 +992,11 @@ class StrategyStateBuilder:
         cold_start = context.get("cold_start") or {}
         market_snapshot = _derive_market_snapshot(context.get("klines_1d"))
         return {
+            # Sprint 1.10-I commit 7 fix:schema_version 标记(v1.4)
+            # 真用户测试发现历史 strategy_runs 无此字段 → 前端 schema gate 永远 False
+            # → 5 个新模块全不渲染。本字段 + 前端 gate 升级双向修复。
+            "schema_version": "v14",
+
             # --- identity ---
             "run_id": run_id,
             "reference_timestamp_utc": run_ts_utc,

@@ -346,6 +346,9 @@ def _build_full_state_json(
     l2 = context.get("l2") or {}
 
     payload = {
+        # Sprint 1.10-I commit 7:schema_version 标记(v1.4)— 与 state_builder
+        # _assemble_state 的同名字段对齐;前端 schema gate 兼容。
+        "schema_version": "v14",
         "layers": result.get("layers") or {},
         "validator": result.get("validator"),
         "status": result.get("status"),

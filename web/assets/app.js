@@ -543,15 +543,39 @@ function app() {
         },
 
         _normalize(body) {
+            // Sprint 1.10-I commit 7 fix:schema gate 三态升级
+            // 真用户测试发现:写死 raw.schema_version === 'v13' 后,新 v14
+            // 数据(无 schema_version 或 schema_version='v14')永远不渲染,
+            // 5 个 1.10-I 新模块全黑屏。改为兼容 3 形态:
+            //   - v13:走 _to_display_state_v13(老路径)
+            //   - v14:含 v14 模块字段(account_summary 等),直接消费
+            //   - hasBasicData 兜底:有 run_id + generated_at_utc 就允许渲染
+            //     (各模块自己处理空字段占位符,避免新 schema 出现时再死锁)
             if (!body) return null;
             const raw = body.state || body;
             if (!raw || typeof raw !== 'object') return null;
-            if (raw.schema_version === 'v13' && raw.summary_card) {
+
+            const hasV13Schema = raw.schema_version === 'v13' && raw.summary_card;
+            const hasV14Modules = !!(
+                raw.account_summary || raw.active_thesis ||
+                raw.position_summary || raw.pending_orders_summary ||
+                raw.schema_version === 'v14'
+            );
+            const hasBasicData = !!(raw.run_id && raw.generated_at_utc);
+
+            if (hasV13Schema) {
                 return this._to_display_state_v13(raw);
             }
-            // 非 v13 数据:不静默兜底,显式报错让用户知道
-            console.error('[app] 收到非 v13 数据,无法渲染。schema_version=', raw.schema_version);
-            this.error = '⚠️ 数据格式异常(非 v13 schema)。系统下次定时运行后会自动恢复,如紧急可联系管理员重启服务。';
+            if (hasV14Modules || hasBasicData) {
+                // 直接消费 raw(含 1.10-I 新 4 字段 + 1.10-I.commit 3 normalize_state 输出)
+                // 各模块的 cold-start placeholder 已实施(commit 4/5),
+                // 字段为空 → 显示"未初始化"而非整页报错
+                return raw;
+            }
+
+            // 完全空(无 run_id):说明系统从未跑过 → 友好提示
+            this.error = '⚠️ 数据为空,等待下次 strategy_run(每日 16:00 BJT 自动跑)';
+            console.warn('[app] strategy_run 数据为空,等待下次自动 run');
             return null;
         },
 

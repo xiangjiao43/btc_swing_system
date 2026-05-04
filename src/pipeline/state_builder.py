@@ -10,7 +10,7 @@ state_builder.py — Sprint 1.12
 核心契约:
   * 单阶段失败**不抛异常**,用 FallbackLogDAO 记 level_1,其余阶段继续。
   * 返回 BuildResult(state, run_id, failures, ...)给调用方处理。
-  * (Sprint 1.10-J commit 6 §X 删 cold_start 字段及所有相关逻辑;
+  * (Sprint 1.10-J commit 6 §X 删 cold_start 业务逻辑 + 1.10-K-A commit 2 删 INSERT 列;
     v1.4 §11.2;冷启动期早过去,不再判定。)
   * CyclePosition 的 last_stable 通过 context['cycle_position_last_stable']
     预注入,避免 factor 内部再调 DAO。

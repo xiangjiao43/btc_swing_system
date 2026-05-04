@@ -10,10 +10,10 @@ strategy_runs INSERT 用的 19 列 dict。
 
 Sprint 1.10-J commit 5 §X:删 observation_classifier 调用
 (v1.4 §11.2 删 "observation_category / observation_classifier 整套机制");
-strategy_runs.observation_category 列写 NULL,DB 列保留(留 1.10-K migration 删列)
+1.10-K-A commit 2 + 4:DB 列已 ALTER TABLE DROP COLUMN(migration 015)
 
 Sprint 1.10-J commit 6 §X:删 cold_start 字段及所有相关逻辑(v1.4 §11.2);
-strategy_runs.cold_start 列写 0 graceful,DB 列保留(留 1.10-K migration 删列)
+1.10-K-A commit 2 + 4:DB 列已 ALTER TABLE DROP COLUMN(migration 015)
 """
 
 from __future__ import annotations

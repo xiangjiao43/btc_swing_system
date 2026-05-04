@@ -67,10 +67,10 @@
 | # | 内容 | 影响文件 | 中断点 |
 |---|---|---|---|
 | **阶段 1:写入方清理 + migration**| | | |
-| 1 | 启动 + 报告骨架 + 接受 P0/P1 决策 | 1 | — |
-| 2 | dao.py(9 处)+ schema.sql(3 处)+ dao 相关测试 | ~3 | — |
-| 3 | state_builder.py(4 处)+ _orchestrator_mapper.py(8 处)+ weekly_review_input_builder.py(1 处)+ 19 测试改造 | ~22 | — |
-| **==中断点 4:写入方清理完成,1490+ 测试 0 regression==**| | | 🛑 |
+| 1 | 启动 + 报告骨架 + 接受 P0/P1 决策 | 1 | ✅ `9d26b73` |
+| 2 | dao.py + schema.sql + state_builder + orchestrator_mapper + weekly_review + 4 测试 fixture(scope 扩展)| 9 | ✅ `ee46335` |
+| 3 | 残留 §X 注释压缩 + §Z 三重验证(中断点 4 准备)| 3 | ✅ 待 push |
+| **==中断点 4:写入方清理完成,1490+ 测试 0 regression==**| | | 🛑 已到达 |
 | 4 | migration 015 真跑(本地备份 + DROP + 验证)+ verify_cleanup_v14 / kb 全过 | 0 代码 | — |
 | **==中断点 5:migration 015 真跑后,本地 + 生产 21→19 列==**| | | 🛑 |
 | **阶段 2:state_machine 重写**| | | |
@@ -238,6 +238,34 @@
 **全量回归**:`tests/` → **1490 passed, 4 skipped, 0 failed**(基准 1490 → 0 净增,3 测试改造 + 写入方清理后维持)
 
 **commit 3 重新定义**:测试 fixtures 中 cold_start_warming_up / SCENARIO_COLD_START 等纯叙事场景测试残留(~10 测试),不影响生产代码 INSERT/SELECT。本来在 commit 3 计划里的 19 测试改造,大部分已在 commit 2 内顺手完成。commit 3 改为收尾测试残留 + 必要文档。
+
+### Commit 3(残留 §X 注释压缩 + 中断点 4 §Z 三重验证)
+**实际 scope**(scope 比 commit 2 小,因 commit 2 已吸收大部分测试改造):
+
+注释压缩(从"1.10-J 留 1.10-K 删列"老状态 → "1.10-K-A commit 2 + 4 已删"新状态):
+- `src/pipeline/_orchestrator_mapper.py:12-16`(2 处 docstring)
+- `src/pipeline/state_builder.py:13`(1 处 docstring)
+
+**未触动的注释**(memory 教训:§X 解释性注释保留):
+- state_builder.py:205-206 / 505-507 / 612 / 908-909 / 942-943 — 含"_determine_cold_start 整删 / cold_start_check stage 已删"是真历史 §X 痕迹,删了未来读代码的人会困惑
+- _orchestrator_mapper.py:174-175 / 179 / 227 — 同上
+- dao.py:1125 — 本 commit 新写,保留
+
+**未触动的 cold_start_warming_up 测试场景**(per K-A 原计划,改造留 commit 11-12 narrator 重写):
+- tests/test_kpi_collector.py:59-72,157-169
+- tests/test_alerts.py:49-57
+- tests/test_no_opportunity_narrator.py(SCENARIO_COLD_START / SCENARIO_POST_PROTECTION 重写)
+- tests/test_no_opportunity_8_scenarios.py
+- tests/test_human_readable_style.py / test_review_generator.py / test_virtual_account_manager.py / test_web_modules_1_2_3.py / test_web_schema_gate.py / test_narrative_human_quality.py / test_plain_reading.py
+- 这些是 narrator 叙事场景测试,不直接 INSERT/SELECT 已删的列,本 sprint 阶段 3 重写
+
+**§Z 三重验证(中断点 4 准备)**:
+- ✅ uvicorn TestClient + GET / → 200 + body 含 'BTC'
+- ✅ GET /api/strategy/latest → 200
+- ✅ scheduler 启动 → BackgroundScheduler + 10 cron jobs registered
+- ✅ _JOB_FUNCTIONS 注册数:14
+- ✅ schema.sql in-memory 验证:strategy_runs **19 列**(原 21 - observation_category - cold_start)+ **7 索引**(action_state / ai_model / flavor / reference / rules_version / time / trigger 全)
+- ✅ 全量回归:**1490 passed, 4 skipped, 0 failed**(基准维持)
 
 ---
 

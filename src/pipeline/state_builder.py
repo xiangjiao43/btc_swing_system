@@ -739,6 +739,26 @@ class StrategyStateBuilder:
         )
         state["state_machine"] = sm_block
 
+        # === Sprint 1.10-L commit 3:P0 #1 PROTECTION 进入接通(P1A 双向)===
+        # §4.2.8: 进 PROTECTION 时所有 active thesis 进 review_pending
+        # 仅在状态从非-PROTECTION → PROTECTION 转换时触发(避免每个 PROTECTION
+        # tick 都重复调,enter_review_pending 内部已幂等也避免噪音 stage 记录)
+        if (
+            isinstance(sm_block, dict)
+            and sm_block.get("current_state") == "PROTECTION"
+            and sm_block.get("previous_state") != "PROTECTION"
+            and self.conn is not None
+        ):
+            from ..strategy import protection_handler as _ph
+            self._safe(
+                lambda: _ph.on_protection_entered(
+                    self.conn, run_id=run_id, now_utc=run_ts_utc,
+                ),
+                stage="protection_entered_review_pending",
+                failures=failures, degraded_stages=degraded_stages,
+                run_ts_utc=run_ts_utc,
+            )
+
         # === Sprint 1.5b-B:lifecycle post-SM(状态过渡副作用)===
         current_state_str = sm_block.get("current_state") if isinstance(sm_block, dict) else "FLAT"
         lifecycle_post = self._run_stage(

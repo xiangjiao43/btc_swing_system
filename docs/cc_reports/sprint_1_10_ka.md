@@ -75,8 +75,10 @@
 | **==中断点 5:migration 015 真跑后,本地 + 生产 21→19 列==**| | | ✅ 已通过(服务器 100% 同步)|
 | 5 | _from_FLIP_WATCH stub(方案 5A)+ _calc_flip_watch_bounds 删 + _on_enter_effects FLIP_WATCH 分支删 + 2 helper 删 + 8 测试 skip(方案 T2)| 3 | ✅ `7cddce4` |
 | 6 | _from_POST_PROTECTION_REASSESS stub(方案 5A)+ _PPR_ALLOWED_TARGETS 删 + _on_enter_effects PPR 分支精简 + _verify_disciplines review_pending 路由说明 + 1 测试 skip | 2 | ✅ `6f5b7d2` |
-| 7 | compute_next 输出 thesis dict + system_state 镜像(方案 C 关键)+ _orchestrator_mapper 镜像字段 + 6 新单测 | 3 | ✅ 待 push |
-| **==中断点 6:commit 7 完成,thesis dict + system_state 输出验证==**| | | 🛑 已到达 |
+| 7 | compute_next 输出 thesis dict + system_state 镜像(方案 C 关键)+ _orchestrator_mapper 镜像字段 + 6 新单测 | 3 | ✅ `584c49a` |
+| **==中断点 6:commit 7 完成,thesis dict + system_state 输出验证==**| | | ✅ 已通过 |
+| 8 | 9 K-A skip 测试 unskip:2 改造(test_19/23/30)+ 7 删除(test_21/22/24/29/36/41/42)| 1 | ✅ `b533823` |
+| 9 | state_machine_inputs.py 26 测试 + lifecycle_manager.py 19 测试 review:**0 changes needed** | 1(报告)| ✅ 待 push |
 | **==中断点 5:migration 015 真跑后,本地 + 生产 21→19 列==**| | | 🛑 |
 | **阶段 2:state_machine 重写**| | | |
 | 5 | _from_FLIP_WATCH 整删 + _calc_flip_watch_bounds 删 + _on_enter_effects FLIP_WATCH 分支删 + state_machine_inputs._flip_watch_bounds_state + _prev_cycle_side 删 | 2 | — |
@@ -243,6 +245,26 @@
 **全量回归**:`tests/` → **1490 passed, 4 skipped, 0 failed**(基准 1490 → 0 净增,3 测试改造 + 写入方清理后维持)
 
 **commit 3 重新定义**:测试 fixtures 中 cold_start_warming_up / SCENARIO_COLD_START 等纯叙事场景测试残留(~10 测试),不影响生产代码 INSERT/SELECT。本来在 commit 3 计划里的 19 测试改造,大部分已在 commit 2 内顺手完成。commit 3 改为收尾测试残留 + 必要文档。
+
+### Commit 9(state_machine_inputs + lifecycle_manager 测试 review)
+**Review 结论**:**0 changes needed** — 两文件 45 个测试全过(26 + 19)。
+
+**grep 残留检查**:
+- `tests/test_state_machine_inputs.py`:`grep _flip_watch_bounds_state|_prev_cycle_side|FLIP_WATCH|POST_PROTECTION_REASSESS` → **0 hits**(原 commit 5 删的 helper 在测试中未直接被引用)
+- `tests/test_lifecycle_manager.py`:`grep _from_FLIP_WATCH|_from_POST_PROTECTION_REASSESS|_flip_watch_bounds_state|_prev_cycle_side` → **0 hits**;`grep POST_PROTECTION_REASSESS` → 1 hit(`test_post_sm_post_protection_reassess` line 347 测 lifecycle_manager.compute_post_sm 处理 PROTECTION → POST_PROTECTION_REASSESS transition)
+
+**为什么 lifecycle_manager test 仍过**:
+- L1 决策不动 lifecycle_manager.py;PROTECTION → POST_PROTECTION_REASSESS transition 仍可发生(_from_PROTECTION 不动,line 780-787 仍输出 POST_PROTECTION_REASSESS target)
+- lifecycle_manager.compute_post_sm 内部 PROTECTION→PPR 处理逻辑(stage='reassess',protection_active=False)不依赖 _from_POST_PROTECTION_REASSESS 业务,只依赖 prev_state/current_state 字符串
+- stub 后的 PPR 是叶状态(stay),但 lifecycle 的 stage='reassess' 标记不变 — 行为完全保留
+
+**§Z 验证**:
+- ✅ pytest tests/test_state_machine_inputs.py tests/test_lifecycle_manager.py → 45 passed, 0 failed
+- ✅ 全量 1489 passed, 4 skipped, 0 failed(commit 8 后维持)
+
+**未触动**:
+- 两文件 0 行代码改动(纯 review pass)
+- 本 commit 仅文档化此 review 在 sprint 报告(防止未来读 git log 时疑惑"为何 commit 9 跳过 review")
 
 ### Commit 7(compute_next 输出加 thesis dict + system_state — 方案 C 关键)
 **实际改动**:

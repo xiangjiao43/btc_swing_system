@@ -190,15 +190,18 @@ def main(argv: list[str]) -> int:
             print(f"    {tr['run_trigger']:30s}  total={tr['total']:4d}  "
                   f"null={tr['null_count']:4d}  has_data={tr['has_data']:4d}")
 
-        # manual 至少 1 行(用户已跑)— 仅生产 DB 满足
-        manual_rows = next(
-            (tr for tr in trigger_stats if tr["run_trigger"] == "manual"), None,
+        # manual / manual_api 合并统计(用户反馈:原 manual 单 trigger 漏 manual_api)
+        # scripts/run_pipeline_once.py 默认 trigger='manual';
+        # POST /api/system/run-now 用 trigger='manual_api'(state_builder.py:386)
+        manual_total = sum(
+            (tr["total"] or 0) for tr in trigger_stats
+            if tr["run_trigger"] in ("manual", "manual_api")
         )
         check(
-            f"§Z 7: run_trigger='manual' 至少 1 行(用户手动触发数据)"
-            f"(实际 {manual_rows['total'] if manual_rows else 0})",
-            manual_rows is not None and manual_rows["total"] >= 1,
-            "本地 DB 待用户在生产跑 manual trigger;生产 DB 用户已跑 1 次",
+            f"§Z 7: run_trigger ∈ {{manual, manual_api}} 至少 1 行(用户手动触发数据)"
+            f"(实际 {manual_total})",
+            manual_total >= 1,
+            "本地 DB 待用户在生产跑 manual trigger;生产 DB 用户已跑 ≥ 1 次",
         )
 
         # ============================================================

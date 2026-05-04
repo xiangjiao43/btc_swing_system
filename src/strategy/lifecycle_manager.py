@@ -496,7 +496,11 @@ class LifecycleManager:
         current_state: str, strategy_state: dict[str, Any],
         run_id: str, now_utc: str,
     ) -> dict[str, Any]:
-        """*_EXIT → FLAT / FLIP_WATCH:归档 lifecycle,推 final_outcome_type。"""
+        """*_EXIT → FLAT / FLIP_WATCH:归档 lifecycle,推 final_outcome_type。
+
+        Sprint 1.10-L commit 5(P0 #2 方案 5A):同时调 thesis_manager.close_thesis
+        关闭对应 active thesis(若仍在 active);commit 6 改 channel 为函数计算。
+        """
         lc = dict(lifecycle)
         lc["status"] = "closed"
         lc["stage"] = "closed"
@@ -513,7 +517,74 @@ class LifecycleManager:
         realized = _as_float(lc.get("current_floating_pnl_pct")) or 0.0
         lc["realized_pnl_pct"] = realized
         lc["final_outcome_type"] = _classify_outcome(realized)
+
+        # Sprint 1.10-L commit 5(P0 #2 方案 5A):接通 thesis_manager.close_thesis
+        self._close_active_thesis_for_archive(
+            strategy_state=strategy_state, run_id=run_id, now_utc=now_utc,
+        )
         return lc
+
+    def _close_active_thesis_for_archive(
+        self, *, strategy_state: dict[str, Any], run_id: str, now_utc: str,
+    ) -> Optional[dict[str, Any]]:
+        """Sprint 1.10-L commit 5 §X(P0 #2 方案 5A):
+        lifecycle 归档时同时关闭对应 active thesis(若仍 active)。
+
+        - self.conn 必须存在(ThesesDAO 调用)
+        - ThesesDAO.get_active 返 None → noop(已被先 close,thesis_manager 幂等也兜底)
+        - close_thesis 默认 reason='invalidated' + channel='B'(commit 6 改函数调用)
+        - 静默捕获异常(归档主路径不能因 thesis close 失败崩溃)
+
+        Returns: close_thesis 的返回 dict,或 None(noop / 失败)。
+        """
+        if self.conn is None:
+            return None
+        try:
+            import uuid
+            from src.data.storage.dao import (
+                ThesesDAO, VirtualAccountDAO,
+            )
+            from src.strategy import thesis_manager
+
+            active = ThesesDAO.get_active(self.conn)
+            if active is None:
+                return None  # 已被先 close,自然 noop
+
+            # current_btc 从 strategy_state.market_snapshot 取
+            market_snapshot = (strategy_state or {}).get("market_snapshot") or {}
+            current_btc = _as_float(market_snapshot.get("btc_price_usd")) or 0.0
+            if current_btc <= 0:
+                return None  # 极边界:无价 → 跳过(留 hard_invalidation 主路径)
+
+            # initial_capital 从 first virtual_account snapshot 读
+            first_snap = VirtualAccountDAO.get_latest(self.conn)
+            initial_capital = float(
+                (first_snap or {}).get("initial_capital") or 100000.0
+            )
+
+            snapshot_id = f"lc_archive_{uuid.uuid4().hex[:12]}"
+            return thesis_manager.close_thesis(
+                self.conn,
+                thesis_id=active["thesis_id"],
+                reason="invalidated",        # commit 6 可改 dynamic
+                close_channel="B",           # commit 6 改 determine_close_channel 计算
+                closed_at_utc=now_utc,
+                fills_for_close=[],          # 归档无新 fill
+                current_btc_price=current_btc,
+                initial_capital=initial_capital,
+                snapshot_id=snapshot_id,
+                run_id=run_id,
+                snapshot_at_utc=now_utc,
+                invalidated_reason=(
+                    "lifecycle_archive_via_state_machine_*_HOLDING_to_FLAT_or_FLIP_WATCH"
+                ),
+            )
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(
+                "lifecycle_archive close_active_thesis 失败(noop): %s", e,
+            )
+            return None
 
     def _detect_tp_hits(
         self, *, trade_plan: dict[str, Any], klines_1d: Any,

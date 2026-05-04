@@ -417,3 +417,187 @@ def test_state_machine_inputs_reads_lifecycle_pnl():
     assert fields["floating_pnl_pct"] == 3.5
     assert fields["hours_since_open"] == 25.0
     assert fields["tp_target_hit"] is False
+
+
+# ============================================================
+# Sprint 1.10-L commit 5(P0 #2 方案 5A)— _archive_lifecycle 接通 close_thesis
+# ============================================================
+
+def _make_conn_with_v14_schema():
+    import sqlite3
+    c = sqlite3.connect(":memory:")
+    c.row_factory = sqlite3.Row
+    with open("src/data/storage/schema.sql", encoding="utf-8") as f:
+        c.executescript(f.read())
+    from scripts.init_v14_tables import apply_migration
+    apply_migration(c)
+    c.commit()
+    return c
+
+
+def _seed_active_thesis_for_archive(conn, thesis_id="th_arch_test"):
+    import json
+    conn.execute(
+        "INSERT INTO theses (thesis_id, created_at_run_id, created_at_utc, "
+        "direction, core_logic, confidence_score, break_conditions, "
+        "lifecycle_stage, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (thesis_id, "r_seed", "2026-05-04T08:00:00Z", "long",
+         "test thesis", 70, json.dumps(["1D 跌破 70k"]),
+         "opened", "active"),
+    )
+    # virtual_account first snapshot 用于 initial_capital
+    conn.execute(
+        "INSERT INTO virtual_account (snapshot_id, run_id, snapshot_at_utc, "
+        "btc_price_at_snapshot, initial_capital, available_cash, total_equity) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        ("snap_init", "r_seed", "2026-05-04T08:00:00Z", 75000.0,
+         100000.0, 100000.0, 100000.0),
+    )
+    conn.commit()
+
+
+def test_archive_calls_close_thesis_when_active_exists():
+    """场景 1(主路径):active thesis 存在 + lifecycle 归档 → close_thesis 真触发,
+    theses.status 从 active → invalidated。"""
+    conn = _make_conn_with_v14_schema()
+    _seed_active_thesis_for_archive(conn, "th_arch_a")
+    mgr = LifecycleManager(conn=conn)
+    lc = {
+        "status": "active", "direction": "long", "stage": "preparing_exit",
+        "average_entry_price": 68000,
+        "current_floating_pnl_pct": -2.5,
+    }
+    state = {"market_snapshot": {"btc_price_usd": 70000.0}}
+    out = mgr.compute_post_sm(
+        prev_state="LONG_EXIT", current_state="FLAT",
+        lifecycle=lc, strategy_state=state, context={},
+        run_id="r_archive", now_utc=_now_iso(),
+    )
+    conn.commit()
+    # lifecycle 归档生效
+    assert out["status"] == "closed"
+    # thesis 也被 close
+    th = conn.execute(
+        "SELECT status, close_channel, lifecycle_stage FROM theses WHERE thesis_id=?",
+        ("th_arch_a",),
+    ).fetchone()
+    assert th["status"] == "invalidated"     # commit 5 默认 reason='invalidated'
+    assert th["close_channel"] == "B"        # commit 5 默认 channel='B'(commit 6 改函数)
+    assert th["lifecycle_stage"] == "closed"
+    conn.close()
+
+
+def test_archive_noop_when_thesis_already_closed():
+    """场景 2(双调用):active thesis 已被 hard_invalidation_monitor 等先 close →
+    get_active 返 None → noop(thesis_manager 幂等也兜底)。"""
+    conn = _make_conn_with_v14_schema()
+    _seed_active_thesis_for_archive(conn, "th_arch_b")
+    # 模拟 hard_invalidation_monitor 先 close(直接 UPDATE 简化测试)
+    conn.execute(
+        "UPDATE theses SET status='closed_loss', close_channel='A', "
+        "closed_at_utc=?, lifecycle_stage='closed' WHERE thesis_id=?",
+        ("2026-05-04T15:00:00Z", "th_arch_b"),
+    )
+    conn.commit()
+
+    mgr = LifecycleManager(conn=conn)
+    lc = {
+        "status": "active", "direction": "long",
+        "current_floating_pnl_pct": -8.0,
+    }
+    state = {"market_snapshot": {"btc_price_usd": 67000.0}}
+    out = mgr.compute_post_sm(
+        prev_state="LONG_EXIT", current_state="FLAT",
+        lifecycle=lc, strategy_state=state, context={},
+        run_id="r_archive_b", now_utc=_now_iso(),
+    )
+    conn.commit()
+    # lifecycle 归档生效
+    assert out["status"] == "closed"
+    # thesis status 未被覆盖(仍是 hard_invalidation 写的 closed_loss + channel='A')
+    th = conn.execute(
+        "SELECT status, close_channel FROM theses WHERE thesis_id=?",
+        ("th_arch_b",),
+    ).fetchone()
+    assert th["status"] == "closed_loss"     # 不被 invalidated 覆盖
+    assert th["close_channel"] == "A"        # 不被 'B' 覆盖
+    conn.close()
+
+
+def test_archive_noop_when_no_active_thesis():
+    """0 active thesis(从未创建)→ noop,lifecycle 仍归档。"""
+    conn = _make_conn_with_v14_schema()
+    # 不 seed thesis,但需要 virtual_account snapshot(initial_capital 来源)
+    conn.execute(
+        "INSERT INTO virtual_account (snapshot_id, run_id, snapshot_at_utc, "
+        "btc_price_at_snapshot, initial_capital, available_cash, total_equity) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        ("snap_init_x", "r_seed", "2026-05-04T08:00:00Z", 75000.0,
+         100000.0, 100000.0, 100000.0),
+    )
+    conn.commit()
+
+    mgr = LifecycleManager(conn=conn)
+    lc = {
+        "status": "active", "direction": "long",
+        "current_floating_pnl_pct": -1.0,
+    }
+    state = {"market_snapshot": {"btc_price_usd": 70000.0}}
+    out = mgr.compute_post_sm(
+        prev_state="LONG_EXIT", current_state="FLAT",
+        lifecycle=lc, strategy_state=state, context={},
+        run_id="r_archive_c", now_utc=_now_iso(),
+    )
+    conn.commit()
+    # lifecycle 归档生效
+    assert out["status"] == "closed"
+    # 0 thesis 写入(noop)
+    n_theses = conn.execute(
+        "SELECT COUNT(*) FROM theses"
+    ).fetchone()[0]
+    assert n_theses == 0
+    conn.close()
+
+
+def test_archive_no_btc_price_skips_close_thesis():
+    """边界:strategy_state.market_snapshot.btc_price_usd 缺失 → 跳过 close_thesis,
+    lifecycle 仍归档(留 hard_invalidation_monitor 主路径)。"""
+    conn = _make_conn_with_v14_schema()
+    _seed_active_thesis_for_archive(conn, "th_arch_d")
+    mgr = LifecycleManager(conn=conn)
+    lc = {
+        "status": "active", "direction": "long",
+        "current_floating_pnl_pct": 0.0,
+    }
+    state = {"market_snapshot": {}}  # 无 btc_price_usd
+    out = mgr.compute_post_sm(
+        prev_state="LONG_EXIT", current_state="FLAT",
+        lifecycle=lc, strategy_state=state, context={},
+        run_id="r_archive_d", now_utc=_now_iso(),
+    )
+    conn.commit()
+    # lifecycle 归档生效
+    assert out["status"] == "closed"
+    # thesis 未被 close(跳过)
+    th = conn.execute(
+        "SELECT status FROM theses WHERE thesis_id=?", ("th_arch_d",),
+    ).fetchone()
+    assert th["status"] == "active"           # 未变
+    conn.close()
+
+
+def test_archive_no_conn_skips_close_thesis():
+    """LifecycleManager(conn=None) → close_thesis 跳过(原 1.5b-C 兼容路径)。"""
+    mgr = LifecycleManager(conn=None)
+    lc = {
+        "status": "active", "direction": "long",
+        "current_floating_pnl_pct": 1.5,
+    }
+    out = mgr.compute_post_sm(
+        prev_state="LONG_EXIT", current_state="FLAT",
+        lifecycle=lc, strategy_state={"market_snapshot": {"btc_price_usd": 70000.0}},
+        context={},
+        run_id="r_archive_e", now_utc=_now_iso(),
+    )
+    # 仍归档,无 conn 时 close_thesis 安全跳过(不抛)
+    assert out["status"] == "closed"

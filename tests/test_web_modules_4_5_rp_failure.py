@@ -186,7 +186,9 @@ def test_ai_failure_status_method(js):
     """aiFailureStatus 处理 retry_log_json 多种场景。"""
     assert "aiFailureStatus" in js
     # 5 类失败状态文本
-    assert "AI 介入失败 — 请人工介入" in js
+    # v1.4.1 涂装(commit afterwards):占位符统一 em-dash → ASCII '-',
+    # 此断言原 "AI 介入失败 — 请人工介入" 同步改 ASCII
+    assert "AI 介入失败 - 请人工介入" in js
     assert "已接管" in js  # thesis_aware fallback
     assert "Master 已短路" in js
     assert "macro fallback" in js

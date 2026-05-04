@@ -115,10 +115,10 @@
                 class="w-full font-mono text-[12px] border border-slate-300
                        dark:border-slate-700 rounded px-2 py-1
                        bg-white dark:bg-slate-950">
-          <option value="a">EXIT_A — 调阈值(降 grade 门槛 / 调 cooldown)</option>
-          <option value="b">EXIT_B — 续期 thesis(master AI 重出 break_conditions)</option>
-          <option value="c">EXIT_C — reset 熔断(清 14d_fuse 历史)</option>
-          <option value="d">EXIT_D — 自然恢复(只对 overly_conservative 生效)</option>
+          <option value="a">EXIT_A - 调阈值(降 grade 门槛 / 调 cooldown)</option>
+          <option value="b">EXIT_B - 续期 thesis(master AI 重出 break_conditions)</option>
+          <option value="c">EXIT_C - reset 熔断(清 14d_fuse 历史)</option>
+          <option value="d">EXIT_D - 自然恢复(只对 overly_conservative 生效)</option>
         </select>
       </div>
       <div>
@@ -194,7 +194,7 @@
     <!-- 顶部全局状态条(§9.3)                                        -->
     <!-- ============================================================ -->
     <section class="audit-card px-3 py-2">
-      <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3 items-center">
+      <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3 items-start">
         <div class="col-span-2 md:col-span-1 lg:col-span-2">
           <div class="stat-label flex items-center gap-1.5">
             <span>BTC 现价</span>
@@ -211,7 +211,7 @@
                   x-text="formatPct(livePrice24hChange(), true)"></span>
           </div>
           <div class="text-[10px] text-slate-500 dark:text-slate-400 flex items-center gap-1">
-            <span x-text="'采集 ' + (livePriceCapturedAt() || '—')"></span>
+            <span x-text="'采集 ' + (livePriceCapturedAt() || '-')"></span>
             <span x-show="livePriceStale()" class="text-amber-600 dark:text-amber-400"
                   title="数据陈旧:现货 > 2 分钟 / K 线 fallback > 30 分钟">·stale</span>
           </div>
@@ -224,13 +224,13 @@
         </div>
         <div>
           <div class="stat-label">生命周期</div>
-          <div class="text-[13px]" x-text="state.main_strategy.lifecycle_phase || '—'"></div>
+          <div class="text-[13px]" x-text="state.main_strategy.lifecycle_phase || '-'"></div>
         </div>
         <div>
           <div class="stat-label">机会 / 许可</div>
           <div class="text-[13px] font-mono"
-               x-text="(state.main_strategy.opportunity_grade || '—') + ' / ' +
-                       (state.main_strategy.execution_permission || '—')"></div>
+               x-text="(state.main_strategy.opportunity_grade || '-') + ' / ' +
+                       (state.main_strategy.execution_permission || '-')"></div>
         </div>
         <div>
           <div class="stat-label">观察类别</div>
@@ -250,7 +250,7 @@
             <span class="font-mono tabular-nums"
                   x-text="(state.data_health && state.data_health.data_completeness_pct != null
                            ? state.data_health.data_completeness_pct.toFixed(0) + '%'
-                           : '—')"></span>
+                           : '-')"></span>
             <span class="text-slate-400">|</span>
             <span :class="fallbackLabelClass(state.meta && state.meta.fallback_level)"
                   x-text="fallbackLabel(state.meta && state.meta.fallback_level)"></span>
@@ -348,7 +348,10 @@
         <h2 class="text-base font-semibold flex items-center gap-2">
           <span>🎯</span><span>AI 策略建议</span>
           <span class="ml-auto text-[10px] text-slate-500" x-show="state.meta?.generated_at_bjt"
-                x-text="'AI 输出于 ' + (state.meta?.generated_at_bjt || '—')"></span>
+                x-text="'AI 输出于 ' + (state.meta?.generated_at_bjt || '-') +
+                        (state.meta?.ai_model_actual
+                         ? ' · ' + simplifyAiModel(state.meta.ai_model_actual)
+                         : '')"></span>
         </h2>
       </header>
       <!-- 1.8.2-K.1:12 卡字号字重统一对齐顶部状态条(.stat-label + text-[13px]),
@@ -357,12 +360,12 @@
         <div>
           <div class="stat-label">方向</div>
           <div class="text-[13px] font-bold text-slate-900 dark:text-slate-100"
-               x-text="state.summary_card?.stance_label || '—'"></div>
+               x-text="state.summary_card?.stance_label || '-'"></div>
         </div>
         <div>
           <div class="stat-label">状态</div>
           <div class="text-[13px] font-bold text-slate-900 dark:text-slate-100"
-               x-text="state.summary_card?.action_state_label || '—'"></div>
+               x-text="state.summary_card?.action_state_label || '-'"></div>
         </div>
         <div>
           <div class="stat-label">机会等级</div>
@@ -544,18 +547,18 @@
               <div>
                 <div class="stat-label">置信度</div>
                 <div class="font-mono tabular-nums font-bold"
-                     x-text="(activeThesis.confidence_score ?? '—') + ' / 100'"></div>
+                     x-text="(activeThesis.confidence_score ?? '-') + ' / 100'"></div>
               </div>
               <div>
                 <div class="stat-label">阶段</div>
                 <div class="font-mono"
-                     x-text="activeThesis.lifecycle_stage || '—'"></div>
+                     x-text="activeThesis.lifecycle_stage || '-'"></div>
               </div>
             </div>
             <div>
               <div class="stat-label">core_logic</div>
               <div class="text-[12px] leading-snug"
-                   x-text="activeThesis.core_logic || '—'"></div>
+                   x-text="activeThesis.core_logic || '-'"></div>
             </div>
             <div x-show="activeThesis.last_assessment">
               <div class="stat-label">最近评估</div>
@@ -564,7 +567,7 @@
                       x-text="activeThesis.last_assessment"></span>
                 <span class="text-slate-500"
                       x-text="activeThesis.last_assessment_note
-                              ? ' — ' + activeThesis.last_assessment_note : ''"></span>
+                              ? ' - ' + activeThesis.last_assessment_note : ''"></span>
               </div>
             </div>
             <div x-show="(activeThesis.break_conditions || []).length > 0">
@@ -616,14 +619,14 @@
                 <div>
                   <span class="text-slate-500">BTC 数量</span>
                   <span class="ml-1"
-                        x-text="positionSummary.btc_amount?.toFixed(6) ?? '—'"></span>
+                        x-text="positionSummary.btc_amount?.toFixed(6) ?? '-'"></span>
                 </div>
                 <div>
                   <span class="text-slate-500">均价</span>
                   <span class="ml-1"
                         x-text="positionSummary.avg_entry_price
                                   ? '$' + positionSummary.avg_entry_price.toLocaleString()
-                                  : '—'"></span>
+                                  : '-'"></span>
                 </div>
               </div>
             </div>
@@ -685,7 +688,7 @@
                   x-text="card.title"></h3>
             </header>
             <!-- 大字标签 -->
-            <div class="text-[13px] font-bold leading-snug" x-text="card.label || '—'"></div>
+            <div class="text-[13px] font-bold leading-snug" x-text="card.label || '-'"></div>
             <!-- 次要标签 -->
             <div class="flex flex-wrap gap-1" x-show="(card.secondary_labels || []).length > 0">
               <template x-for="sl in (card.secondary_labels || [])" :key="sl">
@@ -696,7 +699,7 @@
             </div>
             <!-- 摘要(默认看)-->
             <p class="text-[12px] leading-snug text-slate-700 dark:text-slate-300"
-               x-text="card.summary || '—'"></p>
+               x-text="card.summary || '-'"></p>
             <!-- 查看详细按钮 -->
             <button @click="toggleLayerCard(card.layer)"
                     class="text-[11px] text-blue-600 dark:text-cyan-400 hover:underline">
@@ -792,7 +795,7 @@
                                     : 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-400'"
                           x-text="t.direction"></span>
                   </td>
-                  <td class="text-right" x-text="t.confidence_score ?? '—'"></td>
+                  <td class="text-right" x-text="t.confidence_score ?? '-'"></td>
                   <td>
                     <span :class="thesisStatusColor(t.status)"
                           x-text="t.status"></span>
@@ -806,8 +809,8 @@
                       x-text="t.final_realized_pnl_pct != null
                                 ? (t.final_realized_pnl_pct >= 0 ? '+' : '') +
                                   t.final_realized_pnl_pct.toFixed(2) + '%'
-                                : '—'"></td>
-                  <td x-text="t.close_channel || '—'"></td>
+                                : '-'"></td>
+                  <td x-text="t.close_channel || '-'"></td>
                 </tr>
               </template>
             </tbody>
@@ -874,7 +877,7 @@
                           x-text="'影响:' + directionLabel(c.impact_direction)
                                   + ' · ' + c.linked_layer"></span>
                     <span class="font-mono tabular-nums text-slate-500 truncate ml-2"
-                          x-text="fetchedAtPrimary(c) || '—'"></span>
+                          x-text="fetchedAtPrimary(c) || '-'"></span>
                   </div>
                 </article>
               </template>
@@ -994,12 +997,12 @@
                 <div>
                   <span class="text-slate-500">runs</span>
                   <span class="ml-1 font-bold"
-                        x-text="(weeklyReviewSelected.output.performance_summary || {}).total_runs ?? '—'"></span>
+                        x-text="(weeklyReviewSelected.output.performance_summary || {}).total_runs ?? '-'"></span>
                 </div>
                 <div>
                   <span class="text-slate-500">AI 失败</span>
                   <span class="ml-1 font-bold"
-                        x-text="(weeklyReviewSelected.output.performance_summary || {}).ai_failures ?? '—'"></span>
+                        x-text="(weeklyReviewSelected.output.performance_summary || {}).ai_failures ?? '-'"></span>
                 </div>
                 <div>
                   <span class="text-slate-500">PnL</span>
@@ -1030,12 +1033,12 @@
                                 : d.severity === 'warning' ? 'text-amber-600'
                                 : 'text-slate-700 dark:text-slate-300'"
                           x-text="(d.severity || '').toUpperCase()"></span>
-                    —
+                    -
                     <span x-text="d.issue"></span>
                     <div class="text-slate-500"
-                         x-text="'evidence: ' + (d.evidence || '—')"></div>
+                         x-text="'evidence: ' + (d.evidence || '-')"></div>
                     <div class="text-slate-500"
-                         x-text="'建议: ' + (d.suggested_action || '—')"></div>
+                         x-text="'建议: ' + (d.suggested_action || '-')"></div>
                   </li>
                 </template>
               </ul>
@@ -1076,11 +1079,11 @@
                       <tr class="border-b border-slate-100 dark:border-slate-900">
                         <td class="py-0.5" x-text="vk.replace('validator_', 'V').replace(/_/g, ' ')"></td>
                         <td class="text-right"
-                            x-text="((weeklyReviewSelected.output.hard_constraint_activation_review || {})[vk] || {}).activations ?? '—'"></td>
+                            x-text="((weeklyReviewSelected.output.hard_constraint_activation_review || {})[vk] || {}).activations ?? '-'"></td>
                         <td class="text-right"
-                            x-text="((weeklyReviewSelected.output.hard_constraint_activation_review || {})[vk] || {}).rate || '—'"></td>
+                            x-text="((weeklyReviewSelected.output.hard_constraint_activation_review || {})[vk] || {}).rate || '-'"></td>
                         <td class="text-slate-500"
-                            x-text="((weeklyReviewSelected.output.hard_constraint_activation_review || {})[vk] || {}).evaluation || '—'"></td>
+                            x-text="((weeklyReviewSelected.output.hard_constraint_activation_review || {})[vk] || {}).evaluation || '-'"></td>
                       </tr>
                     </template>
                   </tbody>

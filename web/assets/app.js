@@ -1,5 +1,5 @@
 /* =========================================================================
-   app.js — BTC Strategy 审计台(Sprint 2.3)
+   app.js - BTC Strategy 审计台(Sprint 2.3)
    单栏全宽 5 区域布局 + 讲述式详情。
    ========================================================================= */
 
@@ -27,20 +27,20 @@ function app() {
         _healthTimer: null,
 
         // Sprint 1.10-I §9.2:5 模块数据
-        virtualAccount: null,           // 模块 1 — virtual_account 最新快照
-        accountReturns: {               // 模块 1 — 各周期收益率
+        virtualAccount: null,           // 模块 1 - virtual_account 最新快照
+        accountReturns: {               // 模块 1 - 各周期收益率
             daily_pct: null, weekly_pct: null, monthly_pct: null,
             yearly_pct: null, total_pct: null,
         },
-        accountHistory: [],             // 模块 1 — 30 天 snapshots(sparkline 数据)
-        activeThesis: null,             // 模块 2 — 当前 active thesis
-        positionSummary: null,          // 模块 3 — 持仓摘要(从 strategy/current 复用)
-        ordersPending: {                // 模块 3 — 当前 pending 挂单
+        accountHistory: [],             // 模块 1 - 30 天 snapshots(sparkline 数据)
+        activeThesis: null,             // 模块 2 - 当前 active thesis
+        positionSummary: null,          // 模块 3 - 持仓摘要(从 strategy/current 复用)
+        ordersPending: {                // 模块 3 - 当前 pending 挂单
             active_thesis_id: null, items: [],
         },
-        thesesHistory: [],              // 模块 4 — thesis 历史时间线
-        weeklyReviewSelected: null,     // 模块 5 — 当前选中周复盘
-        weeklyReviewHistory: [],        // 模块 5 — 历史 12 周(D3=a)
+        thesesHistory: [],              // 模块 4 - thesis 历史时间线
+        weeklyReviewSelected: null,     // 模块 5 - 当前选中周复盘
+        weeklyReviewHistory: [],        // 模块 5 - 历史 12 周(D3=a)
         weeklyReviewSelectedIdx: 0,     // 模块 5 下拉切换 index
 
         // RP 红色横幅(D2=a 来自 health.review_pending)+ 模态框(D4=b)
@@ -144,7 +144,7 @@ function app() {
 
             // fallback 2:若 /api/theses/active 没返(如 API 失败 / 仍冷启动)
             // 但 state_machine.thesis 有镜像 → 最小占位让"当前 thesis"模块显示
-            // (主路径仍优先 — 仅 activeThesis null 时镜像顶上)
+            // (主路径仍优先 - 仅 activeThesis null 时镜像顶上)
             if (!this.activeThesis && smThesis) {
                 this.activeThesis = {
                     thesis_id: '(state_machine 镜像)',
@@ -156,15 +156,26 @@ function app() {
             }
         },
 
+        // v1.4.1 涂装:AI 模型简化显示(策略建议 header)
+        // 'claude-sonnet-4-5-20250929' → 'Claude Sonnet 4.5'
+        // 不匹配正则 → 直接返原值(future Opus / Haiku 兼容);空 → 空字符串
+        simplifyAiModel(model) {
+            if (!model) return '';
+            const m = String(model).match(/^claude-(\w+)-(\d+)-(\d+)/);
+            if (!m) return String(model);
+            const name = m[1].charAt(0).toUpperCase() + m[1].slice(1);
+            return `Claude ${name} ${m[2]}.${m[3]}`;
+        },
+
         // Sprint 1.10-I §9.2.4 模块 4:thesis 时间线辅助函数
         thesisDurationDays(t) {
-            if (!t || !t.created_at_utc) return '—';
+            if (!t || !t.created_at_utc) return '-';
             try {
                 const start = new Date(t.created_at_utc);
                 const end = t.closed_at_utc ? new Date(t.closed_at_utc) : new Date();
                 const days = Math.max(0, Math.round((end - start) / 86400000));
                 return days + 'd';
-            } catch (e) { return '—'; }
+            } catch (e) { return '-'; }
         },
         thesisStatusColor(status) {
             if (status === 'active') return 'text-blue-600 dark:text-blue-400';
@@ -219,7 +230,7 @@ function app() {
             const retryNext = rlObj.retry_next_attempt;
 
             if (retryExhausted) {
-                return 'AI 介入失败 — 请人工介入(超 2h 重试窗口或 max_attempts)';
+                return 'AI 介入失败 - 请人工介入(超 2h 重试窗口或 max_attempts)';
             }
             if (failedLayers.length > 0) {
                 const layers = failedLayers.join('/');
@@ -303,7 +314,7 @@ function app() {
 
         // Sprint 1.10-I §9.2.1:USD 格式化(简化版,不引入 Intl)
         formatUsd(v) {
-            if (v == null || isNaN(v)) return '—';
+            if (v == null || isNaN(v)) return '-';
             const n = Number(v);
             if (Math.abs(n) >= 1000) return '$' + n.toLocaleString(undefined, {
                 maximumFractionDigits: 0,
@@ -314,7 +325,7 @@ function app() {
         // Sprint 1.10-I §9.2.3:挂单价距当前 BTC 现价的 %(带 ± 号)
         distanceFromLive(orderPrice) {
             const live = this.livePrice();
-            if (!live || !orderPrice) return '—';
+            if (!live || !orderPrice) return '-';
             const pct = ((Number(orderPrice) - live) / live) * 100;
             return (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%';
         },
@@ -420,7 +431,7 @@ function app() {
             const src = this.livePriceData && this.livePriceData.source || '';
             if (src.startsWith('binance_spot')) return '实时(分钟级,Binance 现货)';
             if (src.includes('kline_1h')) return '1h K 线(fallback)';
-            return '—';
+            return '-';
         },
 
         // Sprint 2.3 R4:data_freshness 可能是字符串 'green'/'yellow'/'red',
@@ -474,43 +485,43 @@ function app() {
         },
         cardConfidence() {
             const tier = this.tp().confidence_tier;
-            if (!tier) return '—';
+            if (!tier) return '-';
             return { high: '高', medium: '中', low: '低' }[tier] || tier;
         },
         cardEntryZones() {
             const zones = this.tp().entry_zones || [];
-            if (zones.length === 0) return '—';
+            if (zones.length === 0) return '-';
             return zones.map(z =>
                 `$${z.price_low}-${z.price_high} (${z.allocation_pct}%)`
             ).join(', ');
         },
         cardStopLoss() {
             const sl = this.tp().stop_loss;
-            return sl != null ? '$' + sl : '—';
+            return sl != null ? '$' + sl : '-';
         },
         cardTakeProfits() {
             const tps = this.tp().take_profit_plan || [];
-            if (tps.length === 0) return '—';
+            if (tps.length === 0) return '-';
             return tps.map((t, i) =>
                 `TP${i+1} $${t.price} ×${t.size_pct}%`
             ).join(', ');
         },
         cardPositionCap() {
             const cap = this.tp().max_position_size_pct;
-            return cap != null ? cap + '%' : '—';
+            return cap != null ? cap + '%' : '-';
         },
         hasActivePosition() {
             const st = this.state?.main_strategy?.action_state;
             return ['LONG_OPEN', 'LONG_HOLD', 'LONG_TRIM', 'SHORT_OPEN', 'SHORT_HOLD', 'SHORT_TRIM'].includes(st);
         },
         cardCurrentPnl() {
-            return '—';
+            return '-';
         },
-        cardDistanceToStop() { return '—'; },
-        cardHoldingDuration() { return '—'; },
+        cardDistanceToStop() { return '-'; },
+        cardHoldingDuration() { return '-'; },
         cardHardInvalidations() {
             const his = this.hardInvalidationLevels();
-            if (his.length === 0) return '—';
+            if (his.length === 0) return '-';
             return his.slice(0, 3).map(h => `$${h.price}`).join(', ');
         },
         _startClock() {
@@ -647,7 +658,7 @@ function app() {
             // main_strategy:从 summary_card 反向推导(给老前端组件用)
             out.main_strategy = {
                 action_state: this._reverseLookupState(sc.action_state_label) || 'FLAT',
-                lifecycle_phase: sc.action_state_label || '—',
+                lifecycle_phase: sc.action_state_label || '-',
                 opportunity_grade: this._extractGrade(out.layer_cards) || 'none',
                 execution_permission: this._extractPermission(out.layer_cards) || 'watch',
                 observation_category: 'disciplined',
@@ -802,17 +813,17 @@ function app() {
         // ============== 格式化 ==============
         formatPrice(v) {
             // Sprint 1.5k:数据是 USDT 计价(Binance 现货 BTCUSDT),改 USDT 后缀
-            if (v == null) return '—';
+            if (v == null) return '-';
             return Number(v).toLocaleString(undefined,
                 { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' USDT';
         },
         formatPct(v, showSign) {
-            if (v == null) return '—';
+            if (v == null) return '-';
             const s = Number(v).toFixed(2);
             return (showSign && v >= 0 ? '+' : '') + s + '%';
         },
         formatFactorValue(v) {
-            if (v == null) return '—';
+            if (v == null) return '-';
             if (typeof v === 'number') {
                 if (Math.abs(v) >= 1000) return v.toLocaleString();
                 if (Math.abs(v) >= 1) return v.toFixed(2);
@@ -824,10 +835,10 @@ function app() {
             if (typeof v === 'object') return '...';
             return String(v);
         },
-        shortId(id) { return id ? String(id).slice(0, 8) : '—'; },
+        shortId(id) { return id ? String(id).slice(0, 8) : '-'; },
 
         get countdownLabel() {
-            if (!this.state || !this.state.meta || !this.state.meta.next_run_eta_bjt) return '—';
+            if (!this.state || !this.state.meta || !this.state.meta.next_run_eta_bjt) return '-';
             const m = String(this.state.meta.next_run_eta_bjt).match(
                 /(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})/);
             if (!m) return this.state.meta.next_run_eta_bjt;
@@ -870,7 +881,7 @@ function app() {
             return {
                 disciplined: '纪律性观望', watchful: '正常等待',
                 possibly_suppressed: '疑似被压制',
-            }[c] || c || '—';
+            }[c] || c || '-';
         },
         observationColor(c) {
             // Sprint 1.10-J commit 6 §X:删 cold_start_warming_up 颜色映射

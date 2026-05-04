@@ -1977,9 +1977,11 @@ event_trigger:
 
 ## 11.3 v1.4 重写
 
-- `src/ai/adjudicator.py`(master AI 改 thesis-aware)
+- `src/ai/agents/master_adjudicator.py`(master AI 改 thesis-aware)
+  <!-- 1.10-J commit 8 修:原 §11.3 写 src/ai/adjudicator.py 是路径错误,真路径在 agents/ 子目录 -->
 - master AI System Prompt
-- `src/decision/validator.py`(从 10 条扩展到 24 条)
+- `src/ai/validator.py`(从 10 条扩展到 24 条)
+  <!-- 1.10-J commit 8 修:原 §11.3 写 src/decision/validator.py 是路径错误,真路径在 src/ai/ -->
 - `src/strategy/state_machine.py`(14 档简化为 thesis lifecycle)
 - 网页 12 卡精简(已重复字段移除)
 

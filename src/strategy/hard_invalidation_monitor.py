@@ -184,13 +184,23 @@ class HardInvalidationMonitor:
                 "stop_loss_order_id": stop_loss_order_id,
             }
 
-        # 3. close_thesis(D4=b1:reuse stop_loss_filled reason + channel A)
+        # 3. close_thesis(D4=b1:stop_loss_filled reason)
+        # Sprint 1.10-L commit 6 §X(P0 #3 改造):
+        # 写死 close_channel='A' → cooldown_manager.determine_close_channel(...)
+        # 统一调用路径(stop_loss_filled 默认仍走 A,_REASON_TO_DEFAULT_CHANNEL 不变)
+        from src.strategy.cooldown_manager import determine_close_channel
+        ch = determine_close_channel(
+            close_reason="stop_loss_filled",
+            stop_loss_breached=True,  # 本路径 stop_loss 真触发
+            # 4 条件分级仅 invalidated reason 用,stop_loss_filled 走默认 'A';
+            # 其他 3 条件留 False 默认(此路径不读 L1/L2/L5,见 cooldown_manager:86)
+        )
         snapshot_id = f"event_inv_{uuid.uuid4().hex[:12]}"
         close_result = thesis_manager.close_thesis(
             conn,
             thesis_id=thesis_id,
             reason="stop_loss_filled",
-            close_channel="A",
+            close_channel=ch,
             closed_at_utc=now_iso,
             fills_for_close=[{
                 "order_id": stop_loss_order_id,

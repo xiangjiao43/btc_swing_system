@@ -562,12 +562,20 @@ class LifecycleManager:
                 (first_snap or {}).get("initial_capital") or 100000.0
             )
 
+            # Sprint 1.10-L commit 6:close_channel 改 determine_close_channel
+            # 4 条件分级(§4.3.3)— 从 strategy_state 提取 L1/L2/L5 信号
+            from src.strategy.cooldown_manager import determine_close_channel
+            channel = determine_close_channel(
+                close_reason="invalidated",
+                **_extract_4_conditions(strategy_state, active.get("direction")),
+            )
+
             snapshot_id = f"lc_archive_{uuid.uuid4().hex[:12]}"
             return thesis_manager.close_thesis(
                 self.conn,
                 thesis_id=active["thesis_id"],
-                reason="invalidated",        # commit 6 可改 dynamic
-                close_channel="B",           # commit 6 改 determine_close_channel 计算
+                reason="invalidated",
+                close_channel=channel,       # commit 6:函数计算(原写死 'B')
                 closed_at_utc=now_utc,
                 fills_for_close=[],          # 归档无新 fill
                 current_btc_price=current_btc,
@@ -630,6 +638,63 @@ class LifecycleManager:
 # ============================================================
 # 工具
 # ============================================================
+
+# Sprint 1.10-L commit 6(P0 #3 改造):提取 4 条件给 determine_close_channel
+# (§4.3.3 反手通道 4 条件分级,仅 invalidated reason 时升降级)
+def _extract_4_conditions(
+    strategy_state: Optional[dict[str, Any]],
+    thesis_direction: Optional[str],
+) -> dict[str, bool]:
+    """从 strategy_state 提取 4 个反手通道分级条件(v1.4 §4.3.3)。
+
+    Args:
+        strategy_state: 含 evidence_reports.layer_1/2/5 的 state dict
+        thesis_direction: 'long' / 'short' / None — 用于判定反向条件
+
+    Returns:
+        4 条件 dict(stop_loss_breached / l1_regime_fully_reversed /
+        l2_stance_strong_flip / l5_extreme_event_or_risk_off)
+    """
+    result = {
+        "stop_loss_breached": False,
+        "l1_regime_fully_reversed": False,
+        "l2_stance_strong_flip": False,
+        "l5_extreme_event_or_risk_off": False,
+    }
+    if not strategy_state or not thesis_direction:
+        return result
+    ev = (strategy_state.get("evidence_reports") or {})
+    l1 = ev.get("layer_1") or {}
+    l2 = ev.get("layer_2") or {}
+    l5 = ev.get("layer_5") or {}
+
+    # L1 完全反转(非过渡态)
+    regime = l1.get("regime")
+    if thesis_direction == "long" and regime == "trend_down":
+        result["l1_regime_fully_reversed"] = True
+    elif thesis_direction == "short" and regime == "trend_up":
+        result["l1_regime_fully_reversed"] = True
+
+    # L2 stance 强翻转(opposite + confidence ≥ 0.75)
+    stance = l2.get("stance")
+    confidence = l2.get("stance_confidence") or l2.get("confidence")
+    try:
+        conf_f = float(confidence) if confidence is not None else 0.0
+    except (ValueError, TypeError):
+        conf_f = 0.0
+    opposite = (
+        (thesis_direction == "long" and stance == "bearish")
+        or (thesis_direction == "short" and stance == "bullish")
+    )
+    if opposite and conf_f >= 0.75:
+        result["l2_stance_strong_flip"] = True
+
+    # L5 极端事件 OR macro_stance='risk_off'
+    if l5.get("extreme_event_detected") or l5.get("macro_stance") == "risk_off":
+        result["l5_extreme_event_or_risk_off"] = True
+
+    return result
+
 
 def _is_active_lifecycle(lc: Optional[dict[str, Any]]) -> bool:
     """lifecycle 是否处于活跃状态(pending_open 或 active)。"""

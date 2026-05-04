@@ -601,3 +601,117 @@ def test_archive_no_conn_skips_close_thesis():
     )
     # 仍归档,无 conn 时 close_thesis 安全跳过(不抛)
     assert out["status"] == "closed"
+
+
+# ============================================================
+# Sprint 1.10-L commit 6(P0 #3 改造)— _extract_4_conditions + 反手通道分级
+# ============================================================
+
+def test_extract_4_conditions_no_state_returns_all_false():
+    """无 strategy_state / direction → 全 False(default 'B' channel for invalidated)。"""
+    from src.strategy.lifecycle_manager import _extract_4_conditions
+    out = _extract_4_conditions(None, None)
+    assert all(v is False for v in out.values())
+    out2 = _extract_4_conditions({}, "long")
+    assert all(v is False for v in out2.values())
+
+
+def test_extract_4_conditions_long_full_reversal_channel_c():
+    """long thesis 完全反转条件:L1=trend_down + L2=bearish 0.85 + L5 risk_off
+    → 3/4 满足(stop_loss_breached=False)→ channel C。"""
+    from src.strategy.cooldown_manager import determine_close_channel
+    from src.strategy.lifecycle_manager import _extract_4_conditions
+    state = {
+        "evidence_reports": {
+            "layer_1": {"regime": "trend_down"},
+            "layer_2": {"stance": "bearish", "stance_confidence": 0.85},
+            "layer_5": {"macro_stance": "risk_off"},
+        },
+    }
+    conds = _extract_4_conditions(state, "long")
+    assert conds["l1_regime_fully_reversed"] is True
+    assert conds["l2_stance_strong_flip"] is True
+    assert conds["l5_extreme_event_or_risk_off"] is True
+    assert conds["stop_loss_breached"] is False
+    # 3/4 → C
+    ch = determine_close_channel(close_reason="invalidated", **conds)
+    assert ch == "C"
+
+
+def test_extract_4_conditions_short_partial_reversal_channel_b():
+    """short thesis 部分反转:L1=trend_up + L2=neutral 0.6 + L5 normal
+    → 1/4 满足(stop_loss_breached=False)→ channel B(默认)。"""
+    from src.strategy.cooldown_manager import determine_close_channel
+    from src.strategy.lifecycle_manager import _extract_4_conditions
+    state = {
+        "evidence_reports": {
+            "layer_1": {"regime": "trend_up"},        # short 反转
+            "layer_2": {"stance": "neutral", "stance_confidence": 0.6},  # 不强翻
+            "layer_5": {"macro_stance": "risk_neutral", "extreme_event_detected": False},
+        },
+    }
+    conds = _extract_4_conditions(state, "short")
+    assert conds["l1_regime_fully_reversed"] is True
+    assert conds["l2_stance_strong_flip"] is False
+    assert conds["l5_extreme_event_or_risk_off"] is False
+    ch = determine_close_channel(close_reason="invalidated", **conds)
+    # 1/4 invalidated 默认 B
+    assert ch == "B"
+
+
+def test_extract_4_conditions_l5_extreme_event_only():
+    """仅 L5 极端事件 → l5_extreme_event_or_risk_off=True 即使 macro_stance 不是 risk_off。"""
+    from src.strategy.lifecycle_manager import _extract_4_conditions
+    state = {
+        "evidence_reports": {
+            "layer_5": {"extreme_event_detected": True, "macro_stance": "risk_neutral"},
+        },
+    }
+    conds = _extract_4_conditions(state, "long")
+    assert conds["l5_extreme_event_or_risk_off"] is True
+
+
+def test_extract_4_conditions_transition_regime_not_fully_reversed():
+    """transition_down 不算 long 完全反转(只 trend_down 算)— modeling §4.3.3。"""
+    from src.strategy.lifecycle_manager import _extract_4_conditions
+    state = {
+        "evidence_reports": {"layer_1": {"regime": "transition_down"}},
+    }
+    conds = _extract_4_conditions(state, "long")
+    assert conds["l1_regime_fully_reversed"] is False
+
+
+def test_archive_uses_channel_c_when_4_conditions_3of4(tmp_path):
+    """端到端 commit 6 改造:lifecycle 归档时 4 条件分级真触发 → channel='C'(立即反手)。"""
+    conn = _make_conn_with_v14_schema()
+    _seed_active_thesis_for_archive(conn, "th_arch_c4")
+    mgr = LifecycleManager(conn=conn)
+    lc = {
+        "status": "active", "direction": "long",
+        "current_floating_pnl_pct": -3.0,
+    }
+    state = {
+        "market_snapshot": {"btc_price_usd": 67000.0},
+        "evidence_reports": {
+            "layer_1": {"regime": "trend_down"},          # ✓ 反转
+            "layer_2": {"stance": "bearish", "stance_confidence": 0.85},  # ✓ 强翻
+            "layer_5": {"extreme_event_detected": True, "macro_stance": "risk_off"},  # ✓
+        },
+    }
+    out = mgr.compute_post_sm(
+        prev_state="LONG_EXIT", current_state="FLAT",
+        lifecycle=lc, strategy_state=state, context={},
+        run_id="r_archive_c4", now_utc=_now_iso(),
+    )
+    conn.commit()
+    assert out["status"] == "closed"
+    # thesis close_channel 应是 'C'(3/4 满足,§4.3.3)
+    th = conn.execute(
+        "SELECT close_channel, status FROM theses WHERE thesis_id=?",
+        ("th_arch_c4",),
+    ).fetchone()
+    assert th["close_channel"] == "C", (
+        f"4 条件 3/4 满足应是 channel C,实际 {th['close_channel']}"
+    )
+    assert th["status"] == "invalidated"
+    conn.close()

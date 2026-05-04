@@ -19,8 +19,9 @@ from src.strategy.state_machine import StateMachine
 from src.strategy.state_machine_inputs import (
     apply_inputs_to_strategy_state,
     build_state_machine_fields,
-    derive_account_state,
 )
+# Sprint 1.10-J commit 4a §X:derive_account_state 已删,本测试文件相关用例
+# 整删 / 改成不传 account_state(state_machine 内部默认空 dict)。
 
 
 # ============================================================
@@ -412,150 +413,17 @@ def test_apply_writes_to_correct_paths():
     assert state["evidence_reports"]["layer_4"]["hard_invalidation_breached"] is False
 
 
-def test_derive_account_state_long():
-    fields = {"account_has_long": True, "account_has_short": False}
-    a = derive_account_state(fields)
-    assert a["long_position_size"] > 0
-    assert a["short_position_size"] == 0
+# Sprint 1.10-J commit 4a §X:test_derive_account_state_long 整删
+# (derive_account_state 函数已删,v1.4 §11.2 删 account_state 真实账户假设)
 
 
 # ============================================================
 # 集成回归:state_machine 之前 fields=空 dict → 永远卡 FLAT;
 #                填充后 → 真实迁移
+# Sprint 1.10-J commit 4a:本节 3 个 e2e 整删 — 14 档老逻辑测试
+# (LONG_PLANNED→OPEN / OPEN→HOLD / HOLD→TRIM)依赖 account_has_long=True,
+# 而 D 项删 account_state 后该字段永远 False;state_machine 主体 1190 行
+# 重写留 1.10-K 跟 E.3 一起做,届时 thesis lifecycle 替代 14 档转换会
+# 重新覆盖这些路径(thesis-driven e2e tests)。
 # ============================================================
 
-def test_state_machine_no_longer_stuck_at_flat_when_fields_filled():
-    """LONG_PLANNED + entry_zone 命中 → state_machine 迁移到 LONG_OPEN。
-
-    这个测试是反"前 sprint fields=空" 退化的 guard。"""
-    sm = StateMachine()
-
-    # 构造完整 strategy_state 模拟 LONG_PLANNED 上下文
-    curr = {
-        "evidence_reports": {
-            "layer_1": {"regime": "trend_up"},
-            "layer_2": {"stance": "bullish", "stance_confidence": 0.7},
-            "layer_3": {"opportunity_grade": "B", "execution_permission": "can_open"},
-            "layer_4": {"overall_risk_level": "moderate", "hard_invalidation_levels": []},
-            "layer_5": {"macro_stance": "risk_neutral"},
-        },
-        "trade_plan": {
-            "entry_zones": [{"price_low": 68000, "price_high": 68200}],
-            "stop_loss": 65000,
-        },
-    }
-
-    # 填充字段(prev=LONG_PLANNED,1H 收盘 68100 已穿入区间)
-    fields = build_state_machine_fields(
-        prev_state="LONG_PLANNED",
-        prev_strategy_state={"state": {"state_machine": {"current_state": "LONG_PLANNED"}}},
-        current_strategy_state=curr,
-        context={"klines_1h": _df_klines([68500, 68100])},
-        lifecycle={},
-    )
-    apply_inputs_to_strategy_state(curr, fields)
-    account = derive_account_state(fields)
-
-    prev_record = {
-        "state": {
-            "state_machine": {
-                "current_state": "LONG_PLANNED",
-                "state_entered_at_utc": _hours_ago_iso(2),
-            },
-        },
-    }
-    result = sm.compute_next(curr, previous_record=prev_record,
-                             account_state=account, now_utc=_now_iso())
-    assert result["current_state"] == "LONG_OPEN", (
-        f"state_machine 应迁移到 LONG_OPEN,实际 {result['current_state']}; "
-        f"matched={result.get('matched_conditions')}"
-    )
-
-
-def test_state_machine_long_open_to_long_hold_after_24h_3pct_pnl():
-    """LONG_OPEN + 24h + 3% 浮盈 → LONG_HOLD。"""
-    sm = StateMachine()
-    curr = {
-        "evidence_reports": {
-            "layer_1": {"regime": "trend_up"},
-            "layer_2": {"stance": "bullish", "stance_confidence": 0.7},
-            "layer_3": {"opportunity_grade": "B", "execution_permission": "can_open"},
-            "layer_4": {"overall_risk_level": "moderate", "hard_invalidation_levels": []},
-            "layer_5": {"macro_stance": "risk_neutral"},
-        },
-        "trade_plan": {"stop_loss": 65000},
-    }
-    fields = build_state_machine_fields(
-        prev_state="LONG_OPEN",
-        prev_strategy_state={"state": {"evidence_reports": {"layer_2": {"stance": "bullish"}}}},
-        current_strategy_state=curr,
-        context={"klines_1h": _df_klines([70040])},
-        lifecycle={
-            "average_entry_price": 68000,
-            "origin_time_utc": _hours_ago_iso(25),
-        },
-    )
-    apply_inputs_to_strategy_state(curr, fields)
-    account = derive_account_state(fields)
-
-    prev_record = {
-        "state": {
-            "state_machine": {
-                "current_state": "LONG_OPEN",
-                "state_entered_at_utc": _hours_ago_iso(25),
-            },
-        },
-    }
-    result = sm.compute_next(curr, previous_record=prev_record,
-                             account_state=account, now_utc=_now_iso())
-    assert result["current_state"] == "LONG_HOLD", (
-        f"应进入 LONG_HOLD,实际 {result['current_state']}; "
-        f"matched={result.get('matched_conditions')}"
-    )
-
-
-def test_state_machine_long_hold_to_long_trim_when_tp_hit():
-    """LONG_HOLD + take_profit_plan 第一档 80000 + 当日 1D 高点 80100 → LONG_TRIM。"""
-    sm = StateMachine()
-    curr = {
-        "evidence_reports": {
-            "layer_1": {"regime": "trend_up"},
-            "layer_2": {"stance": "bullish", "stance_confidence": 0.7},
-            "layer_3": {"opportunity_grade": "A", "execution_permission": "can_open"},
-            "layer_4": {"overall_risk_level": "moderate", "hard_invalidation_levels": []},
-            "layer_5": {"macro_stance": "risk_neutral"},
-        },
-        "trade_plan": {
-            "take_profit_plan": [{"target_price": 80000, "fraction": 0.3}],
-        },
-        "adjudicator": {"thesis_still_valid": "fully_valid"},
-    }
-    fields = build_state_machine_fields(
-        prev_state="LONG_HOLD",
-        prev_strategy_state=None,
-        current_strategy_state=curr,
-        context={"klines_1d": _df_klines([79800], highs=[80100], lows=[79500])},
-        lifecycle={"origin_time_utc": _hours_ago_iso(72),
-                   "average_entry_price": 68000},
-    )
-    # next_trim_triggered 走 lifecycle.next_trim_triggered → state_machine LONG_HOLD
-    # 路径里没有直接读 next_trim_triggered,而是看 tp_target_hit。所以我们也手动
-    # 把 next_trim_triggered 反映到 trade_plan.tp_target_hit(state_machine 那个字段)。
-    fields["tp_target_hit"] = fields["next_trim_triggered"]
-    apply_inputs_to_strategy_state(curr, fields)
-    account = derive_account_state(fields)
-
-    prev_record = {
-        "state": {
-            "state_machine": {
-                "current_state": "LONG_HOLD",
-                "state_entered_at_utc": _hours_ago_iso(48),
-            },
-        },
-    }
-    result = sm.compute_next(curr, previous_record=prev_record,
-                             account_state=account, now_utc=_now_iso())
-    assert result["current_state"] == "LONG_TRIM", (
-        f"应进入 LONG_TRIM,实际 {result['current_state']}; "
-        f"matched={result.get('matched_conditions')}"
-    )

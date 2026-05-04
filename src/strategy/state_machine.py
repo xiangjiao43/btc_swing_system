@@ -155,7 +155,6 @@ class StateMachine:
         strategy_state: dict[str, Any],
         *,
         previous_record: Optional[dict[str, Any]] = None,
-        account_state: Optional[dict[str, Any]] = None,
         now_utc: Optional[str] = None,
     ) -> dict[str, Any]:
         """
@@ -163,10 +162,15 @@ class StateMachine:
           strategy_state:   本轮已填好的 state(evidence_reports + composite_factors
                             + trade_plan + lifecycle + macro_events 等)
           previous_record:  DAO 查到的上一条 strategy_state_history 行
-          account_state:    账户状态(hold、持仓等)
           now_utc:          本次 tick 时间,ISO UTC。默认 strategy_state.reference_timestamp_utc
         Returns:
           StateMachineResult.to_dict()
+
+        Sprint 1.10-J commit 4a §X:删 account_state 参数(v1.4 §11.2 删
+        "account_state 真实账户假设")。内部 _build_field_snapshot 传空 dict,
+        fields["account_has_long"] / ["account_has_short"] 永远 False,
+        14 档转换中读这两个字段的路径(line 737/764)在 1.10-K 主体重写时
+        与 E.3 一起改造。
         """
         now = now_utc or strategy_state.get("reference_timestamp_utc") or _utc_now_iso()
 
@@ -179,7 +183,7 @@ class StateMachine:
 
         fields = _build_field_snapshot(
             strategy_state=strategy_state,
-            account_state=account_state or {},
+            account_state={},  # Sprint 1.10-J commit 4a §X:写死空 dict(留 1.10-K)
             prev_state=prev_state,
             prev_entered_at=prev_entered_at,
             prev_flip_bounds=prev_flip_bounds,

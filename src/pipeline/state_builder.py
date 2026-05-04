@@ -1215,7 +1215,6 @@ class StrategyStateBuilder:
         from ..strategy.state_machine_inputs import (
             apply_inputs_to_strategy_state,
             build_state_machine_fields,
-            derive_account_state,
         )
 
         previous_record = None
@@ -1244,26 +1243,15 @@ class StrategyStateBuilder:
                 now_utc=run_ts_utc,
             )
             apply_inputs_to_strategy_state(state, sm_fields)
-            derived_account = derive_account_state(sm_fields)
         except Exception as e:
             logger.warning("build_state_machine_fields failed (non-fatal): %s", e)
-            sm_fields = {}
-            derived_account = {}
 
-        # account_state 优先级:外部 provider > sm_fields 推断 > 空 dict
-        account_state: Optional[dict[str, Any]] = state.get("account_state")
-        if account_state is None and self._account_state_provider is not None:
-            try:
-                account_state = self._account_state_provider()
-            except Exception as e:
-                logger.warning("account_state_provider failed: %s", e)
-        if account_state is None:
-            account_state = derived_account
-
+        # Sprint 1.10-J commit 4a §X:account_state 推断 / provider 已删
+        # (v1.4 §11.2 删 "account_state 真实账户假设";state_machine 内部
+        # account_has_long / account_has_short 永远 False,1.10-K 主体重写一起改)
         return self._state_machine.compute_next(
             state,
             previous_record=previous_record,
-            account_state=account_state,
             now_utc=run_ts_utc,
         )
 

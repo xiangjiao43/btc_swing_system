@@ -4,7 +4,8 @@
   - L1-L3 输出
   - 当前 BTC 价格(实时)
   - 拥挤度信号(funding 极端 / OI 集中度等)
-  - account_state(若有持仓)
+  - 持仓信息(v1.4 §11.2 删除 account_state 真实账户假设;
+    v1.4 起持仓信息从 active_thesis + virtual_account 推断,见 1.10-A → I)
 
 输出 schema:
   {

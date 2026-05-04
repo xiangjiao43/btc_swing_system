@@ -7,9 +7,22 @@
 - 最终 lifecycle_id 切换到新的(SHORT_PLANNED 是新 lc,不复用旧的)
 
 §Z:不 mock 字段,用真 dict + 真 DAO。
+
+Sprint 1.10-J commit 4a §X:整模块 SKIP — D 项 account_state 删除 +
+E.1.b state_machine FLIP_WATCH 主体留 1.10-K,本 e2e 测试涉及
+LONG_HOLD/TRIM/EXIT/FLIP_WATCH 全 14 档转换;留 1.10-K 重写后 thesis
+lifecycle e2e 重新覆盖。
 """
 
 from __future__ import annotations
+
+import pytest
+
+# Sprint 1.10-J commit 4a §X:整模块 SKIP
+pytestmark = pytest.mark.skip(
+    reason="1.10-J commit 4a:account_state 删 + FLIP_WATCH 主体留 1.10-K;"
+           "1.10-K 重写后 thesis-driven e2e 重新覆盖"
+)
 
 import sqlite3
 import tempfile
@@ -17,7 +30,6 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pandas as pd
-import pytest
 
 from src.data.storage.connection import init_db
 from src.data.storage.dao import LifecyclesDAO
@@ -27,7 +39,6 @@ from src.strategy.state_machine import StateMachine
 from src.strategy.state_machine_inputs import (
     apply_inputs_to_strategy_state,
     build_state_machine_fields,
-    derive_account_state,
 )
 
 

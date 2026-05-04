@@ -10,8 +10,10 @@
   apply_inputs_to_strategy_state(state, fields) → 把 fields 写到 strategy_state
                                                   对应路径(trade_plan / lifecycle /
                                                   evidence_reports.layer_2 / layer_4)
-  derive_account_state(fields) → 返回 {long_position_size, short_position_size}
-                                  供 state_machine.compute_next 的 account_state= 使用
+
+Sprint 1.10-J commit 4a §X:derive_account_state 函数已删除
+  (v1.4 §11.2 删 "account_state 真实账户假设";state_machine 主体
+  1190 行重写留 1.10-K 跟 E.3 一起做)。
 
 不重写 state_machine.py 的迁移逻辑,不修改其字段名(§X)。
 
@@ -270,12 +272,11 @@ def apply_inputs_to_strategy_state(
     return strategy_state
 
 
-def derive_account_state(fields: dict[str, Any]) -> dict[str, Any]:
-    """从 fields 推出 account_state(state_machine.compute_next 单独参数)。"""
-    return {
-        "long_position_size": 1 if fields.get("account_has_long") else 0,
-        "short_position_size": 1 if fields.get("account_has_short") else 0,
-    }
+# Sprint 1.10-J commit 4a §X:derive_account_state 函数已删
+# 旧用途:state_machine.compute_next(account_state=) 参数(已删)
+# v1.4 §11.2 移除 "account_state 真实账户假设"
+# state_machine 内部 account_has_long / account_has_short 字段保留 False(留 1.10-K
+# 跟 state_machine 主体 1190 行重写一起改)
 
 
 # ============================================================

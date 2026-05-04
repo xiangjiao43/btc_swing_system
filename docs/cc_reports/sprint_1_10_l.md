@@ -52,8 +52,12 @@
 | 4 | thesis_manager.close_thesis 幂等检查 + 5 单测 | 2 | ✅ `cde6f7f` |
 | 5 | _archive_lifecycle 接通 close_thesis(P0 #2 5A)+ 5 单测 | 2 | ✅ `68da502` |
 | 6 | hard_invalidation_monitor + lifecycle_manager 改 determine_close_channel + 6 单测 | 3 | ✅ `03b9a08` |
-| 7 | test_lifecycle_e2e_reversal 反手 channel C 端到端重新覆盖 + 2 新 e2e | 1 | ✅ 待 push |
-| **==中断点 9:P0 #2/#3 反向闭环完成==**| | | 🛑 已到达 |
+| 7 | test_lifecycle_e2e_reversal 反手 channel C 端到端重新覆盖 + 2 新 e2e | 1 | ✅ `c49aefa` |
+| **==中断点 9:P0 #2/#3 反向闭环完成==**| | | ✅ 已通过(服务器同步)|
+| 8 | app.js 渐进迁移读 state_machine.thesis / system_state(P1 #4)+ 5 单测 | 2 | ✅ `c981838` |
+| 9 | lifecycle_manager FLIP/PPR review only(P2 #5 降级 9A)+ 1 处过时注释修订 | 1 | ✅ 待 push |
+| 10 | ~~K-A 报告重复段落清理~~ — 跳过(commit 1 P2 #7 已提前完成) | — | ⏭ 跳过 |
+| **==中断点 10:P1 + P2 完成,准备真 API 验证==**| | | 🛑 已到达 |
 | **阶段 2:P0 #2 lifecycle→ThesesDAO + P0 #3 反手通道接通**| | | |
 | 4 | thesis_manager.close_thesis 幂等检查 + 单测 | 2 | — |
 | 5 | lifecycle_manager._archive_lifecycle 接入 close_thesis + 单测 | 2 | — |
@@ -126,6 +130,35 @@
 - `_close_active_thesis_for_archive`:`'B'` → `determine_close_channel('invalidated', **conds)`
 - 6 测试覆盖:default(无 state)/ long 完全反转 3/4 → C / short 1/4 → B / L5 极端单独 / transition_down 不算完全反转 / 端到端 channel C
 - §Z pytest 1522 / 1 / 0
+
+### Commit 8(app.js 渐进迁移 — P1 #4)
+**设计纪律**:主路径不变,镜像作 fallback(冗余 + 防御):
+- 主路径 1: GET /api/theses/active → activeThesis(真 thesis 行,字段最全)
+- 主路径 2: GET /api/health.review_pending → reviewPending(RP 横幅)
+- 镜像 fallback 1: smSystemState='review_pending' → 合成 RP 占位(防 health API 失败)
+- 镜像 fallback 2: !activeThesis && smThesis → 最小占位(防 /api/theses/active 失败)
+- 占位带 `_from_state_machine_mirror=true` 标记
+
+`web/assets/app.js`:fetchAuxData() 末尾加 ~30 行 fallback 逻辑
+`tests/test_web_modules_4_5_rp_failure.py`:5 新单测覆盖 K-A commit 7 字段消费
+- ✅ pytest 1529 passed, 1 skipped, 0 failed(基准 1524 → +5)
+
+### Commit 9(lifecycle_manager FLIP/PPR — P2 #5 降级方案 9A,review only)
+**Scope 重判断**(commit 9 启动前 stop + 报告):
+- 用户原指令"用 thesis-driven 替代 14 档判断"跟 K-A 方案 C(14 档枚举保留)反向
+- lifecycle 无 thesis_id FK,改 thesis-driven 需每次 `ThesesDAO.get_active`(性能 + 耦合)
+- "双 source of truth 是有意"— state_machine / thesis_manager / lifecycle_manager 各自职责
+
+**用户拍板方案 9A:降级为 review only**
+- ✅ 5 处业务条件**不动**(14 档判断符合方案 C,正确简洁)
+- ✅ 4 处历史注释 review:
+  - 行 15 / 203 / 499 docstring 准确描述当前行为(FLAT/FLIP_WATCH stable / *_EXIT 归档触发)+ 跟方案 C 一致 → **不动**
+  - 行 510-511 注释**1 处过时**(说"FLIP_WATCH → *_PLANNED 路径能读到",但 K-A commit 5 _from_FLIP_WATCH 已 stub stay 该路径已废)→ 修订为"prev_cycle_side 镜像保留给 future thesis_manager 反手出口接通(checklist (11) P0)"
+
+**§Z 验证**:
+- ✅ pytest 全量:**1529 passed, 1 skipped, 0 failed**(基准 1529 维持,纯注释修订 0 regression)
+- ✅ 0 业务行为改动 + 1 处过时注释修订
+- 此 commit 是 1.10-L 第 2 个 review only commit(K-A commit 9 是第 1 个),工程纪律成熟形态:**做 review,不做无意义改动**
 
 ### Commit 7(反手 e2e 重新覆盖 — 替代 K-A commit 10 删除的 Tick 7)
 **背景**:K-A commit 10 删除原 Tick 7 "FLIP_WATCH → SHORT_PLANNED 反手" 测试(理由:_from_FLIP_WATCH stub stay,反手出口由 thesis_manager 接管)。1.10-L commit 5/6 完成后,反手通道分级**真接通**(close_thesis 写入 close_channel='C'/'B'/'A',cooldown_manager.is_in_cooldown 据 channel 算 cooldown_end)。

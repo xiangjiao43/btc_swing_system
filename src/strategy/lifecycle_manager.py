@@ -507,8 +507,10 @@ class LifecycleManager:
         lc["exit_time_utc"] = now_utc
         lc["exit_time_bjt"] = _to_bjt(now_utc)
         lc["exit_run_id"] = run_id
-        # Sprint 1.5b-C:archive 时把 direction 镜像到 prev_cycle_side,
-        # 让 state_machine FLIP_WATCH → *_PLANNED 路径能读到
+        # Sprint 1.5b-C:archive 时把 direction 镜像到 prev_cycle_side。
+        # Sprint 1.10-K-A commit 5 后:_from_FLIP_WATCH 已 stub stay,原 FLIP_WATCH
+        # → *_PLANNED 反手路径已废;prev_cycle_side 镜像保留给 future thesis_manager
+        # 反手出口接通(1.10-L checklist (11) P0 反手出口实现)。
         if lc.get("direction") in {"long", "short"}:
             lc["prev_cycle_side"] = lc["direction"]
 

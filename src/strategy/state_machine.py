@@ -74,7 +74,12 @@ _PLANNED_STATES: frozenset[str] = frozenset({
 
 @dataclass
 class StateMachineResult:
-    """StateMachine.compute_next 返回结构。"""
+    """StateMachine.compute_next 返回结构。
+
+    Sprint 1.10-K-A commit 7(方案 C):新增 thesis + system_state 字段
+    (向后兼容,14 档枚举 previous_state / current_state 保留)。
+    上游可渐进迁移到读 thesis dict / system_state(本 sprint 只加镜像不强改)。
+    """
 
     previous_state: Optional[str]
     current_state: str
@@ -86,9 +91,72 @@ class StateMachineResult:
     flip_watch_bounds: Optional[dict[str, Any]] = None
     on_enter_effects: dict[str, Any] = field(default_factory=dict)
     disciplines_violated: list[str] = field(default_factory=list)
+    # Sprint 1.10-K-A commit 7(方案 C):14 档 ↔ thesis 5 档映射镜像
+    thesis: Optional[dict[str, Any]] = None
+    system_state: str = "normal"
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+# Sprint 1.10-K-A commit 7(方案 C):14 档 ↔ thesis 5 档映射(v1.4 §4.1.5)
+# 14 档枚举字符串保留(向后兼容),compute_next 输出加 thesis dict + system_state
+# 镜像供新调用方使用。
+def _state_to_thesis_mirror(state: str) -> tuple[Optional[dict[str, Any]], str]:
+    """v1.4 §4.1.5 14 档 → thesis 5 档 + system_state 映射。
+
+    Returns: (thesis_dict, system_state)
+      thesis_dict: None | {direction, lifecycle_stage, status}
+      system_state: 'normal' | 'PROTECTION' | 'review_pending'
+
+    映射表:
+      FLAT                       → thesis=None,                                    system='normal'
+      LONG_PLANNED               → thesis={direction:'long',  stage:'planned',  status:'active'},                  system='normal'
+      LONG_OPEN                  → thesis={direction:'long',  stage:'opened',   status:'active'},                  system='normal'
+      LONG_HOLD                  → thesis={direction:'long',  stage:'holding',  status:'active'},                  system='normal'
+      LONG_TRIM                  → thesis={direction:'long',  stage:'trim',     status:'active'},                  system='normal'
+      LONG_EXIT                  → thesis={direction:'long',  stage:'closed',   status:'closed_pending'},          system='normal'
+      SHORT_*                    → mirror of LONG_*
+      FLIP_WATCH                 → thesis=None(冷却态由 thesis.closed_at 隐式驱动),system='normal'
+      PROTECTION                 → thesis=None(active thesis 已 closed_protection),system='PROTECTION'
+      POST_PROTECTION_REASSESS   → thesis=None,                                    system='review_pending'
+
+    注:LONG_EXIT/SHORT_EXIT 的 status 设为 'closed_pending'(中间态),
+    真正 closed_profit / closed_loss 区分留 thesis_manager(future sprint)。
+    """
+    if state == "FLAT":
+        return None, "normal"
+    if state == "FLIP_WATCH":
+        # 冷却态:无 active thesis,由 thesis.closed_at 隐式驱动出口
+        return None, "normal"
+    if state == "PROTECTION":
+        # PROTECTION:active thesis 在 _from_PROTECTION 进入时已应 closed_protection
+        return None, "PROTECTION"
+    if state == "POST_PROTECTION_REASSESS":
+        # PPR:review_pending 路由(commit 6 _verify_disciplines 已注明)
+        return None, "review_pending"
+
+    # LONG_* / SHORT_* 14 档
+    if state.startswith("LONG_"):
+        direction = "long"
+    elif state.startswith("SHORT_"):
+        direction = "short"
+    else:
+        return None, "normal"  # 防御:不识别的 state
+
+    stage_map = {
+        "PLANNED": "planned",
+        "OPEN":    "opened",
+        "HOLD":    "holding",
+        "TRIM":    "trim",
+        "EXIT":    "closed",
+    }
+    suffix = state.split("_", 1)[1]  # PLANNED / OPEN / HOLD / TRIM / EXIT
+    stage = stage_map.get(suffix)
+    if stage is None:
+        return None, "normal"
+    status = "closed_pending" if suffix == "EXIT" else "active"
+    return {"direction": direction, "lifecycle_stage": stage, "status": status}, "normal"
 
 
 # ============================================================
@@ -277,6 +345,9 @@ class StateMachine:
             flip_bounds=flip_bounds,
         )
 
+        # Sprint 1.10-K-A commit 7(方案 C):14 档 → thesis dict + system_state 镜像
+        thesis_mirror, system_state_value = _state_to_thesis_mirror(target)
+
         return StateMachineResult(
             previous_state=prev_state,
             current_state=target,
@@ -288,6 +359,8 @@ class StateMachine:
             flip_watch_bounds=flip_bounds,
             on_enter_effects=on_enter,
             disciplines_violated=[],
+            thesis=thesis_mirror,
+            system_state=system_state_value,
         ).to_dict()
 
     # ------------------------------------------------------------------

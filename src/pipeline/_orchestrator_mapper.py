@@ -151,6 +151,19 @@ def _map_orchestrator_result_to_state(
 # 辅助函数
 # ============================================================
 
+def _state_to_thesis_mirror_safe(
+    state: Optional[str],
+) -> tuple[Optional[dict[str, Any]], str]:
+    """Sprint 1.10-K-A commit 7(方案 C):
+    在 _orchestrator_mapper 镜像 state_machine._state_to_thesis_mirror。
+    state=None 时返回 (None, 'normal')。
+    """
+    if not state:
+        return None, "normal"
+    from src.strategy.state_machine import _state_to_thesis_mirror
+    return _state_to_thesis_mirror(state)
+
+
 def _derive_fallback_level(status: str) -> Optional[str]:
     """orchestrator status → strategy_runs.fallback_level。
 
@@ -256,6 +269,12 @@ def _build_summary_v13(
         "state_machine.stable_in_state": (
             state_trans.get("from_state") == state_trans.get("to_state")
         ),
+        # Sprint 1.10-K-A commit 7(方案 C):14 档 ↔ thesis 5 档镜像字段
+        # 上游可渐进迁移到 thesis dict / system_state(本 sprint 不强改原 4 字段)
+        "state_machine.thesis": _state_to_thesis_mirror_safe(
+            state_trans.get("to_state"))[0],
+        "state_machine.system_state": _state_to_thesis_mirror_safe(
+            state_trans.get("to_state"))[1],
         # adjudicator(master 输出 = 主裁)
         "adjudicator.action": trade_plan.get("action"),
         "adjudicator.direction": trade_plan.get("direction"),

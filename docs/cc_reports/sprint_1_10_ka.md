@@ -74,7 +74,9 @@
 | 4 | migration 015 本地真跑(备份 + DROP + 21→19 / 12→12 / 7→7 + verify K 段更新)| 3 | ✅ `0fc692d` |
 | **==中断点 5:migration 015 真跑后,本地 + 生产 21→19 列==**| | | ✅ 已通过(服务器 100% 同步)|
 | 5 | _from_FLIP_WATCH stub(方案 5A)+ _calc_flip_watch_bounds 删 + _on_enter_effects FLIP_WATCH 分支删 + 2 helper 删 + 8 测试 skip(方案 T2)| 3 | ✅ `7cddce4` |
-| 6 | _from_POST_PROTECTION_REASSESS stub(方案 5A)+ _PPR_ALLOWED_TARGETS 删 + _on_enter_effects PPR 分支精简 + _verify_disciplines review_pending 路由说明 + 1 测试 skip | 2 | ✅ 待 push |
+| 6 | _from_POST_PROTECTION_REASSESS stub(方案 5A)+ _PPR_ALLOWED_TARGETS 删 + _on_enter_effects PPR 分支精简 + _verify_disciplines review_pending 路由说明 + 1 测试 skip | 2 | ✅ `6f5b7d2` |
+| 7 | compute_next 输出 thesis dict + system_state 镜像(方案 C 关键)+ _orchestrator_mapper 镜像字段 + 6 新单测 | 3 | ✅ 待 push |
+| **==中断点 6:commit 7 完成,thesis dict + system_state 输出验证==**| | | 🛑 已到达 |
 | **==中断点 5:migration 015 真跑后,本地 + 生产 21→19 列==**| | | 🛑 |
 | **阶段 2:state_machine 重写**| | | |
 | 5 | _from_FLIP_WATCH 整删 + _calc_flip_watch_bounds 删 + _on_enter_effects FLIP_WATCH 分支删 + state_machine_inputs._flip_watch_bounds_state + _prev_cycle_side 删 | 2 | — |
@@ -241,6 +243,43 @@
 **全量回归**:`tests/` → **1490 passed, 4 skipped, 0 failed**(基准 1490 → 0 净增,3 测试改造 + 写入方清理后维持)
 
 **commit 3 重新定义**:测试 fixtures 中 cold_start_warming_up / SCENARIO_COLD_START 等纯叙事场景测试残留(~10 测试),不影响生产代码 INSERT/SELECT。本来在 commit 3 计划里的 19 测试改造,大部分已在 commit 2 内顺手完成。commit 3 改为收尾测试残留 + 必要文档。
+
+### Commit 7(compute_next 输出加 thesis dict + system_state — 方案 C 关键)
+**实际改动**:
+- `src/strategy/state_machine.py`:
+  - `StateMachineResult` dataclass 加 2 字段:`thesis: Optional[dict[str, Any]] = None` / `system_state: str = "normal"`
+  - 新增模块级 `_state_to_thesis_mirror(state) → tuple[Optional[dict], str]`(v1.4 §4.1.5 14↔5 映射表完整实施)
+  - `_build_result` 计算 `thesis_mirror, system_state_value = _state_to_thesis_mirror(target)` + 传入 dataclass
+- `src/pipeline/_orchestrator_mapper.py`:
+  - 新增 `_state_to_thesis_mirror_safe(state)` helper(模块边界,处理 None state 防御)
+  - `_map_orchestrator_result_to_state` 输出加 2 个新字段:`state_machine.thesis` + `state_machine.system_state`(向后兼容,原 4 个 `state_machine.*` 字段保留)
+- `tests/test_state_machine.py`:加 6 个新测试(`test_compute_next_output_includes_thesis_and_system_state` + 5 个映射验证)
+
+**14 档 → thesis 5 档 + system_state 映射表**(v1.4 §4.1.5 严格对齐):
+| 14 档 | thesis dict | system_state |
+|---|---|---|
+| FLAT | None | 'normal' |
+| LONG_PLANNED/OPEN/HOLD/TRIM | {direction:'long', stage:planned/opened/holding/trim, status:'active'} | 'normal' |
+| LONG_EXIT | {direction:'long', stage:'closed', status:'closed_pending'} | 'normal' |
+| SHORT_* | mirror | 'normal' |
+| FLIP_WATCH | None(冷却态由 thesis.closed_at 隐式驱动) | 'normal' |
+| PROTECTION | None(active thesis 已 closed_protection) | **'PROTECTION'** |
+| POST_PROTECTION_REASSESS | None | **'review_pending'** |
+
+**§Z 三重验证**:
+- ✅ pytest 全量:**1487 passed, 13 skipped, 0 failed**(基准 1494 + 6 新 = 1500 总数)
+- ✅ 11 档映射全过(单元覆盖每个 14 档 → 期望 thesis + system_state)
+- ✅ compute_next(prev=LONG_OPEN) → thesis={direction:'long', stage:'opened', status:'active'} + system_state='normal'
+- ✅ compute_next(l5_extreme=True) → current_state='PROTECTION' + thesis=None + system_state='PROTECTION'
+- ✅ compute_next(prev=POST_PROTECTION_REASSESS) → thesis=None + system_state='review_pending'
+- ✅ _state_to_thesis_mirror_safe(None) → (None, 'normal') 防御 OK
+- ✅ uvicorn GET / 200
+
+**未触动**(方案 C 严守):
+- VALID_STATES 14 档不动(向后兼容)
+- 原 4 个 `state_machine.*` 字段不动(`previous`/`current`/`transition_reason`/`stable_in_state`)
+- web/assets/app.js 不动(网页前端 1.10-L 渐进迁移)
+- _orchestrator_mapper 其他字段不动
 
 ### Commit 6(_from_POST_PROTECTION_REASSESS stub + _verify_disciplines 改造 + 1 测试 skip)
 **实际改动**:

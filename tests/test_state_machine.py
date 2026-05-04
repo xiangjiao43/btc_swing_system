@@ -124,6 +124,70 @@ def test_returned_state_always_in_14_whitelist(sm: StateMachine):
 
 
 # ==================================================================
+# Sprint 1.10-K-A commit 7(方案 C):14 档 → thesis dict + system_state 镜像
+# ==================================================================
+
+def test_compute_next_output_includes_thesis_and_system_state(sm: StateMachine):
+    """方案 C 关键:compute_next 输出含 thesis dict + system_state 镜像
+    (向后兼容:14 档 previous_state/current_state 也保留)。"""
+    r = sm.compute_next(_state())
+    # 14 档枚举字符串保留
+    assert r["previous_state"] in VALID_STATES or r["previous_state"] is None
+    assert r["current_state"] in VALID_STATES
+    # 新字段在
+    assert "thesis" in r
+    assert "system_state" in r
+    assert r["system_state"] in {"normal", "PROTECTION", "review_pending"}
+
+
+def test_thesis_mirror_long_open(sm: StateMachine):
+    """LONG_OPEN → thesis(direction=long, lifecycle_stage=opened, status=active)。"""
+    from src.strategy.state_machine_inputs import _utc_now_iso  # noqa: F401
+    prev = _prev_record("LONG_OPEN", _ts(-1))
+    r = sm.compute_next(_state(), previous_record=prev, now_utc=_ts(0))
+    assert r["current_state"] == "LONG_OPEN"
+    assert r["thesis"] == {
+        "direction": "long",
+        "lifecycle_stage": "opened",
+        "status": "active",
+    }
+    assert r["system_state"] == "normal"
+
+
+def test_thesis_mirror_protection_system_state(sm: StateMachine):
+    """PROTECTION → thesis=None,system_state='PROTECTION'。"""
+    r = sm.compute_next(_state(l5_extreme=True))
+    assert r["current_state"] == "PROTECTION"
+    assert r["thesis"] is None
+    assert r["system_state"] == "PROTECTION"
+
+
+def test_thesis_mirror_ppr_review_pending(sm: StateMachine):
+    """POST_PROTECTION_REASSESS → thesis=None,system_state='review_pending'。"""
+    prev = _prev_record("POST_PROTECTION_REASSESS", _ts(-6))
+    r = sm.compute_next(_state(), previous_record=prev, now_utc=_ts(0))
+    assert r["current_state"] == "POST_PROTECTION_REASSESS"
+    assert r["thesis"] is None
+    assert r["system_state"] == "review_pending"
+
+
+def test_thesis_mirror_flip_watch_normal(sm: StateMachine):
+    """FLIP_WATCH → thesis=None(冷却态),system_state='normal'(不是系统态)。"""
+    prev = _prev_record("FLIP_WATCH", _ts(-1))
+    r = sm.compute_next(_state(), previous_record=prev, now_utc=_ts(0))
+    assert r["current_state"] == "FLIP_WATCH"
+    assert r["thesis"] is None
+    assert r["system_state"] == "normal"
+
+
+def test_thesis_mirror_flat(sm: StateMachine):
+    """FLAT → thesis=None,system_state='normal'。"""
+    r = sm.compute_next(_state())
+    assert r["thesis"] is None
+    assert r["system_state"] == "normal"
+
+
+# ==================================================================
 # FLAT → LONG_PLANNED / SHORT_PLANNED
 # ==================================================================
 

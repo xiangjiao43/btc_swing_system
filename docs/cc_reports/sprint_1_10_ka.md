@@ -79,7 +79,8 @@
 | **==中断点 6:commit 7 完成,thesis dict + system_state 输出验证==**| | | ✅ 已通过 |
 | 8 | 9 K-A skip 测试 unskip:2 改造(test_19/23/30)+ 7 删除(test_21/22/24/29/36/41/42)| 1 | ✅ `b533823` |
 | 9 | state_machine_inputs.py 26 测试 + lifecycle_manager.py 19 测试 review:**0 changes needed** | 1(报告)| ✅ `bd54b74` |
-| 10 | 2 老 SKIP unskip + thesis-driven 重写(test_state_machine_e2e + test_lifecycle_e2e_reversal)| 2 | ✅ 待 push |
+| 10 | 2 老 SKIP unskip + thesis-driven 重写(test_state_machine_e2e + test_lifecycle_e2e_reversal)| 2 | ✅ `2328f8f` |
+| 11 | narrator.py 死代码清理(_gen_cold_start 整删 + SCENARIOS 删 SCENARIO_COLD_START key)— X4 顺序前置 | 1 | ✅ 待 push |
 | **==中断点 5:migration 015 真跑后,本地 + 生产 21→19 列==**| | | 🛑 |
 | **阶段 2:state_machine 重写**| | | |
 | 5 | _from_FLIP_WATCH 整删 + _calc_flip_watch_bounds 删 + _on_enter_effects FLIP_WATCH 分支删 + state_machine_inputs._flip_watch_bounds_state + _prev_cycle_side 删 | 2 | — |
@@ -246,6 +247,29 @@
 **全量回归**:`tests/` → **1490 passed, 4 skipped, 0 failed**(基准 1490 → 0 净增,3 测试改造 + 写入方清理后维持)
 
 **commit 3 重新定义**:测试 fixtures 中 cold_start_warming_up / SCENARIO_COLD_START 等纯叙事场景测试残留(~10 测试),不影响生产代码 INSERT/SELECT。本来在 commit 3 计划里的 19 测试改造,大部分已在 commit 2 内顺手完成。commit 3 改为收尾测试残留 + 必要文档。
+
+### Commit 11(narrator.py 死代码清理 — X4 顺序前置)
+**X4 决策**(用户拍板):commit 11 / 12 倒序 + 让两个都有实质内容。
+- commit 11(本)= 实施(纯 §X 死代码删)
+- commit 12 = 测试合理化 + review + SCENARIO_COLD_START 常量 grep 微调
+
+**实际改动**(`src/strategy/no_opportunity_narrator.py`):
+- `_gen_cold_start` 函数(行 189-238)50 行整删
+- `_SCENARIO_GENERATORS` dict 删 `SCENARIO_COLD_START: _gen_cold_start` key
+- `SCENARIO_COLD_START` 常量(行 43)**先保留**(commit 12 grep 后决定)
+
+**为什么是 100% 死代码**:
+- `detect_scenario`(narrator.py:59-67)1.10-J commit 6 已断 cold_start_warming_up 输入条件
+- `SCENARIO_COLD_START` 永远不被路由(detect_scenario 不返此值)
+- `_gen_cold_start` 0 caller via `_SCENARIO_GENERATORS[scenario]` lookup
+- `all_scenarios` fixture cold_start case fall through 到 SCENARIO_GRADE_NONE 默认分支(by accident pass)
+
+**§Z 三重验证**:
+- ✅ pytest 全量:**1492 passed, 1 skipped, 0 failed**(基准 1493 总数维持,0 regression — 死代码删完无活路径影响,验证 X4 推荐前提"narrator 改 → 0 测试 fail" 100% 成立)
+- ✅ `_gen_cold_start` 已删(`hasattr(nn, '_gen_cold_start') == False`)
+- ✅ `_SCENARIO_GENERATORS` 共 7 个 active scenario(原 8 - cold_start)
+- ✅ generate_no_opportunity_narrative(cold_start fixture)→ fall through 默认 narrative(长度 189)
+- ✅ uvicorn GET / → 200
 
 ### Commit 10(2 老 SKIP unskip + thesis-driven 重写)
 **1.10-J 留 K-A 必须处理的 2 个 e2e SKIP**:

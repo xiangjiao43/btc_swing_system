@@ -186,56 +186,10 @@ def _key_sentence(picked: list[dict[str, Any]]) -> str:
 # 8 个场景生成函数
 # ============================================================
 
-def _gen_cold_start(
-    facts: dict[str, Any], state: dict[str, Any],
-) -> dict[str, Any]:
-    cold_start_meta = (state.get("meta") or {}).get("cold_start") or {}
-    if not cold_start_meta:
-        cold_start_meta = state.get("cold_start") or {}
-    days_remaining = cold_start_meta.get("days_remaining")
-    days_text = f"约 {days_remaining} 天" if days_remaining else "几天"
-
-    picked = pick_key_factors(state, n=3, scenario=SCENARIO_COLD_START)
-
-    structure = _structure_sentence(picked) if picked else \
-        "数据基线尚在建立中,组合因子未稳定。"
-    interpretation = (
-        f"系统刚启动不久(冷启动期还剩 {days_text}),长周期因子"
-        "(MVRV-Z 60d 分位、LTH 90d 变化等)需要至少 90 天历史才稳。"
-        "现阶段任何强行决策都基于半完整数据,胜率会比规则期低 20%+。"
-    )
-    key = (
-        "数据完整度 = 系统决策的最低门槛;不是判断保守,是"
-        "数据不全时强行决策风险比'错过'更大。"
-    )
-    conclusion = (
-        f"系统按纪律保持观察 {days_text}。冷启动期满 + ADX-14 / "
-        "ATR 分位 / Swing 序列等关键指标全部就绪 + 5 层证据健康,系统才"
-        "重新启用规则路径。"
-    )
-
-    drivers = _factors_to_drivers(picked, top_k=3)
-    drivers.extend([
-        {"text": f"冷启动期剩余:{days_text}", "evidence_ref": None},
-        {"text": "数据池持续扩充(链上 / 衍生品 / 宏观)", "evidence_ref": None},
-        {"text": "冷启动是系统纪律,数据不全时强行决策风险更大",
-         "evidence_ref": None},
-    ])
-    return {
-        "narrative": _make_4section_narrative(
-            structure, interpretation, key, conclusion,
-        ),
-        "primary_drivers": drivers[:5],
-        "counter_arguments": [
-            {"text": "冷启动期内出现真实大行情,系统会错过 — 这是设计上接受的代价"},
-            {"text": "用户如有强烈交易倾向,可手动参考下方各因子卡片自行判断"},
-        ],
-        "what_would_change_mind": [
-            "冷启动期天数计满(系统自动解除观察约束)",
-            "ADX-14 / ATR 180d 分位 / Swing 序列等关键指标稳定 ≥ 7 天",
-            "5 层证据全部 health_status=healthy",
-        ],
-    }
+# Sprint 1.10-K-A commit 11 §X(v1.4 §11.2):_gen_cold_start 函数整删
+# (50 行)。死代码:detect_scenario(1.10-J commit 6)已断 cold_start_warming_up
+# 输入条件,SCENARIO_COLD_START 永远不被路由,_gen_cold_start 0 caller。
+# SCENARIO_COLD_START 常量先保留,等 commit 12 测试合理化时 grep 0 import 后再决定。
 
 
 def _gen_extreme_event(
@@ -677,8 +631,9 @@ def _build_change_conditions(
     return deduped[:5]
 
 
+# Sprint 1.10-K-A commit 11 §X:删 SCENARIO_COLD_START key
+# (_gen_cold_start 已删,无 handler;detect_scenario 永远不返此 scenario,注册无意义)
 _SCENARIO_GENERATORS = {
-    SCENARIO_COLD_START: _gen_cold_start,
     SCENARIO_EXTREME_EVENT: _gen_extreme_event,
     SCENARIO_PROTECTION: _gen_protection,
     SCENARIO_FALLBACK_DEGRADED: _gen_fallback_degraded,

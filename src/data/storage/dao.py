@@ -800,6 +800,44 @@ class AlertsDAO:
         return sev
 
     @staticmethod
+    def mark_acknowledged(
+        conn: sqlite3.Connection, alert_id: int,
+    ) -> int:
+        """Sprint 1.10-K-B commit 5:标记 alert 已被人工确认(acknowledged=1)。
+
+        UPDATE alerts SET acknowledged=1 WHERE id=?
+        Args:
+            conn: SQLite 连接(调用方 commit)
+            alert_id: alerts.id 主键
+        Returns:
+            受影响行数(0 = 不存在;1 = 标记成功)
+        """
+        cur = conn.execute(
+            "UPDATE alerts SET acknowledged = 1 WHERE id = ?",
+            (int(alert_id),),
+        )
+        return int(cur.rowcount)
+
+    @staticmethod
+    def mark_notified(
+        conn: sqlite3.Connection, alert_id: int,
+    ) -> int:
+        """Sprint 1.10-K-B commit 5:标记 alert 已推送通知(notification_sent=1)。
+
+        UPDATE alerts SET notification_sent=1 WHERE id=?
+        Args:
+            conn: SQLite 连接(调用方 commit)
+            alert_id: alerts.id 主键
+        Returns:
+            受影响行数(0 = 不存在;1 = 标记成功)
+        """
+        cur = conn.execute(
+            "UPDATE alerts SET notification_sent = 1 WHERE id = ?",
+            (int(alert_id),),
+        )
+        return int(cur.rowcount)
+
+    @staticmethod
     def get_recent(
         conn: sqlite3.Connection,
         *,
@@ -1835,7 +1873,14 @@ class ThesesDAO:
     设计要点(用户 v2 补充 B):
       break_conditions 是 list[str],DAO 内 json.dumps 写 TEXT,
       读时 json.loads 还原。JSON 反序列化合法性校验留 1.10-D。
-    """
+
+    Sprint 1.10-K-B commit 5(review only):本 DAO 已对齐统一 DAO 风格
+    (与 AlertsDAO / VirtualAccountDAO / VirtualOrdersDAO 同):
+      - 全部 @staticmethod(无实例状态)
+      - 不隐式 commit(调用方控制事务)
+      - 接口分层:create / update_* / close / get_*(读写分离)
+      - JSON 字段统一 _safe_json_loads 兜底
+    本 sprint 不改造,仅文档化对齐。"""
 
     @staticmethod
     def create(

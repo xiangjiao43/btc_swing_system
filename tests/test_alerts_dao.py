@@ -69,6 +69,100 @@ def test_insert_alert_default_related_run_id_null(conn):
 
 
 # ============================================================
+# Sprint 1.10-K-B commit 5:AlertsDAO.mark_acknowledged / mark_notified
+# ============================================================
+
+def test_mark_acknowledged_happy_path(conn):
+    """mark_acknowledged 把 acknowledged 列从 0 → 1,返回 rowcount=1。"""
+    aid = AlertsDAO.insert_alert(
+        conn, alert_type="t", severity="warning", message="x",
+        raised_at_utc="2026-05-04T12:00:00Z",
+    )
+    conn.commit()
+    # 初始 acknowledged=0
+    row = conn.execute(
+        "SELECT acknowledged FROM alerts WHERE id=?", (aid,),
+    ).fetchone()
+    assert row["acknowledged"] == 0
+    # mark
+    affected = AlertsDAO.mark_acknowledged(conn, aid)
+    conn.commit()
+    assert affected == 1
+    row = conn.execute(
+        "SELECT acknowledged FROM alerts WHERE id=?", (aid,),
+    ).fetchone()
+    assert row["acknowledged"] == 1
+
+
+def test_mark_acknowledged_nonexistent_id_returns_zero(conn):
+    """不存在的 alert_id → rowcount=0,不抛异常。"""
+    affected = AlertsDAO.mark_acknowledged(conn, 999999)
+    conn.commit()
+    assert affected == 0
+
+
+def test_mark_acknowledged_idempotent(conn):
+    """二次调用不报错 + acknowledged 仍 1。"""
+    aid = AlertsDAO.insert_alert(
+        conn, alert_type="t", severity="info", message="x",
+        raised_at_utc="2026-05-04T12:00:00Z",
+    )
+    conn.commit()
+    AlertsDAO.mark_acknowledged(conn, aid)
+    affected2 = AlertsDAO.mark_acknowledged(conn, aid)
+    conn.commit()
+    # 第二次仍 rowcount=1(UPDATE 总是匹配那行;值已 1 不变)
+    assert affected2 == 1
+    row = conn.execute(
+        "SELECT acknowledged FROM alerts WHERE id=?", (aid,),
+    ).fetchone()
+    assert row["acknowledged"] == 1
+
+
+def test_mark_notified_happy_path(conn):
+    """mark_notified 把 notification_sent 列从 0 → 1,返回 rowcount=1。"""
+    aid = AlertsDAO.insert_alert(
+        conn, alert_type="t", severity="critical", message="y",
+        raised_at_utc="2026-05-04T12:00:00Z",
+    )
+    conn.commit()
+    row = conn.execute(
+        "SELECT notification_sent FROM alerts WHERE id=?", (aid,),
+    ).fetchone()
+    assert row["notification_sent"] == 0
+    affected = AlertsDAO.mark_notified(conn, aid)
+    conn.commit()
+    assert affected == 1
+    row = conn.execute(
+        "SELECT notification_sent FROM alerts WHERE id=?", (aid,),
+    ).fetchone()
+    assert row["notification_sent"] == 1
+
+
+def test_mark_notified_nonexistent_id_returns_zero(conn):
+    """不存在的 alert_id → rowcount=0,不抛异常。"""
+    affected = AlertsDAO.mark_notified(conn, 999999)
+    conn.commit()
+    assert affected == 0
+
+
+def test_mark_acknowledged_and_notified_independent(conn):
+    """两个标记独立:mark_acknowledged 不影响 notification_sent,反之亦然。"""
+    aid = AlertsDAO.insert_alert(
+        conn, alert_type="t", severity="warning", message="z",
+        raised_at_utc="2026-05-04T12:00:00Z",
+    )
+    conn.commit()
+    AlertsDAO.mark_acknowledged(conn, aid)
+    conn.commit()
+    row = conn.execute(
+        "SELECT acknowledged, notification_sent FROM alerts WHERE id=?", (aid,),
+    ).fetchone()
+    assert row["acknowledged"] == 1
+    assert row["notification_sent"] == 0  # 未动
+
+
+# ============================================================
 # AlertsDAO.normalize_severity
 # ============================================================
 

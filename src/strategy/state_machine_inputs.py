@@ -166,24 +166,24 @@ def build_state_machine_fields(
             if prev_state in {"LONG_TRIM", "SHORT_TRIM"} else False
         )
 
-    # ---------- FLIP_WATCH 时间界 ----------
-    flip_min_passed, flip_max_exceeded = _flip_watch_bounds_state(
-        prev_state, prev_strategy_state, now_iso,
-    )
-
-    # ---------- prev_cycle_side(FLIP_WATCH 用)----------
-    prev_cycle_side = _prev_cycle_side(prev_state, prev_strategy_state)
+    # Sprint 1.10-K-A commit 5 §X(v1.4 §11.2):
+    # 删 FLIP_WATCH 时间界 + prev_cycle_side 计算
+    # (_from_FLIP_WATCH 业务已 stub;_flip_watch_bounds_state /
+    # _prev_cycle_side 已删,无 caller)
+    # flip_watch_min_hours_passed / flip_watch_max_hours_exceeded /
+    # prev_cycle_side 字段保留输出 False/None,向后兼容 _build_field_snapshot
+    flip_min_passed = False
+    flip_max_exceeded = False
+    prev_cycle_side = None
 
     # ---------- thesis_invalidated ----------
-    # 持仓期看当前 side;FLIP_WATCH/POST_PROTECTION_REASSESS 期 side=None,
-    # 看 prev_cycle_side(state_machine FLIP_WATCH → *_PLANNED 路径需要)。
+    # 持仓期看当前 side(原 FLIP_WATCH/PPR 走 prev_cycle_side 的分支已废)。
     # lifecycle 显式写入的值优先(LifecycleManager 归档时可能已写入)。
-    inv_side = side or prev_cycle_side
     long_thesis_inv = bool(lifecycle.get("long_thesis_invalidated")) or (
-        inv_side == "long" and thesis == "invalidated"
+        side == "long" and thesis == "invalidated"
     )
     short_thesis_inv = bool(lifecycle.get("short_thesis_invalidated")) or (
-        inv_side == "short" and thesis == "invalidated"
+        side == "short" and thesis == "invalidated"
     )
 
     return {
@@ -518,55 +518,11 @@ def _infer_account_status(
     return False, False
 
 
-def _flip_watch_bounds_state(
-    prev_state: Optional[str],
-    prev_strategy_state: Optional[dict[str, Any]],
-    now_iso: str,
-) -> tuple[bool, bool]:
-    """仅 prev_state == FLIP_WATCH 计算;否则 (False, False)。"""
-    if prev_state != "FLIP_WATCH":
-        return False, False
-    sm = (prev_strategy_state or {}).get("state_machine") or {}
-    entered_at = sm.get("state_entered_at_utc")
-    bounds = sm.get("flip_watch_bounds") or {}
-    if not entered_at:
-        return False, False
-    try:
-        a = _parse_iso(entered_at)
-        b = _parse_iso(now_iso)
-        hours_in = (b - a).total_seconds() / 3600.0
-    except Exception:
-        return False, False
-    eff_min = _as_float(bounds.get("effective_min_hours")) or 18.0
-    eff_max = _as_float(bounds.get("effective_max_hours")) or 96.0
-    return hours_in >= eff_min, hours_in >= eff_max
-
-
-def _prev_cycle_side(
-    prev_state: Optional[str],
-    prev_strategy_state: Optional[dict[str, Any]],
-) -> Optional[str]:
-    """FLIP_WATCH / POST_PROTECTION_REASSESS 时,从 prev lifecycle 持久值取;
-    否则按 prev_state 推断。
-
-    prev_strategy_state 可以是 {"state": {...}}(DAO row 形态)或直接 {...}。
-    """
-    if prev_state in {"FLIP_WATCH", "POST_PROTECTION_REASSESS"}:
-        if prev_strategy_state:
-            outer = (
-                prev_strategy_state.get("state")
-                if isinstance(prev_strategy_state.get("state"), dict)
-                else prev_strategy_state
-            )
-            prev_lc = (outer or {}).get("lifecycle") or {}
-            side = prev_lc.get("prev_cycle_side")
-            if side in {"long", "short"}:
-                return side
-            # fallback:用归档 lifecycle 的 direction
-            direction = prev_lc.get("direction")
-            if direction in {"long", "short"}:
-                return direction
-    return _side_from_state(prev_state)
+# Sprint 1.10-K-A commit 5 §X(v1.4 §11.2):
+# _flip_watch_bounds_state(22 行)+ _prev_cycle_side(25 行)整删
+# 原用途:FLIP_WATCH / POST_PROTECTION_REASSESS 期间 hours_in / prev_cycle_side
+# 计算,服务 _from_FLIP_WATCH 反手到 *_PLANNED 的高门槛判定。
+# state_machine.py 的 _from_FLIP_WATCH 业务已 stub(方案 5A);本两个 helper 0 caller。
 
 
 # ============================================================

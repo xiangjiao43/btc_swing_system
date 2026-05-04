@@ -71,7 +71,9 @@
 | 2 | dao.py + schema.sql + state_builder + orchestrator_mapper + weekly_review + 4 测试 fixture(scope 扩展)| 9 | ✅ `ee46335` |
 | 3 | 残留 §X 注释压缩 + §Z 三重验证(中断点 4 准备)| 3 | ✅ `4b3f8bf` |
 | **==中断点 4:写入方清理完成,1490+ 测试 0 regression==**| | | ✅ 已通过 |
-| 4 | migration 015 本地真跑(备份 + DROP + 21→19 / 12→12 / 7→7 + verify K 段更新)| 3 | ✅ 待 push |
+| 4 | migration 015 本地真跑(备份 + DROP + 21→19 / 12→12 / 7→7 + verify K 段更新)| 3 | ✅ `0fc692d` |
+| **==中断点 5:migration 015 真跑后,本地 + 生产 21→19 列==**| | | ✅ 已通过(服务器 100% 同步)|
+| 5 | _from_FLIP_WATCH stub(方案 5A)+ _calc_flip_watch_bounds 删 + _on_enter_effects FLIP_WATCH 分支删 + 2 helper 删 + 8 测试 skip(方案 T2)| 3 | ✅ 待 push |
 | **==中断点 5:migration 015 真跑后,本地 + 生产 21→19 列==**| | | 🛑 |
 | **阶段 2:state_machine 重写**| | | |
 | 5 | _from_FLIP_WATCH 整删 + _calc_flip_watch_bounds 删 + _on_enter_effects FLIP_WATCH 分支删 + state_machine_inputs._flip_watch_bounds_state + _prev_cycle_side 删 | 2 | — |
@@ -238,6 +240,41 @@
 **全量回归**:`tests/` → **1490 passed, 4 skipped, 0 failed**(基准 1490 → 0 净增,3 测试改造 + 写入方清理后维持)
 
 **commit 3 重新定义**:测试 fixtures 中 cold_start_warming_up / SCENARIO_COLD_START 等纯叙事场景测试残留(~10 测试),不影响生产代码 INSERT/SELECT。本来在 commit 3 计划里的 19 测试改造,大部分已在 commit 2 内顺手完成。commit 3 改为收尾测试残留 + 必要文档。
+
+### Commit 5(_from_FLIP_WATCH stub + 伴随 helper 删 + 8 测试 skip)
+**3 歧义拍板**(commit 5 启动调研发现,用户决策):
+- **5A**:`_from_FLIP_WATCH` 留 5 行 stub(返 `(None, ..., ["flip_watch_business_moved..."])`),
+  维持 dispatcher 完整性 + VALID_STATES 14 档保留 + LONG_EXIT/SHORT_EXIT → FLIP_WATCH transition 仍可用
+- **T2**:测被删业务的 8 个测试加 `pytest.mark.skip(reason=...)`,reason 精确标注 commit 8 unskip
+- **L1**:lifecycle_manager.py 完全不动(P0 #2 一致)
+
+**实际改动**:
+- `src/strategy/state_machine.py`:
+  - `_from_FLIP_WATCH` (757-823) 71 行业务 → 5 行 stub(行 762-779)
+  - `_calc_flip_watch_bounds` (304-334) 31 行整删
+  - `_build_result` (270-276) 进入 FLIP_WATCH 时 _calc_flip_watch_bounds 调用删,flip_bounds=None
+  - `_on_enter_effects` FLIP_WATCH 分支 (372-379) actions 从 5 个减到 2 个(删 record_flip_watch_start_time / lock_flip_watch_effective_bounds / 等)+ 删 flip_watch_bounds 字段
+- `src/strategy/state_machine_inputs.py`:
+  - `_flip_watch_bounds_state` (521-542) 22 行整删
+  - `_prev_cycle_side` (545-569) 25 行整删
+  - `build_state_machine_fields` (169-187) FLIP_WATCH 时间界 / prev_cycle_side 计算改为常量 False/None,字段保留(向后兼容 _build_field_snapshot)
+- `tests/test_state_machine.py`:8 测试加 `pytest.mark.skip(reason="1.10-K-A commit 5: ... 测试改造留 commit 8")`
+  - test_19 / 21 / 22 / 23 / 24 / 36 / 41 / 42
+
+**§Z 三重验证**:
+- ✅ pytest 全量:**1482 passed, 12 skipped, 0 failed**(基准 1490 + 4 → 1482 + 12,总数 1494 不变,新 +8 skip)
+- ✅ stub 路径 stay:`compute_next(prev=FLIP_WATCH)` → `current_state='FLIP_WATCH', stable_in_state=True, flip_watch_bounds=None`
+- ✅ 已删函数确认:`hasattr(smi, '_flip_watch_bounds_state') == False` / `_prev_cycle_side == False` / `StateMachine._calc_flip_watch_bounds == False`
+- ✅ stub 仍在:`hasattr(StateMachine, '_from_FLIP_WATCH') == True`(dispatcher 完整性)
+- ✅ uvicorn:GET / 200 + GET /api/strategy/latest 200
+- ✅ scheduler:build_scheduler → 10 cron jobs
+
+**未触动**(纪律严守):
+- VALID_STATES 14 档不动(方案 C)
+- _from_LONG_EXIT / _from_SHORT_EXIT 仍输出 FLIP_WATCH target(不动)
+- lifecycle_manager.py 5 处 FLIP_WATCH 引用全保留(L1)
+- _PPR_ALLOWED_TARGETS / _from_POST_PROTECTION_REASSESS / _verify_disciplines 留 commit 6
+- compute_next 输出 schema 不动(thesis dict + system_state 留 commit 7)
 
 ### Commit 4(migration 015 本地真跑)
 **实际执行**:

@@ -267,13 +267,10 @@ class StateMachine:
         state_entered_at = now if is_transition else (prev_entered_at or now)
         minutes_since = _minutes_between(state_entered_at, now)
 
-        # 进入 FLIP_WATCH 时计算 effective bounds 并锁定
+        # Sprint 1.10-K-A commit 5 §X:删 FLIP_WATCH bounds 计算
+        # (_calc_flip_watch_bounds 已删,冷却由 thesis.closed_at 隐式驱动)
+        # flip_watch_bounds 字段保留 None,向后兼容 dataclass schema
         flip_bounds: Optional[dict[str, Any]] = None
-        if target == "FLIP_WATCH":
-            if is_transition:
-                flip_bounds = self._calc_flip_watch_bounds(fields)
-            else:
-                flip_bounds = fields.get("prev_flip_bounds")
 
         on_enter = self._on_enter_effects(
             target=target,
@@ -298,40 +295,10 @@ class StateMachine:
         ).to_dict()
 
     # ------------------------------------------------------------------
-    # FLIP_WATCH 动态冷却(§5.3)
+    # Sprint 1.10-K-A commit 5 §X(v1.4 §11.2):
+    # _calc_flip_watch_bounds 整删 — FLIP_WATCH 业务逻辑迁出,冷却由
+    # thesis.closed_at + 冷却时长隐式驱动(§4.3 反手 3 档)。本方法 31 行已删。
     # ------------------------------------------------------------------
-
-    def _calc_flip_watch_bounds(
-        self, fields: dict[str, Any],
-    ) -> dict[str, Any]:
-        """进入 FLIP_WATCH 时计算 effective_min/max_hours 并锁定。"""
-        mult = 1.0
-        chain: list[tuple[str, float]] = []
-
-        cp = fields.get("cycle_position")
-        if cp and cp in self._fw_cycle_mult:
-            m = float(self._fw_cycle_mult[cp])
-            mult *= m
-            chain.append((f"cycle_position={cp}", m))
-
-        vol = fields.get("volatility_regime")
-        if vol and vol in self._fw_vol_mult:
-            m = float(self._fw_vol_mult[vol])
-            mult *= m
-            chain.append((f"volatility_regime={vol}", m))
-
-        eff_min = max(self._fw_floor, self._fw_base_min * mult)
-        eff_max = min(self._fw_ceil, self._fw_base_max * mult)
-        return {
-            "effective_min_hours": round(eff_min, 2),
-            "effective_max_hours": round(eff_max, 2),
-            "base_min_hours": self._fw_base_min,
-            "base_max_hours": self._fw_base_max,
-            "multiplier_product": round(mult, 4),
-            "multiplier_chain": [
-                {"source": src, "multiplier": m} for src, m in chain
-            ],
-        }
 
     # ------------------------------------------------------------------
     # on_enter 副作用(§5.5)v1:只记录,不写 lifecycle 表
@@ -403,13 +370,13 @@ class StateMachine:
                 "record_exit_reason",
             ]
         elif target == "FLIP_WATCH":
+            # Sprint 1.10-K-A commit 5 §X:删 lock_flip_watch_effective_bounds 等
+            # FLIP_WATCH 业务 actions(_calc_flip_watch_bounds 已删)。
+            # 保留最小副作用:archive_previous_lifecycle + reset_position(thesis-driven)
             effects["actions"] = [
                 "archive_previous_lifecycle",
-                "record_flip_watch_start_time",
-                "lock_flip_watch_effective_bounds",
                 "reset_position",
             ]
-            effects["flip_watch_bounds"] = flip_bounds
         elif target == "PROTECTION":
             effects["actions"] = [
                 "record_protection_entry_time_and_reason",
@@ -791,69 +758,20 @@ class StateMachine:
     def _from_FLIP_WATCH(
         self, fields: dict[str, Any],
     ) -> tuple[Optional[str], str, list[str]]:
-        hours_in = _as_float(fields.get("hours_in_flip_watch")) or 0.0
-        bounds = fields.get("prev_flip_bounds") or {}
-        eff_min = _as_float(bounds.get("effective_min_hours")) or self._fw_base_min
-        eff_max = _as_float(bounds.get("effective_max_hours")) or self._fw_base_max
+        """Sprint 1.10-K-A commit 5 §X(方案 5A):
+        FLIP_WATCH 业务逻辑已迁出 — 原 66 行(冷却 / 反手 → SHORT_PLANNED|LONG_PLANNED |
+        FLAT)删除,改为 stub 维持 dispatcher 完整性(VALID_STATES 保留 FLIP_WATCH +
+        _from_LONG_EXIT/SHORT_EXIT 仍输出 'FLIP_WATCH' target,删 dispatcher entry
+        会 KeyError)。
 
-        # → FLAT(任一触发)
-        flat_matches: list[str] = []
-        if hours_in > eff_max:
-            flat_matches.append(f"hours_in_flip_watch={hours_in} > effective_max={eff_max}")
-        # L2 stance 回到 bullish 或明确 neutral(取决于前一段方向,v1:通用)
-        if fields.get("l2_stance") in {"bullish", "neutral"} and (
-            fields.get("prev_cycle_side", "long") == "long"
-        ):
-            flat_matches.append(f"l2_stance={fields.get('l2_stance')} (prev long cycle)")
-        if fields.get("l1_regime") == "trend_up" and (
-            fields.get("prev_cycle_side", "long") == "long"
-        ):
-            flat_matches.append("l1_regime_back_to_trend_up")
-        if flat_matches:
-            return ("FLAT", "FLIP_WATCH → FLAT:反手条件未成立/超 effective_max",
-                    flat_matches)
-
-        # → SHORT_PLANNED / LONG_PLANNED(高门槛,超过 effective_min 后)
-        if hours_in < eff_min:
-            return None, (
-                f"保持 FLIP_WATCH:冷却中({hours_in}h < "
-                f"effective_min={eff_min}h)"
-            ), [f"flip_watch_cooling hours_in={hours_in} < min={eff_min}"]
-
-        stance_conf = _as_float(fields.get("l2_stance_confidence"))
-        if (
-            fields.get("prev_cycle_side") == "long"
-            and fields.get("l2_stance") == "bearish"
-            and stance_conf is not None
-            and stance_conf >= self._short_min
-            and fields.get("long_thesis_invalidated", False)
-            and fields.get("l3_grade") in {"A", "B"}
-        ):
-            return ("SHORT_PLANNED",
-                    "FLIP_WATCH → SHORT_PLANNED:已过冷却,原多头论点失效,空头高门槛满足",
-                    [
-                        f"hours_in={hours_in} ≥ effective_min={eff_min}",
-                        f"l2_stance=bearish,confidence={stance_conf}",
-                        "long_thesis_invalidated=true",
-                        f"l3_grade={fields.get('l3_grade')}",
-                    ])
-        if (
-            fields.get("prev_cycle_side") == "short"
-            and fields.get("l2_stance") == "bullish"
-            and stance_conf is not None
-            and stance_conf >= self._long_min
-            and fields.get("short_thesis_invalidated", False)
-            and fields.get("l3_grade") in {"A", "B"}
-        ):
-            return ("LONG_PLANNED",
-                    "FLIP_WATCH → LONG_PLANNED:已过冷却,原空头论点失效,多头高门槛满足",
-                    [
-                        f"hours_in={hours_in} ≥ effective_min={eff_min}",
-                        f"l2_stance=bullish,confidence={stance_conf}",
-                        "short_thesis_invalidated=true",
-                        f"l3_grade={fields.get('l3_grade')}",
-                    ])
-        return None, "保持 FLIP_WATCH:已过冷却但反手条件不全", []
+        语义改变:FLIP_WATCH 现在是"叶状态" — 进入后保持(stay)。真正出口由
+        thesis_manager / future sprint 接管(冷却由 thesis.closed_at + 冷却时长隐式驱动)。
+        """
+        return (
+            None,
+            "FLIP_WATCH stay(冷却由 thesis.closed_at 驱动,业务逻辑迁出待 future sprint)",
+            ["flip_watch_business_moved_to_thesis_manager"],
+        )
 
     # ------ PROTECTION ------
     def _from_PROTECTION(

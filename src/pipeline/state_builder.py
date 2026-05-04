@@ -386,6 +386,8 @@ class StrategyStateBuilder:
             try:
                 # Sprint 1.10-K-A commit 2 §X(v1.4 §11.2):删 observation_category
                 # / cold_start INSERT 列引用(配合 schema.sql / dao.py / migration 015)
+                # Sprint 1.10-L commit 11a §X(V24 写入修复):加 constraint_activations_json
+                # 列(原 17 → 18)— 1.10-E 引入此列但 mapper 一直未装,生产 138 行全 NULL
                 self.conn.execute(
                     """
                     INSERT INTO strategy_runs (
@@ -394,8 +396,9 @@ class StrategyStateBuilder:
                         action_state, stance, btc_price_usd,
                         state_transitioned, run_trigger, run_mode,
                         fallback_level, system_version, rules_version,
-                        strategy_flavor, ai_model_actual, full_state_json
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        strategy_flavor, ai_model_actual, full_state_json,
+                        constraint_activations_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         mapped["run_id"],
@@ -415,6 +418,7 @@ class StrategyStateBuilder:
                         mapped["strategy_flavor"],
                         mapped["ai_model_actual"],
                         mapped["full_state_json"],
+                        mapped["constraint_activations_json"],
                     ),
                 )
                 self.conn.commit()

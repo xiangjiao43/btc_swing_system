@@ -126,6 +126,14 @@ def _map_orchestrator_result_to_state(
     # ---- 17. full_state_json ----
     full_state_json = _build_full_state_json(result, context)
 
+    # ---- 18. constraint_activations_json(Sprint 1.10-L commit 11a §X 修)
+    # 1.10-E V24 引入此列,但 _map_orchestrator_result_to_state 一直没装 mapped
+    # → 生产 138 行 strategy_runs 全 NULL(独立 SQL 列方便周复盘 AI 聚合的设计意图失效)
+    # orchestrator.run_full_a 算好放在 result["constraint_activations"](orchestrator.py:251)
+    # 这里 json.dumps 装入 mapped + state_builder INSERT 同步加列
+    ca = result.get("constraint_activations") or []
+    constraint_activations_json = json.dumps(ca, ensure_ascii=False, default=str)
+
     return {
         "run_id": run_id,
         "generated_at_utc": generated_at_utc,
@@ -144,6 +152,7 @@ def _map_orchestrator_result_to_state(
         "strategy_flavor": strategy_flavor,
         "ai_model_actual": ai_model_actual,
         "full_state_json": full_state_json,
+        "constraint_activations_json": constraint_activations_json,
     }
 
 

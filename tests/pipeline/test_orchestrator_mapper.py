@@ -306,8 +306,10 @@ def test_col_19_full_state_json_does_not_contain_pandas_objects(conn):
 # 完整 19 列 schema 断言
 # ============================================================
 
-def test_returns_all_17_strategy_runs_columns(conn):
-    """1.10-K-A commit 2 §X:从 19 列降到 17 列(删 observation_category / cold_start)。"""
+def test_returns_all_18_strategy_runs_columns(conn):
+    """1.10-K-A commit 2 §X:从 19 列降到 17 列(删 observation_category / cold_start)。
+    1.10-L commit 11a §X V24 写入修复:17 → 18 列(加 constraint_activations_json)。
+    """
     out = _map_orchestrator_result_to_state(_make_result(), _make_context(), conn)
     expected_keys = {
         "run_id", "generated_at_utc", "generated_at_bjt",
@@ -316,8 +318,118 @@ def test_returns_all_17_strategy_runs_columns(conn):
         "state_transitioned", "run_trigger", "run_mode",
         "fallback_level", "system_version", "rules_version",
         "strategy_flavor", "ai_model_actual", "full_state_json",
+        "constraint_activations_json",
     }
     assert set(out.keys()) == expected_keys
+
+
+# ============================================================
+# Sprint 1.10-L commit 11a §X V24 写入修复
+# ============================================================
+
+def test_constraint_activations_json_when_result_has_v_data(conn):
+    """result 含 constraint_activations(28 字段 V meta)→ mapped['constraint_activations_json']
+    是 valid JSON,json.loads 还原回 dict/list。"""
+    result = _make_result()
+    # 模拟 V3 + V21 触发
+    result["constraint_activations"] = {
+        "validator_3_entry_size_normalized": True,
+        "validator_21_soft_resistance": True,
+        "validator_21_needs_retry": True,
+        "validator_22_failures_count": 0,
+        "validator_needs_retry": True,
+        "validator_retry_hints": ["V21 软抗拒检测..."],
+    }
+    out = _map_orchestrator_result_to_state(result, _make_context(), conn)
+    raw = out["constraint_activations_json"]
+    assert isinstance(raw, str), "应是 JSON 字符串"
+    parsed = json.loads(raw)
+    assert parsed["validator_3_entry_size_normalized"] is True
+    assert parsed["validator_21_soft_resistance"] is True
+    assert parsed["validator_retry_hints"] == ["V21 软抗拒检测..."]
+
+
+def test_constraint_activations_json_when_result_no_v_data(conn):
+    """result 无 constraint_activations 字段 → mapped['constraint_activations_json'] = '[]'
+    (json.dumps([]) — 不是 NULL,也不是空字符串)。"""
+    result = _make_result()
+    # 不设 constraint_activations
+    assert "constraint_activations" not in result
+    out = _map_orchestrator_result_to_state(result, _make_context(), conn)
+    assert out["constraint_activations_json"] == "[]"
+
+
+def test_constraint_activations_json_when_result_empty_v_data(conn):
+    """result['constraint_activations']=[] → mapped 同样 '[]' 字符串。"""
+    result = _make_result()
+    result["constraint_activations"] = []
+    out = _map_orchestrator_result_to_state(result, _make_context(), conn)
+    assert out["constraint_activations_json"] == "[]"
+
+
+def test_constraint_activations_json_handles_unicode(conn):
+    """V21 retry_hint 含中文 → JSON 不 escape(ensure_ascii=False)。"""
+    result = _make_result()
+    result["constraint_activations"] = {
+        "validator_21_retry_hint": "软抗拒:active=null + L3 grade=A 应出 thesis",
+    }
+    out = _map_orchestrator_result_to_state(result, _make_context(), conn)
+    raw = out["constraint_activations_json"]
+    parsed = json.loads(raw)
+    assert "软抗拒" in parsed["validator_21_retry_hint"]
+
+
+def test_constraint_activations_json_e2e_strategy_runs_insert(conn):
+    """端到端 §Z:_run_v13_orchestrator INSERT 真写入 constraint_activations_json,
+    SELECT 真还原 — 验证 V24 数据从 orchestrator 一路到 DB 不再丢。
+
+    简化:直接测 INSERT 语法 + DAO query,不 mock orchestrator 全链路。
+    """
+    import json as _json
+    # mapped 含 V 数据
+    result = _make_result()
+    result["constraint_activations"] = {
+        "validator_3_entry_size_normalized": True,
+        "validator_8_break_objectivity": True,
+        "validator_8_needs_retry": True,
+    }
+    mapped = _map_orchestrator_result_to_state(result, _make_context(), conn)
+    # 模拟 state_builder._run_v13_orchestrator 18 列 INSERT
+    conn.execute(
+        """
+        INSERT INTO strategy_runs (
+            run_id, generated_at_utc, generated_at_bjt,
+            reference_timestamp_utc, previous_run_id,
+            action_state, stance, btc_price_usd,
+            state_transitioned, run_trigger, run_mode,
+            fallback_level, system_version, rules_version,
+            strategy_flavor, ai_model_actual, full_state_json,
+            constraint_activations_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            mapped["run_id"], mapped["generated_at_utc"], mapped["generated_at_bjt"],
+            mapped["reference_timestamp_utc"], mapped["previous_run_id"],
+            mapped["action_state"], mapped["stance"], mapped["btc_price_usd"],
+            mapped["state_transitioned"], mapped["run_trigger"], mapped["run_mode"],
+            mapped["fallback_level"], mapped["system_version"], mapped["rules_version"],
+            mapped["strategy_flavor"], mapped["ai_model_actual"], mapped["full_state_json"],
+            mapped["constraint_activations_json"],
+        ),
+    )
+    conn.commit()
+    # SELECT 真还原 V 数据
+    row = conn.execute(
+        "SELECT constraint_activations_json FROM strategy_runs WHERE run_id=?",
+        (mapped["run_id"],),
+    ).fetchone()
+    assert row is not None
+    raw = row["constraint_activations_json"]
+    assert raw is not None, "constraint_activations_json 不再 NULL(本 commit 修复)"
+    parsed = _json.loads(raw)
+    assert parsed["validator_3_entry_size_normalized"] is True
+    assert parsed["validator_8_break_objectivity"] is True
+    assert parsed["validator_8_needs_retry"] is True
 
 
 # ============================================================

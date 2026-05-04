@@ -4,12 +4,14 @@
 strategy_runs INSERT 用的 19 列 dict。
 
 设计决策(已锁定,见 docs/cc_reports/sprint_1_9_a_step5_0_*.md):
-- observation_category:调 src/strategy/observation_classifier::classify(),
-  失败 fallback "watchful"
 - cold_start:调 src/utils/cold_start::is_cold_start(state),写 1/0
 - previous_l*-l5 已在 ContextBuilder.build_full_context 内填(从
   strategy_runs.full_state_json 解析)
 - full_state_json 必须含 layers 子结构(下次 parse_previous 依赖)
+
+Sprint 1.10-J commit 5 §X:删 observation_classifier 调用
+(v1.4 §11.2 删 "observation_category / observation_classifier 整套机制");
+strategy_runs.observation_category 列写 NULL,DB 列保留(留 1.10-K migration 删列)
 """
 
 from __future__ import annotations
@@ -23,7 +25,6 @@ from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
 from ..data.storage.dao import StrategyStateDAO
-from ..strategy.observation_classifier import classify
 from ..utils.cold_start import DEFAULT_COLD_START_RUNS, is_cold_start
 
 
@@ -114,21 +115,10 @@ def _map_orchestrator_result_to_state(
     # ---- 15. strategy_flavor ----
     strategy_flavor = "v1.3_ai_majority"
 
-    # ---- 16. observation_category(调 classify,失败 fallback)----
+    # ---- 16. observation_category(Sprint 1.10-J commit 5 §X 删 classify;
+    #          v1.4 §11.2 删整套机制;DAO 写 NULL,DB 列保留留 1.10-K 删列)----
     cold_start_dict = _build_cold_start_state(conn)
-    classifier_state = _build_classifier_state(layers, cold_start_dict, action_state)
-    try:
-        cls_result = classify(classifier_state)
-        observation_category = (
-            cls_result.get("observation_category")
-            if isinstance(cls_result, dict)
-            else getattr(cls_result, "observation_category", "watchful")
-        ) or "watchful"
-    except Exception as e:
-        logger.warning(
-            "observation_classifier.classify failed: %s; fallback 'watchful'", e,
-        )
-        observation_category = "watchful"
+    observation_category = None
 
     # ---- 17. cold_start(0/1,从 cold_start_dict)----
     cold_start_int = 1 if is_cold_start(
@@ -203,30 +193,9 @@ def _build_cold_start_state(conn: sqlite3.Connection) -> dict[str, Any]:
     }
 
 
-def _build_classifier_state(
-    layers: dict[str, Any],
-    cold_start_dict: dict[str, Any],
-    action_state: str,
-) -> dict[str, Any]:
-    """构造 observation_classifier.classify() 需要的 state dict。
-
-    classify 期望读取 evidence_reports / composite_factors / cold_start /
-    state_machine 等;orchestrator 的 layers 输出形态不同,需 shape。
-    """
-    return {
-        "evidence_reports": {
-            f"layer_{i}": layers.get(f"l{i}") or {}
-            for i in (1, 2, 3, 4, 5)
-        },
-        "composite_factors": {},  # 1.8.1 后只剩 cycle_position,这里 classify
-                                  # 用不到 — 留空 dict
-        "cold_start": cold_start_dict,
-        "state_machine": {
-            "current_state": action_state,
-            "stable_in_state": True,
-        },
-        "ai_decision": layers.get("master") or {},
-    }
+# Sprint 1.10-J commit 5 §X:_build_classifier_state 整删
+# (observation_classifier 已删,本 helper 无 caller)
+# v1.4 §11.2 删 "observation_category / observation_classifier 整套机制"
 
 
 def _derive_ai_model(layers: dict[str, Any]) -> Optional[str]:

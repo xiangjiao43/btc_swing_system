@@ -16,7 +16,7 @@ import pytest
 
 from src.data.storage.connection import init_db
 from src.pipeline._orchestrator_mapper import (
-    _build_classifier_state,
+    # Sprint 1.10-J commit 5 §X:_build_classifier_state 已删
     _build_cold_start_state,
     _build_full_state_json,
     _build_summary_v13,
@@ -234,22 +234,12 @@ def test_col_15_strategy_flavor_v13_ai_majority(conn):
     assert out["strategy_flavor"] == "v1.3_ai_majority"
 
 
-def test_col_16_observation_category_from_classifier(conn):
-    """mock classify 返回 disciplined → 输出 disciplined。"""
-    with patch("src.pipeline._orchestrator_mapper.classify",
-               return_value={"observation_category": "disciplined",
-                             "suppressed_base_satisfied": False,
-                             "streak_runs": 0, "reason": "..."}):
-        out = _map_orchestrator_result_to_state(_make_result(), _make_context(), conn)
-    assert out["observation_category"] == "disciplined"
-
-
-def test_col_16_observation_category_fallback_on_error(conn):
-    """mock classify raise → fallback watchful。"""
-    with patch("src.pipeline._orchestrator_mapper.classify",
-               side_effect=RuntimeError("boom")):
-        out = _map_orchestrator_result_to_state(_make_result(), _make_context(), conn)
-    assert out["observation_category"] == "watchful"
+# Sprint 1.10-J commit 5 §X:test_col_16_observation_category_* 整删
+# (v1.4 §11.2 删 observation_classifier;mapper 直接写 None,DAO 落 NULL)
+def test_col_16_observation_category_is_null(conn):
+    """1.10-J commit 5 后:observation_category 永远 None(DAO 写 NULL)。"""
+    out = _map_orchestrator_result_to_state(_make_result(), _make_context(), conn)
+    assert out["observation_category"] is None
 
 
 def test_col_17_cold_start_1_when_runs_below_threshold(conn):
@@ -366,19 +356,8 @@ def test_build_cold_start_state_returns_dict_with_3_keys(conn):
     assert cs["warming_up"] is True
 
 
-def test_build_classifier_state_shape():
-    layers = {
-        "l1": {"regime": "trend_up"},
-        "l2": {"stance": "bullish"},
-        "l3": {}, "l4": {}, "l5": {},
-        "master": {"action": "open"},
-    }
-    cs = {"warming_up": True, "runs_completed": 5}
-    state = _build_classifier_state(layers, cs, "LONG_PLANNED")
-    assert "evidence_reports" in state
-    assert state["evidence_reports"]["layer_1"]["regime"] == "trend_up"
-    assert state["state_machine"]["current_state"] == "LONG_PLANNED"
-    assert state["cold_start"]["warming_up"] is True
+# Sprint 1.10-J commit 5 §X:test_build_classifier_state_shape 整删
+# (_build_classifier_state 函数已删,observation_classifier 整删)
 
 
 def test_derive_ai_model_skips_layers_without_model_used():

@@ -48,31 +48,12 @@ timezone:
   display: "Asia/Shanghai"
 
 
-# -------- 运行模式(M38)---------------------------------------------
-# Sprint 1.10-G §X:整段 runtime 仅保留 declare/开关;真实 cron 调度由
-# scheduler.yaml 唯一权威源管理(v1.4 §10.4.2)。
-# 已删:
-#   - runtime.scheduled.cron_hours_utc(scheduler.yaml::pipeline_run_regular 是真源)
-#   - runtime.event_driven.throttle(已迁移到 event_trigger 段单一配置源)
-runtime:
-  scheduled:
-    enabled: true
-    run_trigger_tag: "scheduled"
-
-  event_driven:
-    enabled: true
-    types:
-      event_macro: true       # 宏观数据发布后 15 min
-      event_onchain: true     # Glassnode 日级更新(北京 08:15-08:30)
-      event_funding: true     # 资金费率结算后 15 min
-      event_options: true     # 期权月/季到期前 1 h
-      event_price: true       # ±5%(空仓)/ ±3%(持仓)价格异动 — 阈值见 event_trigger 段
-      event_invalidation: true  # 硬失效位击穿 → 规则平仓(无 AI,§6.2.3)
-
-  # 手动触发(调试 / 人工介入)
-  manual:
-    enabled: true
-    run_trigger_tag: "manual"
+# -------- 运行模式 ----------------------------------------------------
+# Sprint 1.10-J §X(commit 3):整段 runtime: 删除。
+# 0 src/ 消费(grep 真核实);真权威源:
+#   - cron 调度 → config/scheduler.yaml
+#   - 事件触发节流 → config/base.yaml::event_trigger 段(1.10-G 加)
+# 历史:1.10-G commit 1 已删 cron_hours_utc + throttle 段,本 commit 完成清理。
 
 
 # -------- 目录路径(全部相对项目根)-----------------------------------

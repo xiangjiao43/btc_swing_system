@@ -513,6 +513,9 @@ def test_28_ppr_refuses_planned_target(sm: StateMachine):
     assert r["current_state"] == "POST_PROTECTION_REASSESS"
 
 
+@pytest.mark.skip(reason="1.10-K-A commit 6: _from_POST_PROTECTION_REASSESS 业务移出 stub,"
+                          "PPR → FLAT/FLIP_WATCH 白名单出口已废(_PPR_ALLOWED_TARGETS 整删);"
+                          "review_pending 路由由 system_state 驱动;测试改造留 commit 8")
 def test_29_ppr_allows_flat_or_flip_watch(sm: StateMachine):
     prev = _prev_record("POST_PROTECTION_REASSESS", _ts(-6))
     r = sm.compute_next(

@@ -73,7 +73,8 @@
 | **==中断点 4:写入方清理完成,1490+ 测试 0 regression==**| | | ✅ 已通过 |
 | 4 | migration 015 本地真跑(备份 + DROP + 21→19 / 12→12 / 7→7 + verify K 段更新)| 3 | ✅ `0fc692d` |
 | **==中断点 5:migration 015 真跑后,本地 + 生产 21→19 列==**| | | ✅ 已通过(服务器 100% 同步)|
-| 5 | _from_FLIP_WATCH stub(方案 5A)+ _calc_flip_watch_bounds 删 + _on_enter_effects FLIP_WATCH 分支删 + 2 helper 删 + 8 测试 skip(方案 T2)| 3 | ✅ 待 push |
+| 5 | _from_FLIP_WATCH stub(方案 5A)+ _calc_flip_watch_bounds 删 + _on_enter_effects FLIP_WATCH 分支删 + 2 helper 删 + 8 测试 skip(方案 T2)| 3 | ✅ `7cddce4` |
+| 6 | _from_POST_PROTECTION_REASSESS stub(方案 5A)+ _PPR_ALLOWED_TARGETS 删 + _on_enter_effects PPR 分支精简 + _verify_disciplines review_pending 路由说明 + 1 测试 skip | 2 | ✅ 待 push |
 | **==中断点 5:migration 015 真跑后,本地 + 生产 21→19 列==**| | | 🛑 |
 | **阶段 2:state_machine 重写**| | | |
 | 5 | _from_FLIP_WATCH 整删 + _calc_flip_watch_bounds 删 + _on_enter_effects FLIP_WATCH 分支删 + state_machine_inputs._flip_watch_bounds_state + _prev_cycle_side 删 | 2 | — |
@@ -240,6 +241,31 @@
 **全量回归**:`tests/` → **1490 passed, 4 skipped, 0 failed**(基准 1490 → 0 净增,3 测试改造 + 写入方清理后维持)
 
 **commit 3 重新定义**:测试 fixtures 中 cold_start_warming_up / SCENARIO_COLD_START 等纯叙事场景测试残留(~10 测试),不影响生产代码 INSERT/SELECT。本来在 commit 3 计划里的 19 测试改造,大部分已在 commit 2 内顺手完成。commit 3 改为收尾测试残留 + 必要文档。
+
+### Commit 6(_from_POST_PROTECTION_REASSESS stub + _verify_disciplines 改造 + 1 测试 skip)
+**实际改动**:
+- `src/strategy/state_machine.py`:
+  - `_from_POST_PROTECTION_REASSESS` (794-817) 23 行业务 → 5 行 stub
+  - `_PPR_ALLOWED_TARGETS` (67-72) 6 行常量整删
+  - `_on_enter_effects` PPR 分支 (388-393) 3 actions → 2(删 force_execution_permission_hold_only)
+  - `_verify_disciplines` (829-876) 三纪律改造:
+    - 纪律 1 PROTECTION 唯一出口 + PPR→PROTECTION + PPR→PLANNED 4 个分支保留
+    - violation 文本注明 "review_pending 路由由 system_state 驱动"(commit 7 真接通)
+    - docstring 更新:纪律 2 由 thesis_manager 接管(commit 5 stub 后)
+- `tests/test_state_machine.py`:`test_29_ppr_allows_flat_or_flip_watch` skip + reason 标 commit 8 unskip
+
+**§Z 三重验证**:
+- ✅ pytest 全量:**1481 passed, 13 skipped, 0 failed**(基准 1494 总数维持,+1 skip)
+- ✅ stub 路径 stay:`compute_next(prev=POST_PROTECTION_REASSESS, target='FLAT')` → 仍 stay PPR(stub 不响应外部 target)
+- ✅ `_PPR_ALLOWED_TARGETS` 已删:`hasattr(sm_mod, '_PPR_ALLOWED_TARGETS') == False`
+- ✅ 纪律 3 PPR→PLANNED 仍 violation + violation 文本含 'review_pending'
+- ✅ 纪律 3 PROTECTION → PPR 唯一合法出口保留
+- ✅ uvicorn GET / 200
+
+**未触动**:
+- VALID_STATES 14 档不动(方案 C)
+- _from_PROTECTION 不动(仍输出 POST_PROTECTION_REASSESS target)
+- compute_next 输出 schema 不动(thesis dict + system_state 留 commit 7)
 
 ### Commit 5(_from_FLIP_WATCH stub + 伴随 helper 删 + 8 测试 skip)
 **3 歧义拍板**(commit 5 启动调研发现,用户决策):

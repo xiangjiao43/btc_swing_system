@@ -64,12 +64,8 @@ _PLANNED_STATES: frozenset[str] = frozenset({
 })
 
 
-# POST_PROTECTION_REASSESS 允许迁出的白名单(§5.2)
-_PPR_ALLOWED_TARGETS: frozenset[str] = frozenset({
-    "LONG_HOLD", "SHORT_HOLD",
-    "LONG_EXIT", "SHORT_EXIT",
-    "FLAT", "FLIP_WATCH",
-})
+# Sprint 1.10-K-A commit 6 §X(v1.4 §11.2):_PPR_ALLOWED_TARGETS 整删
+# (_from_POST_PROTECTION_REASSESS 业务已 stub,白名单 0 caller)
 
 
 # ============================================================
@@ -386,10 +382,12 @@ class StateMachine:
                 "require_manual_confirmation",
             ]
         elif target == "POST_PROTECTION_REASSESS":
+            # Sprint 1.10-K-A commit 6 §X:删 force_execution_permission_hold_only
+            # (_from_POST_PROTECTION_REASSESS 已 stub;review_pending 路由由
+            # system_state 驱动,留 commit 7 输出)。保留最小副作用占位。
             effects["actions"] = [
                 "record_reassess_entry_time",
                 "preserve_lifecycle_no_archive",
-                "force_execution_permission_hold_only",
             ]
         return effects
 
@@ -795,26 +793,20 @@ class StateMachine:
     def _from_POST_PROTECTION_REASSESS(
         self, fields: dict[str, Any],
     ) -> tuple[Optional[str], str, list[str]]:
-        # 强制持续至少一个 4H 周期
-        hours_in = _as_float(fields.get("hours_in_post_protection_reassess")) or 0.0
-        if hours_in < self._ppr_min_hold_hours:
-            return (None,
-                    f"保持 POST_PROTECTION_REASSESS:强制持续至少 "
-                    f"{self._ppr_min_hold_hours}h(当前 {hours_in}h)",
-                    [f"min_hold_hours={self._ppr_min_hold_hours}"])
+        """Sprint 1.10-K-A commit 6 §X(方案 5A):
+        POST_PROTECTION_REASSESS 业务逻辑已迁出 — 原 23 行(min_hold_hours 校验 +
+        _PPR_ALLOWED_TARGETS 白名单 + PLANNED 拒绝)删除,改为 stub 维持
+        dispatcher 完整性(VALID_STATES 保留 POST_PROTECTION_REASSESS)。
 
-        # 允许白名单:{LONG_HOLD, SHORT_HOLD, LONG_EXIT, SHORT_EXIT, FLAT, FLIP_WATCH}
-        target = fields.get("post_protection_next_target")
-        if target in _PPR_ALLOWED_TARGETS:
-            return (target,
-                    f"POST_PROTECTION_REASSESS → {target}:外部调度指定",
-                    [f"post_protection_next_target={target}"])
-        # 不允许 PLANNED(§5.2)— 外部指定被拒时保持本态
-        if target in _PLANNED_STATES:
-            return (None,
-                    f"拒绝迁移到 {target}:POST_PROTECTION_REASSESS 禁止进入 PLANNED",
-                    ["refused_planned_target"])
-        return None, "保持 POST_PROTECTION_REASSESS:未指定合法 next_target", []
+        语义改变:POST_PROTECTION_REASSESS 现在是"叶状态" — 进入后保持(stay)。
+        review_pending 由 _verify_disciplines + 系统态(commit 7 加 system_state)
+        驱动,真正出口由 review_pending 流程接管(用户介入 / future sprint)。
+        """
+        return (
+            None,
+            "POST_PROTECTION_REASSESS stay(review_pending 路由由 system_state 驱动)",
+            ["ppr_business_moved_to_review_pending"],
+        )
 
 
 # ============================================================
@@ -828,13 +820,18 @@ class DisciplineViolation(Exception):
 
 def _verify_disciplines(prev_state: str, target: str) -> list[str]:
     """
-    §5.4 三条核心纪律:
+    §5.4 三条核心纪律(Sprint 1.10-K-A commit 6 改造):
       1. 不允许从 *_HOLD 直接跳到反向 PLANNED(必须经 EXIT → FLIP_WATCH)
-      2. FLIP_WATCH 冷却期强制(由 _from_FLIP_WATCH 内部 eff_min 校验)
-      3. PROTECTION 唯一出口经 POST_PROTECTION_REASSESS(本函数校验)
+      2. FLIP_WATCH 冷却期强制(原 _from_FLIP_WATCH 内部 eff_min 校验,
+         1.10-K-A commit 5 后 stub 已废业务,纪律 2 由 thesis_manager 接管)
+      3. PROTECTION 唯一出口经 POST_PROTECTION_REASSESS(本函数校验)+ PPR
+         拒进 PLANNED / 拒回 PROTECTION(review_pending 路由,system_state 驱动)
 
-    注:纪律 2 是内部 hours_in 校验,落在 _from_FLIP_WATCH 不会产出违纪路径;
-    纪律 1/3 在此用白名单统一拦截。
+    1.10-K-A commit 6 改动:
+    - PPR → PLANNED / PPR → PROTECTION 拒绝逻辑保留(纪律 3 不变)
+    - 拒绝时 violation 文本注明 "review_pending 路由"(commit 7 加 system_state
+      = 'review_pending' 输出后,前端 / thesis_manager 看 system_state 知道
+      用户介入入口)
     """
     violations: list[str] = []
 
@@ -856,21 +853,21 @@ def _verify_disciplines(prev_state: str, target: str) -> list[str]:
     }:
         violations.append(
             f"discipline_3_violated: PROTECTION → {target} "
-            "(唯一出口经 POST_PROTECTION_REASSESS)"
+            "(唯一出口经 POST_PROTECTION_REASSESS,review_pending 由 system_state 路由)"
         )
 
     # 纪律 3 推论:POST_PROTECTION_REASSESS 不得回 PROTECTION
     if prev_state == "POST_PROTECTION_REASSESS" and target == "PROTECTION":
         violations.append(
             "discipline_3_violated: POST_PROTECTION_REASSESS → PROTECTION "
-            "(禁止直接回 PROTECTION,复发走正常流程)"
+            "(禁止直接回 PROTECTION,review_pending 路由由用户介入决定)"
         )
 
     # 纪律 3 推论:POST_PROTECTION_REASSESS 不得进入任何 PLANNED
     if prev_state == "POST_PROTECTION_REASSESS" and target in _PLANNED_STATES:
         violations.append(
             f"discipline_3_violated: POST_PROTECTION_REASSESS → {target} "
-            "(禁止迁移到 PLANNED,必须先 FLAT 重新规划)"
+            "(禁止迁移到 PLANNED;review_pending 出口由用户介入 / future sprint 实现)"
         )
 
     return violations

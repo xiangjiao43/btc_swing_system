@@ -1278,11 +1278,15 @@ def _write_preflight_degraded_alert(
         f"pre-flight degraded for groups: {pf_groups}; "
         f"latest inserted_at per group: {inserted_map}"
     )
-    conn.execute(
-        "INSERT INTO alerts "
-        "(alert_type, severity, message, raised_at_utc, related_run_id) "
-        "VALUES (?, ?, ?, ?, ?)",
-        ("pre_flight_degraded", "warning", msg, run_ts_utc, run_id),
+    # Sprint 1.10-J commit 7 §X:裸 INSERT 改 AlertsDAO.insert_alert
+    from ..data.storage.dao import AlertsDAO
+    AlertsDAO.insert_alert(
+        conn,
+        alert_type="pre_flight_degraded",
+        severity="warning",
+        message=msg,
+        raised_at_utc=run_ts_utc,
+        related_run_id=run_id,
     )
     conn.commit()
     return True

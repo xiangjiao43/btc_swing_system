@@ -745,6 +745,98 @@ class DerivativesDAO:
 # 事件日历
 # ============================================================
 
+class AlertsDAO:
+    """alerts 表 DAO(Sprint 1.10-J commit 7 §X 重构,替代 4 处裸 INSERT)。
+
+    现有 alerts 表 schema(7 字段):
+      id (PK auto), alert_type, severity, message, raised_at_utc,
+      acknowledged DEFAULT 0, notification_sent DEFAULT 0, related_run_id
+
+    本 DAO 不改 schema(向后兼容),仅封装 INSERT / 查询接口,集中验证 +
+    便于未来加 prometheus / Telegram 推送等钩子。
+    """
+
+    VALID_SEVERITIES = ("critical", "warning", "info")
+
+    @staticmethod
+    def insert_alert(
+        conn: sqlite3.Connection,
+        *,
+        alert_type: str,
+        severity: str,
+        message: str,
+        raised_at_utc: str,
+        related_run_id: Optional[str] = None,
+    ) -> int:
+        """插入一条 alerts 行。
+
+        Args:
+            conn: SQLite 连接(调用方 commit)
+            alert_type: 'pre_flight_degraded' / 'overly_conservative' /
+                        'position_health_check' / 'weekly_review' /
+                        'weekly_review_critical_recommendation' / etc.
+            severity: 'critical' / 'warning' / 'info'(本 DAO 不强制校验,
+                      仅 normalize_severity 静态方法可选用)
+            message: 中文人读消息
+            raised_at_utc: ISO 8601 UTC
+            related_run_id: 可选关联 strategy_run
+
+        Returns:
+            新插入行 id(lastrowid)。
+        """
+        cur = conn.execute(
+            "INSERT INTO alerts "
+            "(alert_type, severity, message, raised_at_utc, related_run_id) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (alert_type, severity, message, raised_at_utc, related_run_id),
+        )
+        return int(cur.lastrowid or 0)
+
+    @staticmethod
+    def normalize_severity(sev: Optional[str]) -> str:
+        """非法 severity → 'info' graceful。"""
+        if sev not in AlertsDAO.VALID_SEVERITIES:
+            return "info"
+        return sev
+
+    @staticmethod
+    def get_recent(
+        conn: sqlite3.Connection,
+        *,
+        within_hours: int = 24,
+        alert_type: Optional[str] = None,
+        severity: Optional[str] = None,
+        now_utc: Optional[str] = None,
+    ) -> list[dict[str, Any]]:
+        """查最近 N 小时的 alerts(按 raised_at_utc DESC)。
+
+        可选过滤 alert_type / severity(精确匹配)。
+        """
+        from datetime import datetime, timedelta, timezone
+        if now_utc is None:
+            now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        # 字符串日期减小时
+        from datetime import datetime as _dt
+        try:
+            now_dt = _dt.fromisoformat(now_utc.replace("Z", "+00:00"))
+        except (ValueError, TypeError):
+            now_dt = datetime.now(timezone.utc)
+        cutoff = (now_dt - timedelta(hours=within_hours)).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
+        sql = "SELECT * FROM alerts WHERE raised_at_utc >= ?"
+        params: list[Any] = [cutoff]
+        if alert_type:
+            sql += " AND alert_type = ?"
+            params.append(alert_type)
+        if severity:
+            sql += " AND severity = ?"
+            params.append(severity)
+        sql += " ORDER BY raised_at_utc DESC"
+        rows = conn.execute(sql, params).fetchall()
+        return [dict(r) for r in rows]
+
+
 class EventsCalendarDAO:
     """events_calendar 表 DAO。"""
 

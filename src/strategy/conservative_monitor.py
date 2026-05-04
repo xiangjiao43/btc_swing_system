@@ -161,14 +161,16 @@ class ConservativeMonitor:
         severity: str, message: str, now_iso: str,
         related_run_id: Optional[str] = None,
     ) -> int:
-        """裸 INSERT 写 alerts(沿用 state_builder.py 模式;留 1.10-J 重构成 DAO)。"""
-        cur = conn.execute(
-            "INSERT INTO alerts "
-            "(alert_type, severity, message, raised_at_utc, related_run_id) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (ALERT_TYPE, severity, message, now_iso, related_run_id),
+        """Sprint 1.10-J commit 7 §X:重构为 AlertsDAO.insert_alert(替代裸 INSERT)。"""
+        from src.data.storage.dao import AlertsDAO
+        return AlertsDAO.insert_alert(
+            conn,
+            alert_type=ALERT_TYPE,
+            severity=severity,
+            message=message,
+            raised_at_utc=now_iso,
+            related_run_id=related_run_id,
         )
-        return cur.lastrowid or 0
 
     @staticmethod
     def check_and_alert(

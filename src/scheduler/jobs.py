@@ -1102,14 +1102,18 @@ def job_position_health_check(
         from datetime import datetime as _dt, timezone as _tz
         now_iso = _dt.now(_tz.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         try:
-            conn.execute(
-                "INSERT INTO alerts "
-                "(alert_type, severity, message, raised_at_utc, related_run_id) "
-                "VALUES (?, ?, ?, ?, ?)",
-                ("position_health_check", severity,
-                 f"position_health_check: {action}; "
-                 f"reason={out.get('reasoning', '')[:120]}",
-                 now_iso, active["thesis_id"]),
+            # Sprint 1.10-J commit 7 §X:裸 INSERT 改 AlertsDAO.insert_alert
+            from src.data.storage.dao import AlertsDAO
+            AlertsDAO.insert_alert(
+                conn,
+                alert_type="position_health_check",
+                severity=severity,
+                message=(
+                    f"position_health_check: {action}; "
+                    f"reason={out.get('reasoning', '')[:120]}"
+                ),
+                raised_at_utc=now_iso,
+                related_run_id=active["thesis_id"],
             )
         except Exception as e:
             logger.warning("position_health_check: write alert failed: %s", e)
@@ -1246,11 +1250,12 @@ def job_weekly_review(
             f"{(out.get('performance_summary') or {}).get('weekly_pnl_pct', 'N/A')}"
         )
         try:
-            conn.execute(
-                "INSERT INTO alerts "
-                "(alert_type, severity, message, raised_at_utc, related_run_id) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (alert_type, severity, msg, triggered_iso, None),
+            # Sprint 1.10-J commit 7 §X:裸 INSERT 改 AlertsDAO.insert_alert
+            from src.data.storage.dao import AlertsDAO
+            AlertsDAO.insert_alert(
+                conn,
+                alert_type=alert_type, severity=severity, message=msg,
+                raised_at_utc=triggered_iso, related_run_id=None,
             )
         except Exception as e:
             logger.warning("weekly_review: write alert failed: %s", e)

@@ -103,6 +103,16 @@ def apply_migration(conn: sqlite3.Connection) -> None:
         sql_014 = _MIGRATION_014.read_text(encoding="utf-8")
         conn.executescript(sql_014)
 
+    # Sprint 1.10-J commit 7 §X(累积清单 H#2/H#3 修):
+    # events_calendar.triggered_at_utc 条件 ALTER
+    # 历史:1.10-G verify event_macro 报"no such column" — 因为生产 DB
+    # 是 2.7-D 之前 schema(无此列)+ schema.sql 已含但 IF NOT EXISTS
+    # 不会加列到已存在表 + init_v14_tables 之前不调 migrate_2_7_d
+    if not _column_exists(conn, "events_calendar", "triggered_at_utc"):
+        conn.execute(
+            "ALTER TABLE events_calendar ADD COLUMN triggered_at_utc TEXT"
+        )
+
 
 def get_latest_run_id(conn: sqlite3.Connection) -> str | None:
     """从 strategy_runs 取最新 run_id;无则返 None。"""

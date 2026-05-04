@@ -1,9 +1,9 @@
-"""src/web_helpers/normalize_state.py — Sprint 1.8.2-A。
+"""src/web_helpers/normalize_state.py — Sprint 1.8.2-A / 1.10-K-B commit 4。
 
-把 v12 / v13 strategy_runs.full_state_json 统一成"前端友好 + 已翻译"
+把 v12 / v13 / v14 strategy_runs.full_state_json 统一成"前端友好 + 已翻译"
 schema:
   {
-    "schema_version": "v13" | "v12",
+    "schema_version": "v14" | "v13" | "v12",
     "summary_card": {action_state_label, stance_label, headline, ...},
     "layer_cards": [{layer, title, label, secondary_labels, summary,
                      key_observations, narrative, contradicting_signals,
@@ -58,8 +58,8 @@ def normalize_state(
 
     schema_version = _detect_schema(state, run_mode)
     try:
-        if schema_version == "v13":
-            normalized = _normalize_v13(state)
+        if schema_version in ("v13", "v14"):
+            normalized = _normalize_v13(state, schema_version=schema_version)
         else:
             normalized = _normalize_v12(state)
     except Exception as e:
@@ -102,19 +102,33 @@ def _format_bjt(utc_iso: Optional[str]) -> Optional[str]:
 # ============================================================
 
 def _detect_schema(state: dict[str, Any], run_mode: Optional[str]) -> str:
-    """v13 标识:run_mode='ai_orchestrator' 或 state 含 'layers' 键。"""
+    """三态检测(v14 / v13 / v12)。
+
+    优先级:
+    1. 显式 state['schema_version'] ∈ {'v14','v13','v12'} → 直接返回
+    2. run_mode='ai_orchestrator' 或 state.layers 是 dict → 默认 'v14'
+       (1.10-I commit 7 后 ai_orchestrator 默认写 'v14';老数据无 schema_version
+       字段时按最新版兜底,layered schema 完全兼容)
+    3. else → 'v12'(legacy evidence_reports)
+    """
+    explicit = state.get("schema_version")
+    if explicit in ("v14", "v13", "v12"):
+        return explicit
     if run_mode == "ai_orchestrator":
-        return "v13"
+        return "v14"
     if isinstance(state.get("layers"), dict):
-        return "v13"
+        return "v14"
     return "v12"
 
 
 # ============================================================
-# v13 路径(orchestrator + layers schema)
+# v13 / v14 路径(orchestrator + layers schema)
+# v14 schema 与 v13 layered 结构完全兼容;schema_version 字段参数化输出。
 # ============================================================
 
-def _normalize_v13(state: dict[str, Any]) -> dict[str, Any]:
+def _normalize_v13(
+    state: dict[str, Any], *, schema_version: str = "v14",
+) -> dict[str, Any]:
     layers = state.get("layers") or {}
     l1 = layers.get("l1") or {}
     l2 = layers.get("l2") or {}
@@ -153,7 +167,7 @@ def _normalize_v13(state: dict[str, Any]) -> dict[str, Any]:
     extreme = ctx_summary.get("extreme_event_flags") or {}
 
     return {
-        "schema_version": "v13",
+        "schema_version": schema_version,
         "summary_card": summary_card,
         "layer_cards": layer_cards,
         "anti_patterns_active": [

@@ -116,9 +116,11 @@ def _v13_state_full() -> dict:
     }
 
 
-def test_v13_full_state_returns_v13_schema_version():
+def test_v13_full_state_returns_v14_schema_version():
+    """1.10-K-B commit 4:run_mode='ai_orchestrator' + 无显式 schema_version
+    → 默认 'v14'(1.10-I commit 7 后 backend 默认写 v14)。"""
     out = normalize_state(_v13_state_full(), run_mode="ai_orchestrator")
-    assert out["schema_version"] == "v13"
+    assert out["schema_version"] == "v14"
 
 
 def test_v13_summary_card_action_state_translated():
@@ -306,17 +308,56 @@ def test_normalize_state_invalid_input():
 # Schema 检测
 # ============================================================
 
-def test_detect_schema_v13_by_run_mode():
-    assert _detect_schema({}, "ai_orchestrator") == "v13"
+def test_detect_schema_v14_by_run_mode():
+    """1.10-K-B commit 4:run_mode='ai_orchestrator' 默认 'v14'。"""
+    assert _detect_schema({}, "ai_orchestrator") == "v14"
 
 
-def test_detect_schema_v13_by_layers_key():
-    assert _detect_schema({"layers": {}}, None) == "v13"
+def test_detect_schema_v14_by_layers_key():
+    """1.10-K-B commit 4:state.layers 存在默认 'v14'。"""
+    assert _detect_schema({"layers": {}}, None) == "v14"
 
 
 def test_detect_schema_v12_default():
     assert _detect_schema({"evidence_reports": {}}, None) == "v12"
     assert _detect_schema({}, None) == "v12"
+
+
+# 1.10-K-B commit 4:explicit schema_version 字段优先级
+def test_detect_schema_explicit_v14_wins():
+    """state.schema_version='v14' 覆盖任何 fallback 推断。"""
+    assert _detect_schema(
+        {"schema_version": "v14", "evidence_reports": {}}, None,
+    ) == "v14"
+
+
+def test_detect_schema_explicit_v13_backward_compat():
+    """state.schema_version='v13' 老数据走 v13 路径(backward compat)。"""
+    assert _detect_schema(
+        {"schema_version": "v13", "layers": {}}, "ai_orchestrator",
+    ) == "v13"
+
+
+def test_detect_schema_explicit_v12_wins():
+    assert _detect_schema(
+        {"schema_version": "v12", "layers": {}}, None,
+    ) == "v12"
+
+
+def test_explicit_v13_state_outputs_v13_label():
+    """显式 schema_version='v13' → output['schema_version'] == 'v13'(backward compat)。"""
+    state = _v13_state_full()
+    state["schema_version"] = "v13"
+    out = normalize_state(state, run_mode="ai_orchestrator")
+    assert out["schema_version"] == "v13"
+
+
+def test_explicit_v14_state_outputs_v14_label():
+    """显式 schema_version='v14' → output['schema_version'] == 'v14'。"""
+    state = _v13_state_full()
+    state["schema_version"] = "v14"
+    out = normalize_state(state, run_mode="ai_orchestrator")
+    assert out["schema_version"] == "v14"
 
 
 # ============================================================
@@ -359,10 +400,10 @@ def test_first_sentence_truncate():
 # v13 with run_mode unset still detects via layers
 # ============================================================
 
-def test_v13_detected_without_run_mode():
-    """run_mode=None 但 state 含 layers → 仍识别为 v13。"""
+def test_layered_detected_without_run_mode_defaults_v14():
+    """run_mode=None 但 state 含 layers → 默认识别为 'v14'(1.10-K-B commit 4)。"""
     out = normalize_state(_v13_state_full(), run_mode=None)
-    assert out["schema_version"] == "v13"
+    assert out["schema_version"] == "v14"
     assert out["layer_cards"][0]["label"] != "未知"
 
 

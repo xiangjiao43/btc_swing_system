@@ -301,6 +301,18 @@ _REASON_TO_OUTCOME = {
     "protection":             ("closed_protection", "protection"),
 }
 
+# Sprint 1.10-L commit 4 §X(P0 #2 方案 (A) 双调用幂等):
+# thesis 已 close 后所有 status 值(_REASON_TO_OUTCOME 的 status 列 + 历史值)
+# close_thesis 顶部检测当前 status,若已在此集合 → return early(noop)
+# 防双重 close(hard_invalidation_monitor + lifecycle_manager._archive_lifecycle 都可能调)
+_CLOSED_STATUSES = frozenset({
+    "closed_profit",
+    "closed_loss",
+    "invalidated",
+    "closed_60d_cap",
+    "closed_protection",
+})
+
 
 def close_thesis(
     conn: sqlite3.Connection,
@@ -331,6 +343,25 @@ def close_thesis(
         raise ValueError(f"未知 close reason: {reason!r}")
     status, default_outcome = _REASON_TO_OUTCOME[reason]
     final_outcome = final_outcome_override or default_outcome
+
+    # Sprint 1.10-L commit 4 §X:幂等检查(P0 #2 方案 (A) 双调用)
+    # 若 thesis 当前 status 已在 _CLOSED_STATUSES → return early(noop)
+    # 防 hard_invalidation_monitor + lifecycle_manager._archive_lifecycle 双调用时
+    # 二次 close 走错快照基线 / cancel pending 找不到 / final_pnl 误算
+    existing = ThesesDAO.get_by_id(conn, thesis_id)
+    if existing is not None and existing.get("status") in _CLOSED_STATUSES:
+        return {
+            "thesis_id": thesis_id,
+            "status": existing.get("status"),
+            "close_channel": existing.get("close_channel"),
+            "final_outcome": existing.get("final_outcome"),
+            "final_realized_pnl": existing.get("final_realized_pnl"),
+            "final_realized_pnl_pct": existing.get("final_realized_pnl_pct"),
+            "rows_updated": 0,
+            "cancelled_pending_count": 0,
+            "computed_snapshot_for_account": None,
+            "noop_already_closed": True,
+        }
 
     # 算 close 后快照(含 close fills 的 realized_pnl)
     prev_snapshot = VirtualAccountDAO.get_latest(conn)

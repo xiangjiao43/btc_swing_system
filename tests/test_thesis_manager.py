@@ -629,3 +629,161 @@ def test_full_lifecycle_long_profit(conn):
     )
     assert r3["ready_to_close"]
     assert r3["close_reason"] == "all_take_profit_filled"
+
+
+# ============================================================
+# Sprint 1.10-L commit 4:close_thesis 幂等检查(P0 #2 方案 (A) 双调用)
+# ============================================================
+
+def _close_long_first_time(conn, thesis_id="th_idem"):
+    """辅助:open + close 一次,返回首次 close result。"""
+    _setup_open_long_position(conn, thesis_id=thesis_id)
+    fills = [{
+        "order_id": "x_sl", "thesis_id": thesis_id, "direction": "long",
+        "order_type": "stop_loss", "size_usdt": 20000.0,
+        "filled_price": 67000.0,
+        "filled_btc_amount": 20000.0 / 74000.0,
+        "filled_at_utc": "2026-05-08T14:00:00Z",
+    }]
+    res = close_thesis(
+        conn, thesis_id=thesis_id,
+        reason="stop_loss_filled",
+        close_channel="A",
+        closed_at_utc="2026-05-08T14:00:00Z",
+        fills_for_close=fills,
+        current_btc_price=67000.0,
+        initial_capital=100000.0,
+        snapshot_id="snap_close1", run_id="r_close1",
+        snapshot_at_utc="2026-05-08T14:01:00Z",
+    )
+    conn.commit()
+    return res
+
+
+def test_close_thesis_idempotent_already_closed_loss(conn):
+    """第一次 close → status='closed_loss';第二次 close → noop_already_closed。"""
+    r1 = _close_long_first_time(conn, thesis_id="th_idem_1")
+    assert r1["status"] == "closed_loss"
+    assert r1.get("noop_already_closed") is None  # 第一次不是 noop
+    # 第二次 close(模拟 hard_invalidation_monitor + lifecycle_manager 双调用)
+    r2 = close_thesis(
+        conn, thesis_id="th_idem_1",
+        reason="invalidated",                # 不同 reason 也应 noop
+        close_channel="B",
+        closed_at_utc="2026-05-08T15:00:00Z",
+        fills_for_close=[],
+        current_btc_price=67500.0,
+        initial_capital=100000.0,
+        snapshot_id="snap_close2", run_id="r_close2",
+        snapshot_at_utc="2026-05-08T15:01:00Z",
+    )
+    assert r2["noop_already_closed"] is True
+    # status 不变(仍是首次 close 的 closed_loss),不被 invalidated 覆盖
+    assert r2["status"] == "closed_loss"
+    assert r2["close_channel"] == "A"           # 首次的 channel,未被覆盖
+    assert r2["rows_updated"] == 0
+    assert r2["cancelled_pending_count"] == 0
+    th = conn.execute(
+        "SELECT status, close_channel FROM theses WHERE thesis_id=?",
+        ("th_idem_1",),
+    ).fetchone()
+    assert th["status"] == "closed_loss"
+    assert th["close_channel"] == "A"
+
+
+def test_close_thesis_idempotent_closed_profit(conn):
+    """closed_profit 也是 CLOSED_STATUSES 之一,二次 close 应 noop。"""
+    _setup_open_long_position(conn, thesis_id="th_idem_p")
+    fills_tp = [{
+        "order_id": "x_tp", "thesis_id": "th_idem_p", "direction": "long",
+        "order_type": "take_profit", "size_usdt": 20000.0,
+        "filled_price": 80000.0,
+        "filled_btc_amount": 20000.0 / 74000.0,
+        "filled_at_utc": "2026-05-10T08:00:00Z",
+    }]
+    r1 = close_thesis(
+        conn, thesis_id="th_idem_p",
+        reason="all_take_profit_filled",
+        close_channel="A",
+        closed_at_utc="2026-05-10T08:00:00Z",
+        fills_for_close=fills_tp,
+        current_btc_price=80000.0,
+        initial_capital=100000.0,
+        snapshot_id="snap_p1", run_id="r_p1",
+        snapshot_at_utc="2026-05-10T08:01:00Z",
+    )
+    conn.commit()
+    assert r1["status"] == "closed_profit"
+    # 第二次 close
+    r2 = close_thesis(
+        conn, thesis_id="th_idem_p",
+        reason="stop_loss_filled",
+        close_channel="C",
+        closed_at_utc="2026-05-10T09:00:00Z",
+        fills_for_close=[],
+        current_btc_price=80500.0,
+        initial_capital=100000.0,
+        snapshot_id="snap_p2", run_id="r_p2",
+        snapshot_at_utc="2026-05-10T09:01:00Z",
+    )
+    assert r2["noop_already_closed"] is True
+    assert r2["status"] == "closed_profit"
+
+
+def test_close_thesis_idempotent_invalidated(conn):
+    """invalidated 也在 CLOSED_STATUSES,二次 close 应 noop。"""
+    _setup_open_long_position(conn, thesis_id="th_idem_inv")
+    r1 = close_thesis(
+        conn, thesis_id="th_idem_inv",
+        reason="invalidated",
+        close_channel="B",
+        closed_at_utc="2026-05-08T14:00:00Z",
+        fills_for_close=[],
+        current_btc_price=67000.0,
+        initial_capital=100000.0,
+        snapshot_id="snap_i1", run_id="r_i1",
+        snapshot_at_utc="2026-05-08T14:01:00Z",
+        invalidated_reason="break_condition_1 触发",
+    )
+    conn.commit()
+    assert r1["status"] == "invalidated"
+    r2 = close_thesis(
+        conn, thesis_id="th_idem_inv",
+        reason="stop_loss_filled",
+        close_channel="A",
+        closed_at_utc="2026-05-08T15:00:00Z",
+        fills_for_close=[],
+        current_btc_price=66500.0,
+        initial_capital=100000.0,
+        snapshot_id="snap_i2", run_id="r_i2",
+        snapshot_at_utc="2026-05-08T15:01:00Z",
+    )
+    assert r2["noop_already_closed"] is True
+    assert r2["status"] == "invalidated"
+
+
+def test_close_thesis_first_close_normal_no_noop_flag(conn):
+    """正常第一次 close → noop_already_closed key 不在返回 dict(只在 noop 时才有)。"""
+    r = _close_long_first_time(conn, thesis_id="th_idem_first")
+    assert r["status"] == "closed_loss"
+    assert "noop_already_closed" not in r           # 第一次正常 close,无标记
+    assert r["rows_updated"] == 1                   # 真写入
+
+
+def test_close_thesis_idempotent_unknown_thesis_still_works_normally(conn):
+    """thesis_id 不存在 → get_by_id 返 None → 正常走 close 流程(后续 ThesesDAO.close 可能 rowcount=0)。"""
+    # 不 seed thesis,直接 close
+    res = close_thesis(
+        conn, thesis_id="th_does_not_exist",
+        reason="stop_loss_filled",
+        close_channel="A",
+        closed_at_utc="2026-05-08T14:00:00Z",
+        fills_for_close=[],
+        current_btc_price=70000.0,
+        initial_capital=100000.0,
+        snapshot_id="snap_x", run_id="r_x",
+        snapshot_at_utc="2026-05-08T14:01:00Z",
+    )
+    # 不是 noop(没 closed status)— 正常走完,rows_updated=0(thesis 不存在)
+    assert "noop_already_closed" not in res
+    assert res["rows_updated"] == 0

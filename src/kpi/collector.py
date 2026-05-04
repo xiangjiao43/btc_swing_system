@@ -220,11 +220,13 @@ class KPICollector:
         runs_total = len(rows)
         first = rows[0]["run_timestamp_utc"]
         last = rows[-1]["run_timestamp_utc"]
-        # APScheduler 默认 4 小时一次 → +4h 作为 next_expected_at 的粗估
+        # Sprint 1.10-J:主策略每天 16:05 BJT 1 次(1.9-B 改造,v1.4 §11.2
+        # 删旧 4h interval)→ +24h 作为 next_expected_at 的粗估
+        # 注:event_price / event_invalidation 触发的 event run 不在本估算内
         next_expected = None
         last_dt = _parse_iso(last)
         if last_dt is not None:
-            next_expected = _iso(last_dt + timedelta(hours=4))
+            next_expected = _iso(last_dt + timedelta(hours=24))
         return {
             "runs_total": runs_total,
             "runs_per_day": round(runs_total / max(1, lookback_days), 3),

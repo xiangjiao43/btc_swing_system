@@ -1,8 +1,9 @@
 """src/strategy/factor_cards_refresher.py — Sprint 2.8-A 实时刷新 factor_cards。
 
-**问题**:strategy_state_history.factor_cards 是 pipeline_run(每 4h)的快照,
-网页"抓取于"显示该字段时是 4h 前的旧时间。用户希望"抓取于"反映数据真实
-从 API 拉回的当下时刻(精确到秒)。
+**问题**:strategy_state_history.factor_cards 是 pipeline_run(Sprint 1.9-B
+起每天 16:05 BJT 1 次)的快照,网页"抓取于"显示该字段时是上次 run 的旧时间
+(冷启动 / 异动外可能 24h 前)。用户希望"抓取于"反映数据真实从 API 拉回
+的当下时刻(精确到秒)。
 
 **解决**:每个 collector job 跑完后(:00 / 08:01 / 06:00 / 08:35 / 周一 08:01)
 立即调 `refresh_factor_cards(conn)`:

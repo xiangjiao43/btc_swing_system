@@ -55,9 +55,14 @@
 | 7 | test_lifecycle_e2e_reversal 反手 channel C 端到端重新覆盖 + 2 新 e2e | 1 | ✅ `c49aefa` |
 | **==中断点 9:P0 #2/#3 反向闭环完成==**| | | ✅ 已通过(服务器同步)|
 | 8 | app.js 渐进迁移读 state_machine.thesis / system_state(P1 #4)+ 5 单测 | 2 | ✅ `c981838` |
-| 9 | lifecycle_manager FLIP/PPR review only(P2 #5 降级 9A)+ 1 处过时注释修订 | 1 | ✅ 待 push |
+| 9 | lifecycle_manager FLIP/PPR review only(P2 #5 降级 9A)+ 1 处过时注释修订 | 1 | ✅ `4459f55` |
 | 10 | ~~K-A 报告重复段落清理~~ — 跳过(commit 1 P2 #7 已提前完成) | — | ⏭ 跳过 |
-| **==中断点 10:P1 + P2 完成,准备真 API 验证==**| | | 🛑 已到达 |
+| **==中断点 10:P1 + P2 完成,准备真 API 验证==**| | | ✅ 已通过 |
+| 11a | V24 写入通路修复(_orchestrator_mapper + state_builder INSERT 17→18 列)+ 5 单测 | 3 | ✅ `7af4844` |
+| **==中断点 10.5:V24 写入修复,用户 SSH 真触发验证==**| | | ✅ 已通过(1 行真 V 数据)|
+| 11b | scripts/verify_e2e_real_api.py 任务 8 端到端 §Z 12 项 | 1 | ✅ `9ce293b` |
+| 12 | P2 #6 决策(基于 1 cycle 真数据)留 future + 文档 | 1 | ✅ 待 push |
+| **==中断点 11:任务 8 真 API 验证通过==**| | | 🛑 已到达 |
 | **阶段 2:P0 #2 lifecycle→ThesesDAO + P0 #3 反手通道接通**| | | |
 | 4 | thesis_manager.close_thesis 幂等检查 + 单测 | 2 | — |
 | 5 | lifecycle_manager._archive_lifecycle 接入 close_thesis + 单测 | 2 | — |
@@ -142,6 +147,73 @@
 `web/assets/app.js`:fetchAuxData() 末尾加 ~30 行 fallback 逻辑
 `tests/test_web_modules_4_5_rp_failure.py`:5 新单测覆盖 K-A commit 7 字段消费
 - ✅ pytest 1529 passed, 1 skipped, 0 failed(基准 1524 → +5)
+
+### Commit 12(P2 #6 决策:V12/V15/V19 prompt 留 future)
+**决策依据**(基于 commit 11a 修复 + 用户 SSH 跑 1 次 manual trigger 真数据):
+
+**真数据现状**(用户 SSH 真核 2026-05-04 21:23):
+- 累计 strategy_runs:139 行(原 138 全 NULL + 新增 1 行 has_data)
+- 新 1 行 V meta 完整(28 字段 1181 字符 JSON)
+- **V1-V23 全 silent(false)**:冷启动期符合预期
+  - 无 active thesis → V6/V11/V17 等 thesis 相关静默
+  - 不在 cooldown → V18/V19/V22 等系统级静默
+  - master AI 输出 silent_cooldown(EMA-200 长期均线尚未转向)→ V21 软抗拒未触发(冷启动期合理)
+- ai_status='ok',tokens 86k+7k(主 AI 真返回 + 真 V meta)
+
+**决策**:**V12/V15/V19 prompt 留 future sprint**
+
+**理由**(3 点):
+1. **真数据不足**:1 cycle = 1 行 V data,所有 V 全 silent。无频率分布可决策"哪条 V 高频触发,加 prompt 收益最大"
+2. **冷启动期符合预期**:V silent 不是 prompt 漏洞,是当前业务状态(无 thesis / 不在 cooldown / master 走 silent_cooldown 合理)
+3. **K-A K-B 已加 4 V prompt(V3/V9/V21/V23)**,本 sprint 不擅自加无数据基础的 V12/V15/V19 — 跟"工程纪律 真数据驱动 prompt 优化"一致
+
+**留 1.10-M / future sprint**:
+- 等生产积累 50-100+ 行 V data(thesis 创建 / cooldown 触发 / master 真做出决策后)
+- 看 V 真触发频率分布表(V21 / V14 / V13 / V8 等 thesis-aware V 应有数据)
+- 决策"V12/V15/V19 加 prompt 是否能减少 master AI 违反频次"
+- 工程量 0.3 天(类似 K-B commit 2 prompt 优化模式)
+
+**这不是 cop-out**:
+- 加 prompt 收益取决于 master AI 真违反 V 的频率
+- 当前 0 数据 → 加 prompt 是"猜测"不是"数据驱动"
+- 留 future = 真数据驱动 = K-B 同样模式("数据驱动失败 → 回退结构化分析" 是诚实)
+
+**§Z 验证**:
+- ✅ pytest 全量 1534 passed, 1 skipped, 0 failed(基准维持,纯文档 0 业务改动)
+- ✅ 0 prompt 文件改动(`src/ai/agents/prompts/master_adjudicator.txt` 不动)
+
+### Commit 11a(V24 写入通路修复)
+**根因**(本地代码追踪 + SSH 真核 138 行 DB 数据交叉确认):
+- 1.10-E 引入 `strategy_runs.constraint_activations_json` 列(migration 011)
+- orchestrator.py:251 算好 `result['constraint_activations']` ✅
+- _orchestrator_mapper 输出 17 列 mapped — **不含** constraint_activations_json ❌
+- state_builder._run_v13_orchestrator INSERT 17 列 — **不写** constraint_activations_json ❌
+- DB 138 行全 NULL(SSH 真核确认:null=138/empty=0/has_data=0)
+
+**修复**:
+- `src/pipeline/_orchestrator_mapper.py`:mapped 加 `constraint_activations_json` 字段(json.dumps with ensure_ascii=False)
+- `src/pipeline/state_builder.py`:_run_v13_orchestrator INSERT SQL 17 → 18 列 + params
+- `tests/pipeline/test_orchestrator_mapper.py`:test_returns_all_17 → 18 + 5 新单测
+
+**真接通验证**(用户 SSH 跑 `scripts/run_pipeline_once.py --trigger manual`):
+- run_id: 753cd250..., run_trigger='manual'
+- constraint_activations_json: 1181 字符真有 V meta JSON
+- ai.status: 'ok', tokens_in: 85790, tokens_out: 7367
+- 累计:null=138, has_data=1, total=139
+- **1.10-E V24 设计意图首次真接通,v1.4 完整版而非半残版**
+
+**§Z 验证**:
+- ✅ pytest tests/pipeline/test_orchestrator_mapper.py → 41 passed(原 36 + 5 新)
+- ✅ 全量回归 1534 passed, 1 skipped, 0 failed(基准 1529 → +5 新)
+
+### Commit 11b(verify_e2e_real_api.py 任务 8 §Z 12 项)
+- 段 A V24 写入通路真接通(2 项)
+- 段 B V meta JSON schema 完整性(4 项,V1-V23 + 28 字段)
+- 段 C run_trigger 维度(1 项)
+- 段 D 数据通路完整性 — 代码层 grep(4 项)
+- 段 E 周复盘 AI 数据流通(1 项)
+
+设计纪律:跑得通本地(代码层 ✅,数据层失败 + 给原因)+ 生产 DB 跑全过
 
 ### Commit 9(lifecycle_manager FLIP/PPR — P2 #5 降级方案 9A,review only)
 **Scope 重判断**(commit 9 启动前 stop + 报告):

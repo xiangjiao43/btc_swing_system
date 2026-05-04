@@ -171,57 +171,10 @@
 
 ---
 
-## 33 处写入方清理详细行号(commit 2-3 实施清单)
+## 33 处写入方清理详细行号
 
-### Commit 2(dao.py + schema.sql + dao 相关测试)
-
-| 文件 | 行号 | 内容 | 改动 |
-|---|---|---|---|
-| `src/data/storage/schema.sql` | 17 | 注释提及两列 | 删 |
-| `src/data/storage/schema.sql` | 35 | `observation_category TEXT,` | 删 |
-| `src/data/storage/schema.sql` | 36 | `cold_start INTEGER DEFAULT 0,` | 删 |
-| `src/data/storage/dao.py` | 1124 | `observation = state.get("observation") or {}` | 删 |
-| `src/data/storage/dao.py` | 1139 | `observation_category = observation.get(...)` | 删 |
-| `src/data/storage/dao.py` | 1140 | `cold_start_flag = 0` | 删 |
-| `src/data/storage/dao.py` | 1162-1163 | INSERT 列名 `observation_category, cold_start,` | 改(删两列名 + 调整 VALUES `?` 数 + params)|
-| `src/data/storage/dao.py` | 1178-1179 | ON CONFLICT 子句 `observation_category = excluded..., cold_start = excluded...,` | 删 |
-| `src/data/storage/dao.py` | 1193-1194 | params `observation_category, cold_start_flag,` | 删 |
-| `src/data/storage/dao.py` | 1226 | 注释提及 cold_start 判定 | 改(删 cold_start 提及)|
-| **dao 相关测试** | | | |
-| `tests/test_weekly_review_input_builder.py` | 42, 47, 52 | INSERT 含 observation_category | 改 / 删 |
-| `tests/pipeline/test_orchestrator_mapper.py` | 239-242, 247-250 | observation_category / cold_start always_zero 测试 | 改(测试列已不存在)|
-
-### Commit 3(state_builder + _orchestrator_mapper + weekly_review + 19 测试)
-
-| 文件 | 行号 | 内容 | 改动 |
-|---|---|---|---|
-| `src/pipeline/state_builder.py` | 13 | docstring 提及 cold_start | 改(措辞精简)|
-| `src/pipeline/state_builder.py` | 205-206 | 注释 cold_start_check stage | 删 |
-| `src/pipeline/state_builder.py` | 395-396 | INSERT 列名 `observation_category, cold_start,` | 删 |
-| `src/pipeline/state_builder.py` | 415-416 | params `mapped["observation_category"], mapped["cold_start"],` | 删 |
-| `src/pipeline/state_builder.py` | 506-508 | 注释 cold_start_check stage | 删 |
-| `src/pipeline/state_builder.py` | 613 | 注释 observation_category | 删 |
-| `src/pipeline/state_builder.py` | 909-910 | 注释 _determine_cold_start | 删 |
-| `src/pipeline/state_builder.py` | 943-944 | 注释 cold_start 字段已删 | 删 |
-| `src/pipeline/_orchestrator_mapper.py` | 12-16, 56 | 注释 | 改(精简,K-A 完成)|
-| `src/pipeline/_orchestrator_mapper.py` | 120-126 | observation_category / cold_start_int = None / 0 | 删 |
-| `src/pipeline/_orchestrator_mapper.py` | 150-151 | mapped 字段 | 删 |
-| `src/pipeline/_orchestrator_mapper.py` | 181-186, 234 | 注释 _build_cold_start_state / cold_start key | 删 |
-| `src/ai/weekly_review_input_builder.py` | 87 | SELECT 含 observation_category | 删 |
-| **19 测试** | | | |
-| `tests/test_kpi_collector.py` | 59-72, 157-169 | cold_start_runs / cold_start_warming_up 测试参数 | 改(去掉 cold_start_warming_up case 或改 health_status='error')|
-| `tests/test_alerts.py` | 49-57, 188-189 | cold_start_runs 参数 + 已删测试注释 | 改 / 清理 |
-| `tests/test_no_opportunity_narrator.py` | 34, 38, 42, 45, 49-51, 94-96 | cold_start_warming_up 路由测试 | 改(commit 11-12 narrator 重写一并)|
-| `tests/test_no_opportunity_8_scenarios.py` | 69-71, 229 | SCENARIO_COLD_START 测试 | 改(commit 11) |
-| `tests/test_human_readable_style.py` | 261-263 | cold_start scenario 参数 | 改 |
-| `tests/test_review_generator.py` | 55 | "cold_start": {...} 字段 | 删 |
-| `tests/test_virtual_account_manager.py` | 13 | test_cold_start_no_prev_no_fills | 改(测试名重命名,语义保留)|
-| `tests/test_web_modules_1_2_3.py` | 80 | cold_start_placeholder 测试 | 改 |
-| `tests/test_web_schema_gate.py` | 181 | observation_category fixture | 删 |
-| `tests/test_narrative_human_quality.py` | 49 | cold_start_warming_up=False 字段 | 删 |
-| `tests/test_plain_reading.py` | 61, 109 | health_status="cold_start_warming_up" | 改(已 1.10-J 改 'error',删剩余引用)|
-
-**总计**:**33 处主代码 + ~15 处测试**,符合用户预期 30+。
+**注**:本 sprint 1.10-L commit 1 §X 清理 — 原 commit 1 启动时写的"预期清单 commit 2/3 实施"
+表格已删除(scope 实际扩展后预期 ↔ 实际不一致;权威实际清单见下面 §Z 双验证记录 / Commit 2-3 段)。
 
 ---
 

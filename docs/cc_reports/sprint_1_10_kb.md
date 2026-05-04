@@ -19,9 +19,9 @@
 | Commit | 内容 | 状态 |
 |---|---|---|
 | 1 | 报告骨架 + 5 项调研(V 频率分析 + prompt 覆盖率 cross-check) | ✅ `1ecb63f` |
-| 2 | 任务 1+2:master_adjudicator.txt 加 4 条 hard constraints(V3 / V9 / V21 / V23) | ✅ 进行中 push |
-| 3 | 任务 3:migration 015 自适应 DROP COLUMN + 单测 | 待 |
-| **==中断点 3==** | 用户审 → 授权才进 commit 4-6 | — |
+| 2 | 任务 1+2:master_adjudicator.txt 加 4 条 hard constraints(V3 / V9 / V21 / V23) | ✅ `9e8bc90` |
+| 3 | 任务 3:migration 015 自适应 DROP COLUMN + 7 单测 | ✅ 待 push |
+| **==中断点 3==** | 用户审 → 授权才进 commit 4-6 | 🛑 已到达 |
 
 **绝对不做**(本批次):commits 4-6(normalize_state v14 detect / ThesesDAO 微调 / AlertsDAO mark_*)。
 
@@ -121,6 +121,65 @@ SELECT COUNT(*) FROM strategy_runs WHERE constraint_activations_json IS NOT NULL
 - 全量回归:`tests/` → **1472 passed, 4 skipped**(基准 1471,+1 新测试,0 回归)
 - 4 V 关键词全部命中:Validator 3 / 9 / 21 / 23 + 软抗拒 + 层间
 
+### Commit 3(migration 015 自适应 + 7 单测)
+- 文本验证:
+  - `migrations/015_v14_drop_old_columns.sql` 创建(audit trail,纯文档不挂主流程)
+  - `scripts/init_v14_tables.py`:加 4 个 helper(`_supports_native_drop_column` /
+    `_list_indexes_for_table` / `_drop_column_or_recreate` / `drop_obsolete_columns`)
+  - `apply_migration()` **未** 调 `drop_obsolete_columns`(opt-in 安全门)
+- pytest 验证:`tests/test_init_v14_drop_columns.py` → **7/7 passed**
+  - test_native_alter_drops_column_when_sqlite_supports
+  - test_recreate_path_when_sqlite_too_old(mock 3.30.0)
+  - test_idempotent_when_column_already_dropped
+  - test_drop_obsolete_columns_idempotent
+  - test_data_integrity_preserved_after_drop
+  - test_indexes_preserved_after_drop_native_path
+  - test_indexes_preserved_after_drop_recreate_path
+- 全量回归:`tests/` → **1479 passed, 4 skipped**(基准 1472 → +7 新,0 回归)
+- 启动烟测:in-memory schema → apply_migration → drop_obsolete_columns
+  → 两列从 True/True → False/False(`native_alter` 路径走通)
+
+---
+
+## ⚠️ 中断点 3:本批次结束,等用户审
+
+### 安全门设计(commit 3 关键决策)
+
+**migration 015 不挂 apply_migration() 主流程**,需调用方明确 opt-in:
+```python
+from scripts.init_v14_tables import drop_obsolete_columns
+drop_obsolete_columns(conn, backup_path=Path("/tmp/db.before_015.bak"))
+```
+
+理由:`grep -rn "observation_category|cold_start"` 在 src/ 仍有 30+ 处引用(主要在
+`src/data/storage/dao.py` INSERT 语句 + `src/pipeline/state_builder.py` INSERT 语句 +
+`src/ai/weekly_review_input_builder.py` SELECT 语句)。如果 migration 015 自动
+跑了 DROP COLUMN,下次 pipeline INSERT 会崩(`no such column: cold_start`)。
+
+### 用户决策点(中断点 3 后请审)
+
+请用户在以下三选一:
+
+1. **方案 A:延后部署 migration 015**(推荐)
+   - 本 sprint commits 1-3 push 即可,生产暂不跑 `drop_obsolete_columns()`
+   - 在后续 sprint(commits 4-6 或 1.10-K-C)清理 dao.py / state_builder.py /
+     weekly_review_input_builder.py 的两列引用,然后再跑 migration 015
+   - 风险:零(代码 / DB 都没动)
+
+2. **方案 B:本 sprint 加 commit 3.5 → 同步清理写者**
+   - 加 commit 3.5:dao.py 删两列 INSERT、state_builder.py 删两列 INSERT、
+     weekly_review_input_builder.py SELECT 不再读 observation_category、schema.sql
+     CREATE TABLE 删两列、相关 tests 一起改
+   - 然后用户 SSH 跑 `python scripts/init_v14_tables.py` 触发 apply_migration +
+     在 init_v14_tables main() 里添加 `drop_obsolete_columns(conn, backup_path=...)` 调用
+   - 风险:中(改动面 ~10+ 文件,需仔细回归)
+
+3. **方案 C:跳过删列**
+   - DB 列保留(graceful NULL/0 状态维持),migration 015 + 自适应函数 + 单测
+     仍 commit(留作未来基础设施)
+   - 风险:零,但累积清单第 (6) 项"strategy_runs 残留 observation_category /
+     cold_start 列"无法在 1.10-K 关账
+
 ## 1.10-K 累积清单(本 sprint 内消化的 7 项,1.10-K-A 已消化 4,1.10-K-B 消化 3)
 
 详见 `docs/cc_reports/sprint_1_10_ka.md` 的 1.10-K 累积清单。本 sprint 拟消化:
@@ -128,12 +187,19 @@ SELECT COUNT(*) FROM strategy_runs WHERE constraint_activations_json IS NOT NULL
 - (6) strategy_runs 残留 `observation_category` / `cold_start` 列 → commit 3
 - (7) Validator 真触发频率从无可视性 → commit 1 调研 + 文档化
 
-## 本 sprint 删除清单(待 commit 3 完成后填)
+## 本 sprint 删除清单
 
-| 删除对象 | 路径 / 位置 | 删除原因 |
+| 删除对象 | 路径 / 位置 | 删除原因 / 状态 |
 |---|---|---|
-| 列 strategy_runs.observation_category | DB schema | 1.10-J commit 5 后无人写,通过 migration 015 清理 |
-| 列 strategy_runs.cold_start | DB schema | 1.10-J commit 6 后无人写,通过 migration 015 清理 |
+| 列 strategy_runs.observation_category | DB schema | migration 015 工具已就绪;**实际 DROP 待用户决策**(见中断点 3 三方案) |
+| 列 strategy_runs.cold_start | DB schema | 同上 |
+
+**自检清单**:
+- ✅ `drop_obsolete_columns()` 不在 `apply_migration()` 主流程(防误删)
+- ✅ `migrations/015_v14_drop_old_columns.sql` 仅 audit trail,无 DDL
+- ✅ 7 单测覆盖新/老 sqlite + 幂等 + 数据/索引完整性
+- ✅ 全量回归 1479/4 0 失败
+- ⚠️ 仍有 30+ 处 src/ 引用未清(见中断点 3 方案 B 待跟进)
 
 ---
 
@@ -141,8 +207,8 @@ SELECT COUNT(*) FROM strategy_runs WHERE constraint_activations_json IS NOT NULL
 
 | 步骤 | 状态 |
 |---|---|
-| 本地 pytest 通过 | ⏳ 待 commit 3 后 |
-| GitHub push(commit hash) | ⏳ 待 |
-| 服务器 git pull | ⏳ 待用户执行 |
+| 本地 pytest 通过 | ✅ 1479 / 4(commits 1-3 累计) |
+| GitHub push commits | ✅ `1ecb63f` (c1) + `9e8bc90` (c2) + 待 push (c3) |
+| 服务器 git pull | ⏳ 待用户执行(在审完中断点 3 后) |
 | 服务器 systemctl restart | ⏳ 待用户执行 |
-| 生产 DB migration 015 跑 | ⏳ 待用户执行(自动备份) |
+| 生产 DB migration 015 跑 | 🛑 **不要直接跑** — 见中断点 3 三方案;推荐方案 A(延后) |

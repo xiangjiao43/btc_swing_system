@@ -21,6 +21,7 @@ import sys
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 
 import yaml
 
@@ -38,6 +39,15 @@ _MIGRATION_011 = _REPO_ROOT / "migrations" / "011_v14_validator_meta.sql"
 _MIGRATION_012 = _REPO_ROOT / "migrations" / "012_v14_retry_log.sql"
 _MIGRATION_013 = _REPO_ROOT / "migrations" / "013_v14_event_throttle_class.sql"
 _MIGRATION_014 = _REPO_ROOT / "migrations" / "014_v14_weekly_reviews.sql"
+_MIGRATION_015 = _REPO_ROOT / "migrations" / "015_v14_drop_old_columns.sql"
+
+# Sprint 1.10-K-B commit 3:1.10-J 后无人写的列 → migration 015 删
+# (DROP 由 drop_obsolete_columns() 显式调用,不自动挂 apply_migration)
+_OBSOLETE_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("strategy_runs", "observation_category"),
+    ("strategy_runs", "cold_start"),
+)
+_MIN_NATIVE_DROP_COLUMN_VERSION = (3, 35, 0)
 
 
 def load_config() -> dict:
@@ -112,6 +122,104 @@ def apply_migration(conn: sqlite3.Connection) -> None:
         conn.execute(
             "ALTER TABLE events_calendar ADD COLUMN triggered_at_utc TEXT"
         )
+
+
+def _supports_native_drop_column() -> bool:
+    """SQLite ≥ 3.35.0(2021-03-12)原生支持 ALTER TABLE … DROP COLUMN。
+
+    < 3.35.0 需 CREATE TABLE 复制法兜底。
+    服务器 SQLite 3.45.1 + 本地 3.50.4 均走原生路径。
+    """
+    return sqlite3.sqlite_version_info >= _MIN_NATIVE_DROP_COLUMN_VERSION
+
+
+def _list_indexes_for_table(
+    conn: sqlite3.Connection, table: str,
+) -> list[tuple[str, str]]:
+    """返回表的所有非自动索引 (name, create_sql)。"""
+    rows = conn.execute(
+        "SELECT name, sql FROM sqlite_master "
+        "WHERE type='index' AND tbl_name = ? AND sql IS NOT NULL",
+        (table,),
+    ).fetchall()
+    return [(r[0], r[1]) for r in rows]
+
+
+def _drop_column_or_recreate(
+    conn: sqlite3.Connection, table: str, column: str,
+) -> str:
+    """自适应删列:新 sqlite 走原生 ALTER;老 sqlite 走 CREATE TABLE 复制法。
+
+    幂等:列不存在 → no-op,返回 'no_op'。
+    Returns: 'no_op' | 'native_alter' | 'recreate'
+    """
+    if not _column_exists(conn, table, column):
+        return "no_op"
+    if _supports_native_drop_column():
+        conn.execute(f"ALTER TABLE {table} DROP COLUMN {column}")
+        return "native_alter"
+    # 老 sqlite:CREATE TABLE 复制法(保留索引)
+    indexes = _list_indexes_for_table(conn, table)
+    cols_info = conn.execute(f"PRAGMA table_info({table})").fetchall()
+    keep_cols = [r[1] for r in cols_info if r[1] != column]
+    keep_cols_csv = ", ".join(keep_cols)
+    tmp = f"{table}__migration015_tmp"
+    conn.execute(
+        f"CREATE TABLE {tmp} AS SELECT {keep_cols_csv} FROM {table}"
+    )
+    conn.execute(f"DROP TABLE {table}")
+    conn.execute(f"ALTER TABLE {tmp} RENAME TO {table}")
+    # 重建索引(CREATE TABLE AS 不带索引)
+    for _idx_name, idx_sql in indexes:
+        if idx_sql:
+            try:
+                conn.execute(idx_sql)
+            except sqlite3.OperationalError:
+                # 已存在 → 跳过
+                pass
+    return "recreate"
+
+
+def drop_obsolete_columns(
+    conn: sqlite3.Connection,
+    *,
+    backup_path: Optional[Path] = None,
+) -> dict[str, str]:
+    """Sprint 1.10-K-B commit 3:删 1.10-J 已弃用的 strategy_runs 列。
+
+    **重要**:本函数不挂 apply_migration() 主流程,需调用方明确 opt-in。
+    部署前置:dao.py / state_builder.py / weekly_review_input_builder.py
+    需先更新为不再 INSERT/SELECT 这两列(否则 DROP 后下次 INSERT 崩溃)。
+
+    Args:
+        conn: 已连接的 sqlite3.Connection
+        backup_path: 可选备份路径(传则在 DROP 前 cp DB)
+
+    Returns:
+        {column: result} dict,result ∈ {'no_op', 'native_alter', 'recreate'}
+    """
+    if backup_path is not None:
+        # 仅文件型 DB 才能备份(in-memory ':memory:' 跳过)
+        try:
+            db_file = Path(conn.execute("PRAGMA database_list").fetchone()[2])
+            if db_file.exists():
+                import shutil
+                shutil.copy2(db_file, backup_path)
+        except Exception:
+            pass
+
+    results: dict[str, str] = {}
+    try:
+        for table, column in _OBSOLETE_COLUMNS:
+            results[f"{table}.{column}"] = _drop_column_or_recreate(
+                conn, table, column,
+            )
+        conn.commit()
+    except Exception:
+        # 错误回滚:用未提交事务回滚 + 抛 raise(由调用方决定是否 restore backup)
+        conn.rollback()
+        raise
+    return results
 
 
 def get_latest_run_id(conn: sqlite3.Connection) -> str | None:

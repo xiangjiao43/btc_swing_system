@@ -1,0 +1,46 @@
+-- migrations/015_v14_drop_old_columns.sql — Sprint 1.10-K-B commit 3
+-- v1.4 §11.2 删 "observation_category / observation_classifier 整套机制"
+-- v1.4 §11.2 删 "cold_start 字段及所有相关逻辑"
+--
+-- 历史:
+-- - 1.10-J commit 5:删 observation_classifier(无人写 observation_category 列)
+-- - 1.10-J commit 6:删 cold_start 整套机制(DAO 写死 0 graceful)
+-- - 1.10-K-B commit 3:正式删 DB 列(本 migration)
+--
+-- 目标列(strategy_runs):
+-- - observation_category(列 #15,TEXT)
+-- - cold_start(列 #16,INTEGER DEFAULT 0)
+--
+-- 实施方式:
+-- SQLite ≥ 3.35.0(2021-03-12)原生支持 ALTER TABLE ... DROP COLUMN
+-- < 3.35.0 需 CREATE TABLE 复制法
+--
+-- 服务器 SQLite 3.45.1(用户 2026-05-03 SSH 确认)→ 走原生 ALTER
+-- 本地开发机 SQLite 3.51.0(cli)/ 3.50.4(Python module)→ 走原生 ALTER
+--
+-- ======================================================================
+-- 安全注:本 SQL 仅作 audit trail。实际 DROP 由 Python 端
+-- scripts/init_v14_tables.py:drop_obsolete_columns(conn) 完成
+-- (自适应:新 sqlite 走原生 ALTER;老 sqlite 走 CREATE TABLE 复制)
+--
+-- 不在本 SQL 里写 ALTER 语句,因为:
+-- 1. SQLite < 3.35 完全不支持 DROP COLUMN(语法错误,executescript 失败)
+-- 2. 自适应需 Python 检测 sqlite_version_info 后分支
+-- 3. 自动备份 + 错误回滚需要 Python 控制流
+--
+-- 也不挂在 apply_migration() 主流程,需调用方明确 opt-in:
+--   from scripts.init_v14_tables import drop_obsolete_columns
+--   drop_obsolete_columns(conn)
+--
+-- 部署前置(commits 4-6 / 后续 sprint):
+-- - 必须先更新 src/data/storage/dao.py(strategy_runs INSERT 不再写两列)
+-- - 必须更新 src/pipeline/state_builder.py(同上)
+-- - 必须更新 src/ai/weekly_review_input_builder.py(SELECT 不再读 observation_category)
+-- - 必须更新 tests/(凡 INSERT / SELECT 这两列的测试)
+-- - 必须更新 src/data/storage/schema.sql(CREATE TABLE 不再含两列)
+-- ======================================================================
+
+-- 本 SQL 文件不含 DDL,纯文档化。运行 audit:
+SELECT 'migration_015_drop_old_columns' AS migration_id,
+       'audit_trail_only' AS status,
+       'see scripts/init_v14_tables.py:drop_obsolete_columns()' AS implementation;

@@ -408,21 +408,22 @@ def test_18_long_hold_to_trim_tp_target(sm: StateMachine):
 # LONG_EXIT → FLIP_WATCH / FLAT
 # ==================================================================
 
-@pytest.mark.skip(reason="1.10-K-A commit 5: _calc_flip_watch_bounds 已删 + "
-                          "_on_enter_effects FLIP_WATCH bounds 已删 → flip_watch_bounds "
-                          "断言失效;测试改造留 commit 8")
 def test_19_long_exit_to_flip_watch(sm: StateMachine):
+    """1.10-K-A commit 8 改造:LONG_EXIT → FLIP_WATCH transition 仍可发生
+    (_from_LONG_EXIT 不动);进入后 thesis=None + system_state='normal'
+    (FLIP_WATCH 是冷却态由 thesis.closed_at 隐式驱动,不是系统态);
+    flip_watch_bounds 字段保留 None(_calc_flip_watch_bounds 已删)。"""
     prev = _prev_record("LONG_EXIT", _ts(-2))
     r = sm.compute_next(
         _state(l2_stance="bearish", l1_regime="transition_down"),
         previous_record=prev, now_utc=_ts(0),
     )
     assert r["current_state"] == "FLIP_WATCH"
-    # 进入时锁定 FLIP_WATCH bounds
-    b = r["flip_watch_bounds"]
-    assert b is not None
-    assert b["effective_min_hours"] >= 8
-    assert b["effective_max_hours"] <= 168
+    # commit 7 方案 C 镜像字段
+    assert r["thesis"] is None  # 冷却态无 active thesis
+    assert r["system_state"] == "normal"  # 不是系统态(只有 PROTECTION/PPR 才是)
+    # commit 5 删 _calc_flip_watch_bounds 后 bounds 永远 None
+    assert r["flip_watch_bounds"] is None
 
 
 def test_20_long_exit_to_flat_no_flip_conditions(sm: StateMachine):
@@ -439,80 +440,36 @@ def test_20_long_exit_to_flat_no_flip_conditions(sm: StateMachine):
 # FLIP_WATCH 动态冷却 + 迁出
 # ==================================================================
 
-@pytest.mark.skip(reason="1.10-K-A commit 5: _from_FLIP_WATCH 业务移出 stub,"
-                          "FLIP_WATCH → SHORT_PLANNED 反手路径已废;测试改造留 commit 8")
-def test_21_flip_watch_to_short_planned_after_min(sm: StateMachine):
-    # 进入 FLIP_WATCH 20 小时(超过 base min 18h)
-    bounds = {
-        "effective_min_hours": 18, "effective_max_hours": 96,
-    }
-    prev = _prev_record(
-        "FLIP_WATCH", _ts(-20), flip_watch_bounds=bounds,
-    )
-    r = sm.compute_next(
-        _state(
-            l2_stance="bearish", l2_stance_confidence=0.7,
-            l3_grade="A", l3_permission="can_open",
-            l1_regime="trend_down",
-            l4_overall_risk="moderate",
-            lifecycle={"prev_cycle_side": "long", "long_thesis_invalidated": True},
-        ),
-        previous_record=prev, now_utc=_ts(0),
-    )
-    assert r["current_state"] == "SHORT_PLANNED"
+# 1.10-K-A commit 8 §X 删除:test_21_flip_watch_to_short_planned_after_min
+# (FLIP_WATCH → SHORT_PLANNED 反手出口由 thesis_manager 接管,future sprint;
+#  本测试无 thesis-driven 等价行为可验证)
+#
+# 1.10-K-A commit 8 §X 删除:test_22_flip_watch_to_flat_after_max
+# (FLIP_WATCH → FLAT 超时出口已废,冷却由 thesis.closed_at 隐式驱动;
+#  thesis_manager 接管后留 future sprint)
+#
+# 1.10-K-A commit 8 §X 删除:test_24_flip_watch_multipliers_late_bull_low_vol
+# (_calc_flip_watch_bounds 整删,cycle_position / volatility 乘数计算无替代)
 
 
-@pytest.mark.skip(reason="1.10-K-A commit 5: _from_FLIP_WATCH 业务移出 stub,"
-                          "FLIP_WATCH → FLAT 超时路径已废;测试改造留 commit 8")
-def test_22_flip_watch_to_flat_after_max(sm: StateMachine):
-    bounds = {"effective_min_hours": 18, "effective_max_hours": 96}
-    prev = _prev_record(
-        "FLIP_WATCH", _ts(-100), flip_watch_bounds=bounds,
-    )
-    r = sm.compute_next(
-        _state(l1_regime="trend_up", l2_stance="bullish",
-               lifecycle={"prev_cycle_side": "long"}),
-        previous_record=prev, now_utc=_ts(0),
-    )
-    assert r["current_state"] == "FLAT"
-
-
-@pytest.mark.skip(reason="1.10-K-A commit 5: _from_FLIP_WATCH 业务移出 stub,"
-                          "FLIP_WATCH 冷却 hours_in 维持判定已废;测试改造留 commit 8")
-def test_23_flip_watch_cooling_stays_within_min(sm: StateMachine):
-    bounds = {"effective_min_hours": 18, "effective_max_hours": 96}
-    prev = _prev_record("FLIP_WATCH", _ts(-5), flip_watch_bounds=bounds)
+def test_23_flip_watch_stub_stays_when_prev_is_flip_watch(sm: StateMachine):
+    """1.10-K-A commit 8 改造:_from_FLIP_WATCH stub 行为(方案 5A)。
+    prev_state='FLIP_WATCH' → stub 返 None target → wrapper stay FLIP_WATCH。
+    任何 fields 输入 stub 都忽略(冷却由 thesis.closed_at 驱动)。"""
+    prev = _prev_record("FLIP_WATCH", _ts(-5))
+    # 即使给"反手条件齐全"的 fields,stub 也忽略
     r = sm.compute_next(
         _state(l2_stance="bearish", l2_stance_confidence=0.9,
                l3_grade="A", l3_permission="can_open",
-               l1_regime="trend_down",
-               lifecycle={"prev_cycle_side": "long", "long_thesis_invalidated": True}),
+               l1_regime="trend_down"),
         previous_record=prev, now_utc=_ts(0),
     )
-    # hours_in=5 < min=18 → 保持 FLIP_WATCH
+    # stub stay
     assert r["current_state"] == "FLIP_WATCH"
-
-
-@pytest.mark.skip(reason="1.10-K-A commit 5: _calc_flip_watch_bounds 整删,"
-                          "cycle_position / volatility 乘数计算已废;测试改造留 commit 8")
-def test_24_flip_watch_multipliers_late_bull_low_vol(sm: StateMachine):
-    """§5.3 乘数验证:cycle_position=late_bull × volatility=low = 0.7 × 0.8 = 0.56
-       effective_min = max(8, 18*0.56)= max(8, 10.08) = 10.08
-       effective_max = min(168, 96*0.56)= min(168, 53.76) = 53.76
-    """
-    prev = _prev_record("LONG_EXIT", _ts(-1))
-    r = sm.compute_next(
-        _state(
-            l1_regime="trend_down", l2_stance="bearish",
-            cycle_position="late_bull", volatility_regime="low",
-        ),
-        previous_record=prev, now_utc=_ts(0),
-    )
-    assert r["current_state"] == "FLIP_WATCH"
-    b = r["flip_watch_bounds"]
-    assert b["effective_min_hours"] == pytest.approx(10.08, abs=0.02)
-    assert b["effective_max_hours"] == pytest.approx(53.76, abs=0.02)
-    assert b["multiplier_product"] == pytest.approx(0.56, abs=0.01)
+    assert r["stable_in_state"] is True
+    # commit 7 方案 C 镜像字段
+    assert r["thesis"] is None
+    assert r["system_state"] == "normal"
 
 
 # ==================================================================
@@ -577,27 +534,25 @@ def test_28_ppr_refuses_planned_target(sm: StateMachine):
     assert r["current_state"] == "POST_PROTECTION_REASSESS"
 
 
-@pytest.mark.skip(reason="1.10-K-A commit 6: _from_POST_PROTECTION_REASSESS 业务移出 stub,"
-                          "PPR → FLAT/FLIP_WATCH 白名单出口已废(_PPR_ALLOWED_TARGETS 整删);"
-                          "review_pending 路由由 system_state 驱动;测试改造留 commit 8")
-def test_29_ppr_allows_flat_or_flip_watch(sm: StateMachine):
-    prev = _prev_record("POST_PROTECTION_REASSESS", _ts(-6))
-    r = sm.compute_next(
-        _state(lifecycle={"post_protection_next_target": "FLAT"}),
-        previous_record=prev, now_utc=_ts(0),
-    )
-    assert r["current_state"] == "FLAT"
+# 1.10-K-A commit 8 §X 删除:test_29_ppr_allows_flat_or_flip_watch
+# (_PPR_ALLOWED_TARGETS 整删,PPR → FLAT/FLIP_WATCH 白名单出口已废;
+#  review_pending 路由由 system_state='review_pending' 驱动 — 已在
+#  test_thesis_mirror_ppr_review_pending 覆盖,本测试无独立 thesis-driven 等价)
 
 
-def test_30_ppr_force_min_hold_hours(sm: StateMachine):
-    """§5.2:POST_PROTECTION_REASSESS 强制持续至少一个 4H 周期"""
+def test_30_ppr_stub_stays_regardless_of_min_hold(sm: StateMachine):
+    """1.10-K-A commit 8 改造:PPR stub stay 行为(原 min_hold_hours 4H 校验已废)。
+    stub 忽略 hours_in / post_protection_next_target,永远 stay。"""
     prev = _prev_record("POST_PROTECTION_REASSESS", _ts(-2))
     r = sm.compute_next(
         _state(lifecycle={"post_protection_next_target": "FLAT"}),
         previous_record=prev, now_utc=_ts(0),
     )
-    # 2h < 4h → 保持
+    # stub stay(无论 hours_in 或 next_target 是什么)
     assert r["current_state"] == "POST_PROTECTION_REASSESS"
+    # commit 7 方案 C 镜像
+    assert r["thesis"] is None
+    assert r["system_state"] == "review_pending"
 
 
 # ==================================================================
@@ -652,17 +607,9 @@ def test_35_stable_no_on_enter_effects(sm: StateMachine):
     assert r["on_enter_effects"]["applied"] is False
 
 
-@pytest.mark.skip(reason="1.10-K-A commit 5: _on_enter_effects FLIP_WATCH bounds 分支已删 + "
-                          "lock_flip_watch_effective_bounds action 已删;测试改造留 commit 8")
-def test_36_flip_watch_on_enter_has_bounds(sm: StateMachine):
-    prev = _prev_record("LONG_EXIT", _ts(-1))
-    r = sm.compute_next(
-        _state(l1_regime="trend_down", l2_stance="bearish"),
-        previous_record=prev, now_utc=_ts(0),
-    )
-    assert r["current_state"] == "FLIP_WATCH"
-    assert "lock_flip_watch_effective_bounds" in r["on_enter_effects"]["actions"]
-    assert r["on_enter_effects"]["flip_watch_bounds"] is not None
+# 1.10-K-A commit 8 §X 删除:test_36_flip_watch_on_enter_has_bounds
+# (_on_enter_effects FLIP_WATCH bounds 字段已删 + lock_flip_watch_effective_bounds
+#  action 已删;_calc_flip_watch_bounds 整删,无替代行为可测)
 
 
 # ==================================================================
@@ -714,47 +661,9 @@ def test_40_fallback_level_3_triggers_protection(sm: StateMachine):
 # Sprint 1.5b Task B3:cycle_position 字段链路显式验证
 # ==================================================================
 
-@pytest.mark.skip(reason="1.10-K-A commit 5: _calc_flip_watch_bounds 整删,"
-                          "cycle_position 读取路径已废;测试改造留 commit 8")
-def test_41_flip_watch_reads_cycle_position_nested_field(sm: StateMachine):
-    """
-    CyclePositionFactor 输出的 composite_factors.cycle_position.cycle_position
-    必须被 FLIP_WATCH 乘数计算正确读到(不走默认 mult=1.0)。
-
-    用 late_bear × extreme 验证:0.7 × 1.3 = 0.91,
-    eff_min = max(8, 18*0.91) = 16.38
-    eff_max = min(168, 96*0.91) = 87.36
-    """
-    prev = _prev_record("LONG_EXIT", _ts(-1))
-    state = _state(
-        l1_regime="trend_down", l2_stance="bearish",
-        volatility_regime="extreme",
-    )
-    # 显式使用与真实 CyclePositionFactor 相同的嵌套结构
-    state["composite_factors"]["cycle_position"] = {
-        "factor": "cycle_position",
-        "cycle_position": "late_bear",
-        "cycle_confidence": 0.75,
-    }
-    r = sm.compute_next(state, previous_record=prev, now_utc=_ts(0))
-    assert r["current_state"] == "FLIP_WATCH"
-    b = r["flip_watch_bounds"]
-    assert b["multiplier_product"] == pytest.approx(0.91, abs=0.01)
-    assert b["effective_min_hours"] == pytest.approx(16.38, abs=0.02)
-    assert b["effective_max_hours"] == pytest.approx(87.36, abs=0.02)
-
-
-@pytest.mark.skip(reason="1.10-K-A commit 5: _calc_flip_watch_bounds 整删,"
-                          "legacy band field fallback 已废;测试改造留 commit 8")
-def test_42_flip_watch_legacy_band_field_fallback(sm: StateMachine):
-    """历史版本若只有 `band` 字段,state_machine 仍能回退读到(定义为 fallback)。"""
-    prev = _prev_record("LONG_EXIT", _ts(-1))
-    state = _state(l1_regime="trend_down", l2_stance="bearish")
-    state["composite_factors"]["cycle_position"] = {
-        "factor": "cycle_position",
-        "band": "mid_bull",  # 仅有 band,没有 cycle_position 键
-    }
-    r = sm.compute_next(state, previous_record=prev, now_utc=_ts(0))
-    assert r["current_state"] == "FLIP_WATCH"
-    # mid_bull × 1.3(vol normal 无乘数)= 1.3
-    assert r["flip_watch_bounds"]["multiplier_product"] == pytest.approx(1.3, abs=0.01)
+# 1.10-K-A commit 8 §X 删除:test_41_flip_watch_reads_cycle_position_nested_field
+# (_calc_flip_watch_bounds 整删,cycle_position 读取路径已废;
+#  CyclePositionFactor 仍输出此字段,但已无 FLIP_WATCH 乘数消费方)
+#
+# 1.10-K-A commit 8 §X 删除:test_42_flip_watch_legacy_band_field_fallback
+# (_calc_flip_watch_bounds 整删,legacy band 字段 fallback 路径已废)

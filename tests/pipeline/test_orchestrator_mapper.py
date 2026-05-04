@@ -442,6 +442,10 @@ def test_build_summary_v13_extracts_real_fields():
     assert summary["state_machine.current"] == "FLAT"
     assert summary["state_machine.transition_reason"] == "L3=C 等待"
     assert summary["state_machine.stable_in_state"] is True
+    # Sprint 1.10-K-A commit 7 方案 C 镜像:thesis dict + system_state
+    # FLAT → thesis=None, system_state='normal'
+    assert summary["state_machine.thesis"] is None
+    assert summary["state_machine.system_state"] == "normal"
 
     # adjudicator
     assert summary["adjudicator.action"] == "watch"

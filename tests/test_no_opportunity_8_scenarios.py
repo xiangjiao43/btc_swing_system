@@ -12,7 +12,9 @@ from __future__ import annotations
 import re
 
 from src.strategy.no_opportunity_narrator import (
-    SCENARIO_COLD_START, SCENARIO_EXTREME_EVENT, SCENARIO_PROTECTION,
+    # Sprint 1.10-K-A commit 12 §X:删 SCENARIO_COLD_START import
+    # (1.10-J commit 6 已删 test_scenario_cold_start;commit 11 删 _gen_cold_start)
+    SCENARIO_EXTREME_EVENT, SCENARIO_PROTECTION,
     SCENARIO_FALLBACK_DEGRADED, SCENARIO_POST_PROTECTION,
     SCENARIO_PERMISSION_RESTRICTED, SCENARIO_POSITION_CAP_ZERO,
     SCENARIO_GRADE_NONE,

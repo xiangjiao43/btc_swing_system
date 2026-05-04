@@ -12,7 +12,8 @@ from __future__ import annotations
 import pytest
 
 from src.strategy.no_opportunity_narrator import (
-    SCENARIO_COLD_START,
+    # Sprint 1.10-K-A commit 12 §X:删 SCENARIO_COLD_START import(_gen_cold_start
+    # commit 11 整删,常量同步删,fixture cold_start case 也已删)
     SCENARIO_EXTREME_EVENT,
     SCENARIO_FALLBACK_DEGRADED,
     SCENARIO_GRADE_NONE,
@@ -89,11 +90,10 @@ class TestScenarioDetection:
 
 @pytest.fixture
 def all_scenarios():
-    """8 种场景的 (facts, state) 样本。"""
+    """7 种 active 场景的 (facts, state) 样本。
+    Sprint 1.10-K-A commit 12 §X:删 cold_start case(detect_scenario 1.10-J 已断
+    路由,_gen_cold_start commit 11 整删;原 by accident pass via GRADE_NONE 默认)。"""
     return [
-        ("cold_start",
-         {"cold_start_warming_up": True},
-         {"meta": {"cold_start": {"days_remaining": 5}}}),
         ("extreme_event",
          {"l5_extreme_event_detected": True},
          {}),

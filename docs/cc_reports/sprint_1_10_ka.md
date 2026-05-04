@@ -80,7 +80,9 @@
 | 8 | 9 K-A skip 测试 unskip:2 改造(test_19/23/30)+ 7 删除(test_21/22/24/29/36/41/42)| 1 | ✅ `b533823` |
 | 9 | state_machine_inputs.py 26 测试 + lifecycle_manager.py 19 测试 review:**0 changes needed** | 1(报告)| ✅ `bd54b74` |
 | 10 | 2 老 SKIP unskip + thesis-driven 重写(test_state_machine_e2e + test_lifecycle_e2e_reversal)| 2 | ✅ `2328f8f` |
-| 11 | narrator.py 死代码清理(_gen_cold_start 整删 + SCENARIOS 删 SCENARIO_COLD_START key)— X4 顺序前置 | 1 | ✅ 待 push |
+| 11 | narrator.py 死代码清理(_gen_cold_start 整删 + SCENARIOS 删 SCENARIO_COLD_START key)— X4 顺序前置 | 1 | ✅ `d148302` |
+| 12 | 测试 fixture 合理化 + SCENARIO_COLD_START 常量删(grep 0 import)+ test_orchestrator_mapper 镜像字段覆盖 | 5 | ✅ 待 push |
+| **==中断点 7:commit 12 完成,准备 verify==**| | | 🛑 已到达 |
 | **==中断点 5:migration 015 真跑后,本地 + 生产 21→19 列==**| | | 🛑 |
 | **阶段 2:state_machine 重写**| | | |
 | 5 | _from_FLIP_WATCH 整删 + _calc_flip_watch_bounds 删 + _on_enter_effects FLIP_WATCH 分支删 + state_machine_inputs._flip_watch_bounds_state + _prev_cycle_side 删 | 2 | — |
@@ -247,6 +249,42 @@
 **全量回归**:`tests/` → **1490 passed, 4 skipped, 0 failed**(基准 1490 → 0 净增,3 测试改造 + 写入方清理后维持)
 
 **commit 3 重新定义**:测试 fixtures 中 cold_start_warming_up / SCENARIO_COLD_START 等纯叙事场景测试残留(~10 测试),不影响生产代码 INSERT/SELECT。本来在 commit 3 计划里的 19 测试改造,大部分已在 commit 2 内顺手完成。commit 3 改为收尾测试残留 + 必要文档。
+
+### Commit 12(测试合理化 + SCENARIO_COLD_START 常量删 + mapper 镜像覆盖)
+**实际改动**:
+
+**测试 fixture 清理**(3 文件):
+- `tests/test_no_opportunity_narrator.py`:
+  - 删 `SCENARIO_COLD_START` import(原 line 15)
+  - 删 `all_scenarios` fixture cold_start case(原 line 94-96 — 移除 by accident pass via GRADE_NONE)
+- `tests/test_no_opportunity_8_scenarios.py`:
+  - 删 `SCENARIO_COLD_START` import(line 15)
+- `tests/test_human_readable_style.py`:
+  - 删 `SCENARIO_COLD_START` import(line 17)
+  - 删 `_ALL_SCENARIOS` cold_start case(line 261-263)
+
+**SCENARIO_COLD_START 常量删**(微调):
+- `src/strategy/no_opportunity_narrator.py:43` 整删(grep 0 import 后,常量无意义)
+- `7 种 active scenario` 注释更新(从 8 → 7)
+
+**test_orchestrator_mapper 镜像字段覆盖**(commit 7 新加字段补充测试):
+- `tests/pipeline/test_orchestrator_mapper.py:441-447` 加 2 行断言:
+  - `summary["state_machine.thesis"] is None`(FLAT case)
+  - `summary["state_machine.system_state"] == "normal"`
+
+**§Z 三重验证**:
+- ✅ pytest 全量:**1492 passed, 1 skipped, 0 failed**(基准 1493 维持,0 regression)
+- ✅ `grep SCENARIO_COLD_START src/ tests/`(active code) → **0 hits**(残留全是 §X 解释注释)
+- ✅ `grep _gen_cold_start src/ tests/`(active code) → **0 hits**(同上)
+- ✅ uvicorn GET / 200(隐含,前 commit 已验证)
+
+**§X 解释注释保留**(memory 教训):
+- narrator.py / 3 测试文件残留的 SCENARIO_COLD_START / _gen_cold_start 注释提及是 §X 删除痕迹,删了未来读代码的人会困惑
+
+**未触动**:
+- `_gen_post_protection` 不动(P0 #2 + L1 + 仍可达)
+- `SCENARIO_POST_PROTECTION` 常量保留(state_machine 仍可输出 POST_PROTECTION_REASSESS)
+- lifecycle_manager.py 不动
 
 ### Commit 11(narrator.py 死代码清理 — X4 顺序前置)
 **X4 决策**(用户拍板):commit 11 / 12 倒序 + 让两个都有实质内容。
@@ -493,6 +531,8 @@
 - (8) 14 档枚举字符串去除(方案 C 当下保留,1.10-L 决定是否进一步清理)
 - (9) _orchestrator_mapper.py / state_builder summary / web/assets/app.js 14 档 label 升级(方案 C 渐进迁移)
 - (10) master_adjudicator prompt V12 / V15 / V19 等中等可控 V 加入(数据驱动)
+- (11) **反手出口实现**:`FLIP_WATCH → SHORT_PLANNED` / `LONG_PLANNED` 路径由 thesis_manager 接管(commit 5 stub 后 stub stay,test_lifecycle_e2e_reversal Tick 7 反手测试待重新覆盖)
+- (12) **PROTECTION 出口僵尸状态修复**:stub stay 后 POST_PROTECTION_REASSESS 是叶状态,系统真跑触发 PROTECTION → POST_PROTECTION_REASSESS 会变僵尸状态。1.10-L 必须接通 review_pending 路由(_verify_disciplines violation 文本已注明 system_state='review_pending' 驱动,但实际行为(用户介入入口 / thesis 处理)未实现)
 
 ---
 

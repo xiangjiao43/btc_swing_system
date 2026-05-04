@@ -14,7 +14,7 @@ from src.evidence.plain_reading import inject_plain_readings
 from src.strategy.composite_composition import inject_composite_composition
 from src.strategy.factor_card_emitter import emit_factor_cards
 from src.strategy.no_opportunity_narrator import (
-    SCENARIO_COLD_START,
+    # Sprint 1.10-K-A commit 12 §X:删 SCENARIO_COLD_START import + cold_start fixture
     SCENARIO_EXTREME_EVENT,
     SCENARIO_FALLBACK_DEGRADED,
     SCENARIO_GRADE_NONE,
@@ -257,10 +257,9 @@ class TestFactorCardsNoMachineTerms:
 class TestNoOpportunityNarratorNoMachineTerms:
     """8 种 AI 未触发场景的 narrator 输出全部扫描禁止术语。"""
 
+    # Sprint 1.10-K-A commit 12 §X:删 cold_start fixture(narrator commit 11
+    # 删 _gen_cold_start;原 by accident pass via GRADE_NONE 默认 — 删后语义清晰)
     _ALL_SCENARIOS = [
-        ("cold_start",
-         {"cold_start_warming_up": True},
-         {"meta": {"cold_start": {"days_remaining": 5}}}),
         ("extreme_event",
          {"l5_extreme_event_detected": True},
          {}),

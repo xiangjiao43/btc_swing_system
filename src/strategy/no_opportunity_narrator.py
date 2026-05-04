@@ -39,8 +39,8 @@ from .factor_picker import pick_key_factors
 logger = logging.getLogger(__name__)
 
 
-# 8 种场景枚举
-SCENARIO_COLD_START = "cold_start"
+# 7 种 active 场景枚举(Sprint 1.10-K-A commit 12 §X:删 SCENARIO_COLD_START 常量,
+# commit 11 删 _gen_cold_start + commit 12 grep 0 import 后清理)
 SCENARIO_EXTREME_EVENT = "extreme_event"
 SCENARIO_PROTECTION = "protection"
 SCENARIO_FALLBACK_DEGRADED = "fallback_degraded"

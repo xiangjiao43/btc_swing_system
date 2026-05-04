@@ -268,3 +268,45 @@ def test_existing_regions_preserved(html):
     """§X:不删现有 12 卡 + 五层 6 卡。"""
     for region in ("region-1", "region-layer-cards", "region-4", "region-5"):
         assert f'id="{region}"' in html
+
+
+# ============================================================
+# Sprint 1.10-L commit 8(P1 #4)— app.js 读 state_machine.thesis / system_state 镜像
+# ============================================================
+
+def test_app_js_reads_state_machine_system_state(js):
+    """K-A commit 7 加的 state_machine.system_state 字段在 app.js 真消费。"""
+    assert "system_state" in js, "app.js 应消费 state_machine.system_state 镜像"
+    # 应有 RP fallback path
+    assert "review_pending" in js
+    assert "_from_state_machine_mirror" in js, (
+        "fallback 标记字段应在 app.js"
+    )
+
+
+def test_app_js_reads_state_machine_thesis_dict(js):
+    """K-A commit 7 加的 state_machine.thesis dict 字段在 app.js 真消费。"""
+    # 三字段 direction / lifecycle_stage / status 引用都在
+    assert "smThesis.direction" in js
+    assert "smThesis.lifecycle_stage" in js
+    assert "smThesis.status" in js
+
+
+def test_app_js_smSystemState_review_pending_fallback(js):
+    """smSystemState='review_pending' 时合成 RP 占位(fallback 1)。"""
+    # 模式:smSystemState === 'review_pending' check
+    assert "smSystemState === 'review_pending'" in js
+
+
+def test_app_js_smThesis_fallback_when_activeThesis_null(js):
+    """activeThesis null 时,从 smThesis 顶上(fallback 2)。"""
+    # 模式:!this.activeThesis && smThesis check
+    assert "!this.activeThesis && smThesis" in js
+
+
+def test_app_js_main_path_preserved(js):
+    """主路径不变:/api/theses/active 仍是 activeThesis 来源(fallback 仅补)。"""
+    assert "/api/theses/active" in js
+    assert "/api/health" in js
+    # health.review_pending 主路径
+    assert "health.review_pending" in js or "health && health.review_pending" in js

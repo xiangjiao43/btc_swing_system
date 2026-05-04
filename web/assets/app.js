@@ -118,6 +118,42 @@ function app() {
             this.positionSummary = (
                 this.state && this.state.position_summary
             ) || null;
+
+            // Sprint 1.10-L commit 8 P1 #4:state_machine.thesis / system_state
+            // 镜像消费(K-A commit 7 加,1.10-L 真接通)
+            // - 主路径不变:/api/theses/active 拿真 thesis 行 +
+            //   /api/health.review_pending 拿 RP 状态
+            // - 镜像路径(本 commit 加):state.state_machine.{thesis,system_state}
+            //   作 fallback,防 API 失败时网页死锁;同时让用户能从 strategy/current
+            //   一次拿全(减少跨 API 一致性窗口)
+            const sm = (this.state && this.state.state_machine) || {};
+            const smSystemState = sm.system_state || null;
+            const smThesis = sm.thesis || null;
+
+            // fallback 1:若 health 没返 review_pending 但 system_state='review_pending'
+            // → 临时合成 RP 占位让横幅显示(reason 标 mirror)
+            if (!this.reviewPending && smSystemState === 'review_pending') {
+                this.reviewPending = {
+                    state_id: null,
+                    reason: 'state_machine.system_state=review_pending(镜像 fallback)',
+                    related_thesis_id: null,
+                    entered_at_utc: null,
+                    _from_state_machine_mirror: true,
+                };
+            }
+
+            // fallback 2:若 /api/theses/active 没返(如 API 失败 / 仍冷启动)
+            // 但 state_machine.thesis 有镜像 → 最小占位让"当前 thesis"模块显示
+            // (主路径仍优先 — 仅 activeThesis null 时镜像顶上)
+            if (!this.activeThesis && smThesis) {
+                this.activeThesis = {
+                    thesis_id: '(state_machine 镜像)',
+                    direction: smThesis.direction,
+                    lifecycle_stage: smThesis.lifecycle_stage,
+                    status: smThesis.status,
+                    _from_state_machine_mirror: true,
+                };
+            }
         },
 
         // Sprint 1.10-I §9.2.4 模块 4:thesis 时间线辅助函数

@@ -1033,6 +1033,75 @@ class EventsCalendarDAO:
 
 
 # ============================================================
+# Sprint A(数据真实性透明化底座)— FetchAttemptsDAO
+#   每次 collector 抓取写一行(成功 / 失败 + 原因)。
+#   4 个 source label:
+#     binance_kline / coinglass_derivatives / glassnode_onchain / fred_macro
+#   配 migrations/016_add_fetch_attempts.sql。
+# ============================================================
+
+class FetchAttemptsDAO:
+    """fetch_attempts 表 DAO。所有写入都不隐式 commit;调用方决定 commit 时机。"""
+
+    @staticmethod
+    def record_attempt(
+        conn: sqlite3.Connection,
+        source: str,
+        status: Literal["success", "failure"],
+        *,
+        failure_reason: Optional[str] = None,
+        error_message: Optional[str] = None,
+        rows_upserted: Optional[int] = None,
+        duration_ms: Optional[int] = None,
+        attempted_at_utc: Optional[str] = None,
+    ) -> int:
+        """写一行 fetch_attempts,返回新行 id。"""
+        ts = attempted_at_utc or _utc_now_iso_ms()
+        cur = conn.execute(
+            "INSERT INTO fetch_attempts "
+            "(source, attempted_at_utc, status, failure_reason, "
+            " error_message, rows_upserted, duration_ms) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (source, ts, status, failure_reason,
+             error_message, rows_upserted, duration_ms),
+        )
+        return int(cur.lastrowid or 0)
+
+    @staticmethod
+    def get_latest_attempt(
+        conn: sqlite3.Connection, source: str,
+    ) -> Optional[dict[str, Any]]:
+        """取该 source 最新一行,网页 / state_builder 用。无记录返回 None。"""
+        row = conn.execute(
+            "SELECT id, source, attempted_at_utc, status, failure_reason, "
+            "       error_message, rows_upserted, duration_ms "
+            "FROM fetch_attempts WHERE source = ? "
+            "ORDER BY attempted_at_utc DESC, id DESC LIMIT 1",
+            (source,),
+        ).fetchone()
+        return _row_to_dict(row)
+
+    @staticmethod
+    def get_recent_attempts(
+        conn: sqlite3.Connection, source: str, since_hours: int,
+    ) -> list[dict[str, Any]]:
+        """取该 source 过去 N 小时的记录(skip-guard / 重试节流用)。"""
+        cutoff = (
+            datetime.now(timezone.utc) - timedelta(hours=since_hours)
+        ).strftime("%Y-%m-%dT%H:%M:%SZ")
+        rows = conn.execute(
+            "SELECT id, source, attempted_at_utc, status, failure_reason, "
+            "       error_message, rows_upserted, duration_ms "
+            "FROM fetch_attempts "
+            "WHERE source = ? AND attempted_at_utc >= ? "
+            "ORDER BY attempted_at_utc DESC, id DESC",
+            (source, cutoff),
+        ).fetchall()
+        return [_row_to_dict(r) for r in rows if r is not None]
+
+
+
+# ============================================================
 # StrategyState 历史归档
 # ============================================================
 

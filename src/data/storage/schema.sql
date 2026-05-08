@@ -293,6 +293,7 @@ CREATE TABLE IF NOT EXISTS latest_factor_cards (
 -- ============================================================
 -- Sprint 2.6-G:数据抓取时间记录(配 migrations/004_add_data_fetch_log.sql)
 -- 解决卡片显示 K 线 bar 时间被误解为"系统未刷新"
+-- Sprint 2.6-J:废弃,代码层不再读写,表保留(防外部依赖)。
 -- ============================================================
 CREATE TABLE IF NOT EXISTS data_fetch_log (
     source             TEXT PRIMARY KEY,
@@ -300,6 +301,27 @@ CREATE TABLE IF NOT EXISTS data_fetch_log (
     rows_upserted      INTEGER,
     notes              TEXT
 );
+
+
+-- ============================================================
+-- Sprint A(数据真实性透明化底座)— 2026-05-08
+-- 配 migrations/016_add_fetch_attempts.sql。
+-- 每次 collector 抓取记一行(成功/失败 + 原因)。
+-- 4 个 source label:binance_kline / coinglass_derivatives / glassnode_onchain / fred_macro
+-- ============================================================
+CREATE TABLE IF NOT EXISTS fetch_attempts (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    source             TEXT NOT NULL,
+    attempted_at_utc   TEXT NOT NULL,
+    status             TEXT NOT NULL,
+    failure_reason     TEXT,
+    error_message      TEXT,
+    rows_upserted      INTEGER,
+    duration_ms        INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_fetch_attempts_source_time
+    ON fetch_attempts(source, attempted_at_utc DESC);
 
 
 -- ============================================================

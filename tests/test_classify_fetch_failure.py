@@ -1,0 +1,147 @@
+"""Sprint A — classify_fetch_failure 单测,覆盖 5 个 reason 桶 + 脱敏 + 截断。"""
+from __future__ import annotations
+
+import json
+
+import pytest
+import requests
+
+from src.data.collectors._classify_failure import classify_fetch_failure
+
+
+# ---------------- quota_exceeded ----------------
+
+def test_http_403_classified_as_quota():
+    exc = RuntimeError("HTTP 403 (non-retry) on /v1/metrics/x: body")
+    reason, msg = classify_fetch_failure(exc)
+    assert reason == "quota_exceeded"
+    assert "HTTP 403" in msg
+
+
+def test_http_429_classified_as_quota():
+    exc = RuntimeError("HTTP 429 too many requests on /api/v3/foo")
+    reason, _ = classify_fetch_failure(exc)
+    assert reason == "quota_exceeded"
+
+
+def test_alphanode_chinese_quota_message_classified_as_quota():
+    body = {"error": {"code": "HTTP_ERROR",
+                      "message": "您的 glassnode 周期内配额已用尽"}}
+    exc = RuntimeError(
+        f"HTTP 200 (non-retry) on /v1/metrics/market/mvrv: {json.dumps(body, ensure_ascii=False)}"
+    )
+    reason, _ = classify_fetch_failure(exc)
+    assert reason == "quota_exceeded"
+
+
+def test_english_rate_limit_message_classified_as_quota():
+    exc = RuntimeError("API responded with: rate limit exceeded, retry after 60s")
+    reason, _ = classify_fetch_failure(exc)
+    assert reason == "quota_exceeded"
+
+
+# ---------------- network_error ----------------
+
+def test_connection_error_classified_as_network():
+    exc = requests.exceptions.ConnectionError("DNS lookup failed")
+    reason, msg = classify_fetch_failure(exc)
+    assert reason == "network_error"
+    assert "DNS" in msg
+
+
+def test_timeout_classified_as_network():
+    exc = requests.exceptions.Timeout("Request timed out")
+    reason, _ = classify_fetch_failure(exc)
+    assert reason == "network_error"
+
+
+# ---------------- api_error ----------------
+
+def test_http_500_classified_as_api_error():
+    exc = RuntimeError("HTTP 500 internal server error on /api/foo")
+    reason, _ = classify_fetch_failure(exc)
+    assert reason == "api_error"
+
+
+def test_http_404_classified_as_api_error():
+    exc = RuntimeError("HTTP 404 not found on /v1/metrics/missing")
+    reason, _ = classify_fetch_failure(exc)
+    assert reason == "api_error"
+
+
+# ---------------- parse_error ----------------
+
+def test_json_decode_error_classified_as_parse():
+    try:
+        json.loads("not-json")
+    except json.JSONDecodeError as e:
+        reason, _ = classify_fetch_failure(e)
+        assert reason == "parse_error"
+
+
+def test_value_error_classified_as_parse():
+    exc = ValueError("Unexpected schema: missing field 'timestamp'")
+    reason, _ = classify_fetch_failure(exc)
+    assert reason == "parse_error"
+
+
+# ---------------- unknown ----------------
+
+def test_arbitrary_exception_classified_as_unknown():
+    class WeirdError(Exception):
+        pass
+
+    reason, _ = classify_fetch_failure(WeirdError("something odd happened"))
+    assert reason == "unknown"
+
+
+# ---------------- 脱敏 + 截断 ----------------
+
+def test_message_redacts_api_key_token():
+    exc = RuntimeError(
+        "HTTP 403 on /v1/data: api_key=sk-secret-token-1234567890abcdef"
+    )
+    _, msg = classify_fetch_failure(exc)
+    assert "sk-secret-token-1234567890abcdef" not in msg
+    assert "<redacted>" in msg
+
+
+def test_message_redacts_bearer_token():
+    exc = RuntimeError(
+        "401 unauthorized: header Bearer abc.def.GHI789xyz"
+    )
+    _, msg = classify_fetch_failure(exc)
+    assert "abc.def.GHI789xyz" not in msg
+    assert "<redacted>" in msg
+
+
+def test_message_redacts_x_key_header():
+    exc = RuntimeError(
+        "Request failed with x-key: alphanode-private-token-XYZ"
+    )
+    _, msg = classify_fetch_failure(exc)
+    assert "alphanode-private-token-XYZ" not in msg
+
+
+def test_message_truncated_to_200_chars():
+    long = "x" * 500
+    exc = RuntimeError(long)
+    _, msg = classify_fetch_failure(exc)
+    assert len(msg) <= 200
+
+
+# ---------------- 优先级 ----------------
+
+def test_403_with_quota_keyword_still_quota_not_api():
+    exc = RuntimeError("HTTP 403: rate limit on this key (api_key=x)")
+    reason, _ = classify_fetch_failure(exc)
+    assert reason == "quota_exceeded"
+
+
+def test_network_error_takes_precedence_over_status_in_message():
+    # ConnectionError 即使 message 里有 HTTP 也归 network_error
+    exc = requests.exceptions.ConnectionError(
+        "Failed to establish connection (would-be HTTP 502)"
+    )
+    reason, _ = classify_fetch_failure(exc)
+    assert reason == "network_error"

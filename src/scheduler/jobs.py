@@ -365,6 +365,7 @@ def _skipped_today_payload(reason: str, name: str) -> dict[str, Any]:
 
     不调 refresh_factor_cards(没有新数据 → 刷新无意义);
     返回 status='skipped' 让 _wrap_job 不再额外标 'ok'。
+    Sprint A(数据真实性):skip 路径不写 fetch_attempts(没有真正 fetch)。
     """
     return {
         "status": "skipped",
@@ -373,6 +374,36 @@ def _skipped_today_payload(reason: str, name: str) -> dict[str, Any]:
         "total_upserted": 0,
         "errors": {},
     }
+
+
+def _record_fetch_attempt(
+    conn: Any,
+    *,
+    source: str,
+    start_ts: float,
+    rows_upserted: int,
+    first_exc: Optional[BaseException],
+) -> None:
+    """Sprint A(数据真实性透明化底座)— bucket 跑完后写一行 fetch_attempts。
+
+    first_exc=None 时记 success;否则记 failure 并取首个 exception 分类。
+    时间用 time.time() 起点 → 当前的 wall-time 差,不调 commit(调用方 commit)。
+    """
+    from ..data.collectors._classify_failure import classify_fetch_failure
+    from ..data.storage.dao import FetchAttemptsDAO
+    duration_ms = int((time.time() - start_ts) * 1000)
+    if first_exc is None:
+        FetchAttemptsDAO.record_attempt(
+            conn, source=source, status="success",
+            rows_upserted=rows_upserted, duration_ms=duration_ms,
+        )
+    else:
+        reason, msg = classify_fetch_failure(first_exc)
+        FetchAttemptsDAO.record_attempt(
+            conn, source=source, status="failure",
+            failure_reason=reason, error_message=msg,
+            rows_upserted=rows_upserted, duration_ms=duration_ms,
+        )
 
 
 def _wrap_job(
@@ -448,8 +479,11 @@ def job_collect_klines_1h(
         klines_count = 0
         derivatives_count = 0
         errors: dict[str, str] = {}
+        kl_first_exc: Optional[BaseException] = None
+        deriv_first_exc: Optional[BaseException] = None
 
         # ---- K 线 1h(limit=24,过去 24 小时)----
+        kl_start = time.time()
         try:
             rows = cg.fetch_klines(interval="1h", limit=24)
             if rows:
@@ -464,10 +498,12 @@ def job_collect_klines_1h(
                 ]
                 klines_count = BTCKlinesDAO.upsert_klines(conn, klines)
         except Exception as e:
+            kl_first_exc = e
             logger.warning("collect_klines_1h klines.1h failed: %s", e)
             errors["klines_1h"] = str(e)[:200]
 
         # ---- Sprint 1.5f-revised:衍生品 5 端点 daily limit=7(每小时 cron 刷新今天 bar)----
+        deriv_start = time.time()
         for fn_name in _DERIVATIVES_FETCHERS_1H:
             try:
                 fn = getattr(cg, fn_name, None)
@@ -485,9 +521,21 @@ def job_collect_klines_1h(
                     ]
                     derivatives_count += DerivativesDAO.upsert_batch(conn, metrics)
             except Exception as e:
+                if deriv_first_exc is None:
+                    deriv_first_exc = e
                 logger.warning("collect_klines_1h derivatives.%s failed: %s",
                                fn_name, e)
                 errors[fn_name] = str(e)[:200]
+
+        # Sprint A:每个 source bucket 跑完写一行 fetch_attempts
+        _record_fetch_attempt(
+            conn, source="binance_kline", start_ts=kl_start,
+            rows_upserted=klines_count, first_exc=kl_first_exc,
+        )
+        _record_fetch_attempt(
+            conn, source="coinglass_derivatives", start_ts=deriv_start,
+            rows_upserted=derivatives_count, first_exc=deriv_first_exc,
+        )
 
         conn.commit()
         return {
@@ -528,7 +576,10 @@ def job_collect_klines_daily(
         cg = CoinglassCollector()
         by_tf: dict[str, int] = {}
         errors: dict[str, str] = {}
+        kl_first_exc: Optional[BaseException] = None
+        deriv_first_exc: Optional[BaseException] = None
 
+        kl_start = time.time()
         for tf in ("1d", "4h"):
             try:
                 rows = cg.fetch_klines(interval=tf, limit=24)
@@ -546,13 +597,17 @@ def job_collect_klines_daily(
                 ]
                 by_tf[tf] = BTCKlinesDAO.upsert_klines(conn, klines)
             except Exception as e:
+                if kl_first_exc is None:
+                    kl_first_exc = e
                 logger.warning("collect_klines_daily klines.%s failed: %s", tf, e)
                 errors[tf] = str(e)[:200]
                 by_tf[tf] = 0
+        klines_count = by_tf.get("1d", 0) + by_tf.get("4h", 0)
 
         # Sprint 1.6(建模 v1.3 §2.6):2 个机构/市场结构 daily 端点
         # btc_dominance + etf_flow → 入 derivatives_snapshots(daily timestamp guard 1.5f)
         from ..data.storage.dao import DerivativeMetric, DerivativesDAO
+        deriv_start = time.time()
         for fn_name in ("fetch_btc_dominance", "fetch_etf_flow_history"):
             try:
                 fn = getattr(cg, fn_name, None)
@@ -572,10 +627,26 @@ def job_collect_klines_daily(
                 ]
                 by_tf[fn_name] = DerivativesDAO.upsert_batch(conn, metrics)
             except Exception as e:
+                if deriv_first_exc is None:
+                    deriv_first_exc = e
                 logger.warning("collect_klines_daily.%s failed: %s",
                                fn_name, e)
                 errors[fn_name] = str(e)[:200]
                 by_tf[fn_name] = 0
+        deriv_count = (
+            by_tf.get("fetch_btc_dominance", 0)
+            + by_tf.get("fetch_etf_flow_history", 0)
+        )
+
+        # Sprint A:每个 source bucket 跑完写一行 fetch_attempts
+        _record_fetch_attempt(
+            conn, source="binance_kline", start_ts=kl_start,
+            rows_upserted=klines_count, first_exc=kl_first_exc,
+        )
+        _record_fetch_attempt(
+            conn, source="coinglass_derivatives", start_ts=deriv_start,
+            rows_upserted=deriv_count, first_exc=deriv_first_exc,
+        )
 
         conn.commit()
         return {
@@ -604,9 +675,15 @@ def job_collect_klines_weekly(
         from ..data.collectors.coinglass import CoinglassCollector
         from ..data.storage.dao import BTCKlinesDAO, KlineRow
         cg = CoinglassCollector()
+        kl_start = time.time()
         try:
             rows = cg.fetch_klines(interval="1w", limit=12)
             if not rows:
+                _record_fetch_attempt(
+                    conn, source="binance_kline", start_ts=kl_start,
+                    rows_upserted=0, first_exc=None,
+                )
+                conn.commit()
                 return {"by_collector": {"1w": 0}, "total_upserted": 0, "errors": {}}
             klines = [
                 KlineRow(
@@ -618,9 +695,18 @@ def job_collect_klines_weekly(
                 for r in rows
             ]
             n = BTCKlinesDAO.upsert_klines(conn, klines)
+            _record_fetch_attempt(
+                conn, source="binance_kline", start_ts=kl_start,
+                rows_upserted=n, first_exc=None,
+            )
             conn.commit()
             return {"by_collector": {"1w": n}, "total_upserted": n, "errors": {}}
         except Exception as e:
+            _record_fetch_attempt(
+                conn, source="binance_kline", start_ts=kl_start,
+                rows_upserted=0, first_exc=e,
+            )
+            conn.commit()
             logger.warning("collect_klines_weekly failed: %s", e)
             return {"by_collector": {"1w": 0}, "total_upserted": 0,
                     "errors": {"1w": str(e)[:200]}}
@@ -650,10 +736,30 @@ def job_collect_macro(
             logger.info("collect_macro: FRED key not configured, skipping")
             return {"by_collector": {"fred": 0}, "total_upserted": 0,
                     "errors": {"fred": "FRED_API_KEY not set"}, "status": "skipped"}
-        stats = fc.collect_and_save_all(conn, since_days=since_days)
-        n = sum(v for k, v in stats.items()
-                if isinstance(v, int) and not k.startswith("__"))
+        fred_start = time.time()
+        first_exc: Optional[BaseException] = None
+        n = 0
+        stats: dict[str, Any] = {}
+        try:
+            stats = fc.collect_and_save_all(conn, since_days=since_days)
+            n = sum(v for k, v in stats.items()
+                    if isinstance(v, int) and not k.startswith("__"))
+        except Exception as e:
+            first_exc = e
+            logger.warning("collect_macro fred failed: %s", e)
+
+        _record_fetch_attempt(
+            conn, source="fred_macro", start_ts=fred_start,
+            rows_upserted=n, first_exc=first_exc,
+        )
         conn.commit()
+        if first_exc is not None:
+            return {
+                "by_collector": {"fred": n},
+                "total_upserted": n,
+                "errors": {"fred": str(first_exc)[:200]},
+                "fred_breakdown": stats,
+            }
         return {
             "by_collector": {"fred": n},
             "total_upserted": n,
@@ -691,6 +797,10 @@ def job_collect_onchain(
         gn = GlassnodeCollector()
         total = 0
         errors: dict[str, str] = {}
+        # Sprint A:13 fetcher 共用一个 source bucket,任一失败 → bucket=failure
+        gn_first_exc: Optional[BaseException] = None
+        gn_start = time.time()
+        glassnode_rows = 0
 
         for fn_name in _GLASSNODE_FETCHERS:
             try:
@@ -708,10 +818,20 @@ def job_collect_onchain(
                         )
                         for r in rows
                     ]
-                    total += OnchainDAO.upsert_batch(conn, metrics)
+                    n = OnchainDAO.upsert_batch(conn, metrics)
+                    total += n
+                    glassnode_rows += n
             except Exception as e:
+                if gn_first_exc is None:
+                    gn_first_exc = e
                 logger.warning("collect_onchain.%s failed: %s", fn_name, e)
                 errors[fn_name] = str(e)[:200]
+
+        # Sprint A:13 fetcher 跑完写一行 fetch_attempts(rows_upserted 不含派生)
+        _record_fetch_attempt(
+            conn, source="glassnode_onchain", start_ts=gn_start,
+            rows_upserted=glassnode_rows, first_exc=gn_first_exc,
+        )
 
         conn.commit()
 

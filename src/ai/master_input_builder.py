@@ -76,7 +76,23 @@ def build_master_input(
         "last_5_assessments": _build_last_n_assessments(
             conn, limit=last_5_history_limit,
         ),
+        # Sprint D Item 3:数据新鲜度摘要(注入 master prompt 让 AI 感知 stale)
+        "data_freshness_summary": _build_data_freshness_summary(conn),
     }
+
+
+def _build_data_freshness_summary(
+    conn: sqlite3.Connection,
+) -> list[dict[str, Any]]:
+    """Sprint D Item 3:把 4 个数据源的 freshness 序列化给 master_adjudicator
+    prompt。AI 看到任一源 is_stale=true 时,system prompt 纪律要求 narrative
+    必须明确提到"X 数据已过期 N 小时";否则 validator 会 fail 走 fallback。"""
+    from src.data.freshness import compute_all_freshness, freshness_to_dict
+    try:
+        rows = compute_all_freshness(conn)
+    except Exception:
+        return []
+    return [freshness_to_dict(f) for f in rows]
 
 
 # ============================================================

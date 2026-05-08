@@ -949,11 +949,56 @@ def validator_23_conflict_resolution(
     return out, activations
 
 
+# ----------------------------------------------------------------
+# Sprint D Item 3:stale_disclosure(VStale,§AI 诚实)
+# ----------------------------------------------------------------
+
+_STALE_KEYWORDS: tuple[str, ...] = (
+    "过期", "沿用", "stale", "Stale", "STALE",
+    "数据老", "数据旧", "数据滞后",
+)
+
+
+def validator_stale_disclosure(
+    master_output: dict[str, Any], context: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Sprint D Item 3:任一数据源 is_stale=true 时,master narrative 必须明
+    确提到"过期"/"沿用"/"stale"等关键词;不提 → 标 needs_retry。
+
+    数据来自 context["data_freshness_summary"]:list[dict],每行有 is_stale。
+    silent_cooldown mode 不强制(本来就保守);其他 mode 强制。
+    """
+    out = dict(master_output)
+    activations = {"validator_stale_disclosure_missing": False}
+
+    rows = context.get("data_freshness_summary") or []
+    has_stale = any(bool(r.get("is_stale")) for r in rows if isinstance(r, dict))
+    if not has_stale:
+        return out, activations
+
+    if out.get("mode") == "silent_cooldown":
+        # silent 已保守,不强制;但仍记录 stale 状态
+        activations["validator_stale_disclosure_missing"] = False
+        return out, activations
+
+    narrative = (out.get("narrative") or "")
+    one_line = (out.get("one_line_summary") or "")
+    text = narrative + " " + one_line
+    if not any(k in text for k in _STALE_KEYWORDS):
+        activations["validator_stale_disclosure_missing"] = True
+        activations["validator_stale_disclosure_needs_retry"] = True
+        notes = list(out.get("notes") or [])
+        notes.append("stale_disclosure_missing_needs_retry")
+        out["notes"] = notes
+    return out, activations
+
+
 # ============================================================
 # V24:Meta 约束(灵魂条款,§3.4.9)
 # ============================================================
 
 # V1-V23 应用顺序(自然顺序;V18 后跑也无害,silent_cooldown 后续检查自动跳过)
+# Sprint D Item 3:加 VStale(stale 数据披露纪律)在 V23 之后跑
 _VALIDATOR_PIPELINE = [
     ("V1",  validator_1_stop_loss),
     ("V2",  validator_2_position_cap),
@@ -978,6 +1023,7 @@ _VALIDATOR_PIPELINE = [
     ("V21", validator_21_soft_resistance),
     ("V22", validator_22_3day_fail),
     ("V23", validator_23_conflict_resolution),
+    ("VStale", validator_stale_disclosure),  # Sprint D Item 3
 ]
 
 
@@ -1008,6 +1054,8 @@ _DEFAULT_ACTIVATIONS_V24 = {
     "validator_21_soft_resistance": False,
     "validator_22_3day_fail": False,
     "validator_23_conflict_missing": False,
+    # Sprint D Item 3:stale 数据披露纪律(_needs_retry 是临时聚合用,不持久化)
+    "validator_stale_disclosure_missing": False,
     # 额外 meta 字段(§3.4.9 末段)
     "position_cap_compressed": None,
     "thesis_lock_active": False,
@@ -1057,18 +1105,24 @@ def collect_meta_activations(
     out["cooldown_remaining_hours"] = float(cd.get("cooldown_remaining_hours") or 0)
 
     # Sprint 1.10-F:聚合 V8/V9/V11/V21 needs_retry → 一个总开关
+    # Sprint D Item 3:加 VStale needs_retry
     _per_v_retry_keys = (
         "validator_8_needs_retry",
         "validator_9_needs_retry",
         "validator_11_needs_retry",
         "validator_21_needs_retry",
+        "validator_stale_disclosure_needs_retry",
     )
     needs_retry = any(bool(raw_activations.get(k)) for k in _per_v_retry_keys)
     out["validator_needs_retry"] = needs_retry
-    # 收集所有 retry hints(目前仅 V21 提供 hint;V8/V9/V11 用 notes 中的标识)
+    # 收集所有 retry hints(目前仅 V21 提供 hint;V8/V9/V11/VStale 用 notes 中的标识)
     hints: list[str] = []
     if raw_activations.get("validator_21_retry_hint"):
         hints.append(raw_activations["validator_21_retry_hint"])
+    if raw_activations.get("validator_stale_disclosure_needs_retry"):
+        hints.append(
+            "stale 数据披露:narrative 必须含「过期」/「沿用」/「stale」关键词"
+        )
     out["validator_retry_hints"] = hints
     # 剥离 per-V 临时 _needs_retry / _retry_hint 字段(已聚合到 *_needs_retry /
     # *_retry_hints,不重复持久化到 constraint_activations_json)

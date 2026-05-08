@@ -401,7 +401,13 @@ function app() {
         },
         sourceAgeLabel(src) {
             // src 是 freshness 行(包含 status / minutes_ago / failure_reason 等)
-            if (src.status === 'no_data') return '尚未抓取';
+            // Sprint D:no_data 时也用 last_success_at_bjt(API fallback 到数据表
+            // MAX),显示距今多久 — 不再「尚未抓取」。
+            if (src.status === 'no_data') {
+                return src.last_success_at_bjt
+                    ? this._humanAgeFromBjt(src.last_success_at_bjt)
+                    : '无可用数据';
+            }
             const m = src.minutes_ago;
             if (m == null) return '-';
             let timeStr;
@@ -411,14 +417,28 @@ function app() {
             if (src.status === 'failure') return `${timeStr}抓取失败`;
             return timeStr;
         },
-        // 「沿用 X 月 X 日数据」灰字小注脚(failure 时显示)
+        // 「沿用 X 月 X 日数据」灰字小注脚:failure / no_data 都可显示
         sourceStaleHint(src) {
-            if (src.status !== 'failure') return null;
-            if (!src.last_success_at_bjt) return '从未成功过';
-            // 取 yyyy-mm-dd hh:mm:ss 的「mm-dd」段
+            if (src.status === 'success') return null;
+            if (!src.last_success_at_bjt) return '无可用数据';
             const m = src.last_success_at_bjt.match(/^\d{4}-(\d{2})-(\d{2})/);
             if (!m) return src.last_success_at_bjt;
             return `沿用 ${parseInt(m[1])} 月 ${parseInt(m[2])} 日数据`;
+        },
+        // Sprint D 内部 helper:从 BJT 字符串算「X 分钟/小时前」
+        _humanAgeFromBjt(bjtStr) {
+            try {
+                const m = bjtStr.match(
+                    /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})/);
+                if (!m) return bjtStr;
+                // BJT 是 UTC+8;转成 epoch(假设浏览器时区不影响绝对差值)
+                const utcMs = Date.UTC(
+                    +m[1], +m[2]-1, +m[3], +m[4]-8, +m[5], +m[6]);
+                const ageMin = (Date.now() - utcMs) / 60000;
+                if (ageMin < 60) return `${Math.round(ageMin)} 分钟前`;
+                if (ageMin < 1440) return `${(ageMin/60).toFixed(1)} 小时前`;
+                return `${(ageMin/1440).toFixed(1)} 天前`;
+            } catch (e) { return bjtStr; }
         },
         // failure_reason 中文徽章 class
         sourceReasonBadgeClass(reason) {

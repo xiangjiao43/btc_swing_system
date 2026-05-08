@@ -1027,9 +1027,8 @@ class EventsCalendarDAO:
 
 
 # ============================================================
-# Sprint 2.6-G:DataFetchLogDAO(group 级抓取时间)→ Sprint 2.6-J 已废弃
-#   (替代:per-metric inserted_at_utc 列 + 三个 helper 方法。
-#    data_fetch_log 表本身保留在 DB,代码层不再读不再写。)
+# Sprint D(2026-05-08)收尾:DataFetchLogDAO(已废弃)+ data_fetch_log 表
+# 已彻底删除 — 见 migrations/017_drop_data_fetch_log.sql。
 # ============================================================
 
 

@@ -291,16 +291,10 @@ CREATE TABLE IF NOT EXISTS latest_factor_cards (
 
 
 -- ============================================================
--- Sprint 2.6-G:数据抓取时间记录(配 migrations/004_add_data_fetch_log.sql)
--- 解决卡片显示 K 线 bar 时间被误解为"系统未刷新"
--- Sprint 2.6-J:废弃,代码层不再读写,表保留(防外部依赖)。
+-- Sprint D(2026-05-08)收尾清理:data_fetch_log 表已 DROP
+-- (Sprint 2.6-G 引入 → 2.6-J 废弃 → Sprint A fetch_attempts 完整替代)。
+-- 配 migrations/017_drop_data_fetch_log.sql。
 -- ============================================================
-CREATE TABLE IF NOT EXISTS data_fetch_log (
-    source             TEXT PRIMARY KEY,
-    last_fetched_utc   TEXT NOT NULL,
-    rows_upserted      INTEGER,
-    notes              TEXT
-);
 
 
 -- ============================================================

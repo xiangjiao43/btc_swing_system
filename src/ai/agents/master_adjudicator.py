@@ -48,6 +48,8 @@ class MasterAdjudicator(BaseAgent):
         """v1.4 thesis-aware:把 master_input dict(由 master_input_builder 给)
         序列化为 user prompt。
 
+        Sprint D Item 3:加 [数据新鲜度] 段。AI 必须看到每源 stale 状态。
+
         预期 context 结构(由 src/ai/master_input_builder.build_master_input 给):
           - l1_output / l2_output / l3_output / l4_output / l5_output
           - active_thesis (None 或 dict)
@@ -56,6 +58,7 @@ class MasterAdjudicator(BaseAgent):
           - cooldown_state (dict)
           - fuse_state (dict)
           - last_5_assessments (list)
+          - data_freshness_summary (list[dict],Sprint D 新加)
         """
         snapshot = {
             # L1-L5 outputs
@@ -74,10 +77,62 @@ class MasterAdjudicator(BaseAgent):
         }
         # 删除 None 顶层(避免 prompt 里出现 "key": null 噪音)
         snapshot = {k: v for k, v in snapshot.items() if v is not None}
+
+        freshness_block = self._format_freshness_block(
+            context.get("data_freshness_summary") or [],
+        )
+
         return (
             "===== Master AI v1.4 输入(thesis-aware,§3.3.6)=====\n"
+            f"{freshness_block}"
             f"{json.dumps(snapshot, ensure_ascii=False, indent=2, default=str)}\n"
         )
+
+    @staticmethod
+    def _format_freshness_block(rows: list[dict[str, Any]]) -> str:
+        """Sprint D Item 3:把 4 源 freshness 转成人读 [数据新鲜度] 段。
+        任一源 is_stale=true → 明显标 ⚠️ + 「过期 N 小时」+ 「沿用 X 月 X 日数据」。
+        """
+        if not rows:
+            return ""
+        lines: list[str] = ["===== [数据新鲜度] Sprint D Item 3 ====="]
+        any_stale = False
+        for r in rows:
+            name = r.get("display_name") or r.get("source") or "?"
+            status = r.get("status")
+            is_stale = bool(r.get("is_stale"))
+            hours = r.get("hours_since_last_success")
+            last_succ_bjt = (r.get("last_success_at_utc") or "")[:10]
+            reason_label = r.get("failure_reason_label")
+
+            if is_stale:
+                any_stale = True
+                age_str = (
+                    f"已过期 {hours:.1f} 小时" if isinstance(hours, (int, float))
+                    else "无可用历史成功记录"
+                )
+                if reason_label:
+                    age_str += f"({reason_label})"
+                fallback = (
+                    f",沿用 {last_succ_bjt} 数据" if last_succ_bjt else ""
+                )
+                lines.append(f"  ⚠️ {name}:{age_str}{fallback}")
+            else:
+                age_str = (
+                    f"{hours:.1f} 小时前成功"
+                    if isinstance(hours, (int, float)) else "新鲜"
+                )
+                lines.append(f"  🟢 {name}:{age_str}")
+
+        if any_stale:
+            lines.append(
+                "🛑 纪律(system prompt §过期数据):任一源 is_stale=true 时,"
+                "narrative **必须**明确写"
+                "\"X 数据已过期 N 小时,本判断可信度相应降级\","
+                "且不得给 high 置信度结论;违反则 validator 拒绝,走 fallback。"
+            )
+        lines.append("")  # 空行分隔
+        return "\n".join(lines) + "\n"
 
     def _fallback_output(self) -> dict[str, Any]:
         """基础 fallback(BaseAgent.analyze 在无 context 信息时调用)。

@@ -230,7 +230,11 @@ def test_overall_status_takes_quota_failure_seriously(client, db_path):
 
 
 def test_overall_status_picks_latest_attempt_per_source(client, db_path):
-    """同 source 历史 quota failure + 最新 success → 不应 critical。"""
+    """同 source 历史 quota failure + 最新 success → quota 不再贡献 critical。
+
+    Sprint D 注意:has_failure 也算 is_stale,所以即使该 source latest=success,
+    其他空 source 在 fallback 后仍可能 is_stale=True → has_failure=True。
+    本测试只断言 quota 部分恢复正常。"""
     now = datetime.now(timezone.utc)
     conn = _conn(db_path)
     try:
@@ -249,17 +253,11 @@ def test_overall_status_picks_latest_attempt_per_source(client, db_path):
         conn.commit()
     finally:
         conn.close()
-    body = client.get("/api/system/health-detail").json()
-    # latest=success → fetch_attempts 部分不该贡献 critical;最终 status 取决于
-    # layers / 老 sources(空 DB → critical via layers=missing)。这里只断言
-    # fetch_attempts 没贡献 critical;最终值是 critical 但因为是 layers 而非
-    # quota,所以验证不直接断言总值。
-    # 直接调内部 helper 验证更清晰:
     from src.api.routes.system import _query_fetch_attempts_failures
     c = _conn(db_path)
     try:
-        has_failure, has_quota = _query_fetch_attempts_failures(c)
+        _has_failure, has_quota = _query_fetch_attempts_failures(c)
     finally:
         c.close()
-    assert has_failure is False
+    # quota 部分:glassnode_onchain latest=success → 不再 quota_exceeded
     assert has_quota is False

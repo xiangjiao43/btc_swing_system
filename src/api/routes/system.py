@@ -211,10 +211,49 @@ def _query_data_source_freshness(conn) -> list[HealthDetailDataSource]:
     return out
 
 
+def _apply_layer_stale_overrides(
+    conn,
+    layers: list[HealthDetailEvidenceLayer],
+) -> list[HealthDetailEvidenceLayer]:
+    """Sprint D Item 4(显示侧 stale 守卫):
+    某层依赖的一手 source 过期 → 把网页显示的 layer.health 强制覆盖成 degraded
+    +「依赖的 X 数据已过期 N 小时」追加到 missing_reasons。
+
+    AI 内部 confidence_tier 不动(这条只覆盖 API 输出的显示字段)。L3 不直接
+    依赖 source(衍生自 L1+L2),所以 L3 不在守卫直接命中范围;但 L1/L2 任一
+    被覆盖时,因为 L3 上游 stale,在 master_adjudicator prompt 注入(Item 3)
+    会让 AI narrative 自降。
+    """
+    from ...data.freshness import compute_all_freshness, stale_summary_for_layer
+    try:
+        all_fresh = compute_all_freshness(conn)
+    except Exception as e:
+        logger.warning("freshness compute for stale override failed: %s", e)
+        return layers
+    out: list[HealthDetailEvidenceLayer] = []
+    for layer in layers:
+        stale_msgs = stale_summary_for_layer(layer.layer_id, all_fresh)
+        if not stale_msgs:
+            out.append(layer)
+            continue
+        new_reasons = list(layer.missing_reasons or []) + stale_msgs
+        new_health = "degraded" if layer.health == "healthy" else layer.health
+        out.append(HealthDetailEvidenceLayer(
+            layer_id=layer.layer_id,
+            name=layer.name,
+            health=new_health,
+            pillars_summary=layer.pillars_summary,
+            missing_reasons=new_reasons[:8],
+        ))
+    return out
+
+
 def _query_evidence_layers_health(
     conn,
 ) -> list[HealthDetailEvidenceLayer]:
-    """从最近一条 strategy_run 的 full_state_json 抽 5 层 health_status + pillars。"""
+    """从最近一条 strategy_run 的 full_state_json 抽 5 层 health_status + pillars。
+    Sprint D Item 4:之后调 _apply_layer_stale_overrides 显示侧覆盖 stale 层。
+    """
     layers: list[HealthDetailEvidenceLayer] = []
     try:
         row = conn.execute(
@@ -231,7 +270,7 @@ def _query_evidence_layers_health(
                 health="missing", pillars_summary="尚无 strategy_run",
                 missing_reasons=["pipeline 尚未首次运行"],
             ))
-        return layers
+        return _apply_layer_stale_overrides(conn, layers)
 
     try:
         state = json.loads(row["full_state_json"])
@@ -267,7 +306,7 @@ def _query_evidence_layers_health(
                 health=health, pillars_summary=summary,
                 missing_reasons=missing_reasons,
             ))
-        return layers
+        return _apply_layer_stale_overrides(conn, layers)
 
     er = state.get("evidence_reports") or {}
 
@@ -320,7 +359,7 @@ def _query_evidence_layers_health(
             health=health, pillars_summary=summary,
             missing_reasons=missing_reasons,
         ))
-    return layers
+    return _apply_layer_stale_overrides(conn, layers)
 
 
 def _query_fetch_attempts_failures(
@@ -328,29 +367,23 @@ def _query_fetch_attempts_failures(
 ) -> tuple[bool, bool]:
     """Sprint C:每个 source 取最新 attempt;返回 (has_any_failure,
     has_quota_exceeded)。读 fetch_attempts 而不是老的 inserted_at_utc 推断,
-    避免被 derived MVRV 副作用骗。"""
-    expected_sources = (
-        "binance_kline", "coinglass_derivatives",
-        "glassnode_onchain", "fred_macro",
-    )
+    避免被 derived MVRV 副作用骗。
+
+    Sprint D:简化为读共用 freshness 模块 — 任一 source is_stale 也算 failure
+    侧(包括 fetch_attempts no_data 但数据表 fallback 也 stale 的情况)。
+    """
+    from ...data.freshness import compute_all_freshness
     has_failure = False
     has_quota = False
-    for src in expected_sources:
-        try:
-            row = conn.execute(
-                "SELECT status, failure_reason FROM fetch_attempts "
-                "WHERE source = ? "
-                "ORDER BY attempted_at_utc DESC, id DESC LIMIT 1",
-                (src,),
-            ).fetchone()
-        except Exception:
-            continue
-        if row is None:
-            continue
-        if row["status"] == "failure":
+    try:
+        rows = compute_all_freshness(conn)
+    except Exception:
+        return False, False
+    for f in rows:
+        if f.failure_reason == "quota_exceeded":
+            has_quota = True
+        if f.status == "failure" or f.is_stale:
             has_failure = True
-            if row["failure_reason"] == "quota_exceeded":
-                has_quota = True
     return has_failure, has_quota
 
 

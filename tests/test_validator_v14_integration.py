@@ -22,9 +22,11 @@ def test_v24_default_dict_has_28_fields():
 
     Sprint 1.10-F 增加 4 个 retry-mechanism 元字段(validator_needs_retry /
     validator_retry_hints / validator_22_failures_count /
-    validator_22_needs_review_pending),总数 32。原 28 字段都仍存在。
+    validator_22_needs_review_pending),总数 32。
+    Sprint D 加 1 个 stale 披露元字段(validator_stale_disclosure_missing;
+    _needs_retry 是临时聚合用,不持久化),总数 33。原 28 字段都仍存在。
     """
-    assert len(_DEFAULT_ACTIVATIONS_V24) == 32
+    assert len(_DEFAULT_ACTIVATIONS_V24) == 33
     # v1.4 §3.4.9 28 个原字段必须仍存在
     v14_28_fields = {
         "validator_1_stop_loss_overridden",
@@ -226,16 +228,17 @@ def test_validate_v1_v2_v5_combined_overrides():
 
 
 def test_validate_dict_28_field_complete():
-    """validate_master_output 返回的 activations 必须含全 32 字段。
+    """validate_master_output 返回的 activations 必须含全 33 字段。
 
-    v1.4 §3.4.9 28 字段 + Sprint 1.10-F 新增 4 retry 元字段 = 32。
+    v1.4 §3.4.9 28 字段 + Sprint 1.10-F 新增 4 retry 元字段 +
+    Sprint D 新增 1 stale 披露字段(_needs_retry 临时聚合) = 33。
     """
     _, activations = validate_master_output(
         {"mode": "silent_cooldown", "silent_reason": "x",
          "narrative": "无层间矛盾"},
         {"active_thesis": None, "cooldown_state": {}, "fuse_state": {}},
     )
-    assert len(activations) == 32
+    assert len(activations) == 33
     # 所有 default 字段都在
     for key in _DEFAULT_ACTIVATIONS_V24:
         assert key in activations

@@ -1024,7 +1024,29 @@ class StrategyStateBuilder:
                 if market_snapshot.get("status") == "missing"
                 else {"price_status": "ok"}
             ),
+
+            # --- Sprint D Item 2:4 个数据源 freshness 真实信号 ---
+            # 来源:fetch_attempts 优先 + 实际数据表 MAX fallback。每源含
+            # last_success_at_utc / hours_since_last_success / is_stale /
+            # failure_reason。下游消费:网页"沿用 X 月 X 日"文案、AI master
+            # prompt 注入(Item 3)、evidence_layers 显示侧覆盖(Item 4)。
+            "data_freshness": self._build_data_freshness_block(),
         }
+
+    def _build_data_freshness_block(self) -> list[dict[str, Any]]:
+        """Sprint D Item 2:把 4 源 freshness 持久化进 strategy_runs.full_state_json。
+        与 _evaluate_freshness(state_builder.py:1387)是不同层:那个是 hard
+        gate 重试逻辑;这个只记录给下游消费。互不冲突。"""
+        if self.conn is None:
+            return []
+        try:
+            from src.data.freshness import (
+                compute_all_freshness, freshness_to_dict,
+            )
+            return [freshness_to_dict(f) for f in compute_all_freshness(self.conn)]
+        except Exception as e:
+            logger.warning("data_freshness block compute failed: %s", e)
+            return []
 
     # ------------------------------------------------------------------
     # Stage runner (带 Fallback 日志 + 降级记录)

@@ -202,3 +202,22 @@ context 含完整 master_input dict:
 # 八、输出格式
 
 严格 JSON,首字符 `{`,尾字符 `}`,无 markdown,无解释。
+
+
+# 九、过期数据纪律(Sprint D Item 3)
+
+输入开头会有 `===== [数据新鲜度] =====` 段,列出 4 个数据源(Binance K 线 /
+CoinGlass 衍生品 / Glassnode 链上 / FRED 宏观)的状态:🟢 = 新鲜,⚠️ = 过期。
+
+**当任一源带 ⚠️(is_stale=true)时,你必须**:
+1. 在 `narrative` 里**明确写出**"X 数据已过期 N 小时,本判断可信度相应降级"
+   (X 替换成中文源名,N 替换成实际小时数,使用「过期」/「沿用」/「stale」其一关键词)
+2. 不得给 high 置信度结论(thesis_assessment.confidence_score /
+   new_thesis.confidence_score 上限 0.6)
+3. break_conditions 里至少有一条与"等数据恢复"相关的回退条件
+
+**不遵守 → validator 拒绝输出,走 fallback,人工复核必要**。
+
+例外:如果 `active_thesis` 已经存在且本次 mode=evaluate_existing,可继续走
+评估流程,但仍须在 narrative 里点名过期数据源 + 降低 still_valid 档(从
+fully → mostly,或从 mostly → partially)。

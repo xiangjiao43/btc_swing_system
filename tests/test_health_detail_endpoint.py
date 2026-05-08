@@ -203,6 +203,28 @@ def test_derivatives_freshness(client: TestClient, db_path: Path):
 
 def test_evidence_layers_all_healthy(client: TestClient, db_path: Path):
     _seed_strategy_run_with_layers(db_path)
+    # Sprint D Item 4:显示侧 stale 守卫读 fetch_attempts/数据表 fallback;
+    # 测试需要给所有 4 源 seed fresh 数据,否则 stale 守卫会把 layers 降级。
+    _seed_kline_with_inserted_at(db_path, minutes_ago=15)
+    _seed_derivatives(db_path, minutes_ago=15)
+    conn = sqlite3.connect(db_path)
+    try:
+        ts = _iso(datetime.now(timezone.utc))
+        conn.execute(
+            "INSERT INTO onchain_metrics "
+            "(captured_at_utc, metric_name, value, source, inserted_at_utc) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (ts, "mvrv_z", 1.5, "glassnode_primary", ts),
+        )
+        conn.execute(
+            "INSERT INTO macro_metrics "
+            "(captured_at_utc, metric_name, value, source, inserted_at_utc) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (ts, "us10y", 4.3, "fred", ts),
+        )
+        conn.commit()
+    finally:
+        conn.close()
     r = client.get("/api/system/health-detail")
     body = r.json()
     for layer in body["evidence_layers"]:

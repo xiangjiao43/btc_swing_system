@@ -94,21 +94,19 @@ jobs:
 
   collect_onchain:
     enabled: true
-    cron:                              # 08:35 主 + 多个补救档(BJT)
-      - {hour: 8, minute: 35}
-      - {hour: 9, minute: 5}
-      - {hour: 9, minute: 35}
-      - {hour: 10, minute: 35}
-      - {hour: 11, minute: 35}
-      - {hour: 12, minute: 35}
-      - {hour: 14, minute: 0}
-      - {hour: 16, minute: 0}
-      - {hour: 18, minute: 0}
-      - {hour: 20, minute: 0}
+    # Sprint C(2026-05-08):10 档收敛到 3 档。Sprint A fetch_attempts +
+    # Sprint B 网页诚实显示让"撞 quota 也算今天完成"短路成为可能;
+    # _onchain_today_complete 改写后,主档撞 quota → 后续 9:35/10:35 档 skip。
+    # 配额墙的"补救档变放大器"问题(见 docs/cc_reports/glassnode_frequency_audit.md)
+    # 通过短路彻底解决。yaml hour 是 BJT(顶部 timezone: 'Asia/Shanghai')。
+    cron:
+      - {hour: 8,  minute: 35}         # BJT 08:35 主档
+      - {hour: 9,  minute: 35}         # BJT 09:35 补救一(非 quota fail 重试)
+      - {hour: 10, minute: 35}         # BJT 10:35 补救二(非 quota fail 终档)
     misfire_grace_time: 600
     coalesce: true
     max_instances: 1
-    description: 'Glassnode 13 个 metric(多档补救)'
+    description: 'Glassnode 13 个 metric(3 档:主 + 2 补救;quota fail 短路)'
 
   # ------------- 主 pipeline(2 个 cron entry,共享 pipeline_run 函数)-------
 

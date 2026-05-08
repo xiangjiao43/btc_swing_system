@@ -26,12 +26,61 @@ from __future__ import annotations
 
 import logging
 import sqlite3
-from typing import Any
+from datetime import datetime, timedelta, timezone
+from typing import Any, Optional
 
 from ..storage.dao import OnchainDAO, OnchainMetric
 
 
 logger = logging.getLogger(__name__)
+
+
+# Sprint C(2026-05-08):上游一手 Glassnode 数据 stale 阈值。
+# Glassnode 日级 bar 自然延迟 ≈ 1 天(May 8 BJT 8:35 fetch 拿到的最新 bar
+# 通常是 May 6 或 May 7,captured_at_utc 以 bar 开盘 UTC 为准 → 24-48h
+# 老属正常)。> 48h 才视为真 stale,避免在健康日把正常延迟的派生计算误 abort。
+_UPSTREAM_STALE_THRESHOLD_HOURS: int = 48
+
+# 一手 Glassnode source 标签(与 jobs.py 的 _ONCHAIN_FIRST_HAND_SOURCES 同义,
+# 但本文件保持自己的常量,避免反向 import)。
+_FIRST_HAND_SOURCES: tuple[str, ...] = (
+    "glassnode_primary",
+    "glassnode_display",
+    "glassnode_derived_breakdown_by_age",
+)
+
+
+def _upstream_glassnode_stale(conn: sqlite3.Connection) -> tuple[bool, Optional[str]]:
+    """检查 onchain_metrics 一手 Glassnode 数据的 MAX(captured_at_utc) 是否 stale。
+
+    返回 (is_stale, max_iso)。is_stale=True 时调用方应跳过派生计算 +
+    日志 warning。空表 / 查询失败也视为 stale(防御性)。
+    """
+    placeholders = ",".join(["?"] * len(_FIRST_HAND_SOURCES))
+    try:
+        row = conn.execute(
+            f"SELECT MAX(captured_at_utc) FROM onchain_metrics "
+            f"WHERE source IN ({placeholders})",
+            _FIRST_HAND_SOURCES,
+        ).fetchone()
+    except Exception as e:
+        logger.warning(
+            "_upstream_glassnode_stale: query failed: %s — treat as stale", e,
+        )
+        return True, None
+    max_iso: Optional[str] = row[0] if row and row[0] else None
+    if max_iso is None:
+        return True, None
+    try:
+        s = max_iso.replace("Z", "+00:00") if max_iso.endswith("Z") else max_iso
+        max_dt = datetime.fromisoformat(s)
+        if max_dt.tzinfo is None:
+            max_dt = max_dt.replace(tzinfo=timezone.utc)
+    except Exception:
+        return True, max_iso
+    age = datetime.now(timezone.utc) - max_dt
+    is_stale = age > timedelta(hours=_UPSTREAM_STALE_THRESHOLD_HOURS)
+    return is_stale, max_iso
 
 
 def _load_onchain_metric_by_ts(
@@ -95,7 +144,20 @@ def compute_and_save_derived_mvrv(
       - btc_close ← price_candles WHERE timeframe='1d' AND symbol='BTCUSDT'
       - lth_realized_price / sth_realized_price ← onchain_metrics(Glassnode)
     在 timestamp(date)上 inner join,任一来源缺则跳过。
+
+    Sprint C(2026-05-08):上游一手 Glassnode 数据 > 48h 老 → 跳过整批,
+    不让 derived 行刷新 onchain_metrics MAX(captured_at_utc) 误导网页 +
+    state_builder。
     """
+    is_stale, max_iso = _upstream_glassnode_stale(conn)
+    if is_stale:
+        logger.warning(
+            "compute_derived_mvrv: 一手 Glassnode stale (max=%s, threshold=%dh) "
+            "→ 跳过派生计算,不写新行",
+            max_iso, _UPSTREAM_STALE_THRESHOLD_HOURS,
+        )
+        return {"lth_mvrv": 0, "sth_mvrv": 0}
+
     price_by_ts = _load_btc_close_by_date(conn)
     lth_rp_by_ts = _load_onchain_metric_by_ts(conn, "lth_realized_price")
     sth_rp_by_ts = _load_onchain_metric_by_ts(conn, "sth_realized_price")

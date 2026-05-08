@@ -323,14 +323,60 @@ def _query_evidence_layers_health(
     return layers
 
 
+def _query_fetch_attempts_failures(
+    conn,
+) -> tuple[bool, bool]:
+    """Sprint C:每个 source 取最新 attempt;返回 (has_any_failure,
+    has_quota_exceeded)。读 fetch_attempts 而不是老的 inserted_at_utc 推断,
+    避免被 derived MVRV 副作用骗。"""
+    expected_sources = (
+        "binance_kline", "coinglass_derivatives",
+        "glassnode_onchain", "fred_macro",
+    )
+    has_failure = False
+    has_quota = False
+    for src in expected_sources:
+        try:
+            row = conn.execute(
+                "SELECT status, failure_reason FROM fetch_attempts "
+                "WHERE source = ? "
+                "ORDER BY attempted_at_utc DESC, id DESC LIMIT 1",
+                (src,),
+            ).fetchone()
+        except Exception:
+            continue
+        if row is None:
+            continue
+        if row["status"] == "failure":
+            has_failure = True
+            if row["failure_reason"] == "quota_exceeded":
+                has_quota = True
+    return has_failure, has_quota
+
+
 def _aggregate_overall(
     layers: list[HealthDetailEvidenceLayer],
     sources: list[HealthDetailDataSource],
+    *,
+    fetch_failure: bool = False,
+    fetch_quota_exceeded: bool = False,
 ) -> str:
-    has_critical = any(s.status == "critical" for s in sources) or \
-        any(l.health == "missing" for l in layers)
-    has_warn = any(s.status in ("warn", "no_data") for s in sources) or \
-        any(l.health == "degraded" for l in layers)
+    """Sprint C:fetch_attempts 失败接入聚合。
+      - 任一 source quota_exceeded → critical(配额耗尽是硬阻塞)
+      - 任一 source 其他 failure → 至少 partial_degraded
+      - 老 sources(inserted_at_utc 推断)仍参与,但 fetch_attempts 是新的更
+        准信号
+    """
+    has_critical = (
+        fetch_quota_exceeded
+        or any(s.status == "critical" for s in sources)
+        or any(l.health == "missing" for l in layers)
+    )
+    has_warn = (
+        fetch_failure
+        or any(s.status in ("warn", "no_data") for s in sources)
+        or any(l.health == "degraded" for l in layers)
+    )
     if has_critical:
         return "critical"
     if has_warn:
@@ -346,6 +392,8 @@ def get_system_health_detail(request: Request) -> HealthDetailResponse:
     try:
         layers = _query_evidence_layers_health(conn)
         sources = _query_data_source_freshness(conn)
+        # Sprint C:fetch_attempts 接入顶栏 overall_status
+        fetch_failure, fetch_quota = _query_fetch_attempts_failures(conn)
     finally:
         try:
             conn.close()
@@ -354,7 +402,11 @@ def get_system_health_detail(request: Request) -> HealthDetailResponse:
     return HealthDetailResponse(
         evidence_layers=layers,
         data_sources=sources,
-        overall_status=_aggregate_overall(layers, sources),
+        overall_status=_aggregate_overall(
+            layers, sources,
+            fetch_failure=fetch_failure,
+            fetch_quota_exceeded=fetch_quota,
+        ),
     )
 
 

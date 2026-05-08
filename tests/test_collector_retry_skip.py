@@ -221,31 +221,102 @@ def test_macro_runs_when_today_missing(db_path):
 # job_collect_onchain skip + run
 # ============================================================
 
-def test_onchain_skip_when_today_already_inserted(db_path):
-    # Sprint 1.6.1 起 onchain skip gate 改细粒度:_ONCHAIN_EXPECTED_METRICS_TODAY
-    # ∪ {"hodl_waves"} 必须全部今天已写过才 skip。本测试种全集合,验细粒度 skip。
+def test_onchain_skip_when_today_has_first_hand_row(db_path):
+    # Sprint C(2026-05-08):skip gate 简化为"任一一手 Glassnode 行今天写过"。
+    # 种 1 行 source='glassnode_primary' 即触发 skip。
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     today_captured = f"{today}T08:00:00Z"
-    for m in jobs_mod._ONCHAIN_EXPECTED_METRICS_TODAY:
-        _seed_metric(
-            db_path, "onchain_metrics", metric_name=m,
-            captured_at_utc=today_captured, value=1.0,
-            inserted_at_utc=_today_iso(),
-        )
-    # hodl_waves 用前缀匹配,seed 任一 bucket 即代表 hodl_waves 已抓
-    _seed_metric(
-        db_path, "onchain_metrics", metric_name="hodl_waves_1d_1w",
-        captured_at_utc=today_captured, value=0.05,
-        inserted_at_utc=_today_iso(),
+    conn = _conn(db_path)
+    conn.execute(
+        "INSERT INTO onchain_metrics "
+        "(metric_name, captured_at_utc, value, source, inserted_at_utc) "
+        "VALUES (?, ?, ?, ?, ?)",
+        ("mvrv_z_score", today_captured, 1.5, "glassnode_primary",
+         _today_iso()),
     )
+    conn.commit()
+    conn.close()
+
     gn_cls = MagicMock()
     with patch("src.data.collectors.glassnode.GlassnodeCollector", gn_cls):
         result = jobs_mod.job_collect_onchain(conn_factory=lambda: _conn(db_path))
     assert result["status"] == "skipped"
     assert "today" in result["reason"]
     assert gn_cls.call_count == 0
-    # skip 不该 enqueue pipeline_run(没有新数据)
     assert result.get("events_triggered") in (None, [], )
+
+
+def test_onchain_no_skip_when_today_only_has_computed_row(db_path):
+    """Sprint C 关键反退化:onchain_metrics 今天只有 source='computed'(派生)
+    的行 → skip gate 不触发,因为派生 source 不算一手数据。"""
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today_captured = f"{today}T08:00:00Z"
+    conn = _conn(db_path)
+    conn.execute(
+        "INSERT INTO onchain_metrics "
+        "(metric_name, captured_at_utc, value, source, inserted_at_utc) "
+        "VALUES (?, ?, ?, ?, ?)",
+        ("lth_mvrv", today_captured, 2.5, "computed", _today_iso()),
+    )
+    conn.commit()
+    conn.close()
+
+    # 不 mock collector,直接调 _onchain_today_complete 验证返 False。
+    from src.scheduler.jobs import _onchain_today_complete
+    c = _conn(db_path)
+    c.row_factory = sqlite3.Row
+    try:
+        assert _onchain_today_complete(c) is False
+    finally:
+        c.close()
+
+
+def test_onchain_skip_when_today_quota_exceeded(db_path):
+    """Sprint C 新增:今天 fetch_attempts 撞 quota → skip 后续档。"""
+    from src.data.storage.dao import FetchAttemptsDAO
+    today_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    conn = _conn(db_path)
+    try:
+        FetchAttemptsDAO.record_attempt(
+            conn, source="glassnode_onchain", status="failure",
+            failure_reason="quota_exceeded",
+            error_message="HTTP 403 quota stub",
+            attempted_at_utc=today_iso,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    gn_cls = MagicMock()
+    with patch("src.data.collectors.glassnode.GlassnodeCollector", gn_cls):
+        result = jobs_mod.job_collect_onchain(conn_factory=lambda: _conn(db_path))
+    assert result["status"] == "skipped"
+    assert gn_cls.call_count == 0
+
+
+def test_onchain_no_skip_when_today_only_has_non_quota_failure(db_path):
+    """Sprint C 关键反退化:network_error / api_error / parse_error 等非 quota
+    失败不能短路 → 后续档应继续重试。"""
+    from src.data.storage.dao import FetchAttemptsDAO
+    from src.scheduler.jobs import _onchain_today_complete
+    today_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    conn = _conn(db_path)
+    try:
+        FetchAttemptsDAO.record_attempt(
+            conn, source="glassnode_onchain", status="failure",
+            failure_reason="network_error",
+            error_message="ConnectionError stub",
+            attempted_at_utc=today_iso,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    c = _conn(db_path)
+    c.row_factory = sqlite3.Row
+    try:
+        assert _onchain_today_complete(c) is False
+    finally:
+        c.close()
 
 
 def test_onchain_runs_when_today_missing(db_path):
@@ -371,8 +442,10 @@ def test_or_trigger_registers_all_cron_times():
         jobs_by_id = {j.id: j for j in sched.get_jobs()}
 
         # 4 个低频 job 都用 OrTrigger
+        # Sprint C(2026-05-08):collect_onchain 10 → 3 档(主 + 2 补救;
+        # quota fail 短路逻辑见 _onchain_today_complete)
         expected = {
-            "collect_onchain":     10,
+            "collect_onchain":      3,
             "collect_macro":        7,
             "collect_klines_daily": 9,
             "collect_klines_weekly": 7,

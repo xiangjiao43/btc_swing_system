@@ -97,13 +97,9 @@ def test_glassnode_fetchers_no_deleted_names():
     assert "fetch_sth_supply" in _GLASSNODE_FETCHERS  # 1.6 新加
 
 
-def test_expected_metrics_today_no_deleted_names():
-    from src.scheduler.jobs import _ONCHAIN_EXPECTED_METRICS_TODAY
-    for name in ("sopr", "reserve_risk", "puell_multiple"):
-        assert name not in _ONCHAIN_EXPECTED_METRICS_TODAY, (
-            f"Sprint 1.7:_ONCHAIN_EXPECTED_METRICS_TODAY 应不含 {name}"
-        )
-    assert "sopr_adjusted" in _ONCHAIN_EXPECTED_METRICS_TODAY
+# Sprint C(2026-05-08):删除 test_expected_metrics_today_no_deleted_names —
+# `_ONCHAIN_EXPECTED_METRICS_TODAY` 常量已删除(Sprint C 改为"任一一手 row + quota
+# 短路"语义)。等价覆盖在 _GLASSNODE_FETCHERS 测试已存在。
 
 
 # ============================================================

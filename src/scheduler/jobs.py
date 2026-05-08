@@ -259,61 +259,69 @@ def _has_today_inserted_in_metric_table(
     return cur.fetchone() is not None
 
 
-# Sprint 1.6.1 任务 B:onchain "今日完整性"门(细粒度,按 metric 集合判断)。
-# 老 _has_today_inserted_in_metric_table 是"任意一个 metric 今天写过即 skip",
-# 但 onchain_metrics 是宽表 — 任一旧 metric 今天写过就 skip,导致 1.6 新 fetcher
-# (sth_supply / ssr / cdd / hodl_waves) 永远不被调用。
-_ONCHAIN_EXPECTED_METRICS_TODAY: tuple[str, ...] = (
-    # 旧的(Sprint 1.6 之前已有,12 个 fetcher)
-    "mvrv_z_score", "nupl", "lth_supply", "exchange_net_flow",
-    "btc_price_close", "mvrv", "realized_price",
-    "lth_realized_price", "sth_realized_price",
-    "sopr_adjusted",
-    # Sprint 1.7:删除 sopr / reserve_risk / puell_multiple(噪音因子)
-    # Sprint 1.6 新增 4 个(hodl_waves 用前缀匹配,见下)
-    "sth_supply", "ssr", "cdd",
+# Sprint C(2026-05-08):onchain "今日完整性"门简化 — 任一一手 Glassnode 行
+# 今天写过就算完成。老的 _ONCHAIN_EXPECTED_METRICS_TODAY 13-metric 全集合检查 +
+# _ONCHAIN_HODL_WAVES_PREFIX 已删除(13 个 fetcher 共用一个 fetch_attempts
+# bucket,所以"全部 13 metric 今天都写过"和"任一一手 source 今天有行"在 quota
+# 分流后语义等价)。
+_ONCHAIN_FIRST_HAND_SOURCES: tuple[str, ...] = (
+    "glassnode_primary",
+    "glassnode_display",
+    "glassnode_derived_breakdown_by_age",
 )
-_ONCHAIN_HODL_WAVES_PREFIX = "hodl_waves_"
 
 
 def _onchain_today_complete(conn: Any) -> bool:
-    """Sprint 1.6.1:今天是否所有期望 onchain metric 都已写过。
+    """Sprint C(2026-05-08)重写:今天满足任一即返 True,abort 后续档。
 
-    判定:
-      - 期望集合 = _ONCHAIN_EXPECTED_METRICS_TODAY ∪ {"hodl_waves"}
-      - "今天写过的 metric" = onchain_metrics 表 captured_at_utc LIKE 'YYYY-MM-DD%'
-      - hodl_waves_* 任一 bucket 出现即视为 "hodl_waves 已抓"
-    全部 metric 都在写过集合中 → True(skip);否则 False(继续 fetch)。
+    (a) 今天 onchain_metrics 表有任意一手 Glassnode 数据
+        (source IN _ONCHAIN_FIRST_HAND_SOURCES,排除 'computed' 派生)
+    (b) 今天 fetch_attempts 表有 source='glassnode_onchain' status='failure'
+        failure_reason='quota_exceeded' 的行(撞配额墙别再抓)
+
+    非 quota 失败(network/api/parse)继续返 False → 后续档重试。
     """
     from datetime import datetime, timezone
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
-    written_today: set[str] = set()
+    # (a) 今天有一手 Glassnode 数据
+    placeholders = ",".join(["?"] * len(_ONCHAIN_FIRST_HAND_SOURCES))
     try:
-        rows = conn.execute(
-            "SELECT DISTINCT metric_name FROM onchain_metrics "
-            "WHERE captured_at_utc LIKE ?",
+        row = conn.execute(
+            f"SELECT 1 FROM onchain_metrics "
+            f"WHERE captured_at_utc LIKE ? "
+            f"  AND source IN ({placeholders}) "
+            f"LIMIT 1",
+            (f"{today}%", *_ONCHAIN_FIRST_HAND_SOURCES),
+        ).fetchone()
+        if row is not None:
+            logger.info(
+                "_onchain_today_complete: 今天已有一手 Glassnode 数据 → skip",
+            )
+            return True
+    except Exception as e:
+        logger.warning("_onchain_today_complete (a) onchain_metrics 查询失败: %s", e)
+
+    # (b) 今天撞 quota
+    try:
+        row = conn.execute(
+            "SELECT 1 FROM fetch_attempts "
+            "WHERE source = 'glassnode_onchain' "
+            "  AND status = 'failure' "
+            "  AND failure_reason = 'quota_exceeded' "
+            "  AND attempted_at_utc LIKE ? "
+            "LIMIT 1",
             (f"{today}%",),
-        ).fetchall()
-    except Exception:
-        return False
+        ).fetchone()
+        if row is not None:
+            logger.info(
+                "_onchain_today_complete: 今天 fetch_attempts 已撞 quota → skip 后续档",
+            )
+            return True
+    except Exception as e:
+        logger.warning("_onchain_today_complete (b) fetch_attempts 查询失败: %s", e)
 
-    for r in rows:
-        name = r[0] if not hasattr(r, "keys") else r["metric_name"]
-        if isinstance(name, str) and name.startswith(_ONCHAIN_HODL_WAVES_PREFIX):
-            written_today.add("hodl_waves")
-        elif name:
-            written_today.add(name)
-
-    expected_set = set(_ONCHAIN_EXPECTED_METRICS_TODAY) | {"hodl_waves"}
-    missing = expected_set - written_today
-    if missing:
-        logger.info(
-            "_onchain_today_complete: still missing today: %s "
-            "(written: %s)",
-            sorted(missing), sorted(written_today),
-        )
-    return len(missing) == 0
+    return False
 
 
 def _has_today_btc_dominance_or_etf_flow(conn: Any) -> bool:

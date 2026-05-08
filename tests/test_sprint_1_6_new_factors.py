@@ -104,18 +104,22 @@ def db_with_seed_metrics(tmp_path: Path) -> sqlite3.Connection:
     """Sprint 1.6.1:种入
        - price_candles 表(timeframe='1d', symbol='BTCUSDT')7 天 close
        - onchain_metrics 表 lth_realized_price + sth_realized_price 7 天
-    1.6 老 fixture 只种 onchain.btc_price_close 是错的(实际 BTC 收盘价唯
-    一来源是 price_candles 1d K 线,不在 onchain_metrics)。
+    Sprint C(2026-05-08):timestamps 改为 now() 相对值,避免 hardcode
+    日期超过 derived stale 守卫的 48h 阈值。最新日是 yesterday(=now-1d),
+    保证 < 48h。
     """
+    from datetime import datetime, timedelta, timezone
     db = tmp_path / "derived.db"
     init_db(db_path=db, verbose=False)
     conn = sqlite3.connect(db)
     conn.row_factory = sqlite3.Row
-    base_ts = "2026-04-{:02d}T00:00:00Z"
-    # price_candles 1d 收盘
-    for d in range(24, 31):
-        ts = base_ts.format(d)
-        close = 70000.0 + d * 100
+    today_utc = datetime.now(timezone.utc).date()
+    # 7 天回溯,最新 = yesterday(< 48h 老,通过 stale 守卫)
+    days = [today_utc - timedelta(days=offset) for offset in range(1, 8)]
+    days.sort()  # asc
+    for idx, day in enumerate(days):
+        ts = day.strftime("%Y-%m-%dT00:00:00Z")
+        close = 70000.0 + (idx + 24) * 100  # 保留老测试的数值结构
         conn.execute(
             "INSERT INTO price_candles "
             "(symbol, timeframe, open_time_utc, open, high, low, close, "
@@ -123,10 +127,10 @@ def db_with_seed_metrics(tmp_path: Path) -> sqlite3.Connection:
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             ("BTCUSDT", "1d", ts, close, close, close, close, 1.0, ts),
         )
-    # onchain realized prices
+    # onchain realized prices(同 7 天)
     onchain_metrics = []
-    for d in range(24, 31):
-        ts = base_ts.format(d)
+    for idx, day in enumerate(days):
+        ts = day.strftime("%Y-%m-%dT00:00:00Z")
         onchain_metrics.extend([
             OnchainMetric(timestamp=ts, metric_name="lth_realized_price",
                           metric_value=35000.0,
@@ -169,13 +173,19 @@ def test_local_computed_mvrv_value_correct(
     db_with_seed_metrics: sqlite3.Connection,
 ):
     """关键反退化:数学正确性 — lth_mvrv = price / lth_rp。"""
+    from datetime import datetime, timedelta, timezone
     compute_and_save_derived_mvrv(db_with_seed_metrics)
+    # Sprint C:fixture 改用 now()-相对 ts,这里取最新一天(yesterday)对应行。
+    yesterday_iso = (datetime.now(timezone.utc).date()
+                     - timedelta(days=1)).strftime("%Y-%m-%dT00:00:00Z")
     row = db_with_seed_metrics.execute(
         "SELECT value FROM onchain_metrics "
-        "WHERE metric_name='lth_mvrv' AND captured_at_utc='2026-04-30T00:00:00Z'"
+        "WHERE metric_name='lth_mvrv' AND captured_at_utc=?",
+        (yesterday_iso,),
     ).fetchone()
     assert row is not None
-    # price = 70000 + 30*100 = 73000;lth_rp = 35000;lth_mvrv = 73000/35000 = 2.0857
+    # fixture 最新日(idx=6)的 close = 70000 + (6+24)*100 = 73000;
+    # lth_rp = 35000;lth_mvrv = 73000/35000 ≈ 2.0857
     assert abs(row["value"] - (73000.0 / 35000.0)) < 0.001
 
 
@@ -401,99 +411,10 @@ def test_onchain_source_literal_includes_computed():
 
 
 # ============================================================
-# Sprint 1.6.1 任务 B:细粒度今日门 §X 反退化
+# Sprint 1.6.1 任务 B:细粒度今日门 — Sprint C 已废弃为 ≥ 1 一手 Glassnode 行
+#   原 4 个测试覆盖的"全 13 metric 都写过才 skip"语义已过时,
+#   新逻辑测试在 tests/test_jobs_fetch_attempts_integration.py。
 # ============================================================
-
-def test_onchain_expected_metrics_today_includes_new_fetchers():
-    """1.6.1:_ONCHAIN_EXPECTED_METRICS_TODAY 必须含 1.6 新 4 fetcher 名。"""
-    from src.scheduler.jobs import _ONCHAIN_EXPECTED_METRICS_TODAY
-    for name in ("sth_supply", "ssr", "cdd"):
-        assert name in _ONCHAIN_EXPECTED_METRICS_TODAY, (
-            f"missing 1.6 new metric in expected today: {name}"
-        )
-
-
-def test_onchain_today_complete_returns_false_when_missing(tmp_path: Path):
-    """关键反退化:onchain 表里只有部分老 metric 时,_onchain_today_complete=False
-    (不再"任意一个写过即 skip")。"""
-    from src.scheduler.jobs import _onchain_today_complete
-    from datetime import datetime, timezone
-    db = tmp_path / "complete.db"
-    init_db(db_path=db, verbose=False)
-    conn = sqlite3.connect(db)
-    conn.row_factory = sqlite3.Row
-    try:
-        # 仅写 mvrv_z_score(1 个老 metric)— 不应触发 skip
-        today_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        OnchainDAO.upsert_batch(conn, [OnchainMetric(
-            timestamp=today_iso, metric_name="mvrv_z_score",
-            metric_value=1.5, source="glassnode_primary",
-        )])
-        conn.commit()
-        assert _onchain_today_complete(conn) is False
-    finally:
-        conn.close()
-
-
-def test_onchain_today_complete_returns_true_when_all_present(tmp_path: Path):
-    """期望集合都今天写过 → True(skip)。"""
-    from src.scheduler.jobs import (
-        _ONCHAIN_EXPECTED_METRICS_TODAY, _onchain_today_complete,
-    )
-    from datetime import datetime, timezone
-    db = tmp_path / "all_present.db"
-    init_db(db_path=db, verbose=False)
-    conn = sqlite3.connect(db)
-    conn.row_factory = sqlite3.Row
-    try:
-        today_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        metrics = []
-        for name in _ONCHAIN_EXPECTED_METRICS_TODAY:
-            metrics.append(OnchainMetric(
-                timestamp=today_iso, metric_name=name,
-                metric_value=1.0, source="glassnode_primary",
-            ))
-        # hodl_waves 任一 bucket
-        metrics.append(OnchainMetric(
-            timestamp=today_iso, metric_name="hodl_waves_1y_2y",
-            metric_value=0.1, source="glassnode_primary",
-        ))
-        OnchainDAO.upsert_batch(conn, metrics)
-        conn.commit()
-        assert _onchain_today_complete(conn) is True
-    finally:
-        conn.close()
-
-
-def test_onchain_today_complete_treats_hodl_prefix_as_one(tmp_path: Path):
-    """hodl_waves_<bucket> 任一存在视为 'hodl_waves' 已抓。"""
-    from src.scheduler.jobs import (
-        _ONCHAIN_EXPECTED_METRICS_TODAY, _onchain_today_complete,
-    )
-    from datetime import datetime, timezone
-    db = tmp_path / "hodl.db"
-    init_db(db_path=db, verbose=False)
-    conn = sqlite3.connect(db)
-    conn.row_factory = sqlite3.Row
-    try:
-        today_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        # 全部 expected + hodl_waves_<one>
-        metrics = []
-        for name in _ONCHAIN_EXPECTED_METRICS_TODAY:
-            metrics.append(OnchainMetric(
-                timestamp=today_iso, metric_name=name,
-                metric_value=1.0, source="glassnode_primary",
-            ))
-        # 只一个 bucket
-        metrics.append(OnchainMetric(
-            timestamp=today_iso, metric_name="hodl_waves_24h",
-            metric_value=0.01, source="glassnode_primary",
-        ))
-        OnchainDAO.upsert_batch(conn, metrics)
-        conn.commit()
-        assert _onchain_today_complete(conn) is True  # 仅 1 bucket 视为齐
-    finally:
-        conn.close()
 
 
 def test_has_today_btc_dominance_or_etf_flow_detects_extras(tmp_path: Path):

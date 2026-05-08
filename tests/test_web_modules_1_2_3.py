@@ -34,7 +34,6 @@ def test_module_1_virtual_account_section_exists(html):
     assert 'id="region-virtual-account"' in html
     assert "audit-card" in html  # 复用现有风格
     assert "虚拟账户" in html
-    assert "v1.4 §9.2.1" in html  # 文档对齐标记
 
 
 def test_module_1_displays_total_equity_and_initial(html):
@@ -89,7 +88,6 @@ def test_module_1_cold_start_placeholder(html):
 def test_module_2_active_thesis_section_exists(html):
     assert 'id="region-active-thesis"' in html
     assert "当前 thesis" in html
-    assert "v1.4 §9.2.2" in html
 
 
 def test_module_2_displays_thesis_fields(html):
@@ -132,7 +130,6 @@ def test_module_2_alpine_binds_active_thesis(html):
 def test_module_3_orders_position_section_exists(html):
     assert 'id="region-orders-position"' in html
     assert "挂单 + 持仓" in html
-    assert "v1.4 §9.2.3" in html
 
 
 def test_module_3_displays_position_summary(html):

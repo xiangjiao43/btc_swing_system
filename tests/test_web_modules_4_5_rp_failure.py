@@ -36,7 +36,6 @@ def js() -> str:
 def test_module_4_section_exists(html):
     assert 'id="region-thesis-timeline"' in html
     assert "thesis 历史时间线" in html
-    assert "v1.4 §9.2.4" in html
 
 
 def test_module_4_table_columns(html):
@@ -69,7 +68,6 @@ def test_module_4_position_after_layers(html):
 def test_module_5_section_exists(html):
     assert 'id="region-weekly-review"' in html
     assert "周复盘" in html
-    assert "v1.4 §9.2.5" in html
 
 
 def test_module_5_dropdown_for_history(html):

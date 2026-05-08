@@ -708,9 +708,10 @@ class DerivativesDAO:
     ) -> dict[str, Any]:
         import pandas as pd
         from datetime import datetime, timedelta, timezone
+        # 日级 cutoff:strip H/M/S,避免秒精度让边界日 ts 被误丢。
         cutoff = (
             datetime.now(timezone.utc) - timedelta(days=lookback_days)
-        ).strftime("%Y-%m-%dT%H:%M:%SZ")
+        ).strftime("%Y-%m-%dT00:00:00Z")
         rows = conn.execute(
             "SELECT * FROM derivatives_snapshots "
             "WHERE captured_at_utc >= ? ORDER BY captured_at_utc ASC",

@@ -848,17 +848,22 @@ def job_collect_onchain(
             logger.warning("derived_mvrv compute failed: %s", e)
             errors["derived_mvrv"] = str(e)[:200]
 
-        # Sprint 2.7-D:onchain 抓完立即 enqueue 一次 pipeline_run(event_onchain)
-        # 无节流(每天 08:35 只跑一次,天然不重复)
-        if total > 0:
+        # Sprint B fix:只有 Glassnode bucket 真 success(无 exc + 入库 > 0)才
+        # enqueue pipeline_run。上游 fail 时 derived_mvrv 仍可能写若干行,但那
+        # 是基于昨天 realized_price 的本地计算,**不是新链上数据**。Sprint A 之
+        # 前的 `if total > 0` 条件让 pipeline_run 在 Glassnode 全 403 时仍被
+        # enqueue,然后 v1.3 orchestrator 崩在 state_builder.py:363
+        # (见 docs/cc_reports/glassnode_frequency_audit.md)。
+        gn_success = (gn_first_exc is None) and (glassnode_rows > 0)
+        if gn_success:
             _enqueue_pipeline_run("event_onchain")
         return {
             "by_collector": {
-                "glassnode": total - sum(derived_stats.values()),
+                "glassnode": glassnode_rows,
                 "derived_mvrv": sum(derived_stats.values()),
             },
             "total_upserted": total,
-            "events_triggered": ["event_onchain"] if total > 0 else [],
+            "events_triggered": ["event_onchain"] if gn_success else [],
             "errors": errors,
         }
     return _wrap_job("collect_onchain", _body, conn_factory=conn_factory,

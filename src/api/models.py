@@ -112,3 +112,20 @@ class HealthDetailResponse(BaseModel):
     evidence_layers: list[HealthDetailEvidenceLayer]
     data_sources: list[HealthDetailDataSource]
     overall_status: str  # all_healthy / partial_degraded / critical
+
+
+# Sprint B(数据真实性透明化)— /api/data_sources/freshness
+class DataSourceFreshness(BaseModel):
+    source: str                         # binance_kline / coinglass_derivatives / glassnode_onchain / fred_macro
+    display_name: str                   # 中文展示名(网页直接显示)
+    status: str                         # 'success' | 'failure' | 'no_data'
+    last_attempt_at_utc: str | None = None
+    last_attempt_at_bjt: str | None = None
+    minutes_ago: int | None = None      # 距最近一次 attempt 的分钟数
+    last_success_at_utc: str | None = None
+    last_success_at_bjt: str | None = None
+    failure_reason: str | None = None   # quota_exceeded / network_error / ...
+    failure_reason_label: str | None = None   # 中文徽章
+    error_message: str | None = None
+    rows_upserted: int | None = None
+    duration_ms: int | None = None

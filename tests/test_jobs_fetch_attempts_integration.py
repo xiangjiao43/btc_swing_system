@@ -204,3 +204,58 @@ def test_collect_onchain_skipped_today_writes_no_row(db_path, conn_factory):
         result = jobs_mod.job_collect_onchain(conn_factory=conn_factory)
     assert result["status"] == "skipped"
     assert _attempts(db_path, "glassnode_onchain") == []
+
+
+# ============================================================
+# Sprint B 副作用 bug 反退化:Glassnode 全 fail 时不应 enqueue pipeline_run
+# ============================================================
+
+def test_collect_onchain_all_fail_does_not_enqueue_pipeline_run(
+    db_path, conn_factory,
+):
+    """13 个 fetcher 全 403 → derived_mvrv 仍可能本地写若干行,但 Sprint B
+    修后不应 enqueue event_onchain pipeline_run(上游 fail 状态)。
+    反退化:Sprint A 之前的 `if total > 0` 让 derived 写行也触发 enqueue。"""
+    gn_inst = MagicMock()
+    for fn in jobs_mod._GLASSNODE_FETCHERS:
+        getattr(gn_inst, fn).side_effect = RuntimeError("HTTP 403 quota")
+
+    # 模拟 derived_mvrv 写了几行(模拟历史 realized_price 还在 DB 的副作用)
+    def _fake_compute_derived(_conn):
+        return {"lth_mvrv": 5, "sth_mvrv": 5}
+
+    with patch("src.data.collectors.glassnode.GlassnodeCollector",
+               return_value=gn_inst), \
+         patch("src.data.collectors.derived_onchain.compute_and_save_derived_mvrv",
+               side_effect=_fake_compute_derived), \
+         patch.object(jobs_mod, "_enqueue_pipeline_run") as enqueue:
+        result = jobs_mod.job_collect_onchain(conn_factory=conn_factory)
+
+    enqueue.assert_not_called()
+    assert result["events_triggered"] == []
+    # fetch_attempts 仍应记 1 行 failure
+    rows = _attempts(db_path, "glassnode_onchain")
+    assert len(rows) == 1
+    assert rows[0]["status"] == "failure"
+
+
+def test_collect_onchain_real_success_does_enqueue_pipeline_run(
+    db_path, conn_factory,
+):
+    """13 个 fetcher 全 success + 入库 > 0 → 仍应 enqueue event_onchain。"""
+    gn_inst = MagicMock()
+    for fn in jobs_mod._GLASSNODE_FETCHERS:
+        getattr(gn_inst, fn).return_value = [
+            {"timestamp": "2026-04-27T00:00:00Z",
+             "metric_name": fn.replace("fetch_", ""),
+             "metric_value": 1.0,
+             "source": "glassnode_primary"}
+        ]
+
+    with patch("src.data.collectors.glassnode.GlassnodeCollector",
+               return_value=gn_inst), \
+         patch.object(jobs_mod, "_enqueue_pipeline_run") as enqueue:
+        result = jobs_mod.job_collect_onchain(conn_factory=conn_factory)
+
+    enqueue.assert_called_once_with("event_onchain")
+    assert result["events_triggered"] == ["event_onchain"]

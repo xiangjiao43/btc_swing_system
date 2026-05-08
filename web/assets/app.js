@@ -26,6 +26,11 @@ function app() {
         systemHealth: null,
         _healthTimer: null,
 
+        // Sprint B(数据真实性透明化):/api/data_sources/freshness 真实抓取状态
+        // 替换原"数据源"那栏从 systemHealth.data_sources(老 inserted_at_utc 推断)
+        // 走的逻辑;每 5 分钟刷一次,与 systemHealth 同 timer。
+        dataSourcesFreshness: [],
+
         // Sprint 1.10-I §9.2:5 模块数据
         virtualAccount: null,           // 模块 1 - virtual_account 最新快照
         accountReturns: {               // 模块 1 - 各周期收益率
@@ -336,6 +341,12 @@ function app() {
                                       { cache: 'no-cache' });
                 if (r.ok) this.systemHealth = await r.json();
             } catch (e) { /* 静默失败 */ }
+            // Sprint B:同时刷新 fetch_attempts 真实抓取状态(数据源那栏)
+            try {
+                const r2 = await fetch('/api/data_sources/freshness',
+                                       { cache: 'no-cache' });
+                if (r2.ok) this.dataSourcesFreshness = await r2.json();
+            } catch (e) { /* 静默失败 */ }
         },
         selfCheckBadgeLabel() {
             const s = this.systemHealth && this.systemHealth.overall_status;
@@ -370,31 +381,73 @@ function app() {
             if (h === 'degraded') return 'text-amber-600 dark:text-amber-400';
             return 'text-rose-600 dark:text-rose-400 font-medium';
         },
-        sourceStatusGlyph(s) {
-            if (s === 'ok') return '●';
-            if (s === 'warn') return '⚠';
-            if (s === 'critical') return '✗';
+        // Sprint B:fetch_attempts 真实状态 helper(替代老的 inserted_at_utc 推断)
+        // status ∈ {success, failure, no_data}
+        sourceStatusGlyph(status) {
+            if (status === 'success') return '●';
+            if (status === 'failure') return '●';
             return '○';  // no_data
         },
-        sourceStatusGlyphClass(s) {
-            if (s === 'ok') return 'text-emerald-500';
-            if (s === 'warn') return 'text-amber-500';
-            if (s === 'critical') return 'text-rose-500 font-bold';
+        sourceStatusGlyphClass(status) {
+            if (status === 'success') return 'text-emerald-500';
+            if (status === 'failure') return 'text-rose-500 font-bold';
             return 'text-slate-400';
         },
-        sourceAgeLabel(s) {
-            if (s.age_minutes == null) return '无数据';
-            const m = s.age_minutes;
-            if (m < 60) return `${m.toFixed(1)} 分钟前`;
-            if (m < 1440) return `${(m/60).toFixed(1)} 小时前`;
-            return `${(m/1440).toFixed(1)} 天前`;
-        },
-        sourceTextClass(s) {
-            if (s === 'ok') return 'text-slate-700 dark:text-slate-300';
-            if (s === 'warn') return 'text-amber-600 dark:text-amber-400';
-            if (s === 'critical')
+        sourceTextClass(status) {
+            if (status === 'success') return 'text-slate-700 dark:text-slate-300';
+            if (status === 'failure')
                 return 'text-rose-600 dark:text-rose-400 font-medium';
-            return 'text-slate-400 dark:text-slate-500';  // no_data
+            return 'text-slate-400 dark:text-slate-500';
+        },
+        sourceAgeLabel(src) {
+            // src 是 freshness 行(包含 status / minutes_ago / failure_reason 等)
+            if (src.status === 'no_data') return '尚未抓取';
+            const m = src.minutes_ago;
+            if (m == null) return '-';
+            let timeStr;
+            if (m < 60) timeStr = `${m} 分钟前`;
+            else if (m < 1440) timeStr = `${(m/60).toFixed(1)} 小时前`;
+            else timeStr = `${(m/1440).toFixed(1)} 天前`;
+            if (src.status === 'failure') return `${timeStr}抓取失败`;
+            return timeStr;
+        },
+        // 「沿用 X 月 X 日数据」灰字小注脚(failure 时显示)
+        sourceStaleHint(src) {
+            if (src.status !== 'failure') return null;
+            if (!src.last_success_at_bjt) return '从未成功过';
+            // 取 yyyy-mm-dd hh:mm:ss 的「mm-dd」段
+            const m = src.last_success_at_bjt.match(/^\d{4}-(\d{2})-(\d{2})/);
+            if (!m) return src.last_success_at_bjt;
+            return `沿用 ${parseInt(m[1])} 月 ${parseInt(m[2])} 日数据`;
+        },
+        // failure_reason 中文徽章 class
+        sourceReasonBadgeClass(reason) {
+            if (reason === 'quota_exceeded')
+                return 'bg-rose-500 text-white';
+            if (reason === 'network_error' || reason === 'api_error'
+                || reason === 'parse_error')
+                return 'bg-amber-200 text-amber-900 dark:bg-amber-700 dark:text-amber-100';
+            return 'bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300';
+        },
+        // hover tooltip:完整信息(BJT 时间 + 失败时 error_message + 持续 ms)
+        sourceTooltip(src) {
+            const parts = [];
+            if (src.last_attempt_at_bjt) {
+                parts.push(`最近 attempt: ${src.last_attempt_at_bjt}`);
+            }
+            if (src.status === 'failure' && src.last_success_at_bjt) {
+                parts.push(`最近成功: ${src.last_success_at_bjt}`);
+            }
+            if (src.duration_ms != null) {
+                parts.push(`耗时: ${src.duration_ms} ms`);
+            }
+            if (src.rows_upserted != null) {
+                parts.push(`入库行数: ${src.rows_upserted}`);
+            }
+            if (src.error_message) {
+                parts.push(`错误: ${src.error_message}`);
+            }
+            return parts.join(' · ') || src.display_name;
         },
         async _refreshLivePrice() {
             try {

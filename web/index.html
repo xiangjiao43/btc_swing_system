@@ -318,23 +318,32 @@
           </ul>
         </div>
 
-        <!-- 右列:数据源新鲜度 -->
+        <!-- 右列:数据源新鲜度(Sprint B:读 /api/data_sources/freshness 真实状态) -->
         <div>
           <h3 class="subheading mb-1.5">数据源</h3>
           <ul class="space-y-1">
-            <template x-for="src in (systemHealth?.data_sources || [])"
-                      :key="src.name">
-              <li class="flex items-center gap-2 leading-snug"
-                  :title="(src.captured_at_bjt || '无数据') + ' · ' + src.expected_cadence">
-                <span class="text-base shrink-0"
-                      :class="sourceStatusGlyphClass(src.status)"
-                      x-text="sourceStatusGlyph(src.status)"></span>
-                <span class="flex-1"
-                      :class="sourceTextClass(src.status)"
-                      x-text="src.name"></span>
-                <span class="font-mono tabular-nums shrink-0 text-[11px]"
-                      :class="sourceTextClass(src.status)"
-                      x-text="sourceAgeLabel(src)"></span>
+            <template x-for="src in (dataSourcesFreshness || [])"
+                      :key="src.source">
+              <li class="leading-snug" :title="sourceTooltip(src)">
+                <div class="flex items-center gap-2">
+                  <span class="text-base shrink-0"
+                        :class="sourceStatusGlyphClass(src.status)"
+                        x-text="sourceStatusGlyph(src.status)"></span>
+                  <span class="flex-1 flex items-center gap-1.5"
+                        :class="sourceTextClass(src.status)">
+                    <span x-text="src.display_name"></span>
+                    <span x-show="src.status === 'failure' && src.failure_reason_label"
+                          class="px-1.5 py-px rounded text-[10px] font-semibold leading-none"
+                          :class="sourceReasonBadgeClass(src.failure_reason)"
+                          x-text="src.failure_reason_label"></span>
+                  </span>
+                  <span class="font-mono tabular-nums shrink-0 text-[11px]"
+                        :class="sourceTextClass(src.status)"
+                        x-text="sourceAgeLabel(src)"></span>
+                </div>
+                <div x-show="src.status === 'failure'"
+                     class="ml-6 text-[10px] text-slate-400 dark:text-slate-500"
+                     x-text="sourceStaleHint(src)"></div>
               </li>
             </template>
           </ul>

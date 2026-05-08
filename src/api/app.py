@@ -27,6 +27,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .routes import alerts as alerts_routes
 from .routes import data as data_routes
+from .routes import data_sources as data_sources_routes
 from .routes import evidence as evidence_routes
 from .routes import fallback as fallback_routes
 from .routes import health as health_routes
@@ -142,6 +143,8 @@ def create_app(
     app.include_router(pipeline_routes.router, prefix="/api")
     app.include_router(fallback_routes.router, prefix="/api")
     app.include_router(data_routes.router, prefix="/api")
+    # Sprint B(数据真实性透明化):/api/data_sources/freshness 读 fetch_attempts
+    app.include_router(data_sources_routes.router, prefix="/api")
     app.include_router(alerts_routes.router, prefix="/api")
     # Sprint 1.10-I 5 个新路由(v1.4 §9.5 #8-#18)
     app.include_router(account_routes.router, prefix="/api")

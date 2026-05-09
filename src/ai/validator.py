@@ -950,6 +950,123 @@ def validator_23_conflict_resolution(
 
 
 # ----------------------------------------------------------------
+# Sprint E Step 4:VFactorGrain — 关键层 data_missing / degraded 时
+# master 必须给保守策略
+# ----------------------------------------------------------------
+
+_KEY_LAYER_IDS: tuple[int, ...] = (1, 2, 4)  # L1 regime / L2 direction / L4 risk
+_NON_KEY_LAYER_IDS: tuple[int, ...] = (5,)   # L5 仅 narrative 提及
+
+_PERMISSION_RANK: dict[str, int] = {
+    "watch":         0,
+    "hold_only":     0,   # alias of watch for new positions
+    "cautious_open": 1,
+    "ambush_only":   1,
+    "can_open":      2,
+}
+
+
+def _layer_data_missing(layer_output: dict[str, Any] | None) -> bool:
+    if not isinstance(layer_output, dict):
+        return False
+    fg = layer_output.get("_factor_grain") or {}
+    if fg.get("data_missing") is True:
+        return True
+    return str(layer_output.get("status") or "").endswith("data_missing")
+
+
+def _layer_degraded(layer_output: dict[str, Any] | None) -> bool:
+    if not isinstance(layer_output, dict):
+        return False
+    fg = layer_output.get("_factor_grain") or {}
+    ratio = fg.get("fresh_ratio")
+    if isinstance(ratio, (int, float)) and 0 < ratio < 1:
+        return True
+    status = str(layer_output.get("status") or "")
+    return status.startswith("degraded") and not status.endswith("data_missing")
+
+
+def validator_factor_grain(
+    master_output: dict[str, Any], context: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Sprint E Step 4:关键层(L1/L2/L4)data_missing 或 degraded → master
+    必须给保守策略;否则标 needs_retry。
+
+    检测维度:
+      - 关键层任一 data_missing → execution_permission 必须 ∈ {watch, hold_only}
+        (空仓 = silent_cooldown 或 watch;持仓 = hold_only / 不动仓位)
+      - 关键层任一 degraded → execution_permission 不得高于 cautious_open
+      - 持仓 + 关键层 data_missing → mode 必须不是 new_thesis(应是
+        evaluate_existing 不动仓位 或 silent_cooldown)
+    """
+    out = dict(master_output)
+    activations = {
+        "validator_factor_grain_violation": False,
+        "validator_factor_grain_reason": None,
+    }
+
+    layer_outputs = {
+        1: context.get("l1_output"),
+        2: context.get("l2_output"),
+        3: context.get("l3_output"),
+        4: context.get("l4_output"),
+        5: context.get("l5_output"),
+    }
+    key_data_missing = [
+        lid for lid in _KEY_LAYER_IDS if _layer_data_missing(layer_outputs.get(lid))
+    ]
+    key_degraded = [
+        lid for lid in _KEY_LAYER_IDS if _layer_degraded(layer_outputs.get(lid))
+    ]
+    if not key_data_missing and not key_degraded:
+        return out, activations
+
+    mode = out.get("mode", "")
+    has_active = context.get("active_thesis") is not None
+
+    # 取 effective execution_permission(可能在 trade_plan / new_thesis 内)
+    new_thesis = out.get("new_thesis") or {}
+    perm = (
+        new_thesis.get("execution_permission")
+        or out.get("execution_permission")
+        or ""
+    )
+    perm_rank = _PERMISSION_RANK.get(perm, 99)
+
+    # ---- 关键层 data_missing 强约束 ----
+    if key_data_missing:
+        if not has_active and mode == "new_thesis":
+            activations["validator_factor_grain_violation"] = True
+            activations["validator_factor_grain_needs_retry"] = True
+            activations["validator_factor_grain_reason"] = (
+                f"key layer(s) {key_data_missing} data_missing 但 master 仍 new_thesis"
+            )
+        if perm and perm_rank > _PERMISSION_RANK["watch"]:
+            activations["validator_factor_grain_violation"] = True
+            activations["validator_factor_grain_needs_retry"] = True
+            activations["validator_factor_grain_reason"] = (
+                f"key layer(s) {key_data_missing} data_missing 但 "
+                f"execution_permission='{perm}' > watch"
+            )
+
+    # ---- 关键层 degraded 软约束 ----
+    if key_degraded and perm and perm_rank > _PERMISSION_RANK["cautious_open"]:
+        activations["validator_factor_grain_violation"] = True
+        activations["validator_factor_grain_needs_retry"] = True
+        activations["validator_factor_grain_reason"] = (
+            f"key layer(s) {key_degraded} degraded 但 "
+            f"execution_permission='{perm}' > cautious_open"
+        )
+
+    if activations["validator_factor_grain_violation"]:
+        notes = list(out.get("notes") or [])
+        notes.append("factor_grain_master_violation_needs_retry")
+        out["notes"] = notes
+
+    return out, activations
+
+
+# ----------------------------------------------------------------
 # Sprint D Item 3:stale_disclosure(VStale,§AI 诚实)
 # ----------------------------------------------------------------
 
@@ -1023,7 +1140,8 @@ _VALIDATOR_PIPELINE = [
     ("V21", validator_21_soft_resistance),
     ("V22", validator_22_3day_fail),
     ("V23", validator_23_conflict_resolution),
-    ("VStale", validator_stale_disclosure),  # Sprint D Item 3
+    ("VStale", validator_stale_disclosure),         # Sprint D Item 3
+    ("VFactorGrain", validator_factor_grain),       # Sprint E Step 4
 ]
 
 
@@ -1056,6 +1174,9 @@ _DEFAULT_ACTIVATIONS_V24 = {
     "validator_23_conflict_missing": False,
     # Sprint D Item 3:stale 数据披露纪律(_needs_retry 是临时聚合用,不持久化)
     "validator_stale_disclosure_missing": False,
+    # Sprint E Step 4:因子粒度 — 关键层 stale 时 master 必须给保守策略
+    "validator_factor_grain_violation": False,
+    "validator_factor_grain_reason": None,
     # 额外 meta 字段(§3.4.9 末段)
     "position_cap_compressed": None,
     "thesis_lock_active": False,
@@ -1112,6 +1233,7 @@ def collect_meta_activations(
         "validator_11_needs_retry",
         "validator_21_needs_retry",
         "validator_stale_disclosure_needs_retry",
+        "validator_factor_grain_needs_retry",     # Sprint E Step 4
     )
     needs_retry = any(bool(raw_activations.get(k)) for k in _per_v_retry_keys)
     out["validator_needs_retry"] = needs_retry
@@ -1122,6 +1244,12 @@ def collect_meta_activations(
     if raw_activations.get("validator_stale_disclosure_needs_retry"):
         hints.append(
             "stale 数据披露:narrative 必须含「过期」/「沿用」/「stale」关键词"
+        )
+    if raw_activations.get("validator_factor_grain_needs_retry"):
+        reason = raw_activations.get("validator_factor_grain_reason") or ""
+        hints.append(
+            f"因子粒度保险:关键层 stale 必须给保守 execution_permission "
+            f"(watch / cautious_open);{reason}"
         )
     out["validator_retry_hints"] = hints
     # 剥离 per-V 临时 _needs_retry / _retry_hint 字段(已聚合到 *_needs_retry /

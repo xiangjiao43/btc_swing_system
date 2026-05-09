@@ -221,3 +221,43 @@ CoinGlass 衍生品 / Glassnode 链上 / FRED 宏观)的状态:🟢 = 新鲜,⚠
 例外:如果 `active_thesis` 已经存在且本次 mode=evaluate_existing,可继续走
 评估流程,但仍须在 narrative 里点名过期数据源 + 降低 still_valid 档(从
 fully → mostly,或从 mostly → partially)。
+
+
+# 十、Sprint E 因子粒度 stale 整合规则(2026-05-09)
+
+每个 sub-agent 输出会带 `_factor_grain` 字段(orchestrator 后处理写入):
+```
+"_factor_grain": {
+  "fresh_ratio": 0.0-1.0,
+  "data_missing": bool,         # ratio == 0
+  "ai_skipped": bool,           # 跳过 AI 调用(数据全 stale)
+  "layer_id": 1-5,
+  "confidence_multiplier": 0.3 | 0.6 | 1.0
+}
+```
+
+**整合规则**:
+1. **data_missing 层完全排除决策**:`l_x_output._factor_grain.data_missing == true`
+   → 这一层不参与 stance / regime / phase / opportunity 推理,narrative 显
+   式说"L_x 数据全过期,排除"
+2. **degraded 层降权引用**:`fresh_ratio < 1` → 引用该层结论时减半权重,且
+   narrative 必须提到具体哪些因子 stale(因 sub-agent 已在 key_signals 里
+   标注,master 直接复述)
+3. **healthy 层正常**:无 _factor_grain 字段 / fresh_ratio == 1 → 正常引用
+
+**最终策略保险(关键层强制)**:
+- **关键层 = L1(regime)/ L2(direction)/ L4(risk)**
+  任一关键层 `_factor_grain.data_missing == true` 或 `status` 含 `data_missing`:
+  - 空仓(active_thesis == null)→ **强制 mode=silent_cooldown**,
+    silent_reason="关键层 L_x 数据全过期,空仓不开新仓"
+  - 持仓(active_thesis != null)→ **强制 mode=evaluate_existing 且不动仓位**,
+    narrative 显式说"关键层 stale,保持现仓不调整",thesis_assessment.action
+    = "hold_only"
+- **关键层 degraded**(fresh_ratio < 1 但 > 0):
+  - 空仓 → execution_permission 上限 `watch`(不开新仓)
+  - 持仓 → execution_permission 上限 `cautious_open`(只允许减仓 / 止盈,
+    不加仓)
+- **L5(非关键)**:degraded / data_missing → 仅 narrative 提一句"L5 macro
+  数据 stale,本次未据宏观调整方向",**不影响** execution_permission
+
+不遵守 → validator(VFactorGrain)拒绝输出,fallback 重试。

@@ -167,7 +167,9 @@ def test_build_scheduler_uses_bjt_timezone(monkeypatch):
         # pipeline_run_8h_onchain 仍 disabled。
         # Sprint 1.10-G(§10.4.1)+ 1.10-H(§3.3.9 weekly_review)新增。
         # 共 10 个 enabled cron。
-        expected_10 = {
+        # Sprint E Step 0(2026-05-09):position_health_check 用户决策 disabled
+        # → 注册 9 个 job(从 10 减 1)。
+        expected_9 = {
             "collect_klines_1h",
             "collect_klines_daily",
             "collect_klines_weekly",
@@ -176,11 +178,10 @@ def test_build_scheduler_uses_bjt_timezone(monkeypatch):
             "event_listener",
             "pipeline_run_regular",
             "hard_invalidation_monitor",
-            "position_health_check",
             "weekly_review",
         }
-        assert registered_ids == expected_10, (
-            f"missing={expected_10 - registered_ids}, extra={registered_ids - expected_10}"
+        assert registered_ids == expected_9, (
+            f"missing={expected_9 - registered_ids}, extra={registered_ids - expected_9}"
         )
     finally:
         if sched.running:

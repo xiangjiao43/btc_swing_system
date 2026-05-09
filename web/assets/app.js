@@ -593,9 +593,14 @@ function app() {
         cardDistanceToStop() { return '-'; },
         cardHoldingDuration() { return '-'; },
         cardHardInvalidations() {
-            // Sprint K+:返已分级数组(severity_label / type_label / is_active_stop_loss),
-            // 前端按 severity 由弱到强分行显示;空 → '-'。
-            const classified = (this.state && this.state.hard_invalidation_levels_classified) || [];
+            // Sprint K++:优先 filtered(过滤掉跟 entry 重叠 / 反向 type / 弱预警),
+            // 通常返 1-2 条:active stop_loss + 紧邻一档预警。
+            const filtered = (this.state
+                && this.state.hard_invalidation_levels_filtered) || [];
+            if (filtered.length > 0) return filtered;
+            // 兜底:无 filtered 字段(老 schema)→ 用 classified 全列表(top 4)
+            const classified = (this.state
+                && this.state.hard_invalidation_levels_classified) || [];
             if (classified.length > 0) return classified.slice(0, 4);
             // fallback v1.3 老格式(list of float / dict 但无 type)
             const his = this.hardInvalidationLevels();

@@ -214,9 +214,26 @@ def _normalize_v13(
             active_sl_price = None
     elif isinstance(sl_obj, (int, float)):
         active_sl_price = float(sl_obj)
-    out["hard_invalidation_levels_classified"] = (
-        _classify_hard_invalidation_levels(
-            l4.get("hard_invalidation_levels") or [], active_sl_price,
+    classified = _classify_hard_invalidation_levels(
+        l4.get("hard_invalidation_levels") or [], active_sl_price,
+    )
+    out["hard_invalidation_levels_classified"] = classified
+
+    # Sprint K++:filtered 列表 — 只给用户看的 1-2 条(active stop_loss +
+    # 紧邻预警 - 与 entry 重叠 / 反向 type 的)。前端"分级失效位"卡读这个。
+    entry_prices: list[float] = []
+    if new_thesis:
+        for o in (new_thesis.get("entry_orders") or []):
+            if isinstance(o, dict) and o.get("price") is not None:
+                try:
+                    entry_prices.append(float(o["price"]))
+                except (TypeError, ValueError):
+                    pass
+    out["hard_invalidation_levels_filtered"] = (
+        _filter_hard_invalidation_levels(
+            classified,
+            direction=(new_thesis.get("direction") if new_thesis else None),
+            entry_prices=entry_prices,
         )
     )
 
@@ -322,6 +339,67 @@ def _classify_hard_invalidation_levels(
             entry["is_active_stop_loss"] = False
         out.append(entry)
     out.sort(key=lambda x: (x["severity_rank"], not x["is_active_stop_loss"]))
+    return out
+
+
+def _filter_hard_invalidation_levels(
+    classified: list[dict[str, Any]],
+    direction: Optional[str],
+    entry_prices: list[float],
+) -> list[dict[str, Any]]:
+    """Sprint K++:筛 classified → 只留要给用户看的 1-2 条。
+
+    规则(用户决策):
+    1. 真正 stop_loss(is_active_stop_loss=True)→ 必显示
+    2. rank 紧邻(rank = sl_rank - 1)且 price 距任何 entry_order > 1% 的那条
+       → 显示
+    3. 其他全部隐藏(rank 1 弱预警可能跟 entry 重叠;rank 3 除 active 外的
+       其他;direction 反向 type)
+
+    direction-aware:
+    - long 持仓 hide swing_high / key_resistance / prior_high_break(向上的位置)
+    - short 持仓 hide swing_low / key_support / prior_low_break(向下的位置)
+
+    无 active stop_loss(冷启动 / silent_cooldown)→ 返 classified 中 rank 最高
+    的最后一条(避免完全空)。
+    """
+    if not classified:
+        return []
+    sl = next(
+        (x for x in classified if x.get("is_active_stop_loss")), None,
+    )
+    if sl is None:
+        return classified[-1:]
+    sl_rank = sl.get("severity_rank") or 3
+    out: list[dict[str, Any]] = [sl]
+
+    upside_types = ("swing_high", "key_resistance", "prior_high_break")
+    downside_types = ("swing_low", "key_support", "prior_low_break")
+
+    for x in classified:
+        if x is sl:
+            continue
+        if x.get("severity_rank") != sl_rank - 1:
+            continue
+        x_type = x.get("type")
+        if direction == "long" and x_type in upside_types:
+            continue
+        if direction == "short" and x_type in downside_types:
+            continue
+        # entry 距离过滤(避免显示与 entry 重叠的预警)
+        if entry_prices:
+            try:
+                min_dist = min(
+                    abs(float(x["price"]) - float(ep)) / max(1.0, float(ep))
+                    for ep in entry_prices if ep is not None
+                )
+            except (TypeError, ValueError, ZeroDivisionError):
+                min_dist = 1.0
+            if min_dist <= 0.01:
+                continue
+        out.append(x)
+    # rank 升序(预警先 → 止损后)
+    out.sort(key=lambda y: (y.get("severity_rank") or 3))
     return out
 
 

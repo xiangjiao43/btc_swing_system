@@ -471,12 +471,28 @@
                x-text="cardHoldingDuration()"></div>
         </div>
         <div>
-          <div class="stat-label">硬失效位</div>
-          <div class="text-[13px]"
-               :class="cardHardInvalidations() === '-'
-                       ? 'placeholder-dash'
-                       : 'font-bold font-mono text-slate-900 dark:text-slate-100'"
-               x-text="cardHardInvalidations()"></div>
+          <div class="stat-label">分级失效位</div>
+          <template x-if="cardHardInvalidationsEmpty()">
+            <div class="text-[13px] placeholder-dash">-</div>
+          </template>
+          <template x-if="!cardHardInvalidationsEmpty()">
+            <div class="text-[12px] font-mono space-y-0.5">
+              <template x-for="lv in cardHardInvalidations()"
+                        :key="(lv.type || '') + '_' + lv.price">
+                <div class="leading-tight whitespace-nowrap">
+                  <span :class="severityClass(lv.severity_rank)"
+                        x-text="lv.severity_label"></span>
+                  <span class="text-slate-500 dark:text-slate-400 mx-1"
+                        x-text="lv.type_label"></span>
+                  <span class="font-bold text-slate-900 dark:text-slate-100"
+                        x-text="': $' + Number(lv.price).toLocaleString()"></span>
+                  <span x-show="lv.is_active_stop_loss"
+                        class="text-rose-600 dark:text-rose-400 ml-1 text-[11px]"
+                        >← 真正止损位</span>
+                </div>
+              </template>
+            </div>
+          </template>
         </div>
       </div>
     </section>

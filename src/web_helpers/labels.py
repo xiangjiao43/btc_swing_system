@@ -126,6 +126,24 @@ MASTER_STATE = {
     # raw 字符串(graceful degradation,不挂)。
 }
 
+HARD_INVALIDATION_TYPE = {
+    # Sprint K+:L4 hard_invalidation_levels[i].type → (严重度, 中文 label,
+    # severity_rank int 越大越严重)。前端按 severity_rank 倒序展示,真正
+    # master.stop_loss 加 "← 真正止损位" 标。
+    "ema_20_break":     ("弱预警", "EMA-20", 1),
+    "ema_50_break":     ("中预警", "EMA-50", 2),
+    "ema_100_break":    ("中预警", "EMA-100", 2),
+    "ema_200_break":    ("中预警", "EMA-200", 2),
+    "swing_low":        ("硬止损", "swing low", 3),
+    "swing_high":       ("硬止损", "swing high", 3),
+    "prior_high_break": ("中预警", "前高跌破", 2),
+    "prior_low_break":  ("中预警", "前低跌破", 2),
+    "key_support":      ("中预警", "关键支撑", 2),
+    "key_resistance":   ("中预警", "关键阻力", 2),
+    "structural_break": ("硬止损", "结构破坏", 3),
+}
+
+
 MASTER_MODE = {
     # v1.4 master output `mode` 枚举(src/ai/agents/master_adjudicator.py)
     # — Sprint K 加,前端显示主裁卡 label 与顶部状态条用

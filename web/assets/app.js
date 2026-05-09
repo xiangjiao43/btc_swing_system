@@ -593,9 +593,26 @@ function app() {
         cardDistanceToStop() { return '-'; },
         cardHoldingDuration() { return '-'; },
         cardHardInvalidations() {
+            // Sprint K+:返已分级数组(severity_label / type_label / is_active_stop_loss),
+            // 前端按 severity 由弱到强分行显示;空 → '-'。
+            const classified = (this.state && this.state.hard_invalidation_levels_classified) || [];
+            if (classified.length > 0) return classified.slice(0, 4);
+            // fallback v1.3 老格式(list of float / dict 但无 type)
             const his = this.hardInvalidationLevels();
-            if (his.length === 0) return '-';
-            return his.slice(0, 3).map(h => `$${h.price}`).join(', ');
+            if (his.length === 0) return [];
+            return his.slice(0, 3).map(h => ({
+                price: (typeof h === 'object' ? h.price : h),
+                type_label: '—', severity_label: '硬止损',
+                severity_rank: 3, is_active_stop_loss: false,
+            }));
+        },
+        cardHardInvalidationsEmpty() {
+            return this.cardHardInvalidations().length === 0;
+        },
+        severityClass(rank) {
+            if (rank >= 3) return 'text-rose-600 dark:text-rose-400 font-semibold';
+            if (rank >= 2) return 'text-amber-600 dark:text-amber-400';
+            return 'text-slate-500 dark:text-slate-400';
         },
         _startClock() {
             const tick = () => { this.nowBjt = this._currentBjt(); };

@@ -202,6 +202,24 @@ def _normalize_v13(
     if new_thesis:
         out["trade_plan"] = _build_v14_trade_plan(new_thesis, l4)
 
+    # Sprint K+:hard_invalidation_levels 分级 — 把每条标 severity_label
+    # (弱预警 / 中预警 / 硬止损)+ type_label(EMA-20 等),并标记真正
+    # master stop_loss(is_active_stop_loss=True),前端"分级失效位"卡用。
+    sl_obj = new_thesis.get("stop_loss") if new_thesis else None
+    active_sl_price: Optional[float] = None
+    if isinstance(sl_obj, dict):
+        try:
+            active_sl_price = float(sl_obj.get("price"))
+        except (TypeError, ValueError):
+            active_sl_price = None
+    elif isinstance(sl_obj, (int, float)):
+        active_sl_price = float(sl_obj)
+    out["hard_invalidation_levels_classified"] = (
+        _classify_hard_invalidation_levels(
+            l4.get("hard_invalidation_levels") or [], active_sl_price,
+        )
+    )
+
     # Sprint K:派生 main_strategy(给顶部状态条用),v1.4 / v1.3 双兼容。
     out["main_strategy"] = {
         "action_state": action_state,
@@ -246,6 +264,65 @@ def _build_v14_action_state_label(
     if mode and mode in labels.MASTER_MODE:
         return labels.MASTER_MODE[mode]
     return labels.translate(labels.MASTER_STATE, action_state)
+
+
+def _classify_hard_invalidation_levels(
+    levels: list[Any], active_stop_loss_price: Optional[float],
+) -> list[dict[str, Any]]:
+    """Sprint K+:把 L4 hard_invalidation_levels 按严重度分级 + 中文 label。
+
+    每个 level 富化字段:
+      - severity_label: '弱预警' | '中预警' | '硬止损'(无类型 → '预警')
+      - type_label:    '<类型中文>'(如 'EMA-20')
+      - severity_rank: int(数字越大越严重,前端排序用)
+      - is_active_stop_loss: bool(price 与 master.new_thesis.stop_loss.price 匹配)
+      - 透传原 price / type / description / distance_from_current_pct(若有)
+
+    L4 老格式 list of float:每项当 '硬止损' 处理(无 type 信息),仍跑通。
+    """
+    out: list[dict[str, Any]] = []
+    if not levels:
+        return out
+    for lv in levels:
+        if isinstance(lv, dict):
+            price = lv.get("price")
+            type_name = lv.get("type")
+            sev = labels.HARD_INVALIDATION_TYPE.get(type_name) if type_name else None
+            if sev:
+                sev_label, type_label, sev_rank = sev
+            elif type_name:
+                sev_label, type_label, sev_rank = "预警", str(type_name), 1
+            else:
+                sev_label, type_label, sev_rank = "硬止损", "—", 3
+            entry = {
+                "price": price, "type": type_name,
+                "type_label": type_label, "severity_label": sev_label,
+                "severity_rank": sev_rank,
+                "description": lv.get("description"),
+                "distance_from_current_pct": lv.get("distance_from_current_pct"),
+            }
+        else:
+            try:
+                price = float(lv) if lv is not None else None
+            except (TypeError, ValueError):
+                continue
+            if price is None:
+                continue
+            entry = {
+                "price": price, "type": None,
+                "type_label": "—", "severity_label": "硬止损",
+                "severity_rank": 3,
+                "description": None, "distance_from_current_pct": None,
+            }
+        if (active_stop_loss_price is not None
+                and entry["price"] is not None
+                and abs(float(entry["price"]) - float(active_stop_loss_price)) < 1e-6):
+            entry["is_active_stop_loss"] = True
+        else:
+            entry["is_active_stop_loss"] = False
+        out.append(entry)
+    out.sort(key=lambda x: (x["severity_rank"], not x["is_active_stop_loss"]))
+    return out
 
 
 def _build_v14_trade_plan(new_thesis: dict, l4: dict) -> dict:

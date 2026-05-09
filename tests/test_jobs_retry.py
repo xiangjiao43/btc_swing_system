@@ -55,7 +55,8 @@ def test_with_retry_success_no_retry():
 # ============================================================
 
 def test_with_retry_error_schedules_retry():
-    """job_pipeline_run 返回 status='error' + attempt=1 → 调度 attempt=2。"""
+    """job_pipeline_run 返回 status='error' + attempt=1 → 调度 attempt=2。
+    Sprint F.2:间隔 5/10/20 → 30/60/60,attempt=2 backoff = 60min = 3600s。"""
     mock_pipeline = MagicMock(return_value={
         "status": "error", "error_type": "RuntimeError", "error_message": "x",
     })
@@ -67,12 +68,12 @@ def test_with_retry_error_schedules_retry():
         )
     assert result["retry_scheduled"] is True
     assert result["retry_next_attempt"] == 2
-    # backoff = 600s(attempt=2)
-    assert result["retry_next_delay_sec"] == 600
+    # backoff = 3600s(intervals_minutes[1] = 60 min,attempt=2)
+    assert result["retry_next_delay_sec"] == 3600
     mock_enq.assert_called_once()
     call = mock_enq.call_args
     assert call.kwargs["attempt"] == 2
-    assert call.kwargs["delay_sec"] == 600
+    assert call.kwargs["delay_sec"] == 3600
 
 
 def test_with_retry_degraded_ai_schedules_retry():
@@ -106,13 +107,14 @@ def test_with_retry_attempt_3_then_fail_exhausts():
     mock_enq.assert_not_called()
 
 
-def test_with_retry_outside_2h_window_exhausts():
-    """retry_start_utc = 3 小时前 → is_within_window=False → exhausted。"""
+def test_with_retry_outside_3h_window_exhausts():
+    """retry_start_utc = 4 小时前 → is_within_window=False → exhausted。
+    Sprint F.2:窗口 2h → 3h,所以用 4h 才确保越界。"""
     mock_pipeline = MagicMock(return_value={"status": "error"})
     mock_enq = MagicMock()
-    # 3 小时前(超 2h 窗口)
+    # 4 小时前(超 3h 窗口)
     from datetime import timedelta
-    start = (datetime.now(timezone.utc) - timedelta(hours=3)).strftime(
+    start = (datetime.now(timezone.utc) - timedelta(hours=4)).strftime(
         "%Y-%m-%dT%H:%M:%SZ"
     )
     with patch.object(jobs_module, "job_pipeline_run", mock_pipeline), \

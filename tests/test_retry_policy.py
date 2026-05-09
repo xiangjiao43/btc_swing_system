@@ -16,64 +16,65 @@ from src.ai.retry_policy import (
 # compute_backoff_seconds(指数退避)
 # ============================================================
 
-def test_backoff_first_attempt_5min():
-    p = RetryPolicy(intervals_minutes=[5, 10, 20], max_attempts_per_layer=3)
-    assert p.compute_backoff_seconds(1) == 300  # 5 * 60
+def test_backoff_first_attempt_30min():
+    """Sprint F.2:5/10/20 → 30/60/60。第 1 次重试 30 min = 1800s。"""
+    p = RetryPolicy(intervals_minutes=[30, 60, 60], max_attempts_per_layer=3)
+    assert p.compute_backoff_seconds(1) == 1800  # 30 * 60
 
 
-def test_backoff_second_attempt_10min():
-    p = RetryPolicy(intervals_minutes=[5, 10, 20], max_attempts_per_layer=3)
-    assert p.compute_backoff_seconds(2) == 600
+def test_backoff_second_attempt_60min():
+    p = RetryPolicy(intervals_minutes=[30, 60, 60], max_attempts_per_layer=3)
+    assert p.compute_backoff_seconds(2) == 3600  # 60 * 60
 
 
-def test_backoff_third_attempt_20min():
-    p = RetryPolicy(intervals_minutes=[5, 10, 20], max_attempts_per_layer=3)
-    assert p.compute_backoff_seconds(3) == 1200
+def test_backoff_third_attempt_60min():
+    p = RetryPolicy(intervals_minutes=[30, 60, 60], max_attempts_per_layer=3)
+    assert p.compute_backoff_seconds(3) == 3600
 
 
 def test_backoff_over_max_returns_none():
-    p = RetryPolicy(intervals_minutes=[5, 10, 20], max_attempts_per_layer=3)
+    p = RetryPolicy(intervals_minutes=[30, 60, 60], max_attempts_per_layer=3)
     assert p.compute_backoff_seconds(4) is None
     assert p.compute_backoff_seconds(0) is None
 
 
 def test_backoff_uses_last_when_intervals_short():
     """intervals 比 max_attempts 短时,后续 attempt 用最后一个值。"""
-    p = RetryPolicy(intervals_minutes=[5], max_attempts_per_layer=3)
-    assert p.compute_backoff_seconds(1) == 300
-    assert p.compute_backoff_seconds(2) == 300  # 兜底
+    p = RetryPolicy(intervals_minutes=[30], max_attempts_per_layer=3)
+    assert p.compute_backoff_seconds(1) == 1800
+    assert p.compute_backoff_seconds(2) == 1800  # 兜底
 
 
 # ============================================================
-# is_within_window(2h 窗口)
+# is_within_window(Sprint F.2:2h → 3h 窗口)
 # ============================================================
 
 def test_window_within_1h_ok():
-    p = RetryPolicy(total_window_hours=2)
+    p = RetryPolicy(total_window_hours=3)
     assert p.is_within_window(
         "2026-05-03T08:00:00Z", "2026-05-03T09:00:00Z",
     )
 
 
-def test_window_just_under_2h_ok():
-    p = RetryPolicy(total_window_hours=2)
+def test_window_just_under_3h_ok():
+    p = RetryPolicy(total_window_hours=3)
     assert p.is_within_window(
-        "2026-05-03T08:00:00Z", "2026-05-03T09:59:59Z",
+        "2026-05-03T08:00:00Z", "2026-05-03T10:59:59Z",
     )
 
 
-def test_window_2h_exact_excluded():
-    """边界:2h 整 → 不在窗口内(< 严格)。"""
-    p = RetryPolicy(total_window_hours=2)
-    assert not p.is_within_window(
-        "2026-05-03T08:00:00Z", "2026-05-03T10:00:00Z",
-    )
-
-
-def test_window_over_2h_failed():
-    p = RetryPolicy(total_window_hours=2)
+def test_window_3h_exact_excluded():
+    """边界:3h 整 → 不在窗口内(< 严格)。"""
+    p = RetryPolicy(total_window_hours=3)
     assert not p.is_within_window(
         "2026-05-03T08:00:00Z", "2026-05-03T11:00:00Z",
+    )
+
+
+def test_window_over_3h_failed():
+    p = RetryPolicy(total_window_hours=3)
+    assert not p.is_within_window(
+        "2026-05-03T08:00:00Z", "2026-05-03T12:00:00Z",
     )
 
 
@@ -87,7 +88,7 @@ def test_window_invalid_iso_returns_false():
 # ============================================================
 
 def test_should_retry_attempt_within_max_and_window():
-    p = RetryPolicy(max_attempts_per_layer=3, total_window_hours=2)
+    p = RetryPolicy(max_attempts_per_layer=3, total_window_hours=3)
     assert p.should_retry(
         attempt=1, run_started_at_utc="2026-05-03T08:00:00Z",
         now_utc="2026-05-03T08:05:00Z",
@@ -103,10 +104,10 @@ def test_should_retry_attempt_over_max_no():
 
 
 def test_should_retry_outside_window_no():
-    p = RetryPolicy(total_window_hours=2)
+    p = RetryPolicy(total_window_hours=3)
     assert not p.should_retry(
         attempt=1, run_started_at_utc="2026-05-03T08:00:00Z",
-        now_utc="2026-05-03T11:00:00Z",
+        now_utc="2026-05-03T12:00:00Z",
     )
 
 
@@ -146,9 +147,10 @@ def test_classify_unknown():
 # ============================================================
 
 def test_loads_from_base_yaml_defaults():
-    """无显式参数时,从 base.yaml 读 ai_retry 段(本 sprint commit 1 已加)。"""
+    """无显式参数时,从 base.yaml 读 ai_retry 段。
+    Sprint F.2(2026-05-09)用户决策:5/10/20 + 2h → 30/60/60 + 3h。"""
     p = RetryPolicy()
-    # base.yaml::ai_retry.intervals_minutes = [5, 10, 20]
-    assert p.intervals_minutes == [5, 10, 20]
+    # base.yaml::ai_retry.intervals_minutes = [30, 60, 60](Sprint F.2)
+    assert p.intervals_minutes == [30, 60, 60]
     assert p.max_attempts_per_layer == 3
-    assert p.total_window_hours == 2
+    assert p.total_window_hours == 3

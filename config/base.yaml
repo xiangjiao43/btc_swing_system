@@ -154,12 +154,15 @@ virtual_orders:
 # orchestrator 层失败重试(整层/整次 run 失败 → 等 5/10/20 分钟跨 cron 重试)
 # 注:不同于 BaseAgent._call_ai_with_retry 的 2-attempt 即时重试(API 网络抖动)
 ai_retry:
-  # 指数退避间隔(分钟):第 1/2/3 次重试分别等 5 / 10 / 20 分钟
-  intervals_minutes: [5, 10, 20]
+  # Sprint F.2(2026-05-09)用户决策:5/10/20 间隔 + 2h 窗口对中长线太密。
+  # 改为 30/60/60 分钟 + 3h 窗口。预期重试时间表(假设 BJT 11:35 失败):
+  #   12:05 retry 1(+30min) → 13:05 retry 2(+60min)
+  #   → 14:05 retry 3(+60min) → 14:35 放弃,等次日 11:35。
+  intervals_minutes: [30, 60, 60]
   # 单层最多重试次数(超过 → 短路下游)
   max_attempts_per_layer: 3
   # 整次 run 总窗口(小时):超过 → 放弃所有重试,fallback Level 2
-  total_window_hours: 2
+  total_window_hours: 3
 
   # V22 master 连续失败检测(D2=a 滑动 72h)
   master_consecutive_fail:

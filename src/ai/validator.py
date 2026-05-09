@@ -59,13 +59,39 @@ def _deep_copy_dict(d: Any) -> Any:
 # 资金安全类(V1-V5,继承 v1.3 + 微调)
 # ----------------------------------------------------------------
 
+def _extract_level_price(x: Any) -> Optional[float]:
+    """从 hard_invalidation_levels 单元素抽 price。
+
+    v1.4 L4 schema 输出 list of dict({price, type, description, distance_pct});
+    历史/单测可能传 list of float。兼容两种,保留 dict 元信息(由调用者处理)。
+    None / 解析失败返 None。
+    """
+    if x is None:
+        return None
+    if isinstance(x, dict):
+        p = x.get("price")
+        if p is None:
+            return None
+        try:
+            return float(p)
+        except (TypeError, ValueError):
+            return None
+    try:
+        return float(x)
+    except (TypeError, ValueError):
+        return None
+
+
 def validator_1_stop_loss(
     master_output: dict[str, Any], context: dict[str, Any],
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """V1:stop_loss 必须从 hard_invalidation_levels 选(§3.4.1)。
 
-    失败处理:强制覆盖为 hard_invalidation_levels[0],notes 添加
+    失败处理:强制覆盖为 hard_invalidation_levels[0].price,notes 添加
     `stop_loss_overridden_by_validator`。
+
+    Sprint J:兼容 v1.4 L4 schema(list of dict {price, type, ...})与
+    历史 list of float — 通过 _extract_level_price 抽 price 字段。
 
     Returns: (modified_output, {validator_1_stop_loss_overridden: bool})
     """
@@ -79,11 +105,12 @@ def validator_1_stop_loss(
     levels = context.get("l4_hard_invalidation_levels") or []
     if sl_price is None or not levels:
         return out, activations
-    levels_floats = [float(x) for x in levels if x is not None]
+    levels_floats = [
+        p for p in (_extract_level_price(x) for x in levels) if p is not None
+    ]
     if not levels_floats:
         return out, activations
     if not any(abs(float(sl_price) - lv) < 1e-6 for lv in levels_floats):
-        # 覆盖
         new_thesis = dict(new_thesis)
         new_thesis["stop_loss"] = {"price": levels_floats[0],
                                     "size_pct": sl_obj.get("size_pct", 100)}
@@ -1272,7 +1299,8 @@ def validate_master_output(
         context: dict 含
             - l1_output / l2_output / l3_output / l4_output / l5_output
             - l3_grade (str: 'A','B','C','none')
-            - l4_hard_invalidation_levels (list[float])
+            - l4_hard_invalidation_levels (list[dict {price, type, description,
+              distance_from_current_pct}] — v1.4 L4 schema;V1 兼容 list[float])
             - l4_position_cap_base (float)
             - active_thesis (None or dict, 含 break_conditions / direction / is_60d_capped)
             - current_position (None or dict)

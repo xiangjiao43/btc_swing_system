@@ -379,6 +379,39 @@ class StrategyStateBuilder:
                 rules_version=self.rules_version,
                 previous_run=previous_run,
             )
+            # Sprint G P0(2026-05-09):接通 master.trade_plan →
+            # ThesisManager.create_thesis 持久化链路。审计报告
+            # docs/cc_reports/run_2026_05_03_16_08_audit.md 揭示 60 天
+            # theses 表 0 行,核心 bug 是 1.10-D 留的 wrapper 从未实施。
+            # 任何异常被捕获,不影响 strategy_run 写入。
+            try:
+                from src.strategy.thesis_persistence import (
+                    try_create_thesis_from_master_run,
+                )
+                tp_result = try_create_thesis_from_master_run(
+                    self.conn,
+                    orchestrator_result=result,
+                    fallback_level=mapped.get("fallback_level"),
+                    run_id=mapped["run_id"],
+                    now_utc=mapped["generated_at_utc"],
+                )
+                if tp_result.get("created"):
+                    logger.info(
+                        "thesis_persistence: created %s (schema=%s)",
+                        tp_result.get("thesis_id"),
+                        tp_result.get("schema_version"),
+                    )
+                    self.conn.commit()
+                else:
+                    logger.info(
+                        "thesis_persistence: skipped — %s",
+                        tp_result.get("skip_reason"),
+                    )
+            except Exception as _e:
+                logger.warning(
+                    "thesis_persistence wrapper raised(不影响 strategy_run "
+                    "写入):%s", _e,
+                )
         except Exception as e:
             logger.exception("_run_v13_orchestrator failed: %s", e)
             return BuildResult(

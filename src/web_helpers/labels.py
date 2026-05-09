@@ -126,6 +126,18 @@ MASTER_STATE = {
     # raw 字符串(graceful degradation,不挂)。
 }
 
+MASTER_MODE = {
+    # v1.4 master output `mode` 枚举(src/ai/agents/master_adjudicator.py)
+    # — Sprint K 加,前端显示主裁卡 label 与顶部状态条用
+    "new_thesis": "准备开仓(新 thesis)",
+    "evaluate_existing": "评估持仓(已有 thesis)",
+    "silent_cooldown": "静默冷却(数据降级 / 不开新仓)",
+    "protection": "保护模式(极端事件强制减仓)",
+    "fallback_l1": "降级 L1(主裁失败,走单层兜底)",
+    "fallback_l2": "降级 L2(主裁连续失败)",
+    "fallback_l3": "降级 L3(深度兜底)",
+}
+
 MASTER_ACTION = {
     "open": "开仓",
     "add": "加仓",

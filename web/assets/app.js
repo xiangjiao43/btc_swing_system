@@ -870,8 +870,17 @@ function app() {
 
         // 风险提示
         hardInvalidationLevels() {
-            return (this.state && this.state.risks
-                    && this.state.risks.hard_invalidation_levels) || [];
+            // v1.3 路径:state.risks.hard_invalidation_levels
+            const v13 = this.state && this.state.risks
+                        && this.state.risks.hard_invalidation_levels;
+            if (Array.isArray(v13) && v13.length > 0) return v13;
+            // Sprint K:v1.4 路径 — 从 layer_cards[3](L4)的 supporting_data 抽
+            const cards = (this.state && this.state.layer_cards) || [];
+            const l4 = cards.find(c => c && c.layer === 'l4');
+            const sd = l4 && l4.supporting_data;
+            const hi = sd && sd.hard_invalidation_levels;
+            if (hi && Array.isArray(hi.value)) return hi.value;
+            return [];
         },
         eventWindows() {
             return (this.state && this.state.risks && this.state.risks.event_windows) || [];

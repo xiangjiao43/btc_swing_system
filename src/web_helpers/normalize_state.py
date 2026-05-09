@@ -140,12 +140,30 @@ def _normalize_v13(
 
     state_trans = master.get("state_transition") or {}
     trade_plan = master.get("trade_plan") or {}
-    action_state = state_trans.get("to_state") or "FLAT"
     grade = l3.get("opportunity_grade")
     stance = l2.get("stance")
 
+    # Sprint K:v1.4 master 用 mode + new_thesis(无 state_transition);
+    # action_state 从 mode + new_thesis.direction 推。
+    mode = master.get("mode")
+    new_thesis = master.get("new_thesis") or {}
+    direction = new_thesis.get("direction") if new_thesis else None
+    if state_trans.get("to_state"):
+        action_state = state_trans.get("to_state")
+    else:
+        action_state = _derive_v14_action_state(mode, direction)
+
+    # Sprint K:v1.4 路径用 master_mode 当 action_state_label;
+    # 老路径继续用 MASTER_STATE 翻 14 档名。
+    if mode is not None or new_thesis:
+        action_state_label = _build_v14_action_state_label(
+            mode, direction, action_state,
+        )
+    else:
+        action_state_label = labels.translate(labels.MASTER_STATE, action_state)
+
     summary_card = {
-        "action_state_label": labels.translate(labels.MASTER_STATE, action_state),
+        "action_state_label": action_state_label,
         "stance_label": labels.translate(labels.L2_STANCE, stance),
         "headline": _build_headline(action_state, grade, stance),
         "validator_passed": (state.get("validator") or {}).get("passed"),
@@ -162,11 +180,10 @@ def _normalize_v13(
         _master_card_v13(master, ctx_summary),
     ]
 
-    # 反模式 + 极端事件:从 context_summary 取(orchestrator 写入)
     anti = ctx_summary.get("anti_pattern_signals") or {}
     extreme = ctx_summary.get("extreme_event_flags") or {}
 
-    return {
+    out: dict[str, Any] = {
         "schema_version": schema_version,
         "summary_card": summary_card,
         "layer_cards": layer_cards,
@@ -179,6 +196,102 @@ def _normalize_v13(
             for k, v in extreme.items() if v
         ],
         "raw": state,
+    }
+
+    # Sprint K:从 v1.4 master.new_thesis 派生 trade_plan,前端 cards 兼容。
+    if new_thesis:
+        out["trade_plan"] = _build_v14_trade_plan(new_thesis, l4)
+
+    # Sprint K:派生 main_strategy(给顶部状态条用),v1.4 / v1.3 双兼容。
+    out["main_strategy"] = {
+        "action_state": action_state,
+        "lifecycle_phase": action_state_label,
+        "opportunity_grade": grade or "none",
+        "execution_permission": (
+            l3.get("execution_permission")
+            or (new_thesis.get("execution_permission") if new_thesis else None)
+            or "watch"
+        ),
+        "observation_category": "disciplined",
+    }
+
+    return out
+
+
+def _derive_v14_action_state(
+    mode: Optional[str], direction: Optional[str],
+) -> str:
+    """v1.4 mode + direction → 14 档状态机近似映射(给前端 stateColor 等用)。"""
+    if mode == "new_thesis":
+        if direction == "long": return "LONG_PLANNED"
+        if direction == "short": return "SHORT_PLANNED"
+    if mode == "evaluate_existing":
+        if direction == "long": return "LONG_HOLD"
+        if direction == "short": return "SHORT_HOLD"
+    if mode == "protection":
+        return "PROTECTION"
+    return "FLAT"
+
+
+def _build_v14_action_state_label(
+    mode: Optional[str], direction: Optional[str], action_state: str,
+) -> str:
+    """v1.4 友好文案 — mode + direction 优先,fallback 14 档名。"""
+    if mode == "new_thesis":
+        if direction == "long": return "准备做多(还没开)"
+        if direction == "short": return "准备做空(还没开)"
+    if mode == "evaluate_existing":
+        if direction == "long": return "持有多单"
+        if direction == "short": return "持有空单"
+    if mode and mode in labels.MASTER_MODE:
+        return labels.MASTER_MODE[mode]
+    return labels.translate(labels.MASTER_STATE, action_state)
+
+
+def _build_v14_trade_plan(new_thesis: dict, l4: dict) -> dict:
+    """从 v1.4 master.new_thesis 派生前端 cards 用 trade_plan 形态。
+
+    前端 cardEntryZones / cardStopLoss / cardTakeProfits / cardPositionCap /
+    cardConfidence 等读 state.trade_plan(经 tp() 兜底),原本只 v1.3
+    AdjudicatorV1 路径填这字段;Sprint K 给 v1.4 也派生一份。
+    """
+    entry_orders = new_thesis.get("entry_orders") or []
+    entry_zones: list[dict[str, Any]] = []
+    for o in entry_orders:
+        if not isinstance(o, dict): continue
+        p = o.get("price")
+        if p is None: continue
+        entry_zones.append({
+            "price_low": p, "price_high": p,
+            "allocation_pct": o.get("size_pct"),
+        })
+    stop_loss = new_thesis.get("stop_loss") or {}
+    sl_price = stop_loss.get("price") if isinstance(stop_loss, dict) else stop_loss
+    tp_orders = (new_thesis.get("take_profit")
+                 or new_thesis.get("take_profit_orders") or [])
+    tp_plan: list[dict[str, Any]] = []
+    for t in tp_orders:
+        if not isinstance(t, dict): continue
+        if t.get("price") is None: continue
+        tp_plan.append({
+            "price": t.get("price"),
+            "size_pct": t.get("size_pct"),
+        })
+    cs = new_thesis.get("confidence_score")
+    if isinstance(cs, (int, float)):
+        if cs >= 75: tier = "high"
+        elif cs >= 50: tier = "medium"
+        else: tier = "low"
+    else:
+        tier = None
+    pos_cap = l4.get("position_cap_pct")
+    return {
+        "entry_zones": entry_zones,
+        "stop_loss": sl_price,
+        "take_profit_plan": tp_plan,
+        "max_position_size_pct": pos_cap,
+        "confidence_tier": tier,
+        "confidence_score": cs,
     }
 
 
@@ -301,10 +414,19 @@ def _l5_card_v13(l5: dict, ctx: dict) -> dict:
 
 
 def _master_card_v13(master: dict, ctx: dict) -> dict:
+    """v1.4 master 卡。Sprint K:同时兼容 v1.3(state_transition + trade_plan)
+    与 v1.4(mode + new_thesis)两种 schema。
+
+    v1.4 优先识别(`mode` 字段存在),否则 fallback 到 v1.3 路径。
+    """
+    narrative = master.get("narrative") or ""
+    mode = master.get("mode")
+    new_thesis = master.get("new_thesis") or {}
+    if mode is not None or new_thesis:
+        return _master_card_v14(master, ctx, narrative, mode, new_thesis)
     state_trans = master.get("state_transition") or {}
     trade_plan = master.get("trade_plan") or {}
     pos_final = master.get("position_cap_final") or {}
-    narrative = master.get("narrative") or ""
     from_s = state_trans.get("from_state")
     to_s = state_trans.get("to_state")
     return {
@@ -343,6 +465,69 @@ def _master_card_v13(master: dict, ctx: dict) -> dict:
             },
         },
         "confidence": master.get("confidence"),
+    }
+
+
+def _master_card_v14(
+    master: dict, ctx: dict, narrative: str, mode: Optional[str],
+    new_thesis: dict,
+) -> dict:
+    """v1.4 master 卡:label 从 mode 翻译,supporting_data 从 new_thesis 抽。"""
+    direction = new_thesis.get("direction")
+    confidence_score = new_thesis.get("confidence_score")
+    entry_orders = new_thesis.get("entry_orders") or []
+    stop_loss = new_thesis.get("stop_loss") or {}
+    take_profit = (new_thesis.get("take_profit")
+                   or new_thesis.get("take_profit_orders") or [])
+    label = labels.translate(labels.MASTER_MODE, mode)
+    secondary: list[Optional[str]] = []
+    if mode == "new_thesis" and direction:
+        dir_zh = "做多" if direction == "long" else (
+            "做空" if direction == "short" else direction)
+        secondary.append(f"{label} → {dir_zh}")
+    if isinstance(confidence_score, (int, float)):
+        secondary.append(f"信心 {confidence_score}/100")
+    return {
+        "layer": "master",
+        "title": "主裁(综合决策)",
+        "label": label,
+        "secondary_labels": secondary,
+        "summary": _first_sentence(narrative, max_chars=80)
+                   or master.get("one_line_summary") or "",
+        "key_observations": master.get("key_observations") or [],
+        "narrative": narrative,
+        "contradicting_signals": (master.get("counter_arguments")
+                                  or master.get("contradicting_signals") or []),
+        "supporting_data": {
+            "mode": {
+                "value": label,
+                "explanation": "v1.4 master mode(决策模式)",
+            },
+            "trade_direction": {
+                "value": (direction or "—"),
+                "explanation": "做多 / 做空 / 无方向",
+            },
+            "entry_orders": {
+                "value": entry_orders,
+                "explanation": "分批入场计划(price + size_pct%)",
+            },
+            "stop_loss": {
+                "value": (stop_loss.get("price")
+                          if isinstance(stop_loss, dict) else stop_loss),
+                "explanation": "止损价位(从 L4 hard_invalidation_levels 选)",
+            },
+            "take_profit": {
+                "value": take_profit,
+                "explanation": "分批止盈计划(price + size_pct%)",
+            },
+            "break_conditions": {
+                "value": new_thesis.get("break_conditions") or [],
+                "explanation": "破灭条件(任一触发即关闭 thesis)",
+            },
+        },
+        "confidence": (confidence_score / 100.0
+                       if isinstance(confidence_score, (int, float))
+                       else master.get("confidence")),
     }
 
 

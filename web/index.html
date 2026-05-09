@@ -704,7 +704,7 @@
                       <td x-text="o.order_type"></td>
                       <td class="text-right" x-text="'$' + Number(o.price).toLocaleString()"></td>
                       <td class="text-right"
-                          x-text="((o.size_pct ?? 0) * 100).toFixed(1) + '%'"></td>
+                          x-text="(o.size_pct ?? 0).toFixed(1) + '%'"></td>
                       <td class="text-right"
                           x-text="distanceFromLive(o.price)"></td>
                     </tr>

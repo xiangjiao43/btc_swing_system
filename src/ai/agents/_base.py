@@ -37,6 +37,12 @@ _DEFAULT_MAX_TOKENS = 2048
 _DEFAULT_TEMPERATURE = 0.2
 _RETRY_TEMPERATURE = 0.4
 
+# Sprint I:中转站(novaiapi.com)有多个上游 channel,部分 channel 偶发返回
+# 400 "Provider API error: Model 'X' is not supported" 等中转站特定错误
+# (实测同一 client + 同一 model id 反复重试可命中正常 channel 成功)。
+# 重试间 sleep 2s 让中转站 channel 路由切换,避免连续打到同一个坏 channel。
+_RETRY_SLEEP_SEC = 2.0
+
 
 def build_factor_status_block_for_layer(
     layer_id: int, context: dict[str, Any],
@@ -179,10 +185,14 @@ class BaseAgent:
         *,
         chart_b64: Optional[str] = None,
     ) -> dict[str, Any]:
-        """两次重试:温度 0.2 → 0.4。任一次解析成功即返回。
+        """3 次重试:温度 0.2 → 0.4 → 0.4。任一次解析成功即返回。
 
         v5:chart_b64 不为空时,user content 是 [image, text] list
         (anthropic multi-modal);否则纯 text。
+
+        Sprint I:从 2 次重试改为 3 次,且重试间 sleep 2s 让中转站 channel
+        重路由(中转站偶发 400 "Model not supported" 是 channel 路由问题,
+        不是 model id 问题)。
         """
         model = effective_model(self._model_override)
         last_error: Optional[str] = None
@@ -191,7 +201,6 @@ class BaseAgent:
         total_latency_ms = 0
         last_model_used = model
 
-        # 构造 user content(纯文本 vs multi-modal)
         if chart_b64:
             user_content: Any = [
                 {
@@ -207,9 +216,14 @@ class BaseAgent:
         else:
             user_content = user_prompt
 
-        for attempt, temperature in enumerate(
-            (_DEFAULT_TEMPERATURE, _RETRY_TEMPERATURE), start=1,
-        ):
+        attempts_temps = (
+            _DEFAULT_TEMPERATURE,
+            _RETRY_TEMPERATURE,
+            _RETRY_TEMPERATURE,
+        )
+        for attempt, temperature in enumerate(attempts_temps, start=1):
+            if attempt > 1:
+                time.sleep(_RETRY_SLEEP_SEC)
             start_ts = time.time()
             try:
                 resp = client.messages.create(
@@ -240,7 +254,6 @@ class BaseAgent:
                 )
                 continue
 
-            # success
             parsed.setdefault("agent", self.AGENT_NAME)
             parsed.setdefault("status", "success")
             parsed["model_used"] = last_model_used

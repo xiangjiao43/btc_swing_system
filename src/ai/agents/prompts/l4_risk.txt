@@ -388,3 +388,14 @@ ATR 波动带显著放大(原 1500 现 2800)。Funding 副图近期最高 0.002 
   "data_completeness_pct": 100,
   "notes": ["L1=chaos + volatility=extreme 印证 risk_tier=extreme"]
 }
+
+
+# Sprint E factor-grain stale 纪律(2026-05-09)
+
+输入开头若有 `===== L4 因子状态 =====` 段(✅ 新鲜 / ❌ stale)。
+**纪律**:
+- ❌ 标记的因子(主要是衍生品 / Glassnode 净流),不在 risk_tier 推理引用
+  具体数值,改用文字表述"funding 数据过期,risk_tier 凭剩余信号判断"
+- ✅ 只用 fresh 因子做 risk_tier / position_cap_pct 判断
+- 全 ❌ → `position_cap_pct: 15.0`(硬下限),`risk_tier: "extreme"`,
+  `status: "degraded_data_missing"`

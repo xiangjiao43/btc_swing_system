@@ -414,3 +414,14 @@ impact_estimate 由你判断:
   "data_completeness_pct": 100,
   "notes": ["extreme_event_flags.geopolitical 触发,extreme_event_detected=true 强制 PROTECTION"]
 }
+
+
+# Sprint E factor-grain stale 纪律(2026-05-09)
+
+输入开头若有 `===== L5 因子状态 =====` 段(✅ 新鲜 / ❌ stale)。
+**纪律**:
+- ❌ 标记的 macro 因子(DXY / VIX / SP500 等)— 不在 narrative 引用具体值
+- ✅ events_calendar_72h 是本地 yaml,永远 fresh,可正常引用
+- 全 macro ❌ → `macro_stance: "unclear", macro_headwind_score: 0.0,
+  status: "degraded_data_missing", narrative: "FRED 宏观全过期,L5 无法
+  量化 headwind"`(L5 是非关键层,只 narrative 提及,不强制 protection)

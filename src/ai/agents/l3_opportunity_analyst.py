@@ -29,16 +29,22 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from ._base import BaseAgent
+from ._base import BaseAgent, build_factor_status_block_for_layer
 
 
 class L3OpportunityAnalyst(BaseAgent):
     AGENT_NAME = "l3_opportunity"
     PROMPT_FILE = "l3_opportunity.txt"
+    LAYER_ID = 3
 
     def _build_user_prompt(self, context: dict[str, Any]) -> str:
         """v3 prompt 期望:l1_output + l2_output + risk_preview(3 客观字段)
-        + anti_pattern_signals(5 bool)+ current_state + previous_l3。"""
+        + anti_pattern_signals(5 bool)+ current_state + previous_l3。
+
+        Sprint E Step 2:L3 衍生层无直接 indicator,但仍贴 factor_block(空 / 注释)
+        让 AI 知道上游 source 状态;实际"L3 据 L1+L2 health 联动"逻辑在 Step 3
+        orchestrator 的 confidence 调整里。
+        """
         snapshot = {
             "l1_output": context.get("l1_output"),
             "l2_output": context.get("l2_output"),
@@ -48,7 +54,9 @@ class L3OpportunityAnalyst(BaseAgent):
             "previous_l3": context.get("previous_l3"),
         }
         snapshot = {k: v for k, v in snapshot.items() if v is not None}
+        factor_block = build_factor_status_block_for_layer(self.LAYER_ID, context)
         return (
+            f"{factor_block}"
             "===== L3 输入数据 =====\n"
             f"{json.dumps(snapshot, ensure_ascii=False, indent=2, default=str)}\n"
         )

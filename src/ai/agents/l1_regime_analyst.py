@@ -29,22 +29,29 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from ._base import BaseAgent
+from ._base import BaseAgent, build_factor_status_block_for_layer
 
 
 class L1RegimeAnalyst(BaseAgent):
     AGENT_NAME = "l1_regime"
     PROMPT_FILE = "l1_regime.txt"
+    LAYER_ID = 1
 
     def _build_user_prompt(self, context: dict[str, Any]) -> str:
-        """v3 prompt 期望字段:klines_1d_30d_close + computed_indicators + previous_l1。"""
+        """v3 prompt 期望字段:klines_1d_30d_close + computed_indicators + previous_l1。
+
+        Sprint E Step 2:开头加「L1 因子状态」段(若 orchestrator 注入了
+        source_stale_map);AI 据此跳过 stale 因子。
+        """
         snapshot = {
             "klines_1d_30d_close": context.get("klines_1d_30d_close"),
             "computed_indicators": context.get("computed_indicators"),
             "previous_l1": context.get("previous_l1"),
         }
         snapshot = {k: v for k, v in snapshot.items() if v is not None}
+        factor_block = build_factor_status_block_for_layer(self.LAYER_ID, context)
         return (
+            f"{factor_block}"
             "===== L1 输入数据 =====\n"
             f"{json.dumps(snapshot, ensure_ascii=False, indent=2, default=str)}\n"
         )

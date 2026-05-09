@@ -32,16 +32,20 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from ._base import BaseAgent
+from ._base import BaseAgent, build_factor_status_block_for_layer
 
 
 class L4RiskAnalyst(BaseAgent):
     AGENT_NAME = "l4_risk"
     PROMPT_FILE = "l4_risk.txt"
+    LAYER_ID = 4
 
     def _build_user_prompt(self, context: dict[str, Any]) -> str:
         """v2 prompt 期望:computed_indicators + l1/l2/l3_output + current_state
-        + previous_l4。注:不传 crowding_signals(违反铁律 1)。"""
+        + previous_l4。注:不传 crowding_signals(违反铁律 1)。
+
+        Sprint E Step 2:开头加「L4 因子状态」段。
+        """
         snapshot = {
             "computed_indicators": context.get("computed_indicators"),
             "l1_output": context.get("l1_output"),
@@ -51,7 +55,9 @@ class L4RiskAnalyst(BaseAgent):
             "previous_l4": context.get("previous_l4"),
         }
         snapshot = {k: v for k, v in snapshot.items() if v is not None}
+        factor_block = build_factor_status_block_for_layer(self.LAYER_ID, context)
         return (
+            f"{factor_block}"
             "===== L4 输入数据 =====\n"
             f"{json.dumps(snapshot, ensure_ascii=False, indent=2, default=str)}\n"
         )

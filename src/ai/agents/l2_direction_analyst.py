@@ -30,16 +30,20 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from ._base import BaseAgent
+from ._base import BaseAgent, build_factor_status_block_for_layer
 
 
 class L2DirectionAnalyst(BaseAgent):
     AGENT_NAME = "l2_direction"
     PROMPT_FILE = "l2_direction.txt"
+    LAYER_ID = 2
 
     def _build_user_prompt(self, context: dict[str, Any]) -> str:
         """v2 prompt 期望:klines_1d_30d_close + computed_indicators + l1_output
-        + rule_cycle_position + previous_l2。"""
+        + rule_cycle_position + previous_l2。
+
+        Sprint E Step 2:开头加「L2 因子状态」段。
+        """
         snapshot = {
             "klines_1d_30d_close": context.get("klines_1d_30d_close"),
             "computed_indicators": context.get("computed_indicators"),
@@ -48,7 +52,9 @@ class L2DirectionAnalyst(BaseAgent):
             "previous_l2": context.get("previous_l2"),
         }
         snapshot = {k: v for k, v in snapshot.items() if v is not None}
+        factor_block = build_factor_status_block_for_layer(self.LAYER_ID, context)
         return (
+            f"{factor_block}"
             "===== L2 输入数据 =====\n"
             f"{json.dumps(snapshot, ensure_ascii=False, indent=2, default=str)}\n"
         )

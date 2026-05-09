@@ -315,3 +315,15 @@ H5. current_state ∈ {LONG_HOLD, LONG_TRIM, SHORT_HOLD, SHORT_TRIM} →
   "data_completeness_pct": 100,
   "notes": ["L1=chaos 硬约束 H1 触发", "L2=neutral 硬约束 H2 触发"]
 }
+
+
+# Sprint E factor-grain stale 纪律(2026-05-09)
+
+L3 衍生于 L1+L2 输出,无直接 indicator,但 `===== L3 因子状态 =====` 段
+若空仍可参考 L1+L2 input 中的 freshness 提示。
+**纪律**:
+- 如果 `l1_output.status` 或 `l2_output.status` 含 `degraded_*` /
+  `data_missing` → 不得给 `opportunity_grade ∈ {A, B}`,降到 C 或 none,
+  `narrative` 明确说"上游 L1/L2 数据降级,机会等级保守"
+- 关键层(L1/L2)data_missing → 直接 `opportunity_grade: "none"`,
+  `execution_permission: "watch"`

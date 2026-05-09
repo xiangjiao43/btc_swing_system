@@ -32,16 +32,20 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from ._base import BaseAgent
+from ._base import BaseAgent, build_factor_status_block_for_layer
 
 
 class L5MacroAnalyst(BaseAgent):
     AGENT_NAME = "l5_macro"
     PROMPT_FILE = "l5_macro.txt"
+    LAYER_ID = 5
 
     def _build_user_prompt(self, context: dict[str, Any]) -> str:
         """v3 prompt 期望:computed_macro_indicators + events_calendar_72h
-        + extreme_event_flags + previous_l5。"""
+        + extreme_event_flags + previous_l5。
+
+        Sprint E Step 2:开头加「L5 因子状态」段。
+        """
         snapshot = {
             "computed_macro_indicators": context.get("computed_macro_indicators"),
             "events_calendar_72h": context.get("events_calendar_72h"),
@@ -49,7 +53,9 @@ class L5MacroAnalyst(BaseAgent):
             "previous_l5": context.get("previous_l5"),
         }
         snapshot = {k: v for k, v in snapshot.items() if v is not None}
+        factor_block = build_factor_status_block_for_layer(self.LAYER_ID, context)
         return (
+            f"{factor_block}"
             "===== L5 输入数据 =====\n"
             f"{json.dumps(snapshot, ensure_ascii=False, indent=2, default=str)}\n"
         )

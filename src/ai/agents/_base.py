@@ -38,6 +38,28 @@ _DEFAULT_TEMPERATURE = 0.2
 _RETRY_TEMPERATURE = 0.4
 
 
+def build_factor_status_block_for_layer(
+    layer_id: int, context: dict[str, Any],
+) -> str:
+    """Sprint E Step 2 — sub-agent prompt 注入「因子状态」段。
+
+    context 需要含:
+      - 'source_stale_map': {source: is_stale}(orchestrator 在 Step 3 装配)
+      - 'source_hours_map': {source: hours_since_last_success}(可选,用于带
+        "过期 N 小时"细节)
+
+    若 context 缺这两个 key → 返 ""(向后兼容,Sprint E 之前的 caller 不破)。
+    """
+    stale_map = context.get("source_stale_map") or {}
+    if not stale_map:
+        return ""
+    hours_map = context.get("source_hours_map")
+    from ...strategy.factor_dependencies import format_factor_status_block
+    return format_factor_status_block(
+        layer_id, stale_map, source_hours_map=hours_map,
+    )
+
+
 class BaseAgent:
     """6 AI 角色公共基类。每个角色一个独立类继承本类。"""
 

@@ -268,3 +268,123 @@ def fresh_ratio_for_layer(
         return 1.0
     fresh = sum(1 for _, is_stale, _ in rows if not is_stale)
     return fresh / len(rows)
+
+
+# ============================================================
+# Sprint E Step 2:prompt 注入用的因子状态格式化
+# ============================================================
+
+# Indicator 中文名(用户展示用 → 注入 sub-agent prompt 让 AI 看到中文标识)
+_INDICATOR_DISPLAY_LABELS: dict[str, str] = {
+    # K 线趋势
+    "ema_20_1d_current": "EMA-20 (1d)",
+    "ema_50_1d_current": "EMA-50 (1d)",
+    "ema_200_1d_current": "EMA-200 (1d)",
+    "ema_20_4h_current": "EMA-20 (4h)",
+    "ema_50_4h_current": "EMA-50 (4h)",
+    "ema_200_4h_current": "EMA-200 (4h)",
+    "ema_20_1d_slope_5d": "EMA-20 5d slope",
+    "ema_50_1d_slope_5d": "EMA-50 5d slope",
+    "ema_50_slope_30d": "EMA-50 30d slope",
+    "adx_14_1d_current": "ADX-14 (1d)",
+    "adx_14_1d_5d_avg": "ADX-14 5d 均值",
+    "atr_14_1d_current": "ATR-14 (1d)",
+    "atr_180d_percentile": "ATR 180d 分位",
+    "price_position_in_90d_range": "90d 价格位置",
+    "current_close": "当前收盘价",
+    "max_drawdown_60d_pct": "60d 最大回撤 %",
+    "swing_5_recent": "近 5 个 swing 点",
+    "swing_high_3_recent": "近 3 个 swing 高",
+    "swing_low_3_recent": "近 3 个 swing 低",
+    # Glassnode
+    "lth_realized_price_current": "LTH 实现价格",
+    "sth_realized_price_current": "STH 实现价格",
+    "lth_realized_price": "LTH 实现价格(别名)",
+    "sth_realized_price": "STH 实现价格(别名)",
+    "lth_mvrv": "LTH-MVRV",
+    "sth_mvrv": "STH-MVRV",
+    "exchange_net_flow_30d": "交易所 30d 净流",
+    "exchange_net_flow_30d_sum": "交易所 30d 累计净流",
+    "exchange_net_flow_30d_max_outflow": "30d 最大流出",
+    # CoinGlass
+    "funding_rate_current": "资金费率(当前)",
+    "funding_rate_z_score_90d": "资金费率 Z-90d",
+    "funding_rate_30d_max": "30d 最大资金费率",
+    "open_interest_current": "持仓量(当前)",
+    "open_interest_z_score_90d": "持仓量 Z-90d",
+    # Macro
+    "dxy_current": "DXY",
+    "vix_current": "VIX",
+    "sp500_current": "SP500",
+    "nasdaq_current": "Nasdaq",
+    "us10y_current": "US10Y",
+}
+
+
+def _source_label(src: str) -> str:
+    """中文 source 显示名 — 与 src/data/freshness.py:EXPECTED_SOURCES 对齐。"""
+    return {
+        SRC_BINANCE_KLINE: "Binance K 线",
+        SRC_COINGLASS_DERIV: "CoinGlass 衍生品",
+        SRC_GLASSNODE_ONCHAIN: "Glassnode 链上",
+        SRC_FRED_MACRO: "FRED 宏观",
+    }.get(src, src)
+
+
+def format_factor_status_block(
+    layer_id: int,
+    source_stale_map: dict[str, bool],
+    *,
+    source_hours_map: dict[str, float] | None = None,
+) -> str:
+    """Sprint E Step 2:把该层关心的 indicator 列成「因子状态」段供 sub-agent
+    prompt 消费。
+
+    Args:
+        layer_id: 1-5
+        source_stale_map: {source: is_stale}
+        source_hours_map: {source: hours_since_last_success}(可选,用于在 ❌
+            标签中带"过期 N 小时";不传则只标 ❌ 不带数字)
+
+    Returns:
+        多行字符串(末尾 \\n);如果该层无关心 indicator 或全 fresh,仍返回
+        包含「全部新鲜」一行的块,告诉 AI 此层数据健康。
+    """
+    rows = get_layer_factor_freshness(layer_id, source_stale_map)
+    if not rows:
+        return ""
+
+    lines: list[str] = [f"===== L{layer_id} 因子状态(Sprint E factor-grain stale)====="]
+    any_stale = False
+    for key, is_stale, sources in rows:
+        label = _INDICATOR_DISPLAY_LABELS.get(key, key)
+        src_labels = " / ".join(_source_label(s) for s in sources) or "(无外部数据源)"
+        if is_stale:
+            any_stale = True
+            hours_clause = ""
+            if source_hours_map:
+                stale_hours = max(
+                    (source_hours_map.get(s) or 0.0)
+                    for s in sources if source_stale_map.get(s)
+                )
+                if stale_hours > 0:
+                    hours_clause = f"(过期 {stale_hours:.1f} 小时)"
+            lines.append(
+                f"  ❌ {label}({src_labels}):stale {hours_clause}"
+                f" — 本次分析**禁止**引用本因子的具体数值"
+            )
+        else:
+            lines.append(f"  ✅ {label}({src_labels}):新鲜")
+
+    if any_stale:
+        lines.append("")
+        lines.append(
+            "🛑 纪律(Sprint E factor-grain):"
+            "❌ 标记的因子,不要在分析中引用具体数值,"
+            "直接在 narrative 标注'该因子数据过期,本次跳过';"
+            "✅ 只用 fresh 因子做分析。"
+            "如果本层全部因子 stale,返回 "
+            "{layer_health: 'data_missing', skip_reason: '...'}。"
+        )
+    lines.append("")  # trailing blank
+    return "\n".join(lines) + "\n"

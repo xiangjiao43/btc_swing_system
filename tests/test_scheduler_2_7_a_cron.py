@@ -130,13 +130,13 @@ def test_collect_onchain_at_0835_bjt():
     assert spec.trigger_kwargs["cron_list"][0] == {"hour": 8, "minute": 35}
 
 
-def test_pipeline_run_regular_cron_at_1605_bjt():
-    """Sprint 1.9-B(2026-05-01)改为每日 1 档 16:05 BJT(= UTC 08:05)。
-    原 5 档 00/04/12/16/20:05 是 v1.2 多档轮询;v1.3 AI orchestrator 跑得慢
-    + 成本敏感,改每日 1 档。"""
+def test_pipeline_run_regular_cron_at_1135_bjt():
+    """Sprint 1.9-B 改为每日 1 档 16:05 BJT(= UTC 08:05)。
+    Sprint F.1(2026-05-09)用户决策:16:05 太晚 → 改 11:35 BJT(等
+    Glassnode 10:35 终档 + 1h 缓冲)。每日 1 档,run_trigger=scheduled。"""
     out = {jc.name: jc for jc in build_job_configs(load_scheduler_config(_CONFIG_PATH))}
     spec = out["pipeline_run_regular"]
-    assert spec.trigger_kwargs == {"hour": 16, "minute": 5}
+    assert spec.trigger_kwargs == {"hour": 11, "minute": 35}
 
 
 def test_pipeline_run_8h_onchain_at_0840_bjt():

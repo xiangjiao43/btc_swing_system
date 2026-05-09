@@ -856,23 +856,29 @@ def job_collect_onchain(
             logger.warning("derived_mvrv compute failed: %s", e)
             errors["derived_mvrv"] = str(e)[:200]
 
-        # Sprint B fix:只有 Glassnode bucket 真 success(无 exc + 入库 > 0)才
-        # enqueue pipeline_run。上游 fail 时 derived_mvrv 仍可能写若干行,但那
-        # 是基于昨天 realized_price 的本地计算,**不是新链上数据**。Sprint A 之
-        # 前的 `if total > 0` 条件让 pipeline_run 在 Glassnode 全 403 时仍被
-        # enqueue,然后 v1.3 orchestrator 崩在 state_builder.py:363
-        # (见 docs/cc_reports/glassnode_frequency_audit.md)。
+        # Sprint F.1(2026-05-09)用户决策:删 event_onchain enqueue。
+        # 中长线策略每天只跑 1 次 master(BJT 11:35 pipeline_run_regular,
+        # 等 Glassnode 10:35 终档 + 1h 缓冲)。collect_onchain 完成后不再
+        # enqueue 额外 pipeline_run,严守"一天 1 次"原则,大幅省 token。
+        # 邵底机制仍在:event_price 持仓 ±3% / event_macro / hard_invalidation
+        # 1h 规则平仓。
+        # 历史:Sprint B 曾把"任一 success 就 enqueue"修成"真 success 才 enqueue";
+        # Sprint F.1 进一步删整条 enqueue 路径(gn_success 仍计算供 events_triggered
+        # 字段保留语义,日志还能看出 fetch 是否真成功)。
         gn_success = (gn_first_exc is None) and (glassnode_rows > 0)
-        if gn_success:
-            _enqueue_pipeline_run("event_onchain")
+        # NOTE:不再调 _enqueue_pipeline_run("event_onchain")。
         return {
             "by_collector": {
                 "glassnode": glassnode_rows,
                 "derived_mvrv": sum(derived_stats.values()),
             },
             "total_upserted": total,
-            "events_triggered": ["event_onchain"] if gn_success else [],
+            # Sprint F.1:enqueue 已删,events_triggered 永远为空 list。
+            # 保留 key 供下游兼容(no_opportunity_narrator / KPI collector 读)。
+            "events_triggered": [],
             "errors": errors,
+            # 诊断字段(便于排查 collect_onchain fetch 真实状态)
+            "glassnode_fetch_success": gn_success,
         }
     return _wrap_job("collect_onchain", _body, conn_factory=conn_factory,
                      refresh_cards_on_success=True)

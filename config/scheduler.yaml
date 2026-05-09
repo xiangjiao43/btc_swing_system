@@ -116,11 +116,15 @@ jobs:
   # 1.9.1 持仓健康检查会重新设计)。
   pipeline_run_regular:
     enabled: true
-    cron: {hour: 16, minute: 5}        # 16:05 BJT(= UTC 08:05),每日 1 档
+    # Sprint F.1(2026-05-09):16:05 BJT → 11:35 BJT(= UTC 03:35)。
+    # 用户中长线一天 1 次,16:05 太晚看不到。新时刻 11:35 在 Glassnode
+    # 10:35 终档(Sprint C 3 档:8:35/9:35/10:35)+ 1h 缓冲后,
+    # 配合 Sprint F.1 删 event_onchain enqueue,严守"一天 1 次 master"原则。
+    cron: {hour: 11, minute: 35}
     misfire_grace_time: 300
     coalesce: true
     max_instances: 1
-    description: 'Pipeline 主循环(16:05 BJT 每日 1 档,run_trigger=scheduled);Sprint 1.9-B 启用'
+    description: 'Pipeline 主循环(11:35 BJT 每日 1 档,run_trigger=scheduled;Sprint F.1 从 16:05 改 11:35)'
 
   pipeline_run_8h_onchain:
     enabled: false

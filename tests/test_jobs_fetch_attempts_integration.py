@@ -239,10 +239,12 @@ def test_collect_onchain_all_fail_does_not_enqueue_pipeline_run(
     assert rows[0]["status"] == "failure"
 
 
-def test_collect_onchain_real_success_does_enqueue_pipeline_run(
+def test_collect_onchain_real_success_does_NOT_enqueue_pipeline_run(
     db_path, conn_factory,
 ):
-    """13 个 fetcher 全 success + 入库 > 0 → 仍应 enqueue event_onchain。"""
+    """Sprint F.1(2026-05-09)反退化:13 fetcher 全 success + 入库 > 0,
+    但 collect_onchain 不再 enqueue pipeline_run(用户决策严守"一天 1 次"
+    原则,完整版见 tests/test_event_onchain_chain.py)。"""
     gn_inst = MagicMock()
     for fn in jobs_mod._GLASSNODE_FETCHERS:
         getattr(gn_inst, fn).return_value = [
@@ -257,5 +259,7 @@ def test_collect_onchain_real_success_does_enqueue_pipeline_run(
          patch.object(jobs_mod, "_enqueue_pipeline_run") as enqueue:
         result = jobs_mod.job_collect_onchain(conn_factory=conn_factory)
 
-    enqueue.assert_called_once_with("event_onchain")
-    assert result["events_triggered"] == ["event_onchain"]
+    enqueue.assert_not_called()
+    assert result["events_triggered"] == []
+    # 诊断字段:fetch 真成功仍可被读出(便于 KPI / 排查)
+    assert result.get("glassnode_fetch_success") is True

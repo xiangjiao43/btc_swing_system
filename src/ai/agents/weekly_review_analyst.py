@@ -48,6 +48,12 @@ class WeeklyReviewAnalyst(BaseAgent):
         fuse_states = context.get("fuse_and_states") or {}
         hc_raw = context.get("hard_constraint_activation_raw") or {}
         ctx_meta = context.get("context") or {}
+        # Sprint H Part B 新加 5 个字段
+        anti_pat = context.get("anti_pattern_signals") or {}
+        l3_dist = context.get("l3_grade_distribution") or {}
+        l4_dist = context.get("l4_risk_tier_distribution") or {}
+        price_action = context.get("weekly_price_action") or {}
+        master_runs = context.get("master_runs_with_trade_plan") or []
 
         lines: list[str] = [
             f"# 周复盘窗口",
@@ -76,6 +82,42 @@ class WeeklyReviewAnalyst(BaseAgent):
             f"# 7. hard_constraint_activation 23 V 激活率(原始数据)",
             json.dumps(hc_raw, ensure_ascii=False, indent=2),
             "",
+            "# 8. 反模式触发率(Sprint H Part B 新加)",
+            "L3 anti_pattern_signals 5 类(extending_late_phase / against_long_cycle "
+            "/ chasing_breakout_no_pullback / failing_at_resistance / "
+            "after_extreme_event_no_reset)在过去 7 天的触发次数 + 占比。",
+            "用于评估 L3 prompt §六 反模式判定阈值是否合理:某条触发率 > 40% "
+            "可能阈值偏松,< 5% 可能从未实际触发(prompt 文字定义不清)。",
+            json.dumps(anti_pat, ensure_ascii=False, indent=2),
+            "",
+            "# 9. L3 opportunity_grade 分布(Sprint H Part B 新加)",
+            "用于评估 L3 prompt §四 4 档定义是否合理:期望分布(中长线策略):"
+            "A 1-2/年、B 1-2/月、C 3-4/月、none 其余。"
+            "若实际 B + C 周率 > 5 → L3 prompt §四 'B/C 级' 定义可能偏松。",
+            json.dumps(l3_dist, ensure_ascii=False, indent=2),
+            "",
+            "# 10. L4 risk_tier 分布(Sprint H Part B 新加)",
+            "用于评估 L4 prompt §四 4 档定义是否合理:期望分布(健康市场):"
+            "low + moderate 占多数,elevated < 30%,extreme 罕见。"
+            "若 elevated 持续 > 50% → L4 prompt §四 elevated 档判定可能偏松,"
+            "或市场真处高风险期(需结合实际走势判断)。",
+            json.dumps(l4_dist, ensure_ascii=False, indent=2),
+            "",
+            "# 11. BTC 实际走势(Sprint H Part B 新加,price_candles 1d)",
+            "用于第 12 段 master 决策对比;不要因为系统判断 long 而 BTC 涨就"
+            "事后赞美,也不要因为判断 long 而 BTC 跌就事后批判 — 中长线 1 周"
+            "样本不足以评估方向准确度,主要看关键位(止损/止盈)是否合理。",
+            json.dumps(price_action, ensure_ascii=False, indent=2),
+            "",
+            "# 12. master 真跑通且给 trade_plan 的 run 列表(Sprint H Part B 新加)",
+            "对比 AI 当时给的 entry_zone / stop_loss / take_profit_zones vs "
+            "后续实际走势(用第 11 段 daily K 线)。",
+            "格式化输出每个 master run 的「方向 ✓/✗ + 关键位 ✓/✗」对比,"
+            "存入 strategy_quality.ai_vs_actual_comparison 子段。",
+            "**中立性纪律**:中长线 1 周样本不足以判定 AI 准确度,"
+            "评估只针对关键位(止损/止盈/入场区)合理性,不下\"AI 准/错\"结论。",
+            json.dumps(master_runs, ensure_ascii=False, indent=2, default=str),
+            "",
             f"# 当前 virtual_account snapshot",
             json.dumps(
                 ctx_meta.get("current_virtual_account") or {},
@@ -83,15 +125,27 @@ class WeeklyReviewAnalyst(BaseAgent):
             ),
             "",
             "# 输出要求",
-            "请输出 4 段 JSON:performance_summary / system_health_diagnosis / "
+            "请输出 5 段 JSON:performance_summary / system_health_diagnosis / "
             "strategy_quality / hard_constraint_activation_review / "
             "adjustment_recommendations。",
             "",
             "**hard_constraint_activation_review 必须列全 23 条 V Validator**,"
             "每条含 activations / rate / evaluation 三个字段。",
             "",
-            "若数据全 0(冷启动):仍要输出 4 段 + 23 V dict,"
-            "evaluation 写 '数据不足,无法评估'。",
+            "**Sprint H Part B 新增约束**:",
+            "1. strategy_quality 必须含 ai_vs_actual_comparison 子段 — 若本周",
+            "   有 master_runs_with_trade_plan 数据,**逐条**对比方向 ✓/✗ + 关键位",
+            "   ✓/✗ + 中立评估;无数据则 ai_vs_actual_comparison: []。",
+            "2. adjustment_recommendations 每条必须含「具体调整路径」字段:",
+            "   - 阈值改动:'<文件>:<行号> 的 X 阈值从 Y 改为 Z' 格式",
+            "   - 或观察期:'建议先观察 N 周后调整,理由 ...' 格式",
+            "   - 不许给 '降低 AI 失败率' 这种空泛建议(必须指明改哪个文件 / 哪个",
+            "     阈值 / 改成多少;若数据不足无法决定具体值,优先级 low + 写明",
+            "     '建议先观察 N 周')",
+            "",
+            "若数据全 0(冷启动):仍要输出 5 段 + 23 V dict,"
+            "evaluation 写 '数据不足,无法评估';adjustment_recommendations 至少",
+            "1 条 'low' 优先级 '建议先观察 N 周再评估'。",
         ]
         return "\n".join(lines)
 

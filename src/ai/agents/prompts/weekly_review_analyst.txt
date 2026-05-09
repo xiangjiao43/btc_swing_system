@@ -111,3 +111,98 @@
 - 每条 V 的 evaluation 字段中文,1-2 句具体评估(过严 / 适中 / 过松 / 未触发)
 - adjustment_recommendations 至少 1 条;若一切正常,1 条说明"系统运行良好,无需调整"
 - 优先级 high 的建议会触发 critical 告警 — 用 high 时务必有充足证据
+
+
+# Sprint H Part B 扩展(2026-05-09)
+
+输入新加 5 段数据,你必须用它们做评估:
+
+## 第 8 段 — 反模式触发率
+L3 anti_pattern_signals 5 类(extending_late_phase / against_long_cycle /
+chasing_breakout_no_pullback / failing_at_resistance / after_extreme_event_no_reset)
+触发占比。
+- 触发率 > 40% → L3 prompt §六 反模式判定阈值偏松,在 adjustment_recommendations
+  里建议具体调整(例:"src/ai/agents/prompts/l3_opportunity.txt §六 第 X 条
+  阈值改紧 → 触发率应降到 20-30%")
+- 触发率 < 5% 但 > 0 → 阈值合理
+- 触发率 = 0 但 prompt 定义存在 → 可能 prompt 文字不清,建议审视
+
+## 第 9 段 — L3 grade 分布
+期望(中长线策略):A 1-2/年、B 1-2/月、C 3-4/月、其余 none。
+- 实际周内 B + C 总数 > 5 → L3 §四 'B/C 级' 定义可能偏松,建议收紧 phase=early
+  或反模式触发条件
+- A 出现 → 罕见极端机会,正常
+- 全 none → L1+L2 长期不齐心或硬约束触发太多,审视 H1-H5 阈值
+
+## 第 10 段 — L4 risk_tier 分布
+期望(健康市场):low + moderate 占多数,elevated < 30%,extreme 罕见。
+- elevated 持续 > 50% → L4 §四 elevated 档判定阈值可能偏松,
+  **或** 市场真处高风险期(需结合第 11 段实际走势判断)
+- 全 moderate → L4 不分辨细节,可能 prompt 提示不够
+
+## 第 11 段 — BTC 实际走势(price_candles 7d 1d K 线)
+用于第 12 段对比。**中立性纪律**:中长线 1 周样本不足以评估 AI 方向准确度,
+不要因为 BTC 涨而事后赞美 system long,也不要因为 BTC 跌而事后批判 long。
+评估只针对关键位(stop_loss / take_profit_zones / entry_zone)是否合理。
+
+## 第 12 段 — master_runs_with_trade_plan
+master 真跑通且给了 trade_plan 的 run 列表。每条含:
+- generated_at_bjt + btc_price_at_run + l3_grade / l4_risk_tier
+- master_direction / entry_zone / stop_loss / take_profit_zones / position_size_pct
+
+**输出要求**:必须在 strategy_quality 段加 ai_vs_actual_comparison 子段:
+
+```json
+"ai_vs_actual_comparison": [
+  {
+    "run_at": "2026-05-03T16:08+08:00",
+    "btc_price_at_run": 78337,
+    "system_direction": "long",
+    "system_entry_zone": [76251, 77000],
+    "system_stop_loss": 76251,
+    "system_take_profit": [79455, 82309, 85000],
+    "actual_high_after": 82828,
+    "actual_low_after": 78027,
+    "actual_close_at_week_end": 80331,
+    "direction_assessment": "✓ 实际 5 天涨 +2.5%,方向方向一致",
+    "entry_zone_assessment": "✗ 实际从未回踩到 76251-77000,严守等回踩 = 0 进场",
+    "stop_loss_assessment": "✓ 实际未触及(最低 78027 > 76251),止损位置合理",
+    "take_profit_assessment": "✓ 第一档 79455 / 第二档 82309 都在实际波动范围内触发,关键位准确",
+    "neutral_note": "1 周样本不足以判定 AI 整体准确度,关键位合理性 OK"
+  },
+  ...
+]
+```
+
+无 master_runs_with_trade_plan 时 → ai_vs_actual_comparison: [],
+strategy_quality 段其他字段照常输出。
+
+## adjustment_recommendations 强制约束
+
+**每条建议必须含「具体调整路径」字段**(替代原 "建议" 字段的空泛文字):
+
+格式 1(具体阈值):
+```json
+{
+  "目标": "降低反模式 extending_late_phase 触发率",
+  "具体调整路径": "src/ai/agents/prompts/l3_opportunity.txt §六 第 1 条
+                  judge_phase_late 阈值从 'phase ∈ {late, exhausted}'
+                  改为 'phase = exhausted',预期触发率从 49% 降到 20%",
+  "优先级": "medium",
+  "影响": "降低 grade 降级频率,B 级机会输出更多"
+}
+```
+
+格式 2(数据不足建议观察):
+```json
+{
+  "目标": "评估硬约束阈值合理性",
+  "具体调整路径": "数据不足(本周 0 thesis 创建),建议先观察 4 周积累至少
+                  10 thesis 数据后再评估;不在本周做任何阈值调整",
+  "优先级": "low",
+  "影响": "短期 0 调整;长期保证基于真实数据调优"
+}
+```
+
+**禁止**:'降低 AI 失败率' / '提升 thesis 质量' 这种空泛建议(没指明
+改哪个文件 / 哪个阈值 / 改成多少)— 触发 validator 拒绝。

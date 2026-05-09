@@ -399,6 +399,265 @@ def _aggregate_constraint_activations(
 
 
 # ============================================================
+# Sprint H Part B(2026-05-09):4 个新聚合
+# 历史:weekly_review_audit.md 报告显示原 input 缺以下数据,导致 AI 无法做
+# (1)反模式触发率分析 (2)L3 grade 分布 (3)L4 risk_tier 分布
+# (4)BTC 实际走势 vs AI 判断对比。本 sprint 全部补齐。
+# ============================================================
+
+
+def _aggregate_anti_pattern_signals(
+    conn: sqlite3.Connection, *, week_start: datetime, week_end: datetime,
+) -> dict[str, Any]:
+    """聚合 strategy_runs.full_state_json.layers.l3.anti_pattern_flags 触发率。
+
+    每个反模式 5 类(extending_late_phase / against_long_cycle / chasing_breakout
+    _no_pullback / failing_at_resistance / after_extreme_event_no_reset)
+    分别统计触发次数 + 占总有效 run 比例。
+
+    Returns:
+      {total_runs_with_l3, anti_pattern_counts: {flag: count},
+       trigger_rates: {flag: float 0-1}, top_flag: str | None}
+    """
+    rows = conn.execute(
+        "SELECT json_extract(full_state_json,'$.layers.l3.anti_pattern_flags') "
+        "FROM strategy_runs "
+        "WHERE generated_at_utc >= ? AND generated_at_utc < ? "
+        "  AND json_extract(full_state_json,'$.layers.l3.opportunity_grade') "
+        "      IS NOT NULL",
+        (_to_iso(week_start), _to_iso(week_end)),
+    ).fetchall()
+
+    counts: dict[str, int] = {}
+    total = 0
+    import json as _json
+    for r in rows:
+        raw = r[0] if not hasattr(r, "keys") else r[0]
+        if raw is None:
+            continue
+        total += 1
+        try:
+            flags = _json.loads(raw) if isinstance(raw, str) else raw
+            if isinstance(flags, list):
+                for f in flags:
+                    if isinstance(f, str) and f:
+                        counts[f] = counts.get(f, 0) + 1
+        except (TypeError, ValueError):
+            continue
+
+    rates = {
+        flag: round(c / total, 4) if total > 0 else 0.0
+        for flag, c in counts.items()
+    }
+    top_flag = max(counts, key=lambda k: counts[k]) if counts else None
+    return {
+        "total_runs_with_l3": total,
+        "anti_pattern_counts": counts,
+        "trigger_rates": rates,
+        "top_flag": top_flag,
+    }
+
+
+def _aggregate_l3_grade_distribution(
+    conn: sqlite3.Connection, *, week_start: datetime, week_end: datetime,
+) -> dict[str, int]:
+    """聚合 L3 opportunity_grade 分布。Returns: {A, B, C, none, empty}"""
+    rows = conn.execute(
+        "SELECT json_extract(full_state_json, "
+        "       '$.layers.l3.opportunity_grade') AS l3_grade "
+        "FROM strategy_runs "
+        "WHERE generated_at_utc >= ? AND generated_at_utc < ?",
+        (_to_iso(week_start), _to_iso(week_end)),
+    ).fetchall()
+    out = {"A": 0, "B": 0, "C": 0, "none": 0, "empty": 0}
+    for r in rows:
+        g = r[0] if not hasattr(r, "keys") else r["l3_grade"]
+        if g in ("A", "B", "C", "none"):
+            out[g] += 1
+        else:
+            out["empty"] += 1
+    return out
+
+
+def _aggregate_l4_risk_tier_distribution(
+    conn: sqlite3.Connection, *, week_start: datetime, week_end: datetime,
+) -> dict[str, int]:
+    """聚合 L4 risk_tier 分布。Returns: {low, moderate, elevated, extreme, empty}"""
+    rows = conn.execute(
+        "SELECT json_extract(full_state_json, "
+        "       '$.layers.l4.risk_tier') AS l4r "
+        "FROM strategy_runs "
+        "WHERE generated_at_utc >= ? AND generated_at_utc < ?",
+        (_to_iso(week_start), _to_iso(week_end)),
+    ).fetchall()
+    out = {"low": 0, "moderate": 0, "elevated": 0, "extreme": 0, "empty": 0}
+    for r in rows:
+        t = r[0] if not hasattr(r, "keys") else r["l4r"]
+        if t in ("low", "moderate", "elevated", "extreme"):
+            out[t] += 1
+        else:
+            out["empty"] += 1
+    return out
+
+
+def _aggregate_weekly_price_action(
+    conn: sqlite3.Connection, *, week_start: datetime, week_end: datetime,
+) -> dict[str, Any]:
+    """从 price_candles 1d K 线读 7 天 BTC 走势(open/high/low/close)。
+
+    Returns:
+      {daily: [{date, open, high, low, close}, ...],
+       week_open, week_close, week_high, week_low,
+       week_pct_change, max_intra_drawdown_pct}
+    """
+    try:
+        rows = conn.execute(
+            "SELECT open_time_utc, open, high, low, close FROM price_candles "
+            "WHERE timeframe = '1d' AND symbol = 'BTCUSDT' "
+            "  AND open_time_utc >= ? AND open_time_utc < ? "
+            "ORDER BY open_time_utc",
+            (_to_iso(week_start)[:10], _to_iso(week_end)[:10] + "T23:59:59Z"),
+        ).fetchall()
+    except Exception:
+        rows = []
+    daily: list[dict[str, Any]] = []
+    for r in rows:
+        if hasattr(r, "keys"):
+            d = {
+                "date": str(r["open_time_utc"])[:10],
+                "open": float(r["open"]) if r["open"] is not None else None,
+                "high": float(r["high"]) if r["high"] is not None else None,
+                "low": float(r["low"]) if r["low"] is not None else None,
+                "close": float(r["close"]) if r["close"] is not None else None,
+            }
+        else:
+            d = {
+                "date": str(r[0])[:10],
+                "open": float(r[1]) if r[1] is not None else None,
+                "high": float(r[2]) if r[2] is not None else None,
+                "low": float(r[3]) if r[3] is not None else None,
+                "close": float(r[4]) if r[4] is not None else None,
+            }
+        daily.append(d)
+
+    if not daily:
+        return {
+            "daily": [],
+            "week_open": None, "week_close": None,
+            "week_high": None, "week_low": None,
+            "week_pct_change": None, "max_intra_drawdown_pct": None,
+        }
+
+    week_open = daily[0]["open"]
+    week_close = daily[-1]["close"]
+    week_high = max((d["high"] for d in daily if d["high"] is not None),
+                    default=None)
+    week_low = min((d["low"] for d in daily if d["low"] is not None),
+                   default=None)
+    week_pct_change = (
+        round((week_close - week_open) / week_open * 100.0, 3)
+        if week_open and week_close else None
+    )
+    # 简化 intra-week drawdown:max((d["high"] - 后续最低 low) / d["high"])
+    drawdowns = []
+    for i, d in enumerate(daily):
+        if d["high"] is None:
+            continue
+        lows_after = [
+            x["low"] for x in daily[i:] if x["low"] is not None
+        ]
+        if not lows_after:
+            continue
+        min_after = min(lows_after)
+        drawdowns.append((min_after - d["high"]) / d["high"] * 100.0)
+    max_intra_drawdown_pct = (
+        round(min(drawdowns), 3) if drawdowns else None
+    )
+    return {
+        "daily": daily,
+        "week_open": week_open,
+        "week_close": week_close,
+        "week_high": week_high,
+        "week_low": week_low,
+        "week_pct_change": week_pct_change,
+        "max_intra_drawdown_pct": max_intra_drawdown_pct,
+    }
+
+
+def _aggregate_master_runs_with_trade_plan(
+    conn: sqlite3.Connection, *, week_start: datetime, week_end: datetime,
+) -> list[dict[str, Any]]:
+    """提取本周内 master AI 真跑通 + 给了 trade_plan 的 run(供 prompt 让 AI 对比
+    系统当时判断 vs 后续实际走势)。
+
+    Returns:
+      list[{generated_at_bjt, btc_price_at_run, l3_grade, l4_risk_tier,
+            master_direction, entry_zone, stop_loss, take_profit_zones}]
+    """
+    rows = conn.execute(
+        "SELECT generated_at_bjt, btc_price_usd, fallback_level, "
+        "       full_state_json FROM strategy_runs "
+        "WHERE generated_at_utc >= ? AND generated_at_utc < ? "
+        "  AND run_trigger IN ('scheduled', 'manual_api', 'manual') "
+        "  AND (fallback_level IS NULL OR fallback_level = '') "
+        "ORDER BY generated_at_utc",
+        (_to_iso(week_start), _to_iso(week_end)),
+    ).fetchall()
+
+    import json as _json
+    out: list[dict[str, Any]] = []
+    for r in rows:
+        raw = r["full_state_json"] if hasattr(r, "keys") else r[3]
+        try:
+            state = _json.loads(raw) if isinstance(raw, str) else raw
+        except (TypeError, ValueError):
+            continue
+        layers = state.get("layers") or {}
+        master = layers.get("master") or {}
+        l3 = layers.get("l3") or {}
+        l4 = layers.get("l4") or {}
+        # v1.3 schema: trade_plan
+        tp = master.get("trade_plan")
+        nt = master.get("new_thesis")  # v1.4
+        if not (tp or nt):
+            continue
+        rec = {
+            "generated_at_bjt": (
+                r["generated_at_bjt"] if hasattr(r, "keys") else r[0]
+            ),
+            "btc_price_at_run": (
+                r["btc_price_usd"] if hasattr(r, "keys") else r[1]
+            ),
+            "l3_grade": l3.get("opportunity_grade"),
+            "l4_risk_tier": l4.get("risk_tier"),
+        }
+        if tp:
+            rec.update({
+                "schema": "v1.3",
+                "master_direction": tp.get("direction"),
+                "entry_zone": tp.get("entry_price_zone"),
+                "stop_loss": tp.get("stop_loss"),
+                "take_profit_zones": tp.get("take_profit_zones"),
+                "position_size_pct": tp.get("position_size_pct"),
+            })
+        else:
+            rec.update({
+                "schema": "v1.4",
+                "master_direction": nt.get("direction"),
+                "entry_zone": [
+                    o.get("price") for o in (nt.get("entry_orders") or [])
+                ],
+                "stop_loss": (nt.get("stop_loss") or {}).get("price"),
+                "take_profit_zones": [
+                    o.get("price") for o in (nt.get("take_profit") or [])
+                ],
+                "position_size_pct": None,
+            })
+        out.append(rec)
+    return out
+
+
+# ============================================================
 # 入口:build_weekly_review_input
 # ============================================================
 
@@ -441,6 +700,22 @@ def build_weekly_review_input(
         conn, week_start=week_start, week_end=week_end,
     )
     constraints = _aggregate_constraint_activations(
+        conn, week_start=week_start, week_end=week_end,
+    )
+    # Sprint H Part B:4 个新聚合
+    anti_pattern = _aggregate_anti_pattern_signals(
+        conn, week_start=week_start, week_end=week_end,
+    )
+    l3_grade_dist = _aggregate_l3_grade_distribution(
+        conn, week_start=week_start, week_end=week_end,
+    )
+    l4_risk_dist = _aggregate_l4_risk_tier_distribution(
+        conn, week_start=week_start, week_end=week_end,
+    )
+    price_action = _aggregate_weekly_price_action(
+        conn, week_start=week_start, week_end=week_end,
+    )
+    master_runs_with_plan = _aggregate_master_runs_with_trade_plan(
         conn, week_start=week_start, week_end=week_end,
     )
 
@@ -487,4 +762,10 @@ def build_weekly_review_input(
             "current_virtual_account": current_va,
             "now_utc": _to_iso(now_utc),
         },
+        # Sprint H Part B(2026-05-09):4 个新聚合 + 1 个 master 决策快照
+        "anti_pattern_signals": anti_pattern,
+        "l3_grade_distribution": l3_grade_dist,
+        "l4_risk_tier_distribution": l4_risk_dist,
+        "weekly_price_action": price_action,
+        "master_runs_with_trade_plan": master_runs_with_plan,
     }

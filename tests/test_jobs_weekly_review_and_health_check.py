@@ -31,8 +31,12 @@ from src.scheduler.jobs import (
 # ============================================================
 
 def test_weekly_review_registered():
+    """Sprint H Part A:生产 yaml 'weekly_review' 现走 retry wrapper。
+    job_weekly_review 通过新 key 'weekly_review_no_retry' 仍可单测直调。"""
+    from src.scheduler.jobs import job_weekly_review_with_retry
     assert "weekly_review" in _JOB_FUNCTIONS
-    assert _JOB_FUNCTIONS["weekly_review"] is job_weekly_review
+    assert _JOB_FUNCTIONS["weekly_review"] is job_weekly_review_with_retry
+    assert _JOB_FUNCTIONS["weekly_review_no_retry"] is job_weekly_review
 
 
 # ============================================================

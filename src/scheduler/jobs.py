@@ -1420,6 +1420,144 @@ def job_weekly_review(
     )
 
 
+# ============================================================
+# Sprint H Part A(2026-05-09):weekly_review 加 retry
+#   设计:复用 ai_retry 配置(30/60/60 + 3h 窗口,Sprint F.2)。
+#   时间表:周日 22:00 主跑失败 → 22:30 / 23:30 / 0:30 三次重试 → 1:00 放弃,
+#   等下周日 22:00。跨日不补救(一周一次任务,跨日补救扰乱节奏)。
+# ============================================================
+
+def _enqueue_weekly_review(
+    *,
+    delay_sec: int,
+    attempt: int,
+    retry_start_utc: Optional[str] = None,
+) -> bool:
+    """schedule weekly_review_with_retry 在 delay_sec 后再跑(date trigger)。
+
+    Returns:
+        True 调度成功;False 无 _active_scheduler(单测 / 直调路径)。
+    """
+    sched = _active_scheduler
+    if sched is None:
+        logger.info(
+            "weekly_review retry: no active scheduler "
+            "(test/direct-invoke path),attempt=%d not enqueued",
+            attempt,
+        )
+        return False
+    try:
+        from datetime import datetime, timedelta, timezone
+        run_date = datetime.now(timezone.utc) + timedelta(seconds=delay_sec)
+        sched.add_job(
+            func=job_weekly_review_with_retry,
+            trigger="date",
+            run_date=run_date,
+            kwargs={
+                "attempt": attempt,
+                "retry_start_utc": retry_start_utc,
+            },
+            id=f"weekly_review_retry_{attempt}_{run_date.isoformat()}",
+            replace_existing=True,
+        )
+        logger.info(
+            "weekly_review retry enqueued: attempt=%d run_date=%s",
+            attempt, run_date.isoformat(),
+        )
+        return True
+    except Exception as e:
+        logger.warning("_enqueue_weekly_review failed: %s", e)
+        return False
+
+
+def job_weekly_review_with_retry(
+    *,
+    attempt: int = 1,
+    retry_start_utc: Optional[Any] = None,
+    conn_factory: Optional[Callable[[], Any]] = None,
+) -> dict[str, Any]:
+    """job_weekly_review 包装 + RetryPolicy 异步重试(共享 ai_retry 间隔)。
+
+    Sprint H Part A(2026-05-09):
+      - 共享 base.yaml::ai_retry.intervals_minutes ([30, 60, 60])
+      - 但 max_attempts_per_layer=4 覆盖(允许 main + 3 retry,匹配用户
+        spec "22:30 / 23:30 / 0:30 三次重试")
+      - compute_backoff_seconds(attempt) 用 attempt 直接索引(intervals[0]=30
+        作首次 retry,intervals[1]=60 第二次,intervals[2]=60 第三次)
+      - 与 pipeline_run_with_retry 不同(pipeline 用 attempt+1,实际 main
+        + 2 retry);理由:pipeline 一天一次窗口短可只 2 retry,
+        weekly 一周一次需更长抢救窗口
+
+    时间表(BJT 22:00 main 失败):
+      22:00 main fail (attempt=1)
+      22:30 retry 1     (attempt=2,+30min = intervals[0])
+      23:30 retry 2     (attempt=3,+60min = intervals[1])
+      0:30  retry 3     (attempt=4,+60min = intervals[2])
+      1:00  exhausted   (3h 窗口 + max_attempts=4 双重收敛)
+
+    流程:
+      1. 调 job_weekly_review()
+      2. 若 ai_status startswith 'degraded' 或 input_builder_failed:
+         - attempt+1 ≤ 4 且 in 3h 窗口 → schedule 同 job
+         - 否则 → 放弃,result 标 retry_exhausted
+      3. 成功 → 直接返回(注意:job_weekly_review 即使 AI 失败也写 fallback,
+         retry 下次 UPSERT 覆盖)
+    """
+    from datetime import datetime, timezone
+    from src.ai.retry_policy import RetryPolicy
+
+    result = job_weekly_review(conn_factory=conn_factory)
+
+    # 判定:AI 失败 OR input builder 失败
+    by_collector = result.get("by_collector") or {}
+    ai_status = str(by_collector.get("ai_status") or "")
+    failed = (
+        ai_status.startswith("degraded")
+        or "input_builder_failed" in by_collector.values()
+        or result.get("status") in ("error", "fatal_error")
+    )
+    if not failed:
+        return result
+
+    # max_attempts=4 覆盖:1 main + 3 retry
+    rp = RetryPolicy(max_attempts_per_layer=4)
+    now = datetime.now(timezone.utc)
+    now_iso = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+    if retry_start_utc is None:
+        retry_start_utc = now_iso
+
+    if not rp.should_retry(
+        attempt=attempt + 1,
+        run_started_at_utc=str(retry_start_utc),
+        now_utc=now_iso,
+    ):
+        logger.error(
+            "weekly_review RETRY EXHAUSTED: attempt=%d "
+            "(超 max_attempts=4 或超 %.1fh 窗口)",
+            attempt, rp.total_window_hours,
+        )
+        result["retry_exhausted"] = True
+        result["retry_attempts"] = attempt
+        return result
+
+    # compute_backoff_seconds(attempt) — attempt=1 main fail → intervals[0]=30min
+    backoff = rp.compute_backoff_seconds(attempt)
+    logger.warning(
+        "weekly_review failed (attempt %d, ai_status=%s), "
+        "scheduling retry in %ds (attempt %d)",
+        attempt, ai_status, backoff, attempt + 1,
+    )
+    enq = _enqueue_weekly_review(
+        delay_sec=backoff,
+        attempt=attempt + 1,
+        retry_start_utc=retry_start_utc,
+    )
+    result["retry_scheduled"] = enq
+    result["retry_next_attempt"] = attempt + 1
+    result["retry_next_delay_sec"] = backoff
+    return result
+
+
 _JOB_FUNCTIONS: dict[str, Callable[..., Any]] = {
     "pipeline_run": job_pipeline_run,  # 单测/直调入口,生产 yaml 用下面 2 个 wrapper
     # Sprint 2.7-C:pipeline 2 个 wrapper(对应 yaml 2 个 cron 条目)
@@ -1440,7 +1578,10 @@ _JOB_FUNCTIONS: dict[str, Callable[..., Any]] = {
     "hard_invalidation_monitor": job_hard_invalidation_monitor,
     "position_health_check": job_position_health_check,
     # Sprint 1.10-H v1.4 §3.3.9 + §8.1 周复盘 cron(每周日 22:00 BJT)
-    "weekly_review": job_weekly_review,
+    # Sprint H Part A(2026-05-09):生产 yaml 用 retry wrapper;
+    # job_weekly_review 单独保留供单测 / 直调
+    "weekly_review": job_weekly_review_with_retry,
+    "weekly_review_no_retry": job_weekly_review,   # 单测直调入口
     "cleanup": job_cleanup,
 }
 

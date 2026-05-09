@@ -37,9 +37,110 @@ from .anti_pattern_signals import compute_anti_pattern_signals
 from .circuit_breaker import CircuitBreaker
 from .client import build_anthropic_client
 from .validator import validate_master_output
+from ..strategy.factor_dependencies import fresh_ratio_for_layer
 
 
 logger = logging.getLogger(__name__)
+
+
+# ============================================================
+# Sprint E Step 3:因子粒度 stale 降级 helpers
+# ============================================================
+
+def _stale_state_from_context(
+    context: dict[str, Any],
+) -> tuple[dict[str, bool], dict[str, float]]:
+    """从 run_full_a context 取 source_stale_map + source_hours_map(由
+    state_builder 注入)。无则返空 dict(向后兼容,无 stale 守卫)。"""
+    return (
+        dict(context.get("_source_stale_map") or {}),
+        dict(context.get("_source_hours_map") or {}),
+    )
+
+
+def _build_data_missing_stub(
+    layer_id: int, agent: Any, fresh_ratio: float,
+) -> dict[str, Any]:
+    """Sprint E Step 3:某层 fresh_ratio == 0 时不调 AI,直接构造 stub。
+    省 token + AI 不会瞎编 stale 数据具体值。"""
+    stub = agent._fallback_output()
+    stub["status"] = "degraded_data_missing"
+    stub["narrative"] = (
+        f"L{layer_id} 依赖数据全部过期(fresh_ratio=0),orchestrator 跳过 "
+        f"AI 调用直接 fallback。本层不参与决策。"
+    )
+    if "confidence" in stub:
+        stub["confidence"] = 0.0
+    if "stance_confidence" in stub:
+        stub["stance_confidence"] = 0.0
+    notes = list(stub.get("notes") or [])
+    notes.append("factor_grain_data_missing_ai_skipped")
+    stub["notes"] = notes
+    stub["_factor_grain"] = {
+        "fresh_ratio": 0.0, "data_missing": True, "ai_skipped": True,
+        "layer_id": layer_id,
+    }
+    return stub
+
+
+def _apply_factor_grain_override(
+    layer_id: int,
+    layer_output: dict[str, Any],
+    fresh_ratio: float,
+) -> dict[str, Any]:
+    """Sprint E Step 3:AI 跑完后,按 fresh_ratio 调 confidence + status。
+      fresh_ratio == 1   → 不动
+      0.5 <= ratio < 1   → confidence × 0.6,status=degraded_factor_grain(若原是 ok)
+      0 < ratio < 0.5    → confidence × 0.3,status=degraded_factor_grain
+      ratio == 0         → 应已被 _build_data_missing_stub 拦截,这里防御性走
+                            data_missing 路径
+    """
+    out = dict(layer_output)
+    notes_extra: list[str] = []
+    if fresh_ratio >= 1.0:
+        out["_factor_grain"] = {
+            "fresh_ratio": 1.0, "data_missing": False, "ai_skipped": False,
+            "layer_id": layer_id,
+        }
+        return out
+
+    if fresh_ratio <= 0.0:
+        out["status"] = "degraded_data_missing"
+        if "confidence" in out:
+            out["confidence"] = 0.0
+        if "stance_confidence" in out:
+            out["stance_confidence"] = 0.0
+        multiplier = 0.0
+    elif fresh_ratio < 0.5:
+        if not str(out.get("status", "")).startswith("degraded"):
+            out["status"] = "degraded_factor_grain"
+        multiplier = 0.3
+        for k in ("confidence", "stance_confidence"):
+            if k in out and isinstance(out[k], (int, float)):
+                out[k] = round(float(out[k]) * multiplier, 4)
+    else:
+        if not str(out.get("status", "")).startswith("degraded"):
+            out["status"] = "degraded_factor_grain"
+        multiplier = 0.6
+        for k in ("confidence", "stance_confidence"):
+            if k in out and isinstance(out[k], (int, float)):
+                out[k] = round(float(out[k]) * multiplier, 4)
+
+    notes_extra.append(
+        f"factor_grain: fresh_ratio={fresh_ratio:.2f} → confidence × {multiplier}"
+    )
+    notes = list(out.get("notes") or [])
+    notes.extend(notes_extra)
+    out["notes"] = notes
+
+    out["_factor_grain"] = {
+        "fresh_ratio": round(fresh_ratio, 2),
+        "data_missing": fresh_ratio == 0.0,
+        "ai_skipped": False,
+        "layer_id": layer_id,
+        "confidence_multiplier": multiplier,
+    }
+    return out
 
 
 class AIOrchestrator:
@@ -379,6 +480,17 @@ class AIOrchestrator:
         result: dict[str, Any],
     ) -> dict[str, Any]:
         t0 = time.time()
+        # Sprint E Step 3:从 context 取 stale_map / hours_map(state_builder 注入)
+        stale_map, hours_map = _stale_state_from_context(context)
+        fresh_ratio = fresh_ratio_for_layer(1, stale_map) if stale_map else 1.0
+        # 全 stale → 不调 AI
+        if stale_map and fresh_ratio == 0.0:
+            out = _build_data_missing_stub(1, self._agents["l1"], fresh_ratio)
+            result["latency_ms"]["l1"] = int((time.time() - t0) * 1000)
+            if result["status"] == "ok":
+                result["status"] = "degraded_l1_data_missing"
+            return out
+
         try:
             chart_b64 = self._chart.render_l1_chart(
                 shared["klines_1d"],
@@ -395,6 +507,10 @@ class AIOrchestrator:
 
         l1_input = dict(context.get("l1") or {})
         l1_input["chart_b64"] = chart_b64
+        # Sprint E Step 2:让 sub-agent prompt 看到 stale 状态
+        if stale_map:
+            l1_input["source_stale_map"] = stale_map
+            l1_input["source_hours_map"] = hours_map
         try:
             # Sprint 1.9-A.5.2 fix:每层新建 client 避中转站连接复用限流
             out = self._agents["l1"].analyze(
@@ -404,6 +520,10 @@ class AIOrchestrator:
             logger.warning("orchestrator: L1 analyze raised: %s", e)
             out = self._agents["l1"]._fallback_output()
             out["status"] = "degraded_l1_failed"
+
+        # Sprint E Step 3:fresh_ratio < 1 → 调整 confidence + status
+        if stale_map and fresh_ratio < 1.0:
+            out = _apply_factor_grain_override(1, out, fresh_ratio)
 
         result["latency_ms"]["l1"] = int((time.time() - t0) * 1000)
         if not str(out.get("status", "")).startswith("success"):
@@ -419,6 +539,16 @@ class AIOrchestrator:
         result: dict[str, Any],
     ) -> dict[str, Any]:
         t0 = time.time()
+        # Sprint E Step 3
+        stale_map, hours_map = _stale_state_from_context(context)
+        fresh_ratio = fresh_ratio_for_layer(2, stale_map) if stale_map else 1.0
+        if stale_map and fresh_ratio == 0.0:
+            out = _build_data_missing_stub(2, self._agents["l2"], fresh_ratio)
+            result["latency_ms"]["l2"] = int((time.time() - t0) * 1000)
+            if result["status"] == "ok":
+                result["status"] = "degraded_l2_data_missing"
+            return out
+
         try:
             chart_b64 = self._chart.render_l2_chart(
                 shared["klines_1d"],
@@ -437,6 +567,9 @@ class AIOrchestrator:
         l2_input = dict(context.get("l2") or {})
         l2_input["l1_output"] = l1_out
         l2_input["chart_b64"] = chart_b64
+        if stale_map:
+            l2_input["source_stale_map"] = stale_map
+            l2_input["source_hours_map"] = hours_map
         try:
             out = self._agents["l2"].analyze(
                 l2_input, client=build_anthropic_client(),
@@ -445,6 +578,9 @@ class AIOrchestrator:
             logger.warning("orchestrator: L2 analyze raised: %s", e)
             out = self._agents["l2"]._fallback_output()
             out["status"] = "degraded_l2_failed"
+
+        if stale_map and fresh_ratio < 1.0:
+            out = _apply_factor_grain_override(2, out, fresh_ratio)
 
         result["latency_ms"]["l2"] = int((time.time() - t0) * 1000)
         if not str(out.get("status", "")).startswith("success"):
@@ -462,6 +598,23 @@ class AIOrchestrator:
         result: dict[str, Any],
     ) -> dict[str, Any]:
         t0 = time.time()
+        # Sprint E Step 3:L3 衍生层无直接 indicator,但若 L1 或 L2 上游已经
+        # data_missing → L3 也直接 data_missing(避免基于 stale 上游胡说)
+        l1_dm = (l1_out or {}).get("status") == "degraded_data_missing"
+        l2_dm = (l2_out or {}).get("status") == "degraded_data_missing"
+        if l1_dm or l2_dm:
+            out = _build_data_missing_stub(3, self._agents["l3"], 0.0)
+            out["narrative"] = (
+                "L3 上游 L1/L2 数据全部过期,衍生层无法判断,"
+                "opportunity_grade=none,跳过 AI 调用"
+            )
+            if "opportunity_grade" in out:
+                out["opportunity_grade"] = "none"
+            result["latency_ms"]["l3"] = int((time.time() - t0) * 1000)
+            if result["status"] == "ok":
+                result["status"] = "degraded_l3_data_missing"
+            return out
+
         # L3 不需要图;计算 anti_pattern_signals(需 l1+l2 输出)
         extreme_event_flags = (context.get("l5") or {}).get(
             "extreme_event_flags") or {}
@@ -475,6 +628,13 @@ class AIOrchestrator:
         l3_input["l1_output"] = l1_out
         l3_input["l2_output"] = l2_out
         l3_input["anti_pattern_signals"] = anti_pattern_signals
+        # Sprint E Step 2:L3 prompt 没直接 indicator,但仍透传 stale_map 让 AI
+        # 看到上游 source 状态(L3 prompt 段空但纪律段在,引导 AI 据 L1/L2 status
+        # 联动)
+        stale_map, hours_map = _stale_state_from_context(context)
+        if stale_map:
+            l3_input["source_stale_map"] = stale_map
+            l3_input["source_hours_map"] = hours_map
         try:
             out = self._agents["l3"].analyze(
                 l3_input, client=build_anthropic_client(),
@@ -483,6 +643,14 @@ class AIOrchestrator:
             logger.warning("orchestrator: L3 analyze raised: %s", e)
             out = self._agents["l3"]._fallback_output()
             out["status"] = "degraded_l3_failed"
+
+        # Sprint E Step 3:L3 fresh_ratio 永远 = 1.0(LAYER_RELEVANT_INDICATORS[3]=()),
+        # 但 L1 / L2 是 degraded_factor_grain 时,L3 也降一档
+        l1_status = str((l1_out or {}).get("status") or "")
+        l2_status = str((l2_out or {}).get("status") or "")
+        if l1_status.startswith("degraded") or l2_status.startswith("degraded"):
+            # L3 fresh_ratio 用 0.6(轻度 degraded,沿用 0.5 <= ratio < 1 段)
+            out = _apply_factor_grain_override(3, out, 0.6)
 
         result["latency_ms"]["l3"] = int((time.time() - t0) * 1000)
         if not str(out.get("status", "")).startswith("success"):
@@ -500,6 +668,16 @@ class AIOrchestrator:
         result: dict[str, Any],
     ) -> dict[str, Any]:
         t0 = time.time()
+        # Sprint E Step 3
+        stale_map, hours_map = _stale_state_from_context(context)
+        fresh_ratio = fresh_ratio_for_layer(4, stale_map) if stale_map else 1.0
+        if stale_map and fresh_ratio == 0.0:
+            out = _build_data_missing_stub(4, self._agents["l4"], fresh_ratio)
+            result["latency_ms"]["l4"] = int((time.time() - t0) * 1000)
+            if result["status"] == "ok":
+                result["status"] = "degraded_l4_data_missing"
+            return out
+
         try:
             chart_b64 = self._chart.render_l4_chart(
                 shared["klines_1d"],
@@ -520,6 +698,9 @@ class AIOrchestrator:
         l4_input["l2_output"] = l2_out
         l4_input["l3_output"] = l3_out
         l4_input["chart_b64"] = chart_b64
+        if stale_map:
+            l4_input["source_stale_map"] = stale_map
+            l4_input["source_hours_map"] = hours_map
         try:
             out = self._agents["l4"].analyze(
                 l4_input, client=build_anthropic_client(),
@@ -528,6 +709,9 @@ class AIOrchestrator:
             logger.warning("orchestrator: L4 analyze raised: %s", e)
             out = self._agents["l4"]._fallback_output()
             out["status"] = "degraded_l4_failed"
+
+        if stale_map and fresh_ratio < 1.0:
+            out = _apply_factor_grain_override(4, out, fresh_ratio)
 
         result["latency_ms"]["l4"] = int((time.time() - t0) * 1000)
         if not str(out.get("status", "")).startswith("success"):
@@ -543,7 +727,15 @@ class AIOrchestrator:
         """L5 独立做宏观判断。Sprint 1.10-F:失败时用 CircuitBreaker.apply_macro_fallback()
         硬编码兜底(D4=a),master 仍跑(§6.4.2)。"""
         t0 = time.time()
+        # Sprint E Step 3:L5 是非关键层,即使全 stale 仍跑 AI(events_calendar
+        # 是本地数据,L5 还能输出基础 stance);只调 confidence 不跳 AI
+        stale_map, hours_map = _stale_state_from_context(context)
+        fresh_ratio = fresh_ratio_for_layer(5, stale_map) if stale_map else 1.0
+
         l5_input = dict(context.get("l5") or {})
+        if stale_map:
+            l5_input["source_stale_map"] = stale_map
+            l5_input["source_hours_map"] = hours_map
         try:
             out = self._agents["l5"].analyze(
                 l5_input, client=build_anthropic_client(),
@@ -552,6 +744,9 @@ class AIOrchestrator:
             logger.warning("orchestrator: L5 analyze raised: %s", e)
             out = self._agents["l5"]._fallback_output()
             out["status"] = "degraded_l5_failed"
+
+        if stale_map and fresh_ratio < 1.0:
+            out = _apply_factor_grain_override(5, out, fresh_ratio)
 
         # Sprint 1.10-F:L5 失败时,用 CircuitBreaker.apply_macro_fallback() 硬编码 macro 替代
         # master 仍跑,但用此硬编码 macro 而非 _fallback_output(后者无 macro 字段)

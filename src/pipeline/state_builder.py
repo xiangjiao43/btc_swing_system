@@ -360,6 +360,18 @@ class StrategyStateBuilder:
         try:
             context = ContextBuilder(self.conn).build_full_context()
             previous_run = StrategyStateDAO.get_latest_state(self.conn)
+            # Sprint E Step 3:注入 source_stale_map / source_hours_map 给
+            # orchestrator 用(sub-agent prompt + confidence override)
+            try:
+                from src.data.freshness import compute_stale_state
+                stale_map, hours_map = compute_stale_state(self.conn)
+                context["_source_stale_map"] = stale_map
+                context["_source_hours_map"] = hours_map
+            except Exception as _e:
+                logger.warning(
+                    "Sprint E: compute_stale_state 失败,orchestrator 跑无 "
+                    "factor-grain 守卫: %s", _e,
+                )
             result = AIOrchestrator().run_full_a(context)
             mapped = _map_orchestrator_result_to_state(
                 result, context, self.conn,

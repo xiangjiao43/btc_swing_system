@@ -308,6 +308,22 @@ def stale_summary_for_layer(
     return out
 
 
+def compute_stale_state(conn: Any) -> tuple[dict[str, bool], dict[str, float]]:
+    """Sprint E Step 3:批量算 stale_map + hours_map(orchestrator 喂 sub-agent
+    用)。stale_map = {source: is_stale};hours_map = {source: hours_since_last
+    _success}(None 时填 0.0)。"""
+    rows = compute_all_freshness(conn)
+    stale_map: dict[str, bool] = {}
+    hours_map: dict[str, float] = {}
+    for f in rows:
+        stale_map[f.source] = f.is_stale
+        hours_map[f.source] = (
+            f.hours_since_last_success
+            if f.hours_since_last_success is not None else 0.0
+        )
+    return stale_map, hours_map
+
+
 def freshness_to_dict(f: SourceFreshness) -> dict[str, Any]:
     """SourceFreshness → dict(用于 JSON / state.data_freshness 持久化)。"""
     return {

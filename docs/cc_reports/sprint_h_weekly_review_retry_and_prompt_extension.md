@@ -345,3 +345,146 @@ for k in ['anti_pattern_signals', 'l3_grade_distribution',
 ## 详细报告
 
 (本文件即详细报告)
+
+---
+
+## 附录 — 服务器部署 + 验证(2026-05-09 收尾)
+
+### 1. 部署:git pull + restart ✓
+
+```
+$ ssh ubuntu@124.222.89.86 "cd /home/ubuntu/btc_swing_system && git pull && \
+    sudo systemctl restart btc-strategy.service && sleep 5 && \
+    sudo systemctl status btc-strategy.service --no-pager | head -15"
+
+c8f7bf4..0f75ad5  main  ->  origin/main
+Fast-forward (11 files changed, +2157)
+● btc-strategy.service - active (running) since Sat 2026-05-09 15:39:15 CST; 5s ago
+```
+
+### 2. 服务器 pytest 全 suite ✓
+
+```
+$ ssh ubuntu@124.222.89.86 ".venv/bin/pytest --tb=no -q"
+1693 passed, 1 skipped, 648 warnings in 143.93s (0:02:23)
+```
+
+跟本地完全一致。
+
+### 3. 5 个新字段实测填齐 ✓(直接调 build_weekly_review_input)
+
+注:`weekly_reviews` 表 schema 只存 `output_json` 不存 input。所以验证方式
+是直接调 `build_weekly_review_input(conn)` dump 5 字段:
+
+```
+=== 5 new fields ===
+  anti_pattern_signals: present=True size=4
+  l3_grade_distribution: present=True size=5
+  l4_risk_tier_distribution: present=True size=5
+  weekly_price_action: present=True size=7
+  master_runs_with_trade_plan: present=True size=1
+
+=== anti_pattern_signals ===
+{
+  "total_runs_with_l3": 65,
+  "anti_pattern_counts": {
+    "extending_late_phase": 35,
+    "failing_at_resistance": 1
+  },
+  "trigger_rates": {
+    "extending_late_phase": 0.5385,
+    "failing_at_resistance": 0.0154
+  },
+  "top_flag": "extending_late_phase"
+}
+
+=== l3_grade_distribution ===
+{ "A": 0, "B": 10, "C": 4, "none": 51, "empty": 0 }
+
+=== l4_risk_tier_distribution ===
+{ "low": 0, "moderate": 13, "elevated": 44, "extreme": 0, "empty": 8 }
+
+=== weekly_price_action summary ===
+daily_count: 8
+week_open: 78191.9
+week_close: 80331.3
+week_pct_change: 2.736
+max_intra_drawdown_pct: -4.457
+
+=== master_runs_with_trade_plan count ===
+count: 1
+first run keys: ['generated_at_bjt', 'btc_price_at_run', 'l3_grade',
+                 'l4_risk_tier', 'schema', 'master_direction', 'entry_zone',
+                 'stop_loss', 'take_profit_zones', 'position_size_pct']
+```
+
+5 字段全部真填,结构对。注意 `master_runs_with_trade_plan` 只有 1 条 —
+跟 Sprint G 审计结论一致(过去 7 天只有 5/3 16:08 那一次成功 B 级 master)。
+
+### 4. AI 真出 → fallback ✗(暴露独立生产问题)
+
+```
+$ ssh ubuntu@... ".venv/bin/python -c 'from src.scheduler.jobs \
+    import job_weekly_review; print(job_weekly_review())'"
+
+weekly_review_analyst: attempt 1 failed: Error code: 400 - Provider API error:
+Model 'claude-sonnet-4-5-20250929' is not supported.
+weekly_review_analyst: attempt 2 failed: Error code: 400 - Provider API error:
+Model 'claude-sonnet-4-5-20250929' is not supported.
+{'by_collector': {'weekly_review': 'completed', 'week_start_utc': '2026-05-04',
+'critical_count': 1, 'ai_status': 'degraded_ai_failed'}, ...}
+```
+
+DB row 上传成功(`week_start_utc=2026-05-04` 真插了),但 `output_json`
+是 fallback 内容(`status: degraded_ai_failed`,7 段 JSON 结构齐但 AI 没产文本)。
+
+**由于 AI 没真跑,无法验证「AI 真给的 adjustment_recommendations 是否含
+具体调整路径」**。fallback 第 1 条建议是 hardcoded `{
+"目标": "恢复周复盘 AI 正常运行",
+"建议": "检查 anthropic API key + 中转站状态",
+"优先级": "high",
+"影响": "周复盘缺失,无法发现硬约束阈值过严/过松问题"
+}` — 这是 fallback 文案,不是 AI 真给的「具体路径」格式。
+
+#### 4.1 根因 — model id 不对
+
+`claude-sonnet-4-5-20250929` 在 alphanode 中转站不支持。需要查
+`base.yaml::weekly_review_analyst.model` 改成中转站支持的 id(可能是
+`claude-sonnet-4-5` 或 `claude-haiku-4-5-20251001`)。
+
+这是一个**独立生产问题**,**不属于 Sprint H 范围**。Sprint H 改的是
+input + prompt 文本,model id 在 yaml 配置里。建议 Sprint I 候选:
+- 列 alphanode 实际支持的 Anthropic model id
+- 改 base.yaml 所有 agent 的 model 字段对齐
+- 1 次试跑 manual trigger 验 AI 真出非 fallback
+
+#### 4.2 master AI 用 claude-sonnet-4-5-20250929 跑通了 ✓
+
+5/9 中午 11:35 master AI(同 model id)成功跑完 — 见 `master_runs_with_trade_plan`
+里的 5/3 run 数据。说明 alphanode 对该 model id 的支持**不稳定 / 限速 /
+某个时间窗口才支持**。需要 alphanode 客服侧确认。
+
+或者:weekly_review 走的是 anthropic Python SDK(直连 anthropic.com),
+master 走的是 OpenAI SDK 兼容 endpoint(alphanode 中转)— 两边对 model id
+的支持不同。需查 BaseAgent.run() 走的是哪个 client。
+
+### 部署四件事清单(更新)
+
+| 步骤 | 状态 |
+|---|---|
+| 本地 pytest 通过 | ✅ 1693 passed |
+| GitHub push(commits c7552f5 + ede2152 + 0f75ad5) | ✅ |
+| 服务器 git pull | ✅ 已拉到 0f75ad5 |
+| 服务器 systemctl restart | ✅ active since 2026-05-09 15:39:15 CST |
+| 服务器 pytest 全 suite | ✅ 1693 passed, 1 skipped(同本地) |
+| 5 字段填齐验证 | ✅ 真数据有内容(详见附录 §3) |
+| AI 真跑(非 fallback)| ❌ model id 不支持,走 fallback |
+| 生产 DB 迁移 | N/A |
+
+### 后续 backlog(进 Sprint I 候选)
+
+1. **修 weekly_review_analyst model id**(必跑)— alphanode 不支持
+   `claude-sonnet-4-5-20250929`,需查支持列表 + 改 yaml + 重测。
+2. **5/10 周日 22:00 自然首跑** — 即使 model id 修了,需观察 22:00
+   是否真触发 + retry 兜底是否真 enqueue + AI 真出含具体路径。
+3. **scheduler 重启时正排队的 retry 任务丢失** — 局限,与 master AI retry 相同。

@@ -152,12 +152,16 @@ jobs:
   # Sprint 1.10-G v1.4 §10.4.1 新增:持仓期 4h 健康检查
   # Sprint 1.10-H D2=a:接通 EmergencySimplifiedA 真 AI(trigger='health_check' 区分场景)
   position_health_check:
-    enabled: true
+    # Sprint E(2026-05-09)用户决策关闭(B=d):中长线 4h 持仓体检过密,且
+    # 兜底机制已足够(price ±3% event_price / macro 事件 / hard_invalidation
+    # 1h 规则平仓 / 16:05 scheduled 每日 master 复评)。关闭后 0 次/天此 AI
+    # 调用。
+    enabled: false
     interval: '4h'
     misfire_grace_time: 300
     coalesce: true
     max_instances: 1
-    description: '持仓期 4h 健康检查;无 active thesis 直接返回;有 thesis 调 EmergencySimplifiedA(trigger=health_check)真 AI 评估'
+    description: '持仓期 4h 健康检查(Sprint E disabled,详见 yaml 注释)'
 
   # Sprint 1.10-H v1.4 §3.3.9 + §8.1 新增:周复盘 AI(每周日 22:00 BJT)
   weekly_review:

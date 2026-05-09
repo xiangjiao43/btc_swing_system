@@ -51,11 +51,22 @@ def _seed_alias_double_write(
 # 任务 A.1:no duplicate ts
 # ============================================================
 
+def _two_recent_days() -> tuple[str, str]:
+    """Sprint D fix:相对 now() 的两个紧邻日(yesterday-1 + yesterday),
+    避免 hardcode 日期遇到 lookback 滚动边界丢行。"""
+    from datetime import datetime, timedelta, timezone
+    today = datetime.now(timezone.utc).date()
+    d1 = (today - timedelta(days=2)).strftime("%Y-%m-%dT00:00:00Z")
+    d2 = (today - timedelta(days=1)).strftime("%Y-%m-%dT00:00:00Z")
+    return d1, d2
+
+
 def test_get_all_metrics_lsr_no_duplicate_ts(db_conn):
     """生产 DB 上每个 daily ts 都被 alias 双写过 → get_all_metrics 返回的
     long_short_ratio Series 必须每 ts 仅 1 行。"""
-    _seed_alias_double_write(db_conn, "2026-04-28T00:00:00Z", 0.92)
-    _seed_alias_double_write(db_conn, "2026-04-29T00:00:00Z", 0.80)
+    d1, d2 = _two_recent_days()
+    _seed_alias_double_write(db_conn, d1, 0.92)
+    _seed_alias_double_write(db_conn, d2, 0.80)
 
     metrics = DerivativesDAO.get_all_metrics(db_conn, lookback_days=10)
     s = metrics["long_short_ratio"].dropna()
@@ -69,10 +80,11 @@ def test_get_all_metrics_lsr_no_duplicate_ts(db_conn):
 # ============================================================
 
 def test_lsr_24h_pct_change_uses_distinct_days(db_conn):
-    """关键 Bug 1 反退化:bug 之前末两行都是 04-29 (0.80) → 0/0 - 1 = 0%。
-    去重后末两行变成 04-28 (0.92) + 04-29 (0.80) → -13.04%。"""
-    _seed_alias_double_write(db_conn, "2026-04-28T00:00:00Z", 0.92)
-    _seed_alias_double_write(db_conn, "2026-04-29T00:00:00Z", 0.80)
+    """关键 Bug 1 反退化:bug 之前末两行都是同日 (0.80) → 0/0 - 1 = 0%。
+    去重后末两行变成 d1 (0.92) + d2 (0.80) → -13.04%。"""
+    d1, d2 = _two_recent_days()
+    _seed_alias_double_write(db_conn, d1, 0.92)
+    _seed_alias_double_write(db_conn, d2, 0.80)
 
     metrics = DerivativesDAO.get_all_metrics(db_conn, lookback_days=10)
     s = metrics["long_short_ratio"]
@@ -91,17 +103,18 @@ def test_lsr_24h_pct_change_uses_distinct_days(db_conn):
 
 def test_get_all_metrics_no_alias_no_change(db_conn):
     """如果生产 DB 没有 alias 双写,dedup 是 no-op,各 ts 1 行不变。"""
+    d1, d2 = _two_recent_days()
     db_conn.execute(
         "INSERT INTO derivatives_snapshots "
         "(captured_at_utc, long_short_ratio, inserted_at_utc) "
         "VALUES (?, ?, ?)",
-        ("2026-04-28T00:00:00Z", 0.92, "2026-04-28T00:00:00Z"),
+        (d1, 0.92, d1),
     )
     db_conn.execute(
         "INSERT INTO derivatives_snapshots "
         "(captured_at_utc, long_short_ratio, inserted_at_utc) "
         "VALUES (?, ?, ?)",
-        ("2026-04-29T00:00:00Z", 0.80, "2026-04-29T00:00:00Z"),
+        (d2, 0.80, d2),
     )
     db_conn.commit()
 

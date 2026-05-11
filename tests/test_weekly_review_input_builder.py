@@ -134,6 +134,13 @@ def test_cold_start_returns_empty_aggregates(conn):
     assert len(v_acts) == 23
     for k in VALIDATOR_KEYS:
         assert v_acts[k]["activations"] == 0
+        assert v_acts[k]["rate"] == "0/0 valid_runs"
+    assert result["sample_base"] == {
+        "total_strategy_runs": 0,
+        "valid_constraint_runs": 0,
+        "missing_constraint_runs": 0,
+        "window_days": 7,
+    }
 
 
 # ============================================================
@@ -255,7 +262,10 @@ def test_aggregates_constraint_activations_23_v(conn):
     assert v_acts["validator_21_soft_resistance"]["activations"] == 3
     assert v_acts["validator_2_position_capped"]["activations"] == 0
     # rate 字段
-    assert v_acts["validator_1_stop_loss_overridden"]["rate"] == "3/3 days"
+    assert v_acts["validator_1_stop_loss_overridden"]["rate"] == "3/3 valid_runs"
+    assert r["sample_base"]["total_strategy_runs"] == 3
+    assert r["sample_base"]["valid_constraint_runs"] == 3
+    assert r["sample_base"]["missing_constraint_runs"] == 0
 
 
 def test_aggregates_position_cap_compressed_avg(conn):

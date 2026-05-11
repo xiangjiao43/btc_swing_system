@@ -338,9 +338,10 @@ def _aggregate_fuse_and_states(
 
 def _aggregate_constraint_activations(
     conn: sqlite3.Connection, *, week_start: datetime, week_end: datetime,
+    window_days: int = 7,
 ) -> dict[str, Any]:
     """聚合 strategy_runs.constraint_activations_json:
-    - 23 条 V 激活次数(每条 'activations' / 'rate' 'N/total_runs days')
+    - 23 条 V 激活次数(每条 'activations' / 'rate' 'N/valid_runs valid_runs')
     - meta 4 字段平均值(position_cap_compressed_avg / thesis_lock_blocks_count /
       channel_c_uses_count(从 fuse_events 取)/ review_pending_triggers)
 
@@ -348,26 +349,35 @@ def _aggregate_constraint_activations(
     """
     rows = conn.execute(
         "SELECT constraint_activations_json FROM strategy_runs "
-        "WHERE generated_at_utc >= ? AND generated_at_utc < ? "
-        "  AND constraint_activations_json IS NOT NULL",
+        "WHERE generated_at_utc >= ? AND generated_at_utc < ?",
         (_to_iso(week_start), _to_iso(week_end)),
     ).fetchall()
-    total_days = max(len(rows), 1)  # 避免 /0,真无 run 时显示 0/1
 
     # 23 条 V 累计触发数
     v_counts = {k: 0 for k in VALIDATOR_KEYS}
     cap_compressed_values: list[float] = []
     thesis_lock_count = 0
+    total_strategy_runs = len(rows)
+    valid_constraint_runs = 0
+    missing_constraint_runs = 0
 
     for r in rows:
         ca_str = (
             r["constraint_activations_json"]
             if hasattr(r, "keys") else r[0]
         )
+        if not ca_str:
+            missing_constraint_runs += 1
+            continue
         try:
             ca = json.loads(ca_str)
         except Exception:
+            missing_constraint_runs += 1
             continue
+        if not isinstance(ca, dict):
+            missing_constraint_runs += 1
+            continue
+        valid_constraint_runs += 1
         for k in VALIDATOR_KEYS:
             if ca.get(k) is True:
                 v_counts[k] += 1
@@ -382,7 +392,7 @@ def _aggregate_constraint_activations(
     for k in VALIDATOR_KEYS:
         v_review[k] = {
             "activations": v_counts[k],
-            "rate": f"{v_counts[k]}/{total_days} days",
+            "rate": f"{v_counts[k]}/{valid_constraint_runs} valid_runs",
         }
 
     cap_avg = (
@@ -394,7 +404,15 @@ def _aggregate_constraint_activations(
         "v_activations_raw": v_review,                    # 23 条 V dict
         "position_cap_compressed_avg": cap_avg,
         "thesis_lock_blocks_count": thesis_lock_count,
-        "total_days_in_window": total_days,
+        # 历史字段名不准确:这里不是 days,而是有效 Validator run 数。
+        # 暂时保留给旧 prompt / 旧测试 / 旧输出兼容。
+        "total_days_in_window": valid_constraint_runs,
+        "sample_base": {
+            "total_strategy_runs": total_strategy_runs,
+            "valid_constraint_runs": valid_constraint_runs,
+            "missing_constraint_runs": missing_constraint_runs,
+            "window_days": window_days,
+        },
     }
 
 
@@ -701,6 +719,7 @@ def build_weekly_review_input(
     )
     constraints = _aggregate_constraint_activations(
         conn, week_start=week_start, week_end=week_end,
+        window_days=window_days,
     )
     # Sprint H Part B:4 个新聚合
     anti_pattern = _aggregate_anti_pattern_signals(
@@ -757,6 +776,7 @@ def build_weekly_review_input(
             "channel_c_uses_count": fuse_states["channel_c_used_count"],
             "review_pending_triggers": fuse_states["review_pending_triggers"],
             "total_days_in_window": constraints["total_days_in_window"],
+            "sample_base": constraints["sample_base"],
         },
         "context": {
             "current_virtual_account": current_va,
@@ -768,4 +788,5 @@ def build_weekly_review_input(
         "l4_risk_tier_distribution": l4_risk_dist,
         "weekly_price_action": price_action,
         "master_runs_with_trade_plan": master_runs_with_plan,
+        "sample_base": constraints["sample_base"],
     }

@@ -1313,7 +1313,7 @@ def job_weekly_review(
 
     流程:
       1. build_weekly_review_input(conn) → 7 类聚合 dict
-      2. WeeklyReviewAnalyst.analyze(input) → 4 段 JSON
+      2. WeeklyReviewAnalyst.analyze(input) → 5 段 JSON
       3. normalize_output(out) 补漏 V
       4. UPSERT weekly_reviews 表(PK = week_start_utc 周一 UTC,幂等)
       5. critical_count = count_critical_recommendations(out)
@@ -1360,9 +1360,17 @@ def job_weekly_review(
 
         # 3. normalize 补漏 V
         out = WeeklyReviewAnalyst.normalize_output(out)
+        if isinstance(out, dict) and "sample_base" not in out:
+            sample_base = (
+                inp.get("sample_base")
+                or (inp.get("hard_constraint_activation_raw") or {}).get("sample_base")
+            )
+            if sample_base:
+                out["sample_base"] = sample_base
 
         # 4. UPSERT weekly_reviews
         critical_count = WeeklyReviewAnalyst.count_critical_recommendations(out)
+        high_priority_count = WeeklyReviewAnalyst.count_high_priority_recommendations(out)
         out_json = _json.dumps(out, ensure_ascii=False)
         try:
             conn.execute(
@@ -1380,14 +1388,17 @@ def job_weekly_review(
             logger.warning("weekly_review: upsert weekly_reviews failed: %s", e)
 
         # 5. 写 alerts(D1=a)
-        severity = "critical" if critical_count > 0 else "info"
+        severity = "critical" if critical_count > 0 else (
+            "warning" if high_priority_count > 0 else "info"
+        )
         alert_type = (
             "weekly_review_critical_recommendation"
             if critical_count > 0 else "weekly_review"
         )
         msg = (
             f"weekly_review {week_start_iso} 完成:"
-            f"{critical_count} 条 high priority 建议;"
+            f"critical_count={critical_count};"
+            f"high_priority_count={high_priority_count};"
             f"weekly_pnl_pct="
             f"{(out.get('performance_summary') or {}).get('weekly_pnl_pct', 'N/A')}"
         )
@@ -1408,6 +1419,7 @@ def job_weekly_review(
                 "weekly_review": "completed",
                 "week_start_utc": week_start_iso,
                 "critical_count": critical_count,
+                "high_priority_count": high_priority_count,
                 "ai_status": out.get("status", "unknown"),
             },
             "total_upserted": 1,

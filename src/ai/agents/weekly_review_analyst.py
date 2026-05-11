@@ -3,15 +3,15 @@
 对齐 docs/modeling.md b25cfe6(v1.4)§3.3.9 + §8.1:
 - 触发:每周日 22:00 BJT 自动跑(scheduler.yaml::weekly_review)
 - 输入:7 类聚合 dict(由 weekly_review_input_builder.build_weekly_review_input 给)
-- 输出:4 段 JSON(performance_summary / system_health_diagnosis /
+- 输出:5 段 JSON(performance_summary / system_health_diagnosis /
   strategy_quality / hard_constraint_activation_review / adjustment_recommendations)
 - ~$0.15 / 次,token ~5000 input + ~3000 output
 
 设计纪律:
 - 继承 BaseAgent(prompt 加载 + 2-attempt 重试 + JSON 解析 + fallback 全继承)
-- _fallback_output 返最小合法 4 段 JSON(空 review,系统不崩)
+- _fallback_output 返最小合法 5 段 JSON(空 review,系统不崩)
 - normalize_output 校验 hard_constraint_activation_review 必须含 23 条 V
-  (缺失自动补 0/0 days + evaluation="数据缺失")
+  (缺失自动补 0/0 valid_runs + evaluation="数据缺失")
 """
 from __future__ import annotations
 
@@ -48,6 +48,7 @@ class WeeklyReviewAnalyst(BaseAgent):
         fuse_states = context.get("fuse_and_states") or {}
         hc_raw = context.get("hard_constraint_activation_raw") or {}
         ctx_meta = context.get("context") or {}
+        sample_base = context.get("sample_base") or hc_raw.get("sample_base") or {}
         # Sprint H Part B 新加 5 个字段
         anti_pat = context.get("anti_pattern_signals") or {}
         l3_dist = context.get("l3_grade_distribution") or {}
@@ -80,14 +81,19 @@ class WeeklyReviewAnalyst(BaseAgent):
             json.dumps(fuse_states, ensure_ascii=False, indent=2),
             "",
             f"# 7. hard_constraint_activation 23 V 激活率(原始数据)",
+            "rate 分母是 valid_runs(有效 Validator 决策样本),不是 days。",
             json.dumps(hc_raw, ensure_ascii=False, indent=2),
+            "",
+            "# 7a. 样本口径(sample_base)",
+            json.dumps(sample_base, ensure_ascii=False, indent=2),
             "",
             "# 8. 反模式触发率(Sprint H Part B 新加)",
             "L3 anti_pattern_signals 5 类(extending_late_phase / against_long_cycle "
             "/ chasing_breakout_no_pullback / failing_at_resistance / "
             "after_extreme_event_no_reset)在过去 7 天的触发次数 + 占比。",
-            "用于评估 L3 prompt §六 反模式判定阈值是否合理:某条触发率 > 40% "
-            "可能阈值偏松,< 5% 可能从未实际触发(prompt 文字定义不清)。",
+            "单周某条触发率 > 40% 时,默认只能给 warning 级别的审计/观察/"
+            "补诊断建议;只有连续多周异常,或 ai_vs_actual_comparison 证明"
+            "错过大量真实机会时,才建议具体改 L3 阈值。",
             json.dumps(anti_pat, ensure_ascii=False, indent=2),
             "",
             "# 9. L3 opportunity_grade 分布(Sprint H Part B 新加)",
@@ -99,8 +105,9 @@ class WeeklyReviewAnalyst(BaseAgent):
             "# 10. L4 risk_tier 分布(Sprint H Part B 新加)",
             "用于评估 L4 prompt §四 4 档定义是否合理:期望分布(健康市场):"
             "low + moderate 占多数,elevated < 30%,extreme 罕见。"
-            "若 elevated 持续 > 50% → L4 prompt §四 elevated 档判定可能偏松,"
-            "或市场真处高风险期(需结合实际走势判断)。",
+            "单周 elevated > 50% 不得直接建议降低阈值;必须先结合"
+            "risk_score / risk_breakdown / position_cap_multiplier / 实际走势。"
+            "如果输入缺 risk_breakdown,建议补诊断,不要直接改 L4 prompt。",
             json.dumps(l4_dist, ensure_ascii=False, indent=2),
             "",
             "# 11. BTC 实际走势(Sprint H Part B 新加,price_candles 1d)",
@@ -128,9 +135,25 @@ class WeeklyReviewAnalyst(BaseAgent):
             "请输出 5 段 JSON:performance_summary / system_health_diagnosis / "
             "strategy_quality / hard_constraint_activation_review / "
             "adjustment_recommendations。",
+            "同时在顶层输出 sample_base,原样转述第 7a 段字段。",
             "",
             "**hard_constraint_activation_review 必须列全 23 条 V Validator**,"
             "每条含 activations / rate / evaluation 三个字段。",
+            "",
+            "**severity 与 priority 分离**:",
+            "- severity=critical 只用于系统级故障、DB/订单/止损/失效位异常、"
+            "Validator 安全层失效、连续多周严重异常。",
+            "- severity=warning 用于单周策略分布异常、L3/L4 分布明显偏移、"
+            "V16/V23 偏高等需要审计的问题。",
+            "- severity=info 用于冷启动、0 成交、样本不足、正常观察项。",
+            "- 优先级 high 只表示先处理,不等于 critical,不会自动触发 critical 告警。",
+            "",
+            "**归因纪律**:",
+            "- entry_zone / stop_loss / take_profit 属于 Master trade_plan / "
+            "thesis lifecycle,不要归因给 L3。",
+            "- L3 只负责 opportunity_grade / execution_permission / anti_pattern。",
+            "- 本周 0 成交或只有 1 个 thesis 属于样本不足/早期观察,"
+            "默认不得 high/critical 调参。",
             "",
             "**Sprint H Part B 新增约束**:",
             "1. strategy_quality 必须含 ai_vs_actual_comparison 子段 — 若本周",
@@ -142,6 +165,8 @@ class WeeklyReviewAnalyst(BaseAgent):
             "   - 不许给 '降低 AI 失败率' 这种空泛建议(必须指明改哪个文件 / 哪个",
             "     阈值 / 改成多少;若数据不足无法决定具体值,优先级 low + 写明",
             "     '建议先观察 N 周')",
+            "3. adjustment_recommendations 每条建议可含 severity 或 严重级别,"
+            "但 high priority 不自动等于 critical severity。",
             "",
             "若数据全 0(冷启动):仍要输出 5 段 + 23 V dict,"
             "evaluation 写 '数据不足,无法评估';adjustment_recommendations 至少",
@@ -150,15 +175,21 @@ class WeeklyReviewAnalyst(BaseAgent):
         return "\n".join(lines)
 
     def _fallback_output(self) -> dict[str, Any]:
-        """AI 失败时返最小合法 4 段 JSON(空 review,系统不崩)。"""
+        """AI 失败时返最小合法 5 段 JSON(空 review,系统不崩)。"""
         v_review = {
-            k: {"activations": 0, "rate": "0/0 days",
+            k: {"activations": 0, "rate": "0/0 valid_runs",
                  "evaluation": "AI 失败,无法评估"}
             for k in VALIDATOR_KEYS
         }
         return {
             "agent": self.AGENT_NAME,
             "status": "degraded",
+            "sample_base": {
+                "total_strategy_runs": 0,
+                "valid_constraint_runs": 0,
+                "missing_constraint_runs": 0,
+                "window_days": 7,
+            },
             "performance_summary": {
                 "total_runs": 0, "successful_runs": 0, "ai_failures": 0,
                 "thesis_created": 0, "thesis_closed_profit": 0,
@@ -178,6 +209,7 @@ class WeeklyReviewAnalyst(BaseAgent):
                 "break_conditions_calibration": "适中",
                 "false_signals": [],
                 "missed_opportunities": [],
+                "ai_vs_actual_comparison": [],
             },
             "hard_constraint_activation_review": {
                 **v_review,
@@ -191,8 +223,10 @@ class WeeklyReviewAnalyst(BaseAgent):
             "adjustment_recommendations": [
                 {
                     "目标": "恢复周复盘 AI 正常运行",
+                    "具体调整路径": "检查 <env: OPENAI_API_KEY> / 中转站可用性;仅修复复盘 AI 运行,不改交易参数",
                     "建议": "检查 anthropic API key + 中转站状态",
                     "优先级": "high",
+                    "severity": "warning",
                     "影响": "周复盘缺失,无法发现硬约束阈值过严/过松问题",
                 },
             ],
@@ -206,7 +240,7 @@ class WeeklyReviewAnalyst(BaseAgent):
     def normalize_output(out: dict[str, Any]) -> dict[str, Any]:
         """v1.4 §3.3.9 硬约束:hard_constraint_activation_review 必须含 23 条 V。
 
-        若 AI 漏字段 → 自动补 {activations: 0, rate: '0/? days',
+        若 AI 漏字段 → 自动补 {activations: 0, rate: '0/0 valid_runs',
         evaluation: '数据缺失'},notes 标记。
 
         本 sprint 简化版;严校验(rate 字符串格式 / evaluation 长度 / priority 枚举)
@@ -214,6 +248,24 @@ class WeeklyReviewAnalyst(BaseAgent):
         """
         if not isinstance(out, dict):
             return out  # caller 已 fallback
+        sq = out.get("strategy_quality")
+        if isinstance(sq, dict) and "ai_vs_actual_comparison" not in sq:
+            sq["ai_vs_actual_comparison"] = []
+
+        recs = out.get("adjustment_recommendations")
+        if isinstance(recs, list):
+            for r in recs:
+                if not isinstance(r, dict):
+                    continue
+                if not r.get("具体调整路径"):
+                    fallback_action = r.get("建议") or r.get("suggested_action") or ""
+                    if fallback_action:
+                        r["具体调整路径"] = fallback_action
+                if "severity" not in r and "严重级别" not in r:
+                    r["severity"] = (
+                        "warning" if r.get("优先级") == "high" else "info"
+                    )
+
         hc = out.get("hard_constraint_activation_review")
         if not isinstance(hc, dict):
             return out  # 整段缺失,caller 走 _fallback_output 链路
@@ -221,10 +273,14 @@ class WeeklyReviewAnalyst(BaseAgent):
         for k in VALIDATOR_KEYS:
             if k not in hc:
                 hc[k] = {
-                    "activations": 0, "rate": "0/? days",
+                    "activations": 0, "rate": "0/0 valid_runs",
                     "evaluation": "AI 输出漏字段,自动补默认",
                 }
                 missing.append(k)
+            elif isinstance(hc.get(k), dict):
+                rate = hc[k].get("rate")
+                if isinstance(rate, str) and "days" in rate:
+                    hc[k]["rate"] = rate.replace(" days", " valid_runs")
         if missing:
             notes = list(out.get("notes") or [])
             notes.append(
@@ -235,7 +291,35 @@ class WeeklyReviewAnalyst(BaseAgent):
 
     @staticmethod
     def count_critical_recommendations(out: dict[str, Any]) -> int:
-        """计 adjustment_recommendations.priority='high' 的条数(D1=a 写 alerts 用)。"""
+        """计真正 critical severity 条数(D1=a 写 alerts 用)。
+
+        注意:优先级 high 表示优先处理,不等于 critical 告警。
+        """
+        if not isinstance(out, dict):
+            return 0
+        count = 0
+        diagnosis = out.get("system_health_diagnosis") or []
+        if isinstance(diagnosis, list):
+            count += sum(
+                1 for d in diagnosis
+                if isinstance(d, dict)
+                and str(d.get("severity") or d.get("严重级别") or "").lower()
+                == "critical"
+            )
+        recs = out.get("adjustment_recommendations") or []
+        if not isinstance(recs, list):
+            return count
+        count += sum(
+            1 for r in recs
+            if isinstance(r, dict)
+            and str(r.get("severity") or r.get("严重级别") or "").lower()
+            == "critical"
+        )
+        return count
+
+    @staticmethod
+    def count_high_priority_recommendations(out: dict[str, Any]) -> int:
+        """计 high priority 建议条数,仅用于文案展示,不作为 critical 告警。"""
         if not isinstance(out, dict):
             return 0
         recs = out.get("adjustment_recommendations") or []

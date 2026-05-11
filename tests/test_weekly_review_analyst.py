@@ -22,7 +22,7 @@ def _make_full_output(
     high_recs: int = 0,
     extra_recs_count: int = 1,
 ) -> dict[str, Any]:
-    """构造完整 4 段 JSON(含 23 V)给 mock client 返。"""
+    """构造完整 5 段 JSON(含 23 V)给 mock client 返。"""
     v_review = {
         k: {"activations": 1, "rate": "1/7 days", "evaluation": "适中"}
         for k in VALIDATOR_KEYS
@@ -58,6 +58,7 @@ def _make_full_output(
             "thesis_quality": "acceptable",
             "break_conditions_calibration": "适中",
             "false_signals": [], "missed_opportunities": [],
+            "ai_vs_actual_comparison": [],
         },
         "hard_constraint_activation_review": {
             **v_review,
@@ -110,10 +111,10 @@ def test_prompt_file_exists_and_lists_23_v():
 
 
 # ============================================================
-# 2. happy path:完整 4 段 JSON 解析
+# 2. happy path:完整 5 段 JSON 解析
 # ============================================================
 
-def test_happy_path_full_4_segments():
+def test_happy_path_full_5_segments():
     payload = _make_full_output(perf_pnl=2.5)
     client = _mock_client_returning_json(payload)
     agent = WeeklyReviewAnalyst()
@@ -156,7 +157,7 @@ def test_hard_constraint_review_lists_all_23_v():
 # ============================================================
 
 def test_api_failure_returns_fallback():
-    """AI 抛 → fallback 4 段 JSON 完整(空 review)。"""
+    """AI 抛 → fallback 5 段 JSON 完整(空 review)。"""
     client = MagicMock()
     client.messages.create.side_effect = RuntimeError("simulated")
     agent = WeeklyReviewAnalyst()
@@ -170,12 +171,13 @@ def test_api_failure_returns_fallback():
         assert k in hc
 
 
-def test_fallback_has_critical_recommendation():
-    """fallback 应至少 1 条 priority=high(weekly_review_critical_recommendation)。"""
+def test_fallback_has_high_priority_warning_recommendation():
+    """fallback 可有 high priority,但不自动等于 critical。"""
     agent = WeeklyReviewAnalyst()
     fb = agent._fallback_output()
     recs = fb["adjustment_recommendations"]
     assert any(r["优先级"] == "high" for r in recs)
+    assert WeeklyReviewAnalyst.count_critical_recommendations(fb) == 0
 
 
 # ============================================================
@@ -205,6 +207,21 @@ def test_normalize_output_pass_through_when_complete():
     assert normed.get("notes") == notes_before  # 不动
 
 
+def test_normalize_output_adds_concrete_action_compatibility():
+    payload = _make_full_output(high_recs=1, extra_recs_count=0)
+    normed = WeeklyReviewAnalyst.normalize_output(payload)
+    rec = normed["adjustment_recommendations"][0]
+    assert rec["具体调整路径"] == rec["建议"]
+    assert rec["severity"] == "warning"
+
+
+def test_normalize_output_converts_days_rate_to_valid_runs():
+    payload = _make_full_output()
+    normed = WeeklyReviewAnalyst.normalize_output(payload)
+    hc = normed["hard_constraint_activation_review"]
+    assert hc[VALIDATOR_KEYS[0]]["rate"] == "1/7 valid_runs"
+
+
 def test_normalize_output_handles_missing_review_section():
     """整段 hard_constraint_activation_review 缺失 → 不动(caller fallback 路径)。"""
     payload = _make_full_output()
@@ -222,9 +239,28 @@ def test_count_critical_zero():
     assert WeeklyReviewAnalyst.count_critical_recommendations(payload) == 0
 
 
-def test_count_critical_two():
+def test_count_high_only_is_not_critical():
     payload = _make_full_output(high_recs=2, extra_recs_count=1)
-    assert WeeklyReviewAnalyst.count_critical_recommendations(payload) == 2
+    assert WeeklyReviewAnalyst.count_critical_recommendations(payload) == 0
+    assert WeeklyReviewAnalyst.count_high_priority_recommendations(payload) == 2
+
+
+def test_count_explicit_recommendation_critical():
+    payload = _make_full_output(high_recs=0, extra_recs_count=0)
+    payload["adjustment_recommendations"].append({
+        "目标": "x",
+        "具体调整路径": "y",
+        "优先级": "medium",
+        "severity": "critical",
+        "影响": "z",
+    })
+    assert WeeklyReviewAnalyst.count_critical_recommendations(payload) == 1
+
+
+def test_count_explicit_system_health_critical():
+    payload = _make_full_output(high_recs=0, extra_recs_count=0)
+    payload["system_health_diagnosis"][0]["severity"] = "critical"
+    assert WeeklyReviewAnalyst.count_critical_recommendations(payload) == 1
 
 
 def test_count_critical_handles_non_dict():

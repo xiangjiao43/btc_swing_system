@@ -1082,10 +1082,39 @@
                 </div>
                 <div>
                   <span class="text-slate-500">最大回撤</span>
-                  <span class="ml-1 font-bold text-rose-600"
-                        x-text="formatPct((weeklyReviewSelected.output.performance_summary || {}).max_drawdown_pct, true)"></span>
+                  <span class="ml-1 font-bold"
+                        :class="drawdownColorClass((weeklyReviewSelected.output.performance_summary || {}).max_drawdown_pct)"
+                        x-text="formatDrawdownPct((weeklyReviewSelected.output.performance_summary || {}).max_drawdown_pct)"></span>
                 </div>
               </div>
+            </div>
+            <!-- sample_base:Validator 分母是有效决策样本,不是 days -->
+            <div class="border-t border-slate-200 dark:border-slate-800 pt-2">
+              <div class="stat-label mb-1">样本口径</div>
+              <template x-if="weeklyReviewSampleBase()">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-2 font-mono tabular-nums">
+                  <div>
+                    <span class="text-slate-500">总 run</span>
+                    <span class="ml-1 font-bold"
+                          x-text="weeklyReviewSampleBase().total_strategy_runs ?? '-'"></span>
+                  </div>
+                  <div>
+                    <span class="text-slate-500">Validator 有效样本</span>
+                    <span class="ml-1 font-bold"
+                          x-text="weeklyReviewSampleBase().valid_constraint_runs ?? '-'"></span>
+                  </div>
+                  <div>
+                    <span class="text-slate-500">缺失 Validator 样本</span>
+                    <span class="ml-1 font-bold"
+                          x-text="weeklyReviewSampleBase().missing_constraint_runs ?? '-'"></span>
+                  </div>
+                </div>
+              </template>
+              <template x-if="!weeklyReviewSampleBase()">
+                <div class="text-slate-500 dark:text-slate-400 italic">
+                  样本口径：旧报告未记录
+                </div>
+              </template>
             </div>
             <!-- system_health_diagnosis -->
             <div x-show="(weeklyReviewSelected.output.system_health_diagnosis || []).length > 0">
@@ -1125,11 +1154,68 @@
                                 : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'"
                           x-text="(r['优先级'] || 'low').toUpperCase()"></span>
                     <span x-text="r['目标']"></span>
-                    <div class="text-slate-500" x-text="'建议: ' + (r['建议'] || '')"></div>
+                    <div class="text-slate-500" x-text="'具体调整路径: ' + weeklyReviewRecommendationAction(r)"></div>
                     <div class="text-slate-500" x-text="'影响: ' + (r['影响'] || '')"></div>
                   </li>
                 </template>
               </ul>
+            </div>
+            <!-- strategy_quality + ai_vs_actual_comparison -->
+            <div>
+              <div class="stat-label mb-1">策略质量 / AI vs 实际走势</div>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-[11px]">
+                <div>
+                  <span class="text-slate-500">thesis_quality</span>
+                  <span class="ml-1 font-bold"
+                        x-text="(weeklyReviewSelected.output.strategy_quality || {}).thesis_quality || '-'"></span>
+                </div>
+                <div>
+                  <span class="text-slate-500">break_conditions_calibration</span>
+                  <span class="ml-1 font-bold"
+                        x-text="(weeklyReviewSelected.output.strategy_quality || {}).break_conditions_calibration || '-'"></span>
+                </div>
+                <div>
+                  <span class="text-slate-500">false_signals</span>
+                  <span class="ml-1"
+                        x-text="formatReviewValue((weeklyReviewSelected.output.strategy_quality || {}).false_signals)"></span>
+                </div>
+                <div>
+                  <span class="text-slate-500">missed_opportunities</span>
+                  <span class="ml-1"
+                        x-text="formatReviewValue((weeklyReviewSelected.output.strategy_quality || {}).missed_opportunities)"></span>
+                </div>
+              </div>
+              <template x-if="weeklyReviewAiVsActual().length === 0">
+                <div class="text-slate-500 dark:text-slate-400 italic mt-2">
+                  本周无可对比的 master trade_plan，或旧周报未记录该字段。
+                </div>
+              </template>
+              <div x-show="weeklyReviewAiVsActual().length > 0" class="mt-2 space-y-2">
+                <template x-for="(row, i) in weeklyReviewAiVsActual()" :key="i">
+                  <div class="border-l-2 border-slate-300 dark:border-slate-700 pl-2 text-[11px] leading-snug">
+                    <div class="font-mono text-slate-600 dark:text-slate-300">
+                      <span x-text="row.run_at || '-'"></span>
+                      <span class="mx-1">|</span>
+                      <span x-text="'btc_price_at_run=' + formatReviewValue(row.btc_price_at_run)"></span>
+                      <span class="mx-1">|</span>
+                      <span x-text="'system_direction=' + formatReviewValue(row.system_direction)"></span>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-x-3">
+                      <div x-text="'system_entry_zone: ' + formatReviewValue(row.system_entry_zone)"></div>
+                      <div x-text="'system_stop_loss: ' + formatReviewValue(row.system_stop_loss)"></div>
+                      <div x-text="'system_take_profit: ' + formatReviewValue(row.system_take_profit)"></div>
+                      <div x-text="'actual_high_after: ' + formatReviewValue(row.actual_high_after)"></div>
+                      <div x-text="'actual_low_after: ' + formatReviewValue(row.actual_low_after)"></div>
+                      <div x-text="'actual_close_at_week_end: ' + formatReviewValue(row.actual_close_at_week_end)"></div>
+                    </div>
+                    <div class="text-slate-500" x-text="'direction_assessment: ' + formatReviewValue(row.direction_assessment)"></div>
+                    <div class="text-slate-500" x-text="'entry_zone_assessment: ' + formatReviewValue(row.entry_zone_assessment)"></div>
+                    <div class="text-slate-500" x-text="'stop_loss_assessment: ' + formatReviewValue(row.stop_loss_assessment)"></div>
+                    <div class="text-slate-500" x-text="'take_profit_assessment: ' + formatReviewValue(row.take_profit_assessment)"></div>
+                    <div class="text-slate-500" x-text="'neutral_note: ' + formatReviewValue(row.neutral_note)"></div>
+                  </div>
+                </template>
+              </div>
             </div>
             <!-- 23 V evaluation 表(可折叠) -->
             <details class="border-t border-slate-200 dark:border-slate-800 pt-2">
@@ -1150,7 +1236,7 @@
                         <td class="text-right"
                             x-text="((weeklyReviewSelected.output.hard_constraint_activation_review || {})[vk] || {}).activations ?? '-'"></td>
                         <td class="text-right"
-                            x-text="((weeklyReviewSelected.output.hard_constraint_activation_review || {})[vk] || {}).rate || '-'"></td>
+                            x-text="formatValidatorRate(((weeklyReviewSelected.output.hard_constraint_activation_review || {})[vk] || {}).rate)"></td>
                         <td class="text-slate-500"
                             x-text="((weeklyReviewSelected.output.hard_constraint_activation_review || {})[vk] || {}).evaluation || '-'"></td>
                       </tr>
@@ -1166,7 +1252,7 @@
 
     <!-- Footer -->
     <footer class="pt-2 pb-4 text-[10px] text-slate-500 dark:text-slate-500 flex flex-wrap gap-3">
-      <span>Data: CoinGlass / Glassnode / Yahoo Finance / FRED</span>
+      <span>Data: CoinGlass / Glassnode / FRED / local calendar</span>
       <span>Rules <span x-text="state.meta && state.meta.rules_version"></span></span>
       <span>Model <span x-text="state.meta && state.meta.ai_model_actual"></span></span>
       <span>Source <span class="font-mono" x-text="dataSource"></span></span>

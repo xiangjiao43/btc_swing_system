@@ -314,6 +314,7 @@ def _make_full_review_output():
             "thesis_quality": "acceptable",
             "break_conditions_calibration": "适中",
             "false_signals": [], "missed_opportunities": [],
+            "ai_vs_actual_comparison": [],
         },
         "hard_constraint_activation_review": {
             **v_review,
@@ -356,12 +357,49 @@ def test_weekly_review_writes_to_weekly_reviews_table(conn_factory):
     assert "performance_summary" in parsed
 
 
-def test_weekly_review_critical_writes_critical_alert(conn_factory):
-    """adjustment_recommendations 含 priority='high' → critical alert + 'weekly_review_critical_recommendation' alert_type。"""
+def test_weekly_review_high_priority_does_not_write_critical_alert(conn_factory):
+    """priority='high' 只代表优先处理,不等于 critical alert。"""
     conn_factory().close()
     payload = _make_full_review_output()
     payload["adjustment_recommendations"].append({
         "目标": "high1", "建议": "h", "优先级": "high", "影响": "x",
+    })
+
+    from src.ai.agents.weekly_review_analyst import WeeklyReviewAnalyst
+
+    def fake_analyze(self, ctx, *, client=None):
+        return {**payload, "status": "success"}
+
+    with patch.object(WeeklyReviewAnalyst, "analyze", fake_analyze):
+        result = job_weekly_review(conn_factory=conn_factory)
+
+    body = result.get("by_collector") or {}
+    assert body.get("critical_count") == 0
+    assert body.get("high_priority_count") == 1
+
+    q = _query_conn(conn_factory)
+    try:
+        rows = q.execute(
+            "SELECT alert_type, severity FROM alerts "
+            "WHERE alert_type LIKE 'weekly_review%'"
+        ).fetchall()
+    finally:
+        q.close()
+    assert len(rows) == 1
+    assert rows[0]["alert_type"] == "weekly_review"
+    assert rows[0]["severity"] == "warning"
+
+
+def test_weekly_review_explicit_critical_writes_critical_alert(conn_factory):
+    """只有 explicit severity='critical' 才写 critical alert。"""
+    conn_factory().close()
+    payload = _make_full_review_output()
+    payload["adjustment_recommendations"].append({
+        "目标": "critical1",
+        "具体调整路径": "x",
+        "优先级": "medium",
+        "severity": "critical",
+        "影响": "y",
     })
 
     from src.ai.agents.weekly_review_analyst import WeeklyReviewAnalyst
@@ -409,7 +447,7 @@ def test_weekly_review_upsert_idempotent(conn_factory):
 
 
 def test_weekly_review_ai_failure_still_writes_fallback(conn_factory):
-    """AI 抛异常 → fallback 4 段 + 仍写 weekly_reviews + critical alert(fallback 含 high recs)。"""
+    """AI 抛异常 → fallback 5 段 + 仍写 weekly_reviews,但 high 不自动 critical。"""
     conn_factory().close()
     from src.ai.agents.weekly_review_analyst import WeeklyReviewAnalyst
 
@@ -428,5 +466,4 @@ def test_weekly_review_ai_failure_still_writes_fallback(conn_factory):
     finally:
         q.close()
     assert row is not None
-    # fallback 自带 1 条 high → critical_count >= 1
-    assert row["critical_count"] >= 1
+    assert row["critical_count"] == 0

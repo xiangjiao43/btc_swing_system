@@ -83,6 +83,16 @@ def test_module_5_displays_performance_summary(html):
     assert "performance_summary" in html
     assert "weekly_pnl_pct" in html
     assert "max_drawdown_pct" in html
+    assert "formatDrawdownPct" in html
+    assert "drawdownColorClass" in html
+
+
+def test_module_5_displays_sample_base(html):
+    """周复盘显示总 run / Validator 有效样本 / 缺失样本。"""
+    assert "样本口径" in html
+    assert "Validator 有效样本" in html
+    assert "缺失 Validator 样本" in html
+    assert "旧报告未记录" in html
 
 
 def test_module_5_system_health_diagnosis_severity_colors(html):
@@ -99,6 +109,36 @@ def test_module_5_adjustment_recommendations_priority(html):
     assert "adjustment_recommendations" in html
     assert "目标" in html
     assert "优先级" in html
+    assert "具体调整路径" in html
+    assert "weeklyReviewRecommendationAction" in html
+
+
+def test_module_5_strategy_quality_ai_vs_actual_fields(html):
+    """策略质量 / AI vs 实际走势字段可审计。"""
+    assert "策略质量 / AI vs 实际走势" in html
+    for field in (
+        "thesis_quality",
+        "break_conditions_calibration",
+        "false_signals",
+        "missed_opportunities",
+        "ai_vs_actual_comparison",
+        "run_at",
+        "btc_price_at_run",
+        "system_direction",
+        "system_entry_zone",
+        "system_stop_loss",
+        "system_take_profit",
+        "actual_high_after",
+        "actual_low_after",
+        "actual_close_at_week_end",
+        "direction_assessment",
+        "entry_zone_assessment",
+        "stop_loss_assessment",
+        "take_profit_assessment",
+        "neutral_note",
+    ):
+        assert field in html
+    assert "本周无可对比的 master trade_plan" in html
 
 
 def test_module_5_23_validators_collapsible_table(html):
@@ -213,6 +253,16 @@ def test_js_module_5_state(js):
     assert "weeklyReviewSelected:" in js
     assert "weeklyReviewHistory:" in js
     assert "weeklyReviewSelectedIdx:" in js
+    assert "weeklyReviewSampleBase" in js
+    assert "formatValidatorRate" in js
+    assert "weeklyReviewAiVsActual" in js
+    assert "formatDrawdownPct" in js
+    assert "drawdownColorClass" in js
+
+
+def test_footer_data_sources_aligned(html):
+    assert "Data: CoinGlass / Glassnode / FRED / local calendar" in html
+    assert "Data: CoinGlass / Glassnode / Yahoo Finance / FRED" not in html
 
 
 def test_js_rp_state(js):

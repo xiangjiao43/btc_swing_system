@@ -218,6 +218,46 @@ function app() {
                 'validator_23_conflict_missing',
             ];
         },
+        weeklyReviewOutput() {
+            return (this.weeklyReviewSelected && this.weeklyReviewSelected.output) || {};
+        },
+        weeklyReviewSampleBase() {
+            const out = this.weeklyReviewOutput();
+            if (out.sample_base) return out.sample_base;
+            const perf = out.performance_summary || {};
+            const hc = out.hard_constraint_activation_review || {};
+            let denominator = null;
+            for (const k of this.validatorKeys()) {
+                const rate = hc[k] && hc[k].rate;
+                const m = String(rate || '').match(/^\s*\d+\s*\/\s*(\d+)/);
+                if (m) {
+                    denominator = Number(m[1]);
+                    break;
+                }
+            }
+            if (perf.total_runs == null || denominator == null) return null;
+            return {
+                total_strategy_runs: perf.total_runs,
+                valid_constraint_runs: denominator,
+                missing_constraint_runs: Math.max(Number(perf.total_runs) - denominator, 0),
+                legacy_inferred: true,
+            };
+        },
+        formatValidatorRate(rate) {
+            if (!rate) return '-';
+            return String(rate)
+                .replace(/\s*days\b/g, ' 有效决策')
+                .replace(/\s*valid_runs\b/g, ' 有效决策');
+        },
+        weeklyReviewRecommendationAction(r) {
+            if (!r) return '';
+            return r['具体调整路径'] || r['建议'] || r.suggested_action || '';
+        },
+        weeklyReviewAiVsActual() {
+            const sq = this.weeklyReviewOutput().strategy_quality || {};
+            const rows = sq.ai_vs_actual_comparison || [];
+            return Array.isArray(rows) ? rows : [];
+        },
 
         // Sprint 1.10-I §9.4:AI 失败状态显示(替换"无机会"模糊)
         // 数据源:state.raw.retry_log_json(commit 1.10-F migration 012)
@@ -868,10 +908,10 @@ function app() {
             const cards = ((this.state && this.state.factor_cards) || [])
                 .filter(c => c.tier !== 'composite');
             const specs = [
-                { key: 'price_technical',label: '价格技术',  icon: '🕯️', source: 'Binance klines' },
-                { key: 'derivatives',    label: '衍生品',    icon: '📈', source: 'CoinGlass / Binance' },
+                { key: 'price_technical',label: '价格技术',  icon: '🕯️', source: 'CoinGlass klines' },
+                { key: 'derivatives',    label: '衍生品',    icon: '📈', source: 'CoinGlass' },
                 { key: 'onchain',        label: '链上数据',  icon: '⛓️', source: 'Glassnode' },
-                { key: 'macro',          label: '宏观',      icon: '🌍', source: 'Yahoo / FRED' },
+                { key: 'macro',          label: '宏观',      icon: '🌍', source: 'FRED' },
                 { key: 'events',         label: '事件日历',  icon: '📅', source: 'Manual calendar' },
             ];
             return specs.map(s => {
@@ -925,6 +965,23 @@ function app() {
             if (v == null) return '-';
             const s = Number(v).toFixed(2);
             return (showSign && v >= 0 ? '+' : '') + s + '%';
+        },
+        formatDrawdownPct(v) {
+            if (v == null || isNaN(v)) return '-';
+            const n = Number(v);
+            if (n === 0) return '0.00%';
+            return n.toFixed(2) + '%';
+        },
+        drawdownColorClass(v) {
+            return Number(v) < 0
+                ? 'text-rose-600'
+                : 'text-slate-700 dark:text-slate-300';
+        },
+        formatReviewValue(v) {
+            if (v == null || v === '') return '-';
+            if (Array.isArray(v)) return v.length ? v.join(', ') : '-';
+            if (typeof v === 'object') return JSON.stringify(v);
+            return String(v);
         },
         formatFactorValue(v) {
             if (v == null) return '-';

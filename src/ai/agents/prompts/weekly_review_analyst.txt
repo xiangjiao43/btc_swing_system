@@ -152,6 +152,10 @@
       "具体调整路径": "中文具体建议或观察路径",
       "优先级": "high | medium | low",
       "severity": "critical | warning | info",
+      "recommendation_id": "跨周稳定 snake_case ID",
+      "recommendation_category": "l3_behavior | l4_risk | master_trade_plan | validator_output_quality | weekly_review_observability | data_quality | system_health | web_ui | other",
+      "recommendation_target": "稳定对象,如 l3_extending_late_phase",
+      "recommendation_action_type": "observe | audit | improve_prompt | improve_schema | improve_ui | improve_diagnostics | change_threshold | fix_bug | other",
       "evidence_confidence": "low | medium | high",
       "confidence_reason": "说明为什么是这个证据置信度",
       "影响": "中文风险/收益描述"
@@ -293,7 +297,29 @@ strategy_quality 段其他字段照常输出。
 ## adjustment_recommendations 强制约束
 
 **每条建议必须含「具体调整路径」字段**(替代原 "建议" 字段的空泛文字):
-每条建议也必须含 `evidence_confidence` 与 `confidence_reason`。
+每条建议也必须含 canonical 字段、`evidence_confidence` 与 `confidence_reason`。
+
+必须输出的 canonical 字段:
+- `recommendation_id`:跨周稳定 ID,用于以后统计 recurrence。必须 snake_case。
+- `recommendation_category`:只能是 l3_behavior / l4_risk / master_trade_plan /
+  validator_output_quality / weekly_review_observability / data_quality /
+  system_health / web_ui / other。
+- `recommendation_target`:稳定对象,例如 l3_extending_late_phase /
+  l4_elevated_risk_breakdown / v16_change_mind_structure。
+- `recommendation_action_type`:只能是 observe / audit / improve_prompt /
+  improve_schema / improve_ui / improve_diagnostics / change_threshold /
+  fix_bug / other。
+
+recommendation_id 纪律:
+- recommendation_id 是跨周稳定 ID,不要因为文案换词就换 ID
+- 不允许包含日期、百分比、run_id、随机字符串、UUID
+- 示例: audit_l3_extending_late_phase /
+  audit_l4_elevated_risk_breakdown /
+  improve_master_conflict_resolution_schema /
+  improve_v16_change_mind_structure /
+  improve_weekly_review_evidence_diagnostics
+- observe/audit 类建议不要伪装成 change_threshold
+- 如果证据不足,action_type 应为 observe 或 audit,不应为 change_threshold
 
 格式 1(具体阈值):
 ```json
@@ -303,6 +329,10 @@ strategy_quality 段其他字段照常输出。
                   均证明错过大量真实机会,再评估 src/ai/agents/prompts/l3_opportunity.txt",
   "优先级": "medium",
   "severity": "warning",
+  "recommendation_id": "audit_l3_extending_late_phase",
+  "recommendation_category": "l3_behavior",
+  "recommendation_target": "l3_extending_late_phase",
+  "recommendation_action_type": "audit",
   "evidence_confidence": "medium",
   "confidence_reason": "连续 3 周重复且有 ai_vs_actual_comparison 支撑,但仍需人工复核",
   "影响": "降低 grade 降级频率,B 级机会输出更多"
@@ -317,6 +347,10 @@ strategy_quality 段其他字段照常输出。
                   10 thesis 数据后再评估;不在本周做任何阈值调整",
   "优先级": "low",
   "severity": "info",
+  "recommendation_id": "observe_validator_threshold_calibration",
+  "recommendation_category": "validator_output_quality",
+  "recommendation_target": "validator_threshold_calibration",
+  "recommendation_action_type": "observe",
   "evidence_confidence": "low",
   "confidence_reason": "没有实际成交且 thesis 样本不足,只能观察",
   "影响": "短期 0 调整;长期保证基于真实数据调优"

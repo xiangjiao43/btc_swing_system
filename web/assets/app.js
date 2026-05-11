@@ -253,6 +253,15 @@ function app() {
             if (!r) return '';
             return r['具体调整路径'] || r['建议'] || r.suggested_action || '';
         },
+        weeklyReviewRecommendationId(r) {
+            if (!r) return '-';
+            return r.normalized_recommendation_id
+                || r.recommendation_id
+                || r.id
+                || r.canonical_id
+                || r.issue_id
+                || '-';
+        },
         weeklyReviewRecommendationConfidence(r) {
             if (!r) return 'low';
             return r.evidence_confidence || r.confidence || r.confidence_level || 'low';

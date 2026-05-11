@@ -15,6 +15,7 @@
 """
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from ._base import BaseAgent
@@ -25,6 +26,28 @@ VALID_PRIORITIES = ("high", "medium", "low")
 VALID_SEVERITIES = ("critical", "warning", "info")
 VALID_THESIS_QUALITY = ("good", "acceptable", "poor")
 VALID_EVIDENCE_CONFIDENCE = ("low", "medium", "high")
+VALID_RECOMMENDATION_CATEGORIES = (
+    "l3_behavior",
+    "l4_risk",
+    "master_trade_plan",
+    "validator_output_quality",
+    "weekly_review_observability",
+    "data_quality",
+    "system_health",
+    "web_ui",
+    "other",
+)
+VALID_RECOMMENDATION_ACTION_TYPES = (
+    "observe",
+    "audit",
+    "improve_prompt",
+    "improve_schema",
+    "improve_ui",
+    "improve_diagnostics",
+    "change_threshold",
+    "fix_bug",
+    "other",
+)
 
 
 def _recommendation_text(rec: dict[str, Any]) -> str:
@@ -42,6 +65,143 @@ def _looks_observation_only(rec: dict[str, Any]) -> bool:
         + str(rec.get("suggested_action") or "")
     )
     return any(token in text for token in ("观察", "补诊断", "审计", "不在本周做"))
+
+
+def _snake_case(value: Any) -> str:
+    text = str(value or "").lower()
+    text = re.sub(r"[^a-z0-9]+", "_", text)
+    text = re.sub(r"_+", "_", text).strip("_")
+    return text
+
+
+def _recommendation_blob(rec: dict[str, Any]) -> str:
+    return " ".join(
+        str(rec.get(k) or "")
+        for k in (
+            "recommendation_id",
+            "normalized_recommendation_id",
+            "recommendation_category",
+            "recommendation_target",
+            "recommendation_action_type",
+            "目标",
+            "具体调整路径",
+            "建议",
+            "suggested_action",
+        )
+    ).lower()
+
+
+def _infer_recommendation_category(rec: dict[str, Any]) -> str:
+    raw = str(rec.get("recommendation_category") or rec.get("category") or "").lower()
+    if raw in VALID_RECOMMENDATION_CATEGORIES:
+        return raw
+    blob = _recommendation_blob(rec)
+    if "l3" in blob or "extending_late_phase" in blob or "反模式" in blob:
+        return "l3_behavior"
+    if "l4" in blob or "elevated" in blob or "risk_tier" in blob:
+        return "l4_risk"
+    if "master" in blob or "entry_zone" in blob or "stop_loss" in blob:
+        return "master_trade_plan"
+    if "validator" in blob or "v16" in blob or "v23" in blob or "change_mind" in blob:
+        return "validator_output_quality"
+    if "weekly_review" in blob or "周复盘" in blob or "diagnostics" in blob:
+        return "weekly_review_observability"
+    if "data" in blob or "数据" in blob or "fetch" in blob:
+        return "data_quality"
+    if "ai 失败" in blob or "fallback" in blob or "系统" in blob:
+        return "system_health"
+    if "web" in blob or "网页" in blob or "ui" in blob:
+        return "web_ui"
+    return "other"
+
+
+def _infer_recommendation_action_type(rec: dict[str, Any]) -> str:
+    raw = str(
+        rec.get("recommendation_action_type") or rec.get("action_type") or "",
+    ).lower()
+    if raw in VALID_RECOMMENDATION_ACTION_TYPES:
+        return raw
+    blob = _recommendation_blob(rec)
+    if "观察" in blob or "observe" in blob:
+        return "observe"
+    if "审计" in blob or "audit" in blob:
+        return "audit"
+    if "schema" in blob or "结构化" in blob:
+        return "improve_schema"
+    if "ui" in blob or "网页" in blob or "展示" in blob:
+        return "improve_ui"
+    if "diagnostic" in blob or "诊断" in blob:
+        return "improve_diagnostics"
+    if "prompt" in blob:
+        return "improve_prompt"
+    if "阈值" in blob or "threshold" in blob:
+        return "change_threshold"
+    if "修复" in blob or "fix" in blob or "bug" in blob:
+        return "fix_bug"
+    return "other"
+
+
+def _infer_recommendation_target(rec: dict[str, Any], category: str) -> str:
+    raw = rec.get("recommendation_target") or rec.get("target")
+    if raw:
+        return _snake_case(raw)
+    blob = _recommendation_blob(rec)
+    if "extending_late_phase" in blob:
+        return "l3_extending_late_phase"
+    if "risk_breakdown" in blob and ("elevated" in blob or "l4" in blob):
+        return "l4_elevated_risk_breakdown"
+    if "elevated" in blob or "risk_tier" in blob:
+        return "l4_elevated"
+    if "v16" in blob or "validator_16" in blob or "change_mind" in blob:
+        return "v16_change_mind_structure"
+    if "v23" in blob or "validator_23" in blob or "conflict_missing" in blob:
+        return "v23_conflict_resolution"
+    if "conflict_resolution" in blob:
+        return "master_conflict_resolution_schema"
+    if "evidence" in blob and "diagnostic" in blob:
+        return "weekly_review_evidence_diagnostics"
+    if "ai" in blob and ("失败" in blob or "fallback" in blob):
+        return "weekly_review_ai_failure"
+    title = _snake_case(rec.get("目标") or "")
+    if title:
+        return title[:80].strip("_")
+    return category
+
+
+def _build_stable_recommendation_id(rec: dict[str, Any]) -> str:
+    category = _infer_recommendation_category(rec)
+    action_type = _infer_recommendation_action_type(rec)
+    if _looks_observation_only(rec) and action_type == "change_threshold":
+        action_type = "audit"
+    target = _infer_recommendation_target(rec, category)
+    prefix = {
+        "observe": "observe",
+        "audit": "audit",
+        "improve_prompt": "improve",
+        "improve_schema": "improve",
+        "improve_ui": "improve",
+        "improve_diagnostics": "improve",
+        "change_threshold": "change",
+        "fix_bug": "fix",
+        "other": "review",
+    }.get(action_type, "review")
+    return _snake_case(f"{prefix}_{target}") or "review_other"
+
+
+def _is_unstable_recommendation_id(value: Any) -> bool:
+    rid = str(value or "")
+    if not rid:
+        return False
+    lowered = rid.lower()
+    patterns = (
+        r"20\d{2}[_-]?\d{2}[_-]?\d{2}",
+        r"\d+(_pct|pct|%)",
+        r"run[_-]?[a-z0-9]+",
+        r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+        r"[0-9a-f]{16,}",
+        r"[a-z0-9]{24,}",
+    )
+    return any(re.search(p, lowered) for p in patterns)
 
 
 class WeeklyReviewAnalyst(BaseAgent):
@@ -235,6 +395,19 @@ class WeeklyReviewAnalyst(BaseAgent):
             "   - thesis_created <= 1、total_trades/orders_filled = 0、"
             "diagnostics 缺失、或只是观察建议时,不得 high confidence。",
             "   - high priority 不等于 high evidence_confidence。",
+            "5. adjustment_recommendations 每条必须含 canonical 字段:",
+            "   - recommendation_id:跨周稳定 snake_case ID,不得含日期/百分比/run_id/"
+            "随机字符串。",
+            "   - recommendation_category:l3_behavior / l4_risk / "
+            "master_trade_plan / validator_output_quality / "
+            "weekly_review_observability / data_quality / system_health / "
+            "web_ui / other。",
+            "   - recommendation_target:稳定对象,如 l3_extending_late_phase。",
+            "   - recommendation_action_type:observe / audit / improve_prompt / "
+            "improve_schema / improve_ui / improve_diagnostics / "
+            "change_threshold / fix_bug / other。",
+            "   - observe/audit 类建议不要伪装成 change_threshold;证据不足时"
+            "action_type 应为 observe 或 audit。",
             "",
             "若数据全 0(冷启动):仍要输出 5 段 + 23 V dict,"
             "evaluation 写 '数据不足,无法评估';adjustment_recommendations 至少",
@@ -332,6 +505,11 @@ class WeeklyReviewAnalyst(BaseAgent):
                     "建议": "检查 anthropic API key + 中转站状态",
                     "优先级": "high",
                     "severity": "warning",
+                    "recommendation_id": "fix_weekly_review_ai_failure",
+                    "normalized_recommendation_id": "fix_weekly_review_ai_failure",
+                    "recommendation_category": "system_health",
+                    "recommendation_target": "weekly_review_ai_failure",
+                    "recommendation_action_type": "fix_bug",
                     "evidence_confidence": "low",
                     "confidence_reason": "fallback 输出,没有时间连续性诊断证据",
                     "影响": "周复盘缺失,无法发现硬约束阈值过严/过松问题",
@@ -378,6 +556,12 @@ class WeeklyReviewAnalyst(BaseAgent):
                 for item in recurrence
                 if isinstance(item, dict) and item.get("weeks_seen", 0) >= 2
             }
+            recurrent_ids = {
+                str(item.get("recommendation_id") or "").strip()
+                for item in recurrence
+                if isinstance(item, dict) and item.get("weeks_seen", 0) >= 2
+            }
+            id_counts: dict[str, int] = {}
             for r in recs:
                 if not isinstance(r, dict):
                     continue
@@ -389,6 +573,33 @@ class WeeklyReviewAnalyst(BaseAgent):
                     r["severity"] = (
                         "warning" if r.get("优先级") == "high" else "info"
                     )
+                existing_id = (
+                    r.get("recommendation_id")
+                    or r.get("id")
+                    or r.get("canonical_id")
+                    or r.get("issue_id")
+                )
+                stable_id = _build_stable_recommendation_id(r)
+                if existing_id:
+                    r["recommendation_id"] = _snake_case(existing_id) or stable_id
+                    if _is_unstable_recommendation_id(existing_id):
+                        r["unstable_recommendation_id"] = True
+                        r["normalized_recommendation_id"] = stable_id
+                    else:
+                        r["normalized_recommendation_id"] = r["recommendation_id"]
+                else:
+                    r["recommendation_id"] = stable_id
+                    r["normalized_recommendation_id"] = stable_id
+                category = _infer_recommendation_category(r)
+                action_type = _infer_recommendation_action_type(r)
+                if _looks_observation_only(r) and action_type == "change_threshold":
+                    action_type = "audit"
+                target = _infer_recommendation_target(r, category)
+                r["recommendation_category"] = category
+                r["recommendation_action_type"] = action_type
+                r["recommendation_target"] = target
+                normalized_id = r["normalized_recommendation_id"]
+                id_counts[normalized_id] = id_counts.get(normalized_id, 0) + 1
                 confidence = (
                     r.get("evidence_confidence")
                     or r.get("confidence")
@@ -418,9 +629,15 @@ class WeeklyReviewAnalyst(BaseAgent):
                         })
                     )
                     for old in recurrent_texts
-                )
+                ) or normalized_id in recurrent_ids
                 if confidence == "low" and repeated:
                     r["possible_repetition_without_confirmation"] = True
+            for r in recs:
+                if not isinstance(r, dict):
+                    continue
+                normalized_id = r.get("normalized_recommendation_id")
+                if normalized_id and id_counts.get(normalized_id, 0) > 1:
+                    r["duplicate_recommendation_id"] = True
 
         hc = out.get("hard_constraint_activation_review")
         if not isinstance(hc, dict):

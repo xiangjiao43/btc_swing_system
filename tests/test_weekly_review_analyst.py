@@ -11,7 +11,9 @@ from unittest.mock import MagicMock
 import pytest
 
 from src.ai.agents.weekly_review_analyst import (
-    VALID_EVIDENCE_CONFIDENCE, VALID_PRIORITIES, VALID_SEVERITIES,
+    VALID_EVIDENCE_CONFIDENCE, VALID_PRIORITIES,
+    VALID_RECOMMENDATION_ACTION_TYPES, VALID_RECOMMENDATION_CATEGORIES,
+    VALID_SEVERITIES,
     WeeklyReviewAnalyst,
 )
 from src.ai.weekly_review_input_builder import VALIDATOR_KEYS
@@ -233,6 +235,54 @@ def test_normalize_output_adds_evidence_confidence_compatibility():
     assert "confidence_reason" in rec
 
 
+def test_normalize_output_adds_canonical_recommendation_fields():
+    payload = _make_full_output(high_recs=0, extra_recs_count=1)
+    rec = payload["adjustment_recommendations"][0]
+    rec["目标"] = "审计 L4 elevated risk_breakdown"
+    rec["具体调整路径"] = "建议先审计 L4 elevated 的 risk_breakdown 来源"
+    normed = WeeklyReviewAnalyst.normalize_output(payload)
+    rec = normed["adjustment_recommendations"][0]
+    assert rec["recommendation_id"] == "audit_l4_elevated_risk_breakdown"
+    assert rec["normalized_recommendation_id"] == rec["recommendation_id"]
+    assert rec["recommendation_category"] == "l4_risk"
+    assert rec["recommendation_target"] == "l4_elevated_risk_breakdown"
+    assert rec["recommendation_action_type"] == "audit"
+
+
+def test_normalize_output_accepts_recommendation_id_aliases():
+    payload = _make_full_output(high_recs=0, extra_recs_count=1)
+    rec = payload["adjustment_recommendations"][0]
+    rec["canonical_id"] = "improve_v16_change_mind_structure"
+    normed = WeeklyReviewAnalyst.normalize_output(payload)
+    rec = normed["adjustment_recommendations"][0]
+    assert rec["recommendation_id"] == "improve_v16_change_mind_structure"
+    assert rec["normalized_recommendation_id"] == "improve_v16_change_mind_structure"
+
+
+def test_normalize_output_marks_unstable_recommendation_id():
+    payload = _make_full_output(high_recs=0, extra_recs_count=1)
+    rec = payload["adjustment_recommendations"][0]
+    rec["recommendation_id"] = "audit_l4_elevated_2026_05_10_75pct"
+    rec["目标"] = "审计 L4 elevated risk_breakdown"
+    rec["具体调整路径"] = "审计 L4 elevated risk_breakdown"
+    normed = WeeklyReviewAnalyst.normalize_output(payload)
+    rec = normed["adjustment_recommendations"][0]
+    assert rec["unstable_recommendation_id"] is True
+    assert rec["recommendation_id"] == "audit_l4_elevated_2026_05_10_75pct"
+    assert rec["normalized_recommendation_id"] == "audit_l4_elevated_risk_breakdown"
+
+
+def test_normalize_output_marks_duplicate_recommendation_id():
+    payload = _make_full_output(high_recs=0, extra_recs_count=2)
+    for rec in payload["adjustment_recommendations"]:
+        rec["recommendation_id"] = "audit_l3_extending_late_phase"
+    normed = WeeklyReviewAnalyst.normalize_output(payload)
+    assert all(
+        rec["duplicate_recommendation_id"]
+        for rec in normed["adjustment_recommendations"]
+    )
+
+
 def test_normalize_output_caps_observation_confidence():
     payload = _make_full_output(high_recs=0, extra_recs_count=1)
     rec = payload["adjustment_recommendations"][0]
@@ -361,6 +411,8 @@ def test_build_user_prompt_includes_window_and_perf_raw():
     assert "Validator 诊断证据" in prompt
     assert "时间连续性诊断" in prompt
     assert "evidence_confidence" in prompt
+    assert "recommendation_id" in prompt
+    assert "recommendation_category" in prompt
     assert "证据不足,建议补诊断" in prompt
 
 
@@ -372,3 +424,5 @@ def test_valid_enums():
     assert VALID_PRIORITIES == ("high", "medium", "low")
     assert VALID_SEVERITIES == ("critical", "warning", "info")
     assert VALID_EVIDENCE_CONFIDENCE == ("low", "medium", "high")
+    assert "l3_behavior" in VALID_RECOMMENDATION_CATEGORIES
+    assert "change_threshold" in VALID_RECOMMENDATION_ACTION_TYPES

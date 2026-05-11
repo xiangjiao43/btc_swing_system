@@ -1053,6 +1053,20 @@ def _review_recommendation_text(rec: dict[str, Any]) -> str:
     return "".join(ch for ch in text if ch.isalnum() or "\u4e00" <= ch <= "\u9fff")
 
 
+def _recommendation_canonical_key(rec: dict[str, Any]) -> tuple[str, bool]:
+    for key in (
+        "normalized_recommendation_id",
+        "recommendation_id",
+        "id",
+        "canonical_id",
+        "issue_id",
+    ):
+        value = rec.get(key)
+        if value:
+            return str(value), True
+    return _review_recommendation_text(rec), False
+
+
 def _extract_review_metric(
     output: dict[str, Any], metric: str,
 ) -> tuple[Optional[int], Optional[int]]:
@@ -1240,11 +1254,28 @@ def _aggregate_temporal_consistency_diagnostics(
         for rec in output.get("adjustment_recommendations") or []:
             if not isinstance(rec, dict):
                 continue
-            key = _review_recommendation_text(rec)
+            key, has_canonical_id = _recommendation_canonical_key(rec)
             if not key:
                 continue
             item = recommendation_seen.setdefault(key, {
-                "target": rec.get("目标") or "",
+                "recommendation_id": key,
+                "category": rec.get("recommendation_category") or rec.get("category"),
+                "target": (
+                    rec.get("recommendation_target")
+                    or rec.get("target")
+                    or rec.get("目标")
+                    or ""
+                ),
+                "recommendation_target": (
+                    rec.get("recommendation_target")
+                    or rec.get("target")
+                    or rec.get("目标")
+                    or ""
+                ),
+                "action_type": (
+                    rec.get("recommendation_action_type")
+                    or rec.get("action_type")
+                ),
                 "action": (
                     rec.get("具体调整路径")
                     or rec.get("建议")
@@ -1253,14 +1284,25 @@ def _aggregate_temporal_consistency_diagnostics(
                 ),
                 "weeks_seen": 0,
                 "recent_weeks": [],
+                "last_seen": str(week_key),
+                "confidence_levels_seen": [],
                 "latest_priority": rec.get("优先级"),
+                "latest_severity": rec.get("severity") or rec.get("严重级别"),
                 "latest_evidence_confidence": (
                     rec.get("evidence_confidence")
                     or rec.get("confidence")
                     or rec.get("confidence_level")
                 ),
+                "key_source": "recommendation_id" if has_canonical_id else "text",
             })
             item["weeks_seen"] += 1
+            confidence = (
+                rec.get("evidence_confidence")
+                or rec.get("confidence")
+                or rec.get("confidence_level")
+            )
+            if confidence and confidence not in item["confidence_levels_seen"]:
+                item["confidence_levels_seen"].append(confidence)
             if len(item["recent_weeks"]) < 8:
                 item["recent_weeks"].append(str(week_key))
 

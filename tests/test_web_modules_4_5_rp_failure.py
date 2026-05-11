@@ -110,9 +110,15 @@ def test_module_5_adjustment_recommendations_priority(html):
     assert "目标" in html
     assert "优先级" in html
     assert "具体调整路径" in html
+    assert "recommendation_category" in html
+    assert "recommendation_target" in html
+    assert "recommendation_action_type" in html
+    assert "duplicate_recommendation_id" in html
+    assert "unstable_recommendation_id" in html
     assert "证据置信度" in html
     assert "possible_repetition_without_confirmation" in html
     assert "weeklyReviewRecommendationAction" in html
+    assert "weeklyReviewRecommendationId" in html
 
 
 def test_module_5_temporal_consistency_fields(html):
@@ -122,6 +128,10 @@ def test_module_5_temporal_consistency_fields(html):
     for field in (
         "recent anomaly streaks",
         "recurring recommendations",
+        "recommendation_id",
+        "confidence_levels_seen",
+        "latest_priority",
+        "latest_severity",
         "连续 elevated 周数",
         "连续 V16 偏高周数",
         "连续 V23 偏高周数",
@@ -309,6 +319,7 @@ def test_js_module_5_state(js):
     assert "weeklyReviewTemporalDiagnostics" in js
     assert "hasWeeklyReviewTemporalDiagnostics" in js
     assert "weeklyReviewRecommendationConfidence" in js
+    assert "weeklyReviewRecommendationId" in js
     assert "diagnosticEntries" in js
 
 

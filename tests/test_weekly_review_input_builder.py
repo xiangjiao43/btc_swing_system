@@ -442,9 +442,14 @@ def test_aggregates_temporal_consistency_diagnostics(conn):
             },
             "adjustment_recommendations": [
                 {
+                    "recommendation_id": "audit_l4_elevated_risk_breakdown",
+                    "recommendation_category": "l4_risk",
+                    "recommendation_target": "l4_elevated_risk_breakdown",
+                    "recommendation_action_type": "audit",
                     "目标": "审计 elevated",
                     "具体调整路径": "连续观察 elevated",
                     "优先级": "medium",
+                    "severity": "warning",
                     "evidence_confidence": "low",
                 },
             ],
@@ -466,10 +471,15 @@ def test_aggregates_temporal_consistency_diagnostics(conn):
             },
             "adjustment_recommendations": [
                 {
+                    "recommendation_id": "audit_l4_elevated_risk_breakdown",
+                    "recommendation_category": "l4_risk",
+                    "recommendation_target": "l4_elevated_risk_breakdown",
+                    "recommendation_action_type": "audit",
                     "目标": "审计 elevated",
-                    "具体调整路径": "连续观察 elevated",
-                    "优先级": "medium",
-                    "evidence_confidence": "low",
+                    "具体调整路径": "继续审计 elevated 的 risk_breakdown",
+                    "优先级": "high",
+                    "severity": "warning",
+                    "evidence_confidence": "medium",
                 },
             ],
         },
@@ -486,7 +496,16 @@ def test_aggregates_temporal_consistency_diagnostics(conn):
     assert td["anomaly_streaks"]["l4_elevated_weeks"] == 3
     assert td["anomaly_streaks"]["zero_thesis_weeks"] == 3
     assert td["anomaly_streaks"]["zero_trade_weeks"] == 3
-    assert td["recommendation_recurrence"][0]["weeks_seen"] == 2
+    recurrence = td["recommendation_recurrence"][0]
+    assert recurrence["recommendation_id"] == "audit_l4_elevated_risk_breakdown"
+    assert recurrence["category"] == "l4_risk"
+    assert recurrence["target"] == "l4_elevated_risk_breakdown"
+    assert recurrence["action_type"] == "audit"
+    assert recurrence["weeks_seen"] == 2
+    assert recurrence["last_seen"] == "2026-04-27"
+    assert recurrence["confidence_levels_seen"] == ["low", "medium"]
+    assert recurrence["latest_priority"] == "medium"
+    assert recurrence["latest_severity"] == "warning"
 
 
 def test_aggregates_position_cap_compressed_avg(conn):

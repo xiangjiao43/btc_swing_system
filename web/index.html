@@ -1154,9 +1154,20 @@
                                 : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'"
                           x-text="(r['优先级'] || 'low').toUpperCase()"></span>
                     <span x-text="r['目标']"></span>
+                    <div class="font-mono text-slate-600 dark:text-slate-300"
+                         x-text="'ID: ' + weeklyReviewRecommendationId(r)"></div>
+                    <div class="text-slate-500"
+                         x-text="'category: ' + formatReviewValue(r.recommendation_category) + ' | target: ' + formatReviewValue(r.recommendation_target) + ' | action_type: ' + formatReviewValue(r.recommendation_action_type)"></div>
                     <div class="text-slate-500" x-text="'具体调整路径: ' + weeklyReviewRecommendationAction(r)"></div>
                     <div class="text-slate-500"
                          x-text="'证据置信度: ' + weeklyReviewRecommendationConfidence(r) + ' | 原因: ' + weeklyReviewRecommendationConfidenceReason(r)"></div>
+                    <template x-if="r.duplicate_recommendation_id || r.unstable_recommendation_id">
+                      <div class="text-amber-600 dark:text-amber-400">
+                        <span x-show="r.duplicate_recommendation_id">重复 recommendation_id</span>
+                        <span x-show="r.duplicate_recommendation_id && r.unstable_recommendation_id"> / </span>
+                        <span x-show="r.unstable_recommendation_id">不稳定 recommendation_id，已生成 normalized_recommendation_id</span>
+                      </div>
+                    </template>
                     <template x-if="r.possible_repetition_without_confirmation">
                       <div class="text-amber-600 dark:text-amber-400">
                         该建议已连续出现，但证据仍不足
@@ -1221,8 +1232,11 @@
                   </template>
                   <template x-for="(r, i) in weeklyReviewRecurringRecommendations()" :key="i">
                     <div class="border-l-2 border-slate-300 dark:border-slate-700 pl-2 mt-1">
-                      <div x-text="formatReviewValue(r.target)"></div>
+                      <div class="font-mono" x-text="'recommendation_id: ' + formatReviewValue(r.recommendation_id)"></div>
+                      <div x-text="'category: ' + formatReviewValue(r.category) + ' | target: ' + formatReviewValue(r.target) + ' | action_type: ' + formatReviewValue(r.action_type)"></div>
                       <div class="text-slate-500" x-text="'weeks_seen: ' + formatReviewValue(r.weeks_seen)"></div>
+                      <div class="text-slate-500" x-text="'confidence_levels_seen: ' + formatReviewValue(r.confidence_levels_seen)"></div>
+                      <div class="text-slate-500" x-text="'latest_priority: ' + formatReviewValue(r.latest_priority) + ', latest_severity: ' + formatReviewValue(r.latest_severity)"></div>
                       <div class="text-slate-500" x-text="'action: ' + formatReviewValue(r.action)"></div>
                       <div class="text-slate-500" x-text="'recent_weeks: ' + formatReviewValue(r.recent_weeks)"></div>
                     </div>

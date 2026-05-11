@@ -39,7 +39,7 @@ def _seed_strategy_run(
     conn, *, run_id, generated_at_utc,
     fallback_level=None, ca_json=None, retry_log_json=None,
     btc_price_usd=75000.0, action_state="FLAT",
-    run_trigger="scheduled",
+    run_trigger="scheduled", full_state_json=None,
 ):
     # Sprint 1.10-K-A commit 2 §X(v1.4 §11.2):删 observation_category INSERT 列引用
     # (列已从 schema.sql 删除,配合 dao.py + state_builder.py + migration 015 真跑)
@@ -51,7 +51,8 @@ def _seed_strategy_run(
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (run_id, generated_at_utc, generated_at_utc,
          generated_at_utc, action_state, run_trigger, btc_price_usd,
-         fallback_level, "{}",
+         fallback_level,
+         json.dumps(full_state_json) if full_state_json is not None else "{}",
          json.dumps(ca_json) if ca_json else None,
          json.dumps(retry_log_json) if retry_log_json else None),
     )
@@ -141,6 +142,9 @@ def test_cold_start_returns_empty_aggregates(conn):
         "missing_constraint_runs": 0,
         "window_days": 7,
     }
+    assert result["l3_diagnostics"]["phase_distribution"] == {}
+    assert result["l4_diagnostics"]["risk_tier_distribution"] == {}
+    assert result["validator_diagnostics"]["top_triggered_validators"] == []
 
 
 # ============================================================
@@ -266,6 +270,107 @@ def test_aggregates_constraint_activations_23_v(conn):
     assert r["sample_base"]["total_strategy_runs"] == 3
     assert r["sample_base"]["valid_constraint_runs"] == 3
     assert r["sample_base"]["missing_constraint_runs"] == 0
+
+
+def test_aggregates_weekly_review_evidence_diagnostics(conn):
+    """L3/L4/Validator 诊断只读聚合,用于解释异常原因。"""
+    state_1 = {
+        "layers": {
+            "l2": {"phase": "late"},
+            "l3": {
+                "opportunity_grade": "C",
+                "execution_permission": "watch",
+                "anti_pattern_flags": [
+                    "extending_late_phase",
+                    "failing_at_resistance",
+                ],
+            },
+            "l4": {
+                "risk_tier": "elevated",
+                "risk_score": 72,
+                "position_cap_multiplier": 0.55,
+                "risk_breakdown": {
+                    "volatility_risk": 80,
+                    "crowding_risk": 65,
+                },
+            },
+            "master": {
+                "trade_plan": {"action": "watch"},
+                "what_would_change_mind": ["1D 收盘重新站上阻力"],
+                "notes": [
+                    "what_would_change_mind_insufficient_1_objective",
+                    "conflict_resolution_missing",
+                ],
+            },
+        },
+    }
+    state_2 = {
+        "layers": {
+            "l2": {"phase": "early"},
+            "l3": {
+                "opportunity_grade": "B",
+                "execution_permission": "cautious_open",
+                "anti_pattern_flags": [],
+            },
+            "l4": {
+                "risk_tier": "moderate",
+                "risk_score": 31,
+                "position_cap_multiplier": 0.85,
+                "risk_breakdown": {"crowding_risk": 20},
+            },
+            "master": {"mode": "new_thesis"},
+        },
+    }
+    _seed_strategy_run(
+        conn,
+        run_id="r_diag_1",
+        generated_at_utc=_iso(_NOW - timedelta(days=1)),
+        btc_price_usd=80000.0,
+        full_state_json=state_1,
+        ca_json={
+            "validator_16_change_mind": True,
+            "validator_23_conflict_missing": True,
+        },
+    )
+    _seed_strategy_run(
+        conn,
+        run_id="r_diag_2",
+        generated_at_utc=_iso(_NOW - timedelta(days=2)),
+        btc_price_usd=79000.0,
+        full_state_json=state_2,
+        ca_json={"validator_16_change_mind": False},
+    )
+    conn.commit()
+
+    r = build_weekly_review_input(conn, now_utc=_NOW)
+
+    l3 = r["l3_diagnostics"]
+    assert l3["phase_distribution"] == {"early": 1, "late": 1}
+    assert l3["opportunity_grade_distribution"] == {"B": 1, "C": 1}
+    assert l3["execution_permission_distribution"] == {
+        "cautious_open": 1,
+        "watch": 1,
+    }
+    assert l3["anti_pattern_signal_distribution"]["extending_late_phase"] == 1
+    assert l3["anti_pattern_by_grade"]["C"]["failing_at_resistance"] == 1
+    assert len(l3["extending_late_phase_samples"]) == 1
+    assert l3["extending_late_phase_samples"][0]["master_action"] == "watch"
+
+    l4 = r["l4_diagnostics"]
+    assert l4["risk_tier_distribution"] == {"elevated": 1, "moderate": 1}
+    assert l4["risk_score_summary"]["avg"] == 51.5
+    assert l4["position_cap_multiplier_summary"]["min"] == 0.55
+    assert l4["risk_breakdown_top_reasons"][0]["reason"] == "volatility_risk"
+    assert len(l4["elevated_samples"]) == 1
+    assert l4["elevated_samples"][0]["risk_breakdown"]["crowding_risk"] == 65
+
+    vd = r["validator_diagnostics"]
+    assert vd["validator_sample_base"]["valid_constraint_runs"] == 2
+    assert vd["top_triggered_validators"][0]["activations"] == 1
+    assert len(vd["v16_samples"]) == 1
+    assert "what_would_change_mind" in vd["v16_samples"][0]["activation_reason"]
+    assert len(vd["v23_samples"]) == 1
+    assert "conflict_resolution" in vd["v23_samples"][0]["activation_reason"]
 
 
 def test_aggregates_position_cap_compressed_avg(conn):

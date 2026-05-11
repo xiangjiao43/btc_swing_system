@@ -72,6 +72,70 @@ def _to_iso(dt: datetime) -> str:
     return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _safe_json_loads(raw: Any) -> dict[str, Any]:
+    """Best-effort JSON object parser for review-only diagnostics."""
+    if isinstance(raw, dict):
+        return raw
+    if not raw:
+        return {}
+    try:
+        obj = json.loads(raw)
+    except Exception:
+        return {}
+    return obj if isinstance(obj, dict) else {}
+
+
+def _row_value(row: Any, key: str, idx: int) -> Any:
+    if hasattr(row, "keys"):
+        return row[key]
+    return row[idx]
+
+
+def _count_value(counter: dict[str, int], value: Any, empty_key: str = "empty") -> None:
+    key = str(value) if value not in (None, "") else empty_key
+    counter[key] = counter.get(key, 0) + 1
+
+
+def _as_list(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    if isinstance(value, tuple):
+        return list(value)
+    return [value]
+
+
+def _numeric_summary(values: list[float]) -> dict[str, Any]:
+    if not values:
+        return {"count": 0, "min": None, "max": None, "avg": None}
+    return {
+        "count": len(values),
+        "min": round(min(values), 4),
+        "max": round(max(values), 4),
+        "avg": round(sum(values) / len(values), 4),
+    }
+
+
+def _extract_layers(state: dict[str, Any]) -> dict[str, Any]:
+    return state.get("layers") or {}
+
+
+def _extract_master_action(state: dict[str, Any]) -> Any:
+    layers = _extract_layers(state)
+    master = layers.get("master") or {}
+    trade_plan = master.get("trade_plan") or {}
+    new_thesis = master.get("new_thesis") or {}
+    return (
+        master.get("mode")
+        or master.get("action")
+        or trade_plan.get("action")
+        or new_thesis.get("mode")
+        or (state.get("adjudicator") or {}).get("action")
+        or (state.get("trade_plan") or {}).get("action")
+    )
+
+
 # ============================================================
 # 7 类输入聚合 helper(每个返回独立 dict / list)
 # ============================================================
@@ -341,7 +405,7 @@ def _aggregate_constraint_activations(
     window_days: int = 7,
 ) -> dict[str, Any]:
     """聚合 strategy_runs.constraint_activations_json:
-    - 23 条 V 激活次数(每条 'activations' / 'rate' 'N/valid_runs valid_runs')
+    - 23 条 V 激活次数(每条 'activations' / 'rate' 'N/M valid_runs')
     - meta 4 字段平均值(position_cap_compressed_avg / thesis_lock_blocks_count /
       channel_c_uses_count(从 fuse_events 取)/ review_pending_triggers)
 
@@ -675,6 +739,273 @@ def _aggregate_master_runs_with_trade_plan(
     return out
 
 
+def _fetch_strategy_run_json_rows(
+    conn: sqlite3.Connection, *, week_start: datetime, week_end: datetime,
+) -> list[Any]:
+    """Read only rows needed by evidence diagnostics."""
+    return conn.execute(
+        "SELECT run_id, generated_at_bjt, generated_at_utc, btc_price_usd, "
+        "       full_state_json, constraint_activations_json "
+        "FROM strategy_runs "
+        "WHERE generated_at_utc >= ? AND generated_at_utc < ? "
+        "ORDER BY generated_at_utc",
+        (_to_iso(week_start), _to_iso(week_end)),
+    ).fetchall()
+
+
+def _aggregate_l3_diagnostics(rows: list[Any]) -> dict[str, Any]:
+    """只读聚合 L3 异常解释证据;缺字段时返回空结构。"""
+    phase_dist: dict[str, int] = {}
+    anti_dist: dict[str, int] = {}
+    grade_dist: dict[str, int] = {}
+    permission_dist: dict[str, int] = {}
+    anti_by_grade: dict[str, dict[str, int]] = {}
+    extending_samples: list[dict[str, Any]] = []
+
+    for r in rows:
+        state = _safe_json_loads(_row_value(r, "full_state_json", 4))
+        layers = _extract_layers(state)
+        l2 = layers.get("l2") or state.get("layer_2") or {}
+        l3 = layers.get("l3") or state.get("layer_3") or {}
+
+        phase = (
+            l2.get("phase")
+            or l2.get("market_phase")
+            or l3.get("phase")
+            or l3.get("market_phase")
+        )
+        grade = l3.get("opportunity_grade") or l3.get("grade")
+        permission = l3.get("execution_permission")
+        anti_flags = [
+            str(x) for x in _as_list(
+                l3.get("anti_pattern_flags") or l3.get("anti_pattern_signals")
+            )
+            if x not in (None, "")
+        ]
+
+        if phase not in (None, ""):
+            _count_value(phase_dist, phase)
+        if grade not in (None, ""):
+            _count_value(grade_dist, grade)
+        if permission not in (None, ""):
+            _count_value(permission_dist, permission)
+
+        grade_key = str(grade) if grade not in (None, "") else "empty"
+        anti_by_grade.setdefault(grade_key, {})
+        for flag in anti_flags:
+            anti_dist[flag] = anti_dist.get(flag, 0) + 1
+            anti_by_grade[grade_key][flag] = (
+                anti_by_grade[grade_key].get(flag, 0) + 1
+            )
+
+        if (
+            "extending_late_phase" in anti_flags
+            and len(extending_samples) < 10
+        ):
+            extending_samples.append({
+                "run_id": _row_value(r, "run_id", 0),
+                "run_at": (
+                    _row_value(r, "generated_at_bjt", 1)
+                    or _row_value(r, "generated_at_utc", 2)
+                ),
+                "phase": phase,
+                "opportunity_grade": grade,
+                "execution_permission": permission,
+                "anti_pattern_signals": anti_flags,
+                "master_action": _extract_master_action(state),
+                "btc_price": _row_value(r, "btc_price_usd", 3),
+            })
+
+    return {
+        "phase_distribution": phase_dist,
+        "anti_pattern_signal_distribution": anti_dist,
+        "opportunity_grade_distribution": grade_dist,
+        "execution_permission_distribution": permission_dist,
+        "anti_pattern_by_grade": anti_by_grade,
+        "extending_late_phase_samples": extending_samples,
+    }
+
+
+def _aggregate_l4_diagnostics(rows: list[Any]) -> dict[str, Any]:
+    """只读聚合 L4 risk_tier 异常解释证据;不改 L4 schema/阈值。"""
+    tier_dist: dict[str, int] = {}
+    risk_scores: list[float] = []
+    cap_multipliers: list[float] = []
+    breakdown_values: dict[str, list[float]] = {}
+    breakdown_counts: dict[str, int] = {}
+    elevated_samples: list[dict[str, Any]] = []
+
+    for r in rows:
+        state = _safe_json_loads(_row_value(r, "full_state_json", 4))
+        layers = _extract_layers(state)
+        l4 = layers.get("l4") or state.get("layer_4") or {}
+
+        tier = l4.get("risk_tier")
+        if tier not in (None, ""):
+            _count_value(tier_dist, tier)
+
+        risk_score = l4.get("risk_score")
+        if isinstance(risk_score, (int, float)):
+            risk_scores.append(float(risk_score))
+
+        cap_mult = l4.get("position_cap_multiplier")
+        if isinstance(cap_mult, (int, float)):
+            cap_multipliers.append(float(cap_mult))
+
+        risk_breakdown = l4.get("risk_breakdown") or {}
+        if isinstance(risk_breakdown, dict):
+            for reason, value in risk_breakdown.items():
+                reason_key = str(reason)
+                breakdown_counts[reason_key] = breakdown_counts.get(reason_key, 0) + 1
+                if isinstance(value, (int, float)):
+                    breakdown_values.setdefault(reason_key, []).append(float(value))
+
+        if tier in ("elevated", "extreme") and len(elevated_samples) < 10:
+            elevated_samples.append({
+                "run_id": _row_value(r, "run_id", 0),
+                "run_at": (
+                    _row_value(r, "generated_at_bjt", 1)
+                    or _row_value(r, "generated_at_utc", 2)
+                ),
+                "risk_tier": tier,
+                "risk_score": risk_score,
+                "position_cap_multiplier": cap_mult,
+                "risk_breakdown": risk_breakdown if isinstance(risk_breakdown, dict) else {},
+                "master_action": _extract_master_action(state),
+                "btc_price": _row_value(r, "btc_price_usd", 3),
+            })
+
+    top_reasons = []
+    for reason, count in breakdown_counts.items():
+        values = breakdown_values.get(reason) or []
+        top_reasons.append({
+            "reason": reason,
+            "count": count,
+            "avg": (
+                round(sum(values) / len(values), 4) if values else None
+            ),
+            "max": round(max(values), 4) if values else None,
+        })
+    top_reasons.sort(
+        key=lambda x: (
+            x["max"] if x["max"] is not None else -1,
+            x["count"],
+            x["reason"],
+        ),
+        reverse=True,
+    )
+
+    return {
+        "risk_tier_distribution": tier_dist,
+        "risk_score_summary": _numeric_summary(risk_scores),
+        "position_cap_multiplier_summary": _numeric_summary(cap_multipliers),
+        "risk_breakdown_top_reasons": top_reasons[:10],
+        "elevated_samples": elevated_samples,
+    }
+
+
+def _validator_display_name(validator_key: str) -> str:
+    if validator_key.startswith("validator_"):
+        parts = validator_key.split("_", 2)
+        if len(parts) == 3 and parts[1].isdigit():
+            return f"V{parts[1]} {parts[2]}"
+    return validator_key
+
+
+def _activation_reason_for_validator(
+    *, validator_key: str, ca: dict[str, Any], master: dict[str, Any],
+) -> str:
+    notes = [str(x) for x in _as_list(master.get("notes")) if x]
+    if validator_key == "validator_16_change_mind":
+        matched = [n for n in notes if "what_would_change_mind" in n]
+        if matched:
+            return "; ".join(matched[:3])
+    if validator_key == "validator_23_conflict_missing":
+        matched = [n for n in notes if "conflict_resolution" in n]
+        if matched:
+            return "; ".join(matched[:3])
+    hints = [str(x) for x in _as_list(ca.get("validator_retry_hints")) if x]
+    if hints:
+        return "; ".join(hints[:3])
+    return f"{_validator_display_name(validator_key)} triggered"
+
+
+def _aggregate_validator_diagnostics(rows: list[Any]) -> dict[str, Any]:
+    """只读聚合 Validator 异常解释证据;不改 Validator 判定。"""
+    counts = {k: 0 for k in VALIDATOR_KEYS}
+    valid_constraint_runs = 0
+    missing_constraint_runs = 0
+    v16_samples: list[dict[str, Any]] = []
+    v23_samples: list[dict[str, Any]] = []
+
+    for r in rows:
+        ca = _safe_json_loads(_row_value(r, "constraint_activations_json", 5))
+        if not ca:
+            missing_constraint_runs += 1
+            continue
+        valid_constraint_runs += 1
+
+        state = _safe_json_loads(_row_value(r, "full_state_json", 4))
+        layers = _extract_layers(state)
+        master = layers.get("master") or state.get("adjudicator") or {}
+        master_action = _extract_master_action(state)
+
+        for key in VALIDATOR_KEYS:
+            if ca.get(key) is True:
+                counts[key] += 1
+
+        def _sample(validator_key: str) -> dict[str, Any]:
+            return {
+                "run_at": (
+                    _row_value(r, "generated_at_bjt", 1)
+                    or _row_value(r, "generated_at_utc", 2)
+                ),
+                "validator_id": validator_key.split("_")[1]
+                if len(validator_key.split("_")) > 1 else validator_key,
+                "validator_name": _validator_display_name(validator_key),
+                "activation_reason": _activation_reason_for_validator(
+                    validator_key=validator_key, ca=ca, master=master,
+                ),
+                "message": _activation_reason_for_validator(
+                    validator_key=validator_key, ca=ca, master=master,
+                ),
+                "master_action": master_action,
+                "what_would_change_mind": master.get("what_would_change_mind"),
+                "conflict_resolution": (
+                    master.get("conflict_resolution")
+                    or master.get("conflict_resolution_summary")
+                ),
+            }
+
+        if ca.get("validator_16_change_mind") is True and len(v16_samples) < 10:
+            v16_samples.append(_sample("validator_16_change_mind"))
+        if ca.get("validator_23_conflict_missing") is True and len(v23_samples) < 10:
+            v23_samples.append(_sample("validator_23_conflict_missing"))
+
+    top_triggered = [
+        {
+            "validator_id": key.split("_")[1],
+            "validator_key": key,
+            "validator_name": _validator_display_name(key),
+            "activations": count,
+        }
+        for key, count in counts.items()
+        if count > 0
+    ]
+    top_triggered.sort(key=lambda x: (x["activations"], x["validator_key"]), reverse=True)
+
+    return {
+        "top_triggered_validators": top_triggered[:10],
+        "v16_samples": v16_samples,
+        "v23_samples": v23_samples,
+        "validator_sample_base": {
+            "total_strategy_runs": len(rows),
+            "valid_constraint_runs": valid_constraint_runs,
+            "missing_constraint_runs": missing_constraint_runs,
+        },
+    }
+
+
 # ============================================================
 # 入口:build_weekly_review_input
 # ============================================================
@@ -702,7 +1033,7 @@ def build_weekly_review_input(
         "context": {current_virtual_account, equity_curve_7d}
       }
 
-    AI 收到此 dict 后填 evaluation 文本 + 输出最终 4 段 JSON。
+    AI 收到此 dict 后填 evaluation 文本 + 输出最终 5 段 JSON。
     """
     if now_utc is None:
         now_utc = datetime.now(timezone.utc)
@@ -737,6 +1068,12 @@ def build_weekly_review_input(
     master_runs_with_plan = _aggregate_master_runs_with_trade_plan(
         conn, week_start=week_start, week_end=week_end,
     )
+    diagnostic_rows = _fetch_strategy_run_json_rows(
+        conn, week_start=week_start, week_end=week_end,
+    )
+    l3_diagnostics = _aggregate_l3_diagnostics(diagnostic_rows)
+    l4_diagnostics = _aggregate_l4_diagnostics(diagnostic_rows)
+    validator_diagnostics = _aggregate_validator_diagnostics(diagnostic_rows)
 
     # 装配 performance_summary_raw(对齐 §3.3.9 schema 7 字段)
     performance_raw = {
@@ -789,4 +1126,7 @@ def build_weekly_review_input(
         "weekly_price_action": price_action,
         "master_runs_with_trade_plan": master_runs_with_plan,
         "sample_base": constraints["sample_base"],
+        "l3_diagnostics": l3_diagnostics,
+        "l4_diagnostics": l4_diagnostics,
+        "validator_diagnostics": validator_diagnostics,
     }

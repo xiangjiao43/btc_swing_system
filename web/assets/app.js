@@ -258,6 +258,40 @@ function app() {
             const rows = sq.ai_vs_actual_comparison || [];
             return Array.isArray(rows) ? rows : [];
         },
+        weeklyReviewDiagnostics() {
+            const out = this.weeklyReviewOutput();
+            const nested = out.evidence_diagnostics || {};
+            return {
+                l3: out.l3_diagnostics || nested.l3_diagnostics || {},
+                l4: out.l4_diagnostics || nested.l4_diagnostics || {},
+                validator: out.validator_diagnostics
+                    || nested.validator_diagnostics || {},
+            };
+        },
+        hasDiagnosticData(value) {
+            if (value == null || value === '') return false;
+            if (Array.isArray(value)) {
+                return value.some(v => this.hasDiagnosticData(v));
+            }
+            if (typeof value === 'object') {
+                return Object.values(value).some(v => this.hasDiagnosticData(v));
+            }
+            if (typeof value === 'number') return value !== 0;
+            return true;
+        },
+        hasWeeklyReviewDiagnostics() {
+            const d = this.weeklyReviewDiagnostics();
+            return this.hasDiagnosticData(d.l3)
+                || this.hasDiagnosticData(d.l4)
+                || this.hasDiagnosticData(d.validator);
+        },
+        diagnosticEntries(obj) {
+            if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return [];
+            return Object.entries(obj).map(([key, value]) => ({
+                key,
+                value: this.formatReviewValue(value),
+            }));
+        },
 
         // Sprint 1.10-I §9.4:AI 失败状态显示(替换"无机会"模糊)
         // 数据源:state.raw.retry_log_json(commit 1.10-F migration 012)

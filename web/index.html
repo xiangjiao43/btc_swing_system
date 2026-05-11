@@ -1217,6 +1217,138 @@
                 </template>
               </div>
             </div>
+            <!-- evidence diagnostics -->
+            <div class="border-t border-slate-200 dark:border-slate-800 pt-2">
+              <div class="stat-label mb-1">诊断证据</div>
+              <template x-if="!hasWeeklyReviewDiagnostics()">
+                <div class="text-slate-500 dark:text-slate-400 italic">
+                  旧周报未记录该诊断字段
+                </div>
+              </template>
+              <div x-show="hasWeeklyReviewDiagnostics()" class="space-y-3 text-[11px]">
+                <div>
+                  <div class="font-semibold text-slate-700 dark:text-slate-300">L3 诊断</div>
+                  <div class="grid grid-cols-1 md:grid-cols-3 gap-2">
+                    <div>
+                      <div class="text-slate-500">phase_distribution</div>
+                      <template x-for="item in diagnosticEntries(weeklyReviewDiagnostics().l3.phase_distribution)" :key="item.key">
+                        <div class="font-mono" x-text="item.key + ': ' + item.value"></div>
+                      </template>
+                    </div>
+                    <div>
+                      <div class="text-slate-500">opportunity_grade_distribution</div>
+                      <template x-for="item in diagnosticEntries(weeklyReviewDiagnostics().l3.opportunity_grade_distribution)" :key="item.key">
+                        <div class="font-mono" x-text="item.key + ': ' + item.value"></div>
+                      </template>
+                    </div>
+                    <div>
+                      <div class="text-slate-500">top anti_pattern_signals</div>
+                      <template x-for="item in diagnosticEntries(weeklyReviewDiagnostics().l3.anti_pattern_signal_distribution)" :key="item.key">
+                        <div class="font-mono" x-text="item.key + ': ' + item.value"></div>
+                      </template>
+                    </div>
+                  </div>
+                  <div class="mt-1">
+                    <div class="text-slate-500">extending_late_phase_samples</div>
+                    <template x-for="(s, i) in (weeklyReviewDiagnostics().l3.extending_late_phase_samples || [])" :key="i">
+                      <div class="border-l-2 border-slate-300 dark:border-slate-700 pl-2 mt-1">
+                        <span x-text="formatReviewValue(s.run_at || s.run_id)"></span>
+                        <span class="mx-1">|</span>
+                        <span x-text="'phase=' + formatReviewValue(s.phase)"></span>
+                        <span class="mx-1">|</span>
+                        <span x-text="'opportunity_grade=' + formatReviewValue(s.opportunity_grade)"></span>
+                        <span class="mx-1">|</span>
+                        <span x-text="'execution_permission=' + formatReviewValue(s.execution_permission)"></span>
+                        <div class="text-slate-500" x-text="'anti_pattern_signals: ' + formatReviewValue(s.anti_pattern_signals)"></div>
+                        <div class="text-slate-500" x-text="'master_action: ' + formatReviewValue(s.master_action) + ', btc_price: ' + formatReviewValue(s.btc_price)"></div>
+                      </div>
+                    </template>
+                  </div>
+                </div>
+
+                <div>
+                  <div class="font-semibold text-slate-700 dark:text-slate-300">L4 诊断</div>
+                  <div class="grid grid-cols-1 md:grid-cols-3 gap-2">
+                    <div>
+                      <div class="text-slate-500">risk_tier_distribution</div>
+                      <template x-for="item in diagnosticEntries(weeklyReviewDiagnostics().l4.risk_tier_distribution)" :key="item.key">
+                        <div class="font-mono" x-text="item.key + ': ' + item.value"></div>
+                      </template>
+                    </div>
+                    <div>
+                      <div class="text-slate-500">risk_score_summary</div>
+                      <template x-for="item in diagnosticEntries(weeklyReviewDiagnostics().l4.risk_score_summary)" :key="item.key">
+                        <div class="font-mono" x-text="item.key + ': ' + item.value"></div>
+                      </template>
+                    </div>
+                    <div>
+                      <div class="text-slate-500">position_cap_multiplier_summary</div>
+                      <template x-for="item in diagnosticEntries(weeklyReviewDiagnostics().l4.position_cap_multiplier_summary)" :key="item.key">
+                        <div class="font-mono" x-text="item.key + ': ' + item.value"></div>
+                      </template>
+                    </div>
+                  </div>
+                  <div class="mt-1">
+                    <div class="text-slate-500">top risk_breakdown reasons</div>
+                    <template x-for="(r, i) in (weeklyReviewDiagnostics().l4.risk_breakdown_top_reasons || [])" :key="i">
+                      <div class="font-mono"
+                           x-text="formatReviewValue(r.reason) + ': count=' + formatReviewValue(r.count) + ', avg=' + formatReviewValue(r.avg) + ', max=' + formatReviewValue(r.max)"></div>
+                    </template>
+                  </div>
+                  <div class="mt-1">
+                    <div class="text-slate-500">elevated_samples</div>
+                    <template x-for="(s, i) in (weeklyReviewDiagnostics().l4.elevated_samples || [])" :key="i">
+                      <div class="border-l-2 border-slate-300 dark:border-slate-700 pl-2 mt-1">
+                        <span x-text="formatReviewValue(s.run_at || s.run_id)"></span>
+                        <span class="mx-1">|</span>
+                        <span x-text="'risk_tier=' + formatReviewValue(s.risk_tier)"></span>
+                        <span class="mx-1">|</span>
+                        <span x-text="'risk_score=' + formatReviewValue(s.risk_score)"></span>
+                        <span class="mx-1">|</span>
+                        <span x-text="'position_cap_multiplier=' + formatReviewValue(s.position_cap_multiplier)"></span>
+                        <div class="text-slate-500" x-text="'risk_breakdown: ' + formatReviewValue(s.risk_breakdown)"></div>
+                        <div class="text-slate-500" x-text="'master_action: ' + formatReviewValue(s.master_action) + ', btc_price: ' + formatReviewValue(s.btc_price)"></div>
+                      </div>
+                    </template>
+                  </div>
+                </div>
+
+                <div>
+                  <div class="font-semibold text-slate-700 dark:text-slate-300">Validator 诊断</div>
+                  <div>
+                    <div class="text-slate-500">top_triggered_validators</div>
+                    <template x-for="(v, i) in (weeklyReviewDiagnostics().validator.top_triggered_validators || [])" :key="i">
+                      <div class="font-mono"
+                           x-text="formatReviewValue(v.validator_name) + ': ' + formatReviewValue(v.activations)"></div>
+                    </template>
+                  </div>
+                  <div class="grid grid-cols-1 md:grid-cols-2 gap-2 mt-1">
+                    <div>
+                      <div class="text-slate-500">V16 samples</div>
+                      <template x-for="(s, i) in (weeklyReviewDiagnostics().validator.v16_samples || [])" :key="i">
+                        <div class="border-l-2 border-slate-300 dark:border-slate-700 pl-2 mt-1">
+                          <div x-text="formatReviewValue(s.run_at) + ' | ' + formatReviewValue(s.validator_name)"></div>
+                          <div class="text-slate-500" x-text="'activation_reason: ' + formatReviewValue(s.activation_reason || s.message)"></div>
+                          <div class="text-slate-500" x-text="'master_action: ' + formatReviewValue(s.master_action)"></div>
+                          <div class="text-slate-500" x-text="'what_would_change_mind: ' + formatReviewValue(s.what_would_change_mind)"></div>
+                        </div>
+                      </template>
+                    </div>
+                    <div>
+                      <div class="text-slate-500">V23 samples</div>
+                      <template x-for="(s, i) in (weeklyReviewDiagnostics().validator.v23_samples || [])" :key="i">
+                        <div class="border-l-2 border-slate-300 dark:border-slate-700 pl-2 mt-1">
+                          <div x-text="formatReviewValue(s.run_at) + ' | ' + formatReviewValue(s.validator_name)"></div>
+                          <div class="text-slate-500" x-text="'activation_reason: ' + formatReviewValue(s.activation_reason || s.message)"></div>
+                          <div class="text-slate-500" x-text="'master_action: ' + formatReviewValue(s.master_action)"></div>
+                          <div class="text-slate-500" x-text="'conflict_resolution: ' + formatReviewValue(s.conflict_resolution)"></div>
+                        </div>
+                      </template>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
             <!-- 23 V evaluation 表(可折叠) -->
             <details class="border-t border-slate-200 dark:border-slate-800 pt-2">
               <summary class="cursor-pointer text-[11px] font-mono text-slate-500

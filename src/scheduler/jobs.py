@@ -1367,6 +1367,14 @@ def job_weekly_review(
             )
             if sample_base:
                 out["sample_base"] = sample_base
+        if isinstance(out, dict):
+            for diag_key in (
+                "l3_diagnostics",
+                "l4_diagnostics",
+                "validator_diagnostics",
+            ):
+                if diag_key not in out and inp.get(diag_key) is not None:
+                    out[diag_key] = inp[diag_key]
 
         # 4. UPSERT weekly_reviews
         critical_count = WeeklyReviewAnalyst.count_critical_recommendations(out)

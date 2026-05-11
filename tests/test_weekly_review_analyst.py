@@ -165,6 +165,9 @@ def test_api_failure_returns_fallback():
     assert "degraded" in out["status"]
     assert "performance_summary" in out
     assert "hard_constraint_activation_review" in out
+    assert "l3_diagnostics" in out
+    assert "l4_diagnostics" in out
+    assert "validator_diagnostics" in out
     hc = out["hard_constraint_activation_review"]
     # fallback 也含 23 V
     for k in VALIDATOR_KEYS:
@@ -220,6 +223,16 @@ def test_normalize_output_converts_days_rate_to_valid_runs():
     normed = WeeklyReviewAnalyst.normalize_output(payload)
     hc = normed["hard_constraint_activation_review"]
     assert hc[VALIDATOR_KEYS[0]]["rate"] == "1/7 valid_runs"
+
+
+def test_normalize_output_repairs_invalid_valid_runs_rate_text():
+    payload = _make_full_output()
+    payload["hard_constraint_activation_review"][VALIDATOR_KEYS[0]]["rate"] = (
+        "1/" + "valid_runs " + "valid_runs"
+    )
+    normed = WeeklyReviewAnalyst.normalize_output(payload)
+    hc = normed["hard_constraint_activation_review"]
+    assert hc[VALIDATOR_KEYS[0]]["rate"] == "1/0 valid_runs"
 
 
 def test_normalize_output_handles_missing_review_section():
@@ -284,12 +297,19 @@ def test_build_user_prompt_includes_window_and_perf_raw():
         "hard_constraint_activation_raw": {
             "v_activations": {"validator_1_stop_loss_overridden": {"activations": 0}},
         },
+        "l3_diagnostics": {"phase_distribution": {"late": 2}},
+        "l4_diagnostics": {"risk_score_summary": {"avg": 72}},
+        "validator_diagnostics": {"v16_samples": [{"run_at": "x"}]},
     })
     assert "2026-05-03T14:00:00Z" in prompt
     assert "2026-05-10T14:00:00Z" in prompt
     assert "total_runs" in prompt
     assert "ai_failures" in prompt
     assert "23 条 V Validator" in prompt
+    assert "L3 诊断证据" in prompt
+    assert "L4 诊断证据" in prompt
+    assert "Validator 诊断证据" in prompt
+    assert "证据不足,建议补诊断" in prompt
 
 
 # ============================================================

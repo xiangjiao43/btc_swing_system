@@ -49,6 +49,30 @@
     "window_days": <int>
   },
 
+  "l3_diagnostics": {
+    "phase_distribution": {},
+    "anti_pattern_signal_distribution": {},
+    "opportunity_grade_distribution": {},
+    "execution_permission_distribution": {},
+    "anti_pattern_by_grade": {},
+    "extending_late_phase_samples": []
+  },
+
+  "l4_diagnostics": {
+    "risk_tier_distribution": {},
+    "risk_score_summary": {"count": <int>, "min": <float or null>, "max": <float or null>, "avg": <float or null>},
+    "position_cap_multiplier_summary": {"count": <int>, "min": <float or null>, "max": <float or null>, "avg": <float or null>},
+    "risk_breakdown_top_reasons": [],
+    "elevated_samples": []
+  },
+
+  "validator_diagnostics": {
+    "top_triggered_validators": [],
+    "v16_samples": [],
+    "v23_samples": [],
+    "validator_sample_base": {}
+  },
+
   "performance_summary": {
     "total_runs": <int>,
     "successful_runs": <int>,
@@ -147,6 +171,18 @@ chasing_breakout_no_pullback / failing_at_resistance / after_extreme_event_no_re
 - 触发率 < 5% 但 > 0 → 阈值合理
 - 触发率 = 0 但 prompt 定义存在 → 可能 prompt 文字不清,建议审视
 
+## 第 8b 段 — L3 诊断证据
+新增 l3_diagnostics,用于解释“为什么 L3 异常”:
+- phase_distribution:先判断是否因为 late/exhausted 阶段过多
+- anti_pattern_signal_distribution:再判断是否某类反模式单点过密
+- anti_pattern_by_grade:看反模式是否集中在 B/C/none
+- extending_late_phase_samples:最多 10 条样本,只能用于审计,不能用于自动调参
+
+对 extending_late_phase:
+- 必须先解释是 phase 分布导致,还是 anti_pattern 组合导致
+- 如果 diagnostics 为空,必须写“证据不足,建议补诊断”
+- 不允许单凭比例建议改 L3 prompt
+
 ## 第 9 段 — L3 grade 分布
 期望(中长线策略):A 1-2/年、B 1-2/月、C 3-4/月、其余 none。
 - 实际周内 B + C 总数 > 5 → L3 §四 'B/C 级' 定义可能偏松,建议收紧 phase=early
@@ -160,6 +196,29 @@ chasing_breakout_no_pullback / failing_at_resistance / after_extreme_event_no_re
   必须先结合 risk_score / risk_breakdown / position_cap_multiplier / 第 11 段实际走势判断。
   如果当前输入缺 risk_breakdown,建议“补诊断”,不要直接调 L4 prompt。
 - 全 moderate → L4 不分辨细节,可能 prompt 提示不够
+
+## 第 10b 段 — L4 诊断证据
+新增 l4_diagnostics,用于解释“为什么 L4 elevated”:
+- risk_score_summary:看 elevated 是否有 risk_score 支撑
+- risk_breakdown_top_reasons:看主要是 crowding / structure / volatility / macro 哪类风险
+- position_cap_multiplier_summary:看风险是否实际压缩仓位
+- elevated_samples:最多 10 条样本,只能用于审计,不能用于自动调参
+
+对 elevated:
+- 必须先解释 risk_score / risk_breakdown / position_cap_multiplier
+- 如果 diagnostics 为空,必须写“证据不足,建议补诊断”
+- 不允许单凭 elevated 比例建议放宽 L4
+
+## 第 10c 段 — Validator 诊断证据
+新增 validator_diagnostics,用于解释 V16 / V23:
+- top_triggered_validators:先看触发最密集的 Validator
+- v16_samples:检查 what_would_change_mind 是缺失、太少,还是不够客观
+- v23_samples:检查 conflict_resolution 是缺失、文案未显式表达,还是 Master 结构化不足
+
+对 V16 / V23:
+- 必须先判断是输出字段缺失、Validator 文案误报,还是 Master 结构化不足
+- 如果 diagnostics 为空,必须写“证据不足,建议补诊断”
+- 不允许直接修改 Validator 交易约束
 
 ## 第 11 段 — BTC 实际走势(price_candles 7d 1d K 线)
 用于第 12 段对比。**中立性纪律**:中长线 1 周样本不足以评估 AI 方向准确度,

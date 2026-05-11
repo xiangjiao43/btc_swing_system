@@ -55,6 +55,9 @@ class WeeklyReviewAnalyst(BaseAgent):
         l4_dist = context.get("l4_risk_tier_distribution") or {}
         price_action = context.get("weekly_price_action") or {}
         master_runs = context.get("master_runs_with_trade_plan") or []
+        l3_diag = context.get("l3_diagnostics") or {}
+        l4_diag = context.get("l4_diagnostics") or {}
+        validator_diag = context.get("validator_diagnostics") or {}
 
         lines: list[str] = [
             f"# 周复盘窗口",
@@ -125,6 +128,24 @@ class WeeklyReviewAnalyst(BaseAgent):
             "评估只针对关键位(止损/止盈/入场区)合理性,不下\"AI 准/错\"结论。",
             json.dumps(master_runs, ensure_ascii=False, indent=2, default=str),
             "",
+            "# 13. L3 诊断证据(只读,不改 L3 schema)",
+            "用于解释 L3 异常的原因:先看 phase_distribution,再看 "
+            "anti_pattern_signal_distribution 与 anti_pattern_by_grade。"
+            "若 diagnostics 为空,必须写“证据不足,建议补诊断”,不能直接调 L3 prompt。",
+            json.dumps(l3_diag, ensure_ascii=False, indent=2, default=str),
+            "",
+            "# 14. L4 诊断证据(只读,不改 L4 schema/阈值)",
+            "用于解释 L4 elevated:先看 risk_score_summary / risk_breakdown_top_reasons "
+            "/ position_cap_multiplier_summary,不能单凭 elevated 比例建议放宽 L4。",
+            "若 diagnostics 为空,必须写“证据不足,建议补诊断”。",
+            json.dumps(l4_diag, ensure_ascii=False, indent=2, default=str),
+            "",
+            "# 15. Validator 诊断证据(只读,不改 Validator 判定)",
+            "用于解释 V16/V23:先判断是输出字段缺失、Validator 文案误报,"
+            "还是 Master 结构化不足;不能直接修改 Validator 交易约束。",
+            "若 diagnostics 为空,必须写“证据不足,建议补诊断”。",
+            json.dumps(validator_diag, ensure_ascii=False, indent=2, default=str),
+            "",
             f"# 当前 virtual_account snapshot",
             json.dumps(
                 ctx_meta.get("current_virtual_account") or {},
@@ -136,6 +157,8 @@ class WeeklyReviewAnalyst(BaseAgent):
             "strategy_quality / hard_constraint_activation_review / "
             "adjustment_recommendations。",
             "同时在顶层输出 sample_base,原样转述第 7a 段字段。",
+            "同时在顶层输出 l3_diagnostics / l4_diagnostics / "
+            "validator_diagnostics,原样转述第 13-15 段字段,供网页展示。",
             "",
             "**hard_constraint_activation_review 必须列全 23 条 V Validator**,"
             "每条含 activations / rate / evaluation 三个字段。",
@@ -154,6 +177,12 @@ class WeeklyReviewAnalyst(BaseAgent):
             "- L3 只负责 opportunity_grade / execution_permission / anti_pattern。",
             "- 本周 0 成交或只有 1 个 thesis 属于样本不足/早期观察,"
             "默认不得 high/critical 调参。",
+            "- 对 L3 extending_late_phase,先解释是 phase 分布导致,"
+            "还是 anti_pattern 组合导致;不允许单凭比例建议改 L3 prompt。",
+            "- 对 L4 elevated,先解释 risk_score / risk_breakdown / "
+            "position_cap_multiplier;不允许单凭 elevated 比例建议放宽 L4。",
+            "- 对 V16/V23,先解释是输出字段缺失、Validator 文案误报,"
+            "还是 Master 结构化不足;不允许直接修改 Validator 交易约束。",
             "",
             "**Sprint H Part B 新增约束**:",
             "1. strategy_quality 必须含 ai_vs_actual_comparison 子段 — 若本周",
@@ -211,6 +240,33 @@ class WeeklyReviewAnalyst(BaseAgent):
                 "missed_opportunities": [],
                 "ai_vs_actual_comparison": [],
             },
+            "l3_diagnostics": {
+                "phase_distribution": {},
+                "anti_pattern_signal_distribution": {},
+                "opportunity_grade_distribution": {},
+                "execution_permission_distribution": {},
+                "anti_pattern_by_grade": {},
+                "extending_late_phase_samples": [],
+            },
+            "l4_diagnostics": {
+                "risk_tier_distribution": {},
+                "risk_score_summary": {"count": 0, "min": None, "max": None, "avg": None},
+                "position_cap_multiplier_summary": {
+                    "count": 0, "min": None, "max": None, "avg": None,
+                },
+                "risk_breakdown_top_reasons": [],
+                "elevated_samples": [],
+            },
+            "validator_diagnostics": {
+                "top_triggered_validators": [],
+                "v16_samples": [],
+                "v23_samples": [],
+                "validator_sample_base": {
+                    "total_strategy_runs": 0,
+                    "valid_constraint_runs": 0,
+                    "missing_constraint_runs": 0,
+                },
+            },
             "hard_constraint_activation_review": {
                 **v_review,
                 "position_cap_compressed_avg": None,
@@ -248,6 +304,9 @@ class WeeklyReviewAnalyst(BaseAgent):
         """
         if not isinstance(out, dict):
             return out  # caller 已 fallback
+        out.setdefault("l3_diagnostics", {})
+        out.setdefault("l4_diagnostics", {})
+        out.setdefault("validator_diagnostics", {})
         sq = out.get("strategy_quality")
         if isinstance(sq, dict) and "ai_vs_actual_comparison" not in sq:
             sq["ai_vs_actual_comparison"] = []
@@ -281,6 +340,10 @@ class WeeklyReviewAnalyst(BaseAgent):
                 rate = hc[k].get("rate")
                 if isinstance(rate, str) and "days" in rate:
                     hc[k]["rate"] = rate.replace(" days", " valid_runs")
+                rate = hc[k].get("rate")
+                if isinstance(rate, str):
+                    bad_suffix = "/valid_runs " + "valid_runs"
+                    hc[k]["rate"] = rate.replace(bad_suffix, "/0 valid_runs")
         if missing:
             notes = list(out.get("notes") or [])
             notes.append(

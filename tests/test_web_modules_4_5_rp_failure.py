@@ -141,6 +141,33 @@ def test_module_5_strategy_quality_ai_vs_actual_fields(html):
     assert "本周无可对比的 master trade_plan" in html
 
 
+def test_module_5_evidence_diagnostics_fields(html):
+    """周复盘新增诊断证据:L3 / L4 / Validator。"""
+    assert "诊断证据" in html
+    assert "L3 诊断" in html
+    assert "L4 诊断" in html
+    assert "Validator 诊断" in html
+    for field in (
+        "phase_distribution",
+        "opportunity_grade_distribution",
+        "top anti_pattern_signals",
+        "extending_late_phase_samples",
+        "risk_tier_distribution",
+        "risk_score_summary",
+        "position_cap_multiplier_summary",
+        "top risk_breakdown reasons",
+        "elevated_samples",
+        "top_triggered_validators",
+        "V16 samples",
+        "V23 samples",
+        "activation_reason",
+        "what_would_change_mind",
+        "conflict_resolution",
+        "旧周报未记录该诊断字段",
+    ):
+        assert field in html
+
+
 def test_module_5_23_validators_collapsible_table(html):
     """折叠 <details> 含 23 V 评估表。"""
     assert "<details" in html
@@ -258,6 +285,9 @@ def test_js_module_5_state(js):
     assert "weeklyReviewAiVsActual" in js
     assert "formatDrawdownPct" in js
     assert "drawdownColorClass" in js
+    assert "weeklyReviewDiagnostics" in js
+    assert "hasWeeklyReviewDiagnostics" in js
+    assert "diagnosticEntries" in js
 
 
 def test_footer_data_sources_aligned(html):

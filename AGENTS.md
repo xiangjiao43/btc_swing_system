@@ -1,4 +1,4 @@
-# BTC Swing System - CLAUDE.md
+# BTC Swing System - AGENTS.md
 
 ## 项目唯一权威蓝本
 

@@ -1,10 +1,10 @@
 """
-jobs.py — Sprint 1.15b 任务定义 + 配置装载
+jobs.py — APScheduler 任务定义 + 配置装载。
 
-三个 job:
+核心 job:
   * job_pipeline_run:调 StrategyStateBuilder.run();异常写 FallbackLog,不 crash。
-  * job_data_collection:数据采集骨架(默认关闭,占位用)。
-  * job_cleanup:清理骨架(默认关闭,占位用)。
+  * collector jobs:按 scheduler.yaml 写入 K 线、衍生品、链上、宏观与事件数据。
+  * event / hard_invalidation / weekly_review jobs:处理 v1.4 触发与复盘。
 
 build_job_configs(cfg) 把 yaml dict 拍平成 JobConfig 列表,
 config 读完后交给 src/scheduler/main.py 注册到 APScheduler。
@@ -75,7 +75,7 @@ def job_pipeline_run(
     try:
         conn = cf()
         # Sprint 1.10-H D3=a:S3 过度保守监控同步检查(builder.run 之前)
-        # 规则计算 < 1ms;告警立即体现在 16:05 BJT 网页(1.10-I)
+        # 规则计算 < 1ms;告警立即体现在下一次网页刷新 / 主裁决输出。
         try:
             from src.strategy.conservative_monitor import ConservativeMonitor
             ConservativeMonitor.check_and_alert(conn)
@@ -169,7 +169,10 @@ def job_pipeline_run_regular(
     conn_factory: Optional[Callable[[], Any]] = None,
     builder_factory: Optional[Callable[[Any], Any]] = None,
 ) -> dict[str, Any]:
-    """常规档(00/04/12/16/20:05 BJT)。pre-flight 阈值宽松,允许 30h 链上 / 30h 宏观。"""
+    """每日主裁决档(当前 scheduler.yaml 为 11:35 BJT)。
+
+    pre-flight 阈值宽松,允许 30h 链上 / 30h 宏观。
+    """
     return job_pipeline_run(
         conn_factory=conn_factory, builder_factory=builder_factory,
         run_trigger="scheduled",

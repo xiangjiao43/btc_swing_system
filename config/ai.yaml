@@ -5,38 +5,38 @@
 #       采样参数 / 成本控制)。与数据源解耦,单独一个文件。
 #
 # 重要说明 —— 协议与 SDK 选择:
-#   * 中转站协议:**OpenAI Compatible**(不是 Anthropic 原生协议)
-#   * SDK 选择:使用 `openai` Python SDK(不使用 `anthropic` SDK)
-#   * 这与建模文档 §10.2 的原始示例(anthropic SDK)不同 —— 因
-#     本项目用的中转站走 OpenAI 兼容 API,直接调 openai SDK 更省事。
+#   * 当前代码使用 `anthropic` Python SDK(src/ai/client.py),通过 base_url
+#     指向 novaiapi 中转站。
+#   * OPENAI_API_BASE / OPENAI_API_KEY / OPENAI_MODEL 是历史沿用的环境变量名,
+#     不代表代码使用 openai SDK。
+#   * 不要只改本 yaml 就切 SDK;若要换协议,必须同步改 src/ai/client.py 与测试。
 #
 # 重要说明 —— 模型选择:
-#   * 建模文档 v1.2 原写的是 claude-opus-4-7(见 §10.2 的 AI_MODEL_NAME)
-#   * 因成本考虑,v0.x 默认改用 **claude-sonnet-4-5-20250929**
+#   * 建模文档 v1.4 当前默认 **claude-sonnet-4-5-20250929**
 #   * 调用端需从响应里读实际模型名,写入 StrategyState.ai_model_actual
 #     (M37,见下面 model_tracking 段),以防中转站隐式降级。
 #
 # 创建于:2026-04-23(Sprint 1 前置工作 · 优化二第 1 批微调)
-# 建模版本:v1.2
+# 建模版本:v1.4
 # ============================================================
 
 
 # -------- 协议与 SDK ------------------------------------------------
 protocol:
-  # 中转站暴露的 API 协议:openai_compat / anthropic_native
-  flavor: "openai_compat"
-  # 客户端 SDK:用 openai 还是 anthropic;当前用 openai
-  sdk: "openai"
+  # 中转站暴露的 API 协议:当前由 anthropic SDK Messages API 访问
+  flavor: "anthropic_messages"
+  # 客户端 SDK:实际代码使用 anthropic
+  sdk: "anthropic"
 
 
 # -------- Endpoint & 鉴权 -------------------------------------------
 # 真值写在 .env,这里只声明环境变量名 + 兜底默认。
 endpoint:
-  # OpenAI 兼容的 base URL,需带 /v1 后缀(openai SDK 约定)
+  # 中转站 base URL。src/ai/client.py 会为 anthropic SDK 规范化 /v1 后缀。
   base_url_env: "OPENAI_API_BASE"
   base_url_default: "https://us.novaiapi.com/v1"
 
-  # API key 走 Authorization: Bearer …(openai SDK 自动处理)
+  # API key 由 anthropic SDK 发送;变量名保留 OPENAI_API_KEY 兼容历史 .env。
   api_key_env: "OPENAI_API_KEY"
 
   # 某些中转站要求额外 org header,留空即不发送
@@ -65,7 +65,7 @@ adjudicator:
     backoff_strategy: "exponential"
     retry_on_status: [408, 429, 500, 502, 503, 504]
 
-  # 输出格式强制:让 AI 返回 JSON(openai SDK 的 response_format 支持)
+  # 输出格式强制:agent prompt + parser 约束 AI 返回 JSON。
   response_format: "json_object"
   # AI 输出需通过 program validator(src/decision/validator.py);
   # 校验失败 → Fallback Level 1 或重试(见 §6 裁决契约)

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""scripts/init_v14_tables.py — Sprint 1.10-A 幂等初始化 v1.4 三表。
+"""scripts/init_v14_tables.py — 幂等初始化 / 补齐 v1.4 运行表。
 
 应用:
-1. 跑 migrations/009_v14_virtual_account_thesis.sql(CREATE TABLE IF NOT EXISTS,幂等)
+1. 幂等补齐既有运行表列(002/005)与 v1.4 相关 migrations(009-014,016-017)。
 2. 写入 virtual_account 第一行 snapshot:
    - initial_capital / currency 从 config/base.yaml::virtual_account 读
    - 关联到当前最新 strategy_run 的 run_id(若无 run,使用 'init_v14_bootstrap')
@@ -40,6 +40,8 @@ _MIGRATION_012 = _REPO_ROOT / "migrations" / "012_v14_retry_log.sql"
 _MIGRATION_013 = _REPO_ROOT / "migrations" / "013_v14_event_throttle_class.sql"
 _MIGRATION_014 = _REPO_ROOT / "migrations" / "014_v14_weekly_reviews.sql"
 _MIGRATION_015 = _REPO_ROOT / "migrations" / "015_v14_drop_old_columns.sql"
+_MIGRATION_016 = _REPO_ROOT / "migrations" / "016_add_fetch_attempts.sql"
+_MIGRATION_017 = _REPO_ROOT / "migrations" / "017_drop_data_fetch_log.sql"
 
 # Sprint 1.10-K-B commit 3:1.10-J 后无人写的列 → migration 015 删
 # (DROP 由 drop_obsolete_columns() 显式调用,不自动挂 apply_migration)
@@ -67,13 +69,48 @@ def _column_exists(conn: sqlite3.Connection, table: str, column: str) -> bool:
     return any(r[1] == column for r in rows)
 
 
-def apply_migration(conn: sqlite3.Connection) -> None:
-    """幂等跑 migration 009 + 010。
+def _table_exists(conn: sqlite3.Connection, table: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+        (table,),
+    ).fetchone()
+    return row is not None
 
+
+def _add_column_if_missing(
+    conn: sqlite3.Connection,
+    table: str,
+    column: str,
+    definition: str,
+) -> None:
+    """SQLite 不支持 ADD COLUMN IF NOT EXISTS,用 PRAGMA 做幂等保护。"""
+    if not _table_exists(conn, table):
+        return
+    if not _column_exists(conn, table, column):
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+
+def apply_migration(conn: sqlite3.Connection) -> None:
+    """幂等跑 v1.4 运行表相关 migration。
+
+    002/005:通过 Python 侧条件 ALTER 补齐宽表新列,避免 SQL 重跑 duplicate column
     009:CREATE TABLE IF NOT EXISTS,executescript 幂等
     010 SQL 部分:同 009(fuse_events / system_states 用 IF NOT EXISTS)
     010 ALTER:Python 侧条件 ALTER(SQLite ALTER 不支持 IF NOT EXISTS)
+    016/017:fetch_attempts 替代 data_fetch_log,用于 collector 新鲜度审计
     """
+    # 002:derivatives_snapshots 清算列(条件 ALTER)
+    _add_column_if_missing(conn, "derivatives_snapshots", "liquidation_long", "REAL")
+    _add_column_if_missing(conn, "derivatives_snapshots", "liquidation_short", "REAL")
+    _add_column_if_missing(conn, "derivatives_snapshots", "liquidation_total", "REAL")
+
+    # 005:metric 表系统写入时间(条件 ALTER)
+    for table in (
+        "price_candles", "derivatives_snapshots",
+        "onchain_metrics", "macro_metrics",
+    ):
+        _add_column_if_missing(conn, table, "inserted_at_utc", "TEXT DEFAULT NULL")
+
     # 009
     sql_009 = _MIGRATION.read_text(encoding="utf-8")
     conn.executescript(sql_009)
@@ -122,6 +159,12 @@ def apply_migration(conn: sqlite3.Connection) -> None:
         conn.execute(
             "ALTER TABLE events_calendar ADD COLUMN triggered_at_utc TEXT"
         )
+
+    # 016/017:collector 新鲜度审计表。对新 DB schema.sql 已覆盖;对旧 DB 需补跑。
+    if _MIGRATION_016.exists():
+        conn.executescript(_MIGRATION_016.read_text(encoding="utf-8"))
+    if _MIGRATION_017.exists():
+        conn.executescript(_MIGRATION_017.read_text(encoding="utf-8"))
 
 
 def _supports_native_drop_column() -> bool:
@@ -285,7 +328,7 @@ def main(argv: list[str]) -> int:
     try:
         apply_migration(conn)
         conn.commit()
-        print("[init_v14_tables] migration 009 applied (idempotent)")
+        print("[init_v14_tables] migrations 002/005/009-014/016-017 applied (idempotent)")
 
         if already_initialized(conn):
             existing = VirtualAccountDAO.get_latest(conn)

@@ -131,15 +131,16 @@ def test_get_all_metrics_no_alias_no_change(db_conn):
 
 def test_dedup_keeps_last_value_per_ts(db_conn):
     """同 ts 双写值不同时,dedup 取 last(后写覆盖)。"""
+    _, ts = _two_recent_days()
     # 主列 0.92,extras 0.80(模拟 collector 升级期间值漂移)
     db_conn.execute(
         "INSERT INTO derivatives_snapshots "
         "(captured_at_utc, long_short_ratio, full_data_json, inserted_at_utc) "
         "VALUES (?, ?, ?, ?)",
         (
-            "2026-04-29T00:00:00Z", 0.92,
+            ts, 0.92,
             json.dumps({"long_short_ratio": 0.80}),
-            "2026-04-29T00:00:00Z",
+            ts,
         ),
     )
     db_conn.commit()

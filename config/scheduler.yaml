@@ -2,14 +2,18 @@
 # scheduler.yaml — APScheduler 任务配置(Sprint 2.7-A 重写)
 # ============================================================
 # 时区改为 BJT(Asia/Shanghai),所有 cron 时间都按北京时间。
-# 7 个独立 cron job + 1 个 60s 常驻 event_listener:
+# 当前任务总览(含 disabled 项):
 #   collect_klines_1h        每整点 :00,衍生品 1h + K 线 1h
 #   collect_klines_daily     每天 08:01,1d/4h K 线
 #   collect_klines_weekly    每周一 08:01,1w K 线
 #   collect_macro            每天 06:00,FRED 9 个 series
-#   collect_onchain          每天 08:35,Glassnode + sopr_adjusted + LTH 等
-#   pipeline_run             6 档:00:05/04:05/12:05/16:05/20:05 + 08:40
-#   event_listener           60 秒高频,4 种 event 触发
+#   collect_onchain          每天 08:35/09:35/10:35,Glassnode 3 档
+#   pipeline_run_regular     每天 11:35 BJT 主裁决
+#   pipeline_run_8h_onchain  disabled,历史 8h 链上档
+#   event_listener           60 秒高频,event_price / event_macro
+#   hard_invalidation_monitor 每 1h 规则平仓检查
+#   position_health_check    disabled,历史 4h 持仓体检
+#   weekly_review            周日 22:00 BJT
 #
 # yaml 字段:
 #   enabled              true/false。关掉即不注册到 scheduler。
@@ -110,8 +114,8 @@ jobs:
 
   # ------------- 主 pipeline(2 个 cron entry,共享 pipeline_run 函数)-------
 
-  # Sprint 1.9-B(2026-05-01)启用:1 档 16:05 BJT cron(= UTC 08:05),
-  # 配合 BTC_USE_ORCHESTRATOR=true 走 v1.3 AI orchestrator 路径。
+  # v1.4 主裁决:每日 1 档,配合 BTC_USE_ORCHESTRATOR=true 走
+  # src/ai/orchestrator.py(L1-L5 + Master + Validator 24)。
   # pipeline_run_8h_onchain 用户决策保持 disabled(8h 链上档是 v1.2 残余,
   # 1.9.1 持仓健康检查会重新设计)。
   pipeline_run_regular:
@@ -158,7 +162,7 @@ jobs:
   position_health_check:
     # Sprint E(2026-05-09)用户决策关闭(B=d):中长线 4h 持仓体检过密,且
     # 兜底机制已足够(price ±3% event_price / macro 事件 / hard_invalidation
-    # 1h 规则平仓 / 16:05 scheduled 每日 master 复评)。关闭后 0 次/天此 AI
+    # 1h 规则平仓 / 11:35 scheduled 每日 master 复评)。关闭后 0 次/天此 AI
     # 调用。
     enabled: false
     interval: '4h'

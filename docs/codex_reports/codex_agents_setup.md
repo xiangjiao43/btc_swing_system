@@ -126,7 +126,7 @@ rg -n "sk-ant-|sk-[A-Za-z0-9_-]{20,}|AIza|xox[baprs]-|ghp_[A-Za-z0-9_]{20,}|----
 | 步骤 | 状态 |
 |---|---|
 | 本地 pytest 通过 | N/A，本轮仅文档规则更新 |
-| GitHub push(commit hash:提交后补记) | 待执行 |
+| GitHub push(commit hash:3c577b2) | ✅ |
 | 服务器 git pull | N/A，本轮不部署 |
 | 服务器 systemctl restart | N/A，本轮不重启服务 |
 | 生产 DB 迁移 / 清污 | N/A，本轮不碰生产 DB |
@@ -135,8 +135,7 @@ rg -n "sk-ant-|sk-[A-Za-z0-9_-]{20,}|AIza|xox[baprs]-|ghp_[A-Za-z0-9_]{20,}|----
 ## 风险和未完成
 
 1. `uv.lock` 仍有接手前已有的本地改动，本轮不触碰、不提交。
-2. 本报告中的 commit hash 需要在提交后补充。
-3. 本轮不做服务器部署，因此生产端只有 GitHub 规则文件更新，不涉及服务运行变化。
+2. 本轮不做服务器部署，因此生产端只有 GitHub 规则文件更新，不涉及服务运行变化。
 
 ## 下一步建议
 

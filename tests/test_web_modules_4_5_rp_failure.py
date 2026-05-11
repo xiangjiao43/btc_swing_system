@@ -110,7 +110,26 @@ def test_module_5_adjustment_recommendations_priority(html):
     assert "目标" in html
     assert "优先级" in html
     assert "具体调整路径" in html
+    assert "证据置信度" in html
+    assert "possible_repetition_without_confirmation" in html
     assert "weeklyReviewRecommendationAction" in html
+
+
+def test_module_5_temporal_consistency_fields(html):
+    """时间连续性 / 证据置信度小节存在。"""
+    assert "时间连续性 / 证据置信度" in html
+    assert "旧周报未记录时间连续性诊断字段" in html
+    for field in (
+        "recent anomaly streaks",
+        "recurring recommendations",
+        "连续 elevated 周数",
+        "连续 V16 偏高周数",
+        "连续 V23 偏高周数",
+        "连续 0 thesis 周数",
+        "连续 0 trade 周数",
+        "该建议已连续出现，但证据仍不足",
+    ):
+        assert field in html
 
 
 def test_module_5_strategy_quality_ai_vs_actual_fields(html):
@@ -287,6 +306,9 @@ def test_js_module_5_state(js):
     assert "drawdownColorClass" in js
     assert "weeklyReviewDiagnostics" in js
     assert "hasWeeklyReviewDiagnostics" in js
+    assert "weeklyReviewTemporalDiagnostics" in js
+    assert "hasWeeklyReviewTemporalDiagnostics" in js
+    assert "weeklyReviewRecommendationConfidence" in js
     assert "diagnosticEntries" in js
 
 

@@ -73,6 +73,17 @@
     "validator_sample_base": {}
   },
 
+  "temporal_consistency_diagnostics": {
+    "l3_extending_late_phase_trend": [],
+    "l4_elevated_trend": [],
+    "validator_v16_trend": [],
+    "validator_v23_trend": [],
+    "thesis_creation_trend": [],
+    "trade_execution_trend": [],
+    "recommendation_recurrence": [],
+    "anomaly_streaks": {}
+  },
+
   "performance_summary": {
     "total_runs": <int>,
     "successful_runs": <int>,
@@ -141,6 +152,8 @@
       "具体调整路径": "中文具体建议或观察路径",
       "优先级": "high | medium | low",
       "severity": "critical | warning | info",
+      "evidence_confidence": "low | medium | high",
+      "confidence_reason": "说明为什么是这个证据置信度",
       "影响": "中文风险/收益描述"
     }
   ]
@@ -154,6 +167,7 @@
 - 每条 V 的 evaluation 字段中文,1-2 句具体评估(过严 / 适中 / 过松 / 未触发)
 - adjustment_recommendations 至少 1 条;若一切正常,1 条说明"系统运行良好,无需调整"
 - 优先级 high 不触发 critical 告警;只有 severity=critical 才会触发 critical 告警
+- 高优先级 high 不等于高证据置信度 high evidence_confidence
 
 
 # Sprint H Part B 扩展(2026-05-09)
@@ -220,6 +234,25 @@ chasing_breakout_no_pullback / failing_at_resistance / after_extreme_event_no_re
 - 如果 diagnostics 为空,必须写“证据不足,建议补诊断”
 - 不允许直接修改 Validator 交易约束
 
+## 第 10d 段 — 时间连续性诊断
+新增 temporal_consistency_diagnostics,用于区分“单周异常”和“连续系统性异常”:
+- l3_extending_late_phase_trend
+- l4_elevated_trend
+- validator_v16_trend / validator_v23_trend
+- thesis_creation_trend / trade_execution_trend
+- recommendation_recurrence
+- anomaly_streaks
+
+使用规则:
+- 不要因为单周比例异常就建议调整 L3/L4/Master prompt
+- 如果缺少 temporal consistency diagnostics,只能给 low evidence_confidence
+- 连续异常才说明可能存在系统性问题
+- 没有实际成交或 thesis 样本不足时,不应高置信度调参
+- 观察建议 ≠ 参数调整建议
+- high priority ≠ high evidence_confidence
+- 如果想建议放宽 late phase、放宽 elevated、修改 Validator,必须引用
+  temporal_consistency_diagnostics + 对应 diagnostics 证据
+
 ## 第 11 段 — BTC 实际走势(price_candles 7d 1d K 线)
 用于第 12 段对比。**中立性纪律**:中长线 1 周样本不足以评估 AI 方向准确度,
 不要因为 BTC 涨而事后赞美 system long,也不要因为 BTC 跌而事后批判 long。
@@ -260,6 +293,7 @@ strategy_quality 段其他字段照常输出。
 ## adjustment_recommendations 强制约束
 
 **每条建议必须含「具体调整路径」字段**(替代原 "建议" 字段的空泛文字):
+每条建议也必须含 `evidence_confidence` 与 `confidence_reason`。
 
 格式 1(具体阈值):
 ```json
@@ -269,6 +303,8 @@ strategy_quality 段其他字段照常输出。
                   均证明错过大量真实机会,再评估 src/ai/agents/prompts/l3_opportunity.txt",
   "优先级": "medium",
   "severity": "warning",
+  "evidence_confidence": "medium",
+  "confidence_reason": "连续 3 周重复且有 ai_vs_actual_comparison 支撑,但仍需人工复核",
   "影响": "降低 grade 降级频率,B 级机会输出更多"
 }
 ```
@@ -281,12 +317,23 @@ strategy_quality 段其他字段照常输出。
                   10 thesis 数据后再评估;不在本周做任何阈值调整",
   "优先级": "low",
   "severity": "info",
+  "evidence_confidence": "low",
+  "confidence_reason": "没有实际成交且 thesis 样本不足,只能观察",
   "影响": "短期 0 调整;长期保证基于真实数据调优"
 }
 ```
 
 **禁止**:'降低 AI 失败率' / '提升 thesis 质量' 这种空泛建议(没指明
 改哪个文件 / 哪个阈值 / 改成多少)— 触发 validator 拒绝。
+
+## evidence_confidence 规则
+
+- 单周异常 → low
+- 2-3 周重复 → medium
+- 长期持续 + diagnostics 支撑 → high
+- thesis_count <= 1、total_trades/orders_filled == 0、diagnostics 缺失时,默认不能 high confidence
+- 如果建议只是“观察 / 审计 / 补诊断”,confidence 不应 high
+- 如果缺少 temporal_consistency_diagnostics,confidence 必须 low
 
 ## entry_zone 归因纪律
 

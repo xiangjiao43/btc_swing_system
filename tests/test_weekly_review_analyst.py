@@ -11,7 +11,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from src.ai.agents.weekly_review_analyst import (
-    VALID_PRIORITIES, VALID_SEVERITIES,
+    VALID_EVIDENCE_CONFIDENCE, VALID_PRIORITIES, VALID_SEVERITIES,
     WeeklyReviewAnalyst,
 )
 from src.ai.weekly_review_input_builder import VALIDATOR_KEYS
@@ -70,6 +70,10 @@ def _make_full_output(
             "suggested_actions": ["无"],
         },
         "adjustment_recommendations": recs,
+        "temporal_consistency_diagnostics": {
+            "recommendation_recurrence": [],
+            "anomaly_streaks": {},
+        },
     }
 
 
@@ -168,6 +172,7 @@ def test_api_failure_returns_fallback():
     assert "l3_diagnostics" in out
     assert "l4_diagnostics" in out
     assert "validator_diagnostics" in out
+    assert "temporal_consistency_diagnostics" in out
     hc = out["hard_constraint_activation_review"]
     # fallback 也含 23 V
     for k in VALIDATOR_KEYS:
@@ -216,6 +221,48 @@ def test_normalize_output_adds_concrete_action_compatibility():
     rec = normed["adjustment_recommendations"][0]
     assert rec["具体调整路径"] == rec["建议"]
     assert rec["severity"] == "warning"
+
+
+def test_normalize_output_adds_evidence_confidence_compatibility():
+    payload = _make_full_output(high_recs=0, extra_recs_count=1)
+    rec = payload["adjustment_recommendations"][0]
+    rec["confidence_level"] = "medium"
+    normed = WeeklyReviewAnalyst.normalize_output(payload)
+    rec = normed["adjustment_recommendations"][0]
+    assert rec["evidence_confidence"] == "medium"
+    assert "confidence_reason" in rec
+
+
+def test_normalize_output_caps_observation_confidence():
+    payload = _make_full_output(high_recs=0, extra_recs_count=1)
+    rec = payload["adjustment_recommendations"][0]
+    rec["具体调整路径"] = "建议先观察 4 周,不在本周做参数调整"
+    rec["evidence_confidence"] = "high"
+    normed = WeeklyReviewAnalyst.normalize_output(payload)
+    assert normed["adjustment_recommendations"][0]["evidence_confidence"] == "medium"
+
+
+def test_normalize_output_marks_repetition_without_confirmation():
+    payload = _make_full_output(high_recs=0, extra_recs_count=1)
+    rec = payload["adjustment_recommendations"][0]
+    rec["目标"] = "审计 elevated"
+    rec["具体调整路径"] = "连续观察 elevated"
+    rec["evidence_confidence"] = "low"
+    payload["temporal_consistency_diagnostics"] = {
+        "recommendation_recurrence": [
+            {
+                "target": "审计 elevated",
+                "action": "连续观察 elevated",
+                "weeks_seen": 3,
+            },
+        ],
+    }
+    normed = WeeklyReviewAnalyst.normalize_output(payload)
+    assert (
+        normed["adjustment_recommendations"][0]
+        ["possible_repetition_without_confirmation"]
+        is True
+    )
 
 
 def test_normalize_output_converts_days_rate_to_valid_runs():
@@ -300,6 +347,9 @@ def test_build_user_prompt_includes_window_and_perf_raw():
         "l3_diagnostics": {"phase_distribution": {"late": 2}},
         "l4_diagnostics": {"risk_score_summary": {"avg": 72}},
         "validator_diagnostics": {"v16_samples": [{"run_at": "x"}]},
+        "temporal_consistency_diagnostics": {
+            "l4_elevated_trend": [{"week_start_utc": "2026-05-04"}],
+        },
     })
     assert "2026-05-03T14:00:00Z" in prompt
     assert "2026-05-10T14:00:00Z" in prompt
@@ -309,6 +359,8 @@ def test_build_user_prompt_includes_window_and_perf_raw():
     assert "L3 诊断证据" in prompt
     assert "L4 诊断证据" in prompt
     assert "Validator 诊断证据" in prompt
+    assert "时间连续性诊断" in prompt
+    assert "evidence_confidence" in prompt
     assert "证据不足,建议补诊断" in prompt
 
 
@@ -319,3 +371,4 @@ def test_build_user_prompt_includes_window_and_perf_raw():
 def test_valid_enums():
     assert VALID_PRIORITIES == ("high", "medium", "low")
     assert VALID_SEVERITIES == ("critical", "warning", "info")
+    assert VALID_EVIDENCE_CONFIDENCE == ("low", "medium", "high")

@@ -103,6 +103,21 @@ def _seed_review_pending(conn, *, reason, entered_at_utc):
     )
 
 
+def _seed_weekly_review(conn, *, week_start_utc, output):
+    conn.execute(
+        "INSERT INTO weekly_reviews "
+        "(week_start_utc, triggered_at_utc, output_json, critical_count, notification_sent) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (
+            week_start_utc,
+            week_start_utc + "T14:00:00Z",
+            json.dumps(output, ensure_ascii=False),
+            0,
+            0,
+        ),
+    )
+
+
 def _iso(dt: datetime) -> str:
     return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -371,6 +386,107 @@ def test_aggregates_weekly_review_evidence_diagnostics(conn):
     assert "what_would_change_mind" in vd["v16_samples"][0]["activation_reason"]
     assert len(vd["v23_samples"]) == 1
     assert "conflict_resolution" in vd["v23_samples"][0]["activation_reason"]
+
+
+def test_aggregates_temporal_consistency_diagnostics(conn):
+    """从本周 strategy_runs + 历史 weekly_reviews 只读聚合时间连续性。"""
+    for i in range(2):
+        _seed_strategy_run(
+            conn,
+            run_id=f"r_temporal_{i}",
+            generated_at_utc=_iso(_NOW - timedelta(days=i + 1)),
+            full_state_json={
+                "layers": {
+                    "l2": {"phase": "late"},
+                    "l3": {
+                        "opportunity_grade": "C",
+                        "anti_pattern_flags": ["extending_late_phase"],
+                    },
+                    "l4": {"risk_tier": "elevated"},
+                },
+            },
+            ca_json={
+                "validator_16_change_mind": True,
+                "validator_23_conflict_missing": True,
+            },
+        )
+    _seed_weekly_review(
+        conn,
+        week_start_utc="2026-04-27",
+        output={
+            "performance_summary": {
+                "thesis_created": 0,
+                "orders_filled": 0,
+            },
+            "l3_diagnostics": {
+                "anti_pattern_signal_distribution": {
+                    "extending_late_phase": 3,
+                },
+                "opportunity_grade_distribution": {"C": 3},
+            },
+            "l4_diagnostics": {
+                "risk_tier_distribution": {
+                    "elevated": 4,
+                    "moderate": 1,
+                },
+            },
+            "hard_constraint_activation_review": {
+                "validator_16_change_mind": {
+                    "activations": 3,
+                    "rate": "3/5 valid_runs",
+                },
+                "validator_23_conflict_missing": {
+                    "activations": 3,
+                    "rate": "3/5 valid_runs",
+                },
+            },
+            "adjustment_recommendations": [
+                {
+                    "目标": "审计 elevated",
+                    "具体调整路径": "连续观察 elevated",
+                    "优先级": "medium",
+                    "evidence_confidence": "low",
+                },
+            ],
+        },
+    )
+    _seed_weekly_review(
+        conn,
+        week_start_utc="2026-04-20",
+        output={
+            "performance_summary": {
+                "thesis_created": 0,
+                "orders_filled": 0,
+            },
+            "l4_diagnostics": {
+                "risk_tier_distribution": {
+                    "elevated": 5,
+                    "moderate": 0,
+                },
+            },
+            "adjustment_recommendations": [
+                {
+                    "目标": "审计 elevated",
+                    "具体调整路径": "连续观察 elevated",
+                    "优先级": "medium",
+                    "evidence_confidence": "low",
+                },
+            ],
+        },
+    )
+    conn.commit()
+
+    r = build_weekly_review_input(conn, now_utc=_NOW)
+    td = r["temporal_consistency_diagnostics"]
+
+    assert td["l3_extending_late_phase_trend"][0]["rate"] == 1.0
+    assert td["l4_elevated_trend"][0]["count"] == 2
+    assert td["validator_v16_trend"][0]["rate"] == 1.0
+    assert td["validator_v23_trend"][0]["rate"] == 1.0
+    assert td["anomaly_streaks"]["l4_elevated_weeks"] == 3
+    assert td["anomaly_streaks"]["zero_thesis_weeks"] == 3
+    assert td["anomaly_streaks"]["zero_trade_weeks"] == 3
+    assert td["recommendation_recurrence"][0]["weeks_seen"] == 2
 
 
 def test_aggregates_position_cap_compressed_avg(conn):

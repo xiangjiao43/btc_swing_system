@@ -24,6 +24,24 @@ from ..weekly_review_input_builder import VALIDATOR_KEYS
 VALID_PRIORITIES = ("high", "medium", "low")
 VALID_SEVERITIES = ("critical", "warning", "info")
 VALID_THESIS_QUALITY = ("good", "acceptable", "poor")
+VALID_EVIDENCE_CONFIDENCE = ("low", "medium", "high")
+
+
+def _recommendation_text(rec: dict[str, Any]) -> str:
+    text = " ".join(
+        str(rec.get(k) or "")
+        for k in ("目标", "具体调整路径", "建议", "suggested_action")
+    ).lower()
+    return "".join(ch for ch in text if ch.isalnum() or "\u4e00" <= ch <= "\u9fff")
+
+
+def _looks_observation_only(rec: dict[str, Any]) -> bool:
+    text = (
+        str(rec.get("具体调整路径") or "")
+        + str(rec.get("建议") or "")
+        + str(rec.get("suggested_action") or "")
+    )
+    return any(token in text for token in ("观察", "补诊断", "审计", "不在本周做"))
 
 
 class WeeklyReviewAnalyst(BaseAgent):
@@ -58,6 +76,7 @@ class WeeklyReviewAnalyst(BaseAgent):
         l3_diag = context.get("l3_diagnostics") or {}
         l4_diag = context.get("l4_diagnostics") or {}
         validator_diag = context.get("validator_diagnostics") or {}
+        temporal_diag = context.get("temporal_consistency_diagnostics") or {}
 
         lines: list[str] = [
             f"# 周复盘窗口",
@@ -146,6 +165,13 @@ class WeeklyReviewAnalyst(BaseAgent):
             "若 diagnostics 为空,必须写“证据不足,建议补诊断”。",
             json.dumps(validator_diag, ensure_ascii=False, indent=2, default=str),
             "",
+            "# 16. 时间连续性诊断(只读,用于区分单周异常 vs 连续系统性异常)",
+            "用于判断异常是否连续出现:单周异常默认 low confidence;连续 2-3 周 "
+            "可 medium;长期持续且 L3/L4/Validator diagnostics 支撑才可 high。",
+            "如果 temporal_consistency_diagnostics 为空,所有调参建议只能 low confidence。",
+            "观察/审计/补诊断建议不是参数调整建议,证据置信度不应 high。",
+            json.dumps(temporal_diag, ensure_ascii=False, indent=2, default=str),
+            "",
             f"# 当前 virtual_account snapshot",
             json.dumps(
                 ctx_meta.get("current_virtual_account") or {},
@@ -158,7 +184,8 @@ class WeeklyReviewAnalyst(BaseAgent):
             "adjustment_recommendations。",
             "同时在顶层输出 sample_base,原样转述第 7a 段字段。",
             "同时在顶层输出 l3_diagnostics / l4_diagnostics / "
-            "validator_diagnostics,原样转述第 13-15 段字段,供网页展示。",
+            "validator_diagnostics / temporal_consistency_diagnostics,"
+            "原样转述第 13-16 段字段,供网页展示。",
             "",
             "**hard_constraint_activation_review 必须列全 23 条 V Validator**,"
             "每条含 activations / rate / evaluation 三个字段。",
@@ -176,13 +203,17 @@ class WeeklyReviewAnalyst(BaseAgent):
             "thesis lifecycle,不要归因给 L3。",
             "- L3 只负责 opportunity_grade / execution_permission / anti_pattern。",
             "- 本周 0 成交或只有 1 个 thesis 属于样本不足/早期观察,"
-            "默认不得 high/critical 调参。",
+            "默认不得 high/critical 调参,也不得给 high evidence_confidence。",
             "- 对 L3 extending_late_phase,先解释是 phase 分布导致,"
             "还是 anti_pattern 组合导致;不允许单凭比例建议改 L3 prompt。",
             "- 对 L4 elevated,先解释 risk_score / risk_breakdown / "
             "position_cap_multiplier;不允许单凭 elevated 比例建议放宽 L4。",
             "- 对 V16/V23,先解释是输出字段缺失、Validator 文案误报,"
             "还是 Master 结构化不足;不允许直接修改 Validator 交易约束。",
+            "- 不要因为单周比例异常就建议调整 L3/L4/Master prompt;连续异常"
+            "才说明可能存在系统性问题。",
+            "- 若建议放宽 late phase / 放宽 elevated / 修改 Validator,必须引用"
+            "temporal + diagnostics 双重证据。",
             "",
             "**Sprint H Part B 新增约束**:",
             "1. strategy_quality 必须含 ai_vs_actual_comparison 子段 — 若本周",
@@ -196,6 +227,14 @@ class WeeklyReviewAnalyst(BaseAgent):
             "     '建议先观察 N 周')",
             "3. adjustment_recommendations 每条建议可含 severity 或 严重级别,"
             "但 high priority 不自动等于 critical severity。",
+            "4. adjustment_recommendations 每条必须含 evidence_confidence "
+            "(low / medium / high) 和 confidence_reason:",
+            "   - 单周异常 → low",
+            "   - 2-3 周重复 → medium",
+            "   - 长期持续 + diagnostics 支撑 → high",
+            "   - thesis_created <= 1、total_trades/orders_filled = 0、"
+            "diagnostics 缺失、或只是观察建议时,不得 high confidence。",
+            "   - high priority 不等于 high evidence_confidence。",
             "",
             "若数据全 0(冷启动):仍要输出 5 段 + 23 V dict,"
             "evaluation 写 '数据不足,无法评估';adjustment_recommendations 至少",
@@ -267,6 +306,16 @@ class WeeklyReviewAnalyst(BaseAgent):
                     "missing_constraint_runs": 0,
                 },
             },
+            "temporal_consistency_diagnostics": {
+                "l3_extending_late_phase_trend": [],
+                "l4_elevated_trend": [],
+                "validator_v16_trend": [],
+                "validator_v23_trend": [],
+                "thesis_creation_trend": [],
+                "trade_execution_trend": [],
+                "recommendation_recurrence": [],
+                "anomaly_streaks": {},
+            },
             "hard_constraint_activation_review": {
                 **v_review,
                 "position_cap_compressed_avg": None,
@@ -283,6 +332,8 @@ class WeeklyReviewAnalyst(BaseAgent):
                     "建议": "检查 anthropic API key + 中转站状态",
                     "优先级": "high",
                     "severity": "warning",
+                    "evidence_confidence": "low",
+                    "confidence_reason": "fallback 输出,没有时间连续性诊断证据",
                     "影响": "周复盘缺失,无法发现硬约束阈值过严/过松问题",
                 },
             ],
@@ -307,12 +358,26 @@ class WeeklyReviewAnalyst(BaseAgent):
         out.setdefault("l3_diagnostics", {})
         out.setdefault("l4_diagnostics", {})
         out.setdefault("validator_diagnostics", {})
+        out.setdefault("temporal_consistency_diagnostics", {})
         sq = out.get("strategy_quality")
         if isinstance(sq, dict) and "ai_vs_actual_comparison" not in sq:
             sq["ai_vs_actual_comparison"] = []
 
         recs = out.get("adjustment_recommendations")
         if isinstance(recs, list):
+            temporal = out.get("temporal_consistency_diagnostics") or {}
+            recurrence = (
+                temporal.get("recommendation_recurrence")
+                if isinstance(temporal, dict) else []
+            ) or []
+            recurrent_texts = {
+                _recommendation_text({
+                    "目标": item.get("target") or item.get("目标") or "",
+                    "具体调整路径": item.get("action") or item.get("具体调整路径") or "",
+                })
+                for item in recurrence
+                if isinstance(item, dict) and item.get("weeks_seen", 0) >= 2
+            }
             for r in recs:
                 if not isinstance(r, dict):
                     continue
@@ -324,6 +389,38 @@ class WeeklyReviewAnalyst(BaseAgent):
                     r["severity"] = (
                         "warning" if r.get("优先级") == "high" else "info"
                     )
+                confidence = (
+                    r.get("evidence_confidence")
+                    or r.get("confidence")
+                    or r.get("confidence_level")
+                    or "low"
+                )
+                confidence = str(confidence).lower()
+                if confidence not in VALID_EVIDENCE_CONFIDENCE:
+                    confidence = "low"
+                if confidence == "high" and _looks_observation_only(r):
+                    confidence = "medium"
+                r["evidence_confidence"] = confidence
+                if not r.get("confidence_reason"):
+                    r["confidence_reason"] = (
+                        "AI 未提供置信度原因,normalize 默认按低证据处理"
+                        if confidence == "low"
+                        else "AI 未提供置信度原因,请结合时间连续性诊断人工复核"
+                    )
+                rec_text = _recommendation_text(r)
+                repeated = any(
+                    old and (
+                        old in rec_text
+                        or rec_text in old
+                        or old == _recommendation_text({
+                            "目标": r.get("目标") or "",
+                            "具体调整路径": r.get("具体调整路径") or "",
+                        })
+                    )
+                    for old in recurrent_texts
+                )
+                if confidence == "low" and repeated:
+                    r["possible_repetition_without_confirmation"] = True
 
         hc = out.get("hard_constraint_activation_review")
         if not isinstance(hc, dict):

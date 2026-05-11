@@ -1155,10 +1155,80 @@
                           x-text="(r['优先级'] || 'low').toUpperCase()"></span>
                     <span x-text="r['目标']"></span>
                     <div class="text-slate-500" x-text="'具体调整路径: ' + weeklyReviewRecommendationAction(r)"></div>
+                    <div class="text-slate-500"
+                         x-text="'证据置信度: ' + weeklyReviewRecommendationConfidence(r) + ' | 原因: ' + weeklyReviewRecommendationConfidenceReason(r)"></div>
+                    <template x-if="r.possible_repetition_without_confirmation">
+                      <div class="text-amber-600 dark:text-amber-400">
+                        该建议已连续出现，但证据仍不足
+                      </div>
+                    </template>
                     <div class="text-slate-500" x-text="'影响: ' + (r['影响'] || '')"></div>
                   </li>
                 </template>
               </ul>
+            </div>
+            <!-- temporal consistency diagnostics -->
+            <div class="border-t border-slate-200 dark:border-slate-800 pt-2">
+              <div class="stat-label mb-1">时间连续性 / 证据置信度</div>
+              <template x-if="!hasWeeklyReviewTemporalDiagnostics()">
+                <div class="text-slate-500 dark:text-slate-400 italic">
+                  旧周报未记录时间连续性诊断字段
+                </div>
+              </template>
+              <div x-show="hasWeeklyReviewTemporalDiagnostics()" class="space-y-2 text-[11px]">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-2 font-mono tabular-nums">
+                  <div>
+                    <span class="text-slate-500">连续 elevated 周数</span>
+                    <span class="ml-1 font-bold"
+                          x-text="weeklyReviewAnomalyStreaks().l4_elevated_weeks ?? '-'"></span>
+                  </div>
+                  <div>
+                    <span class="text-slate-500">连续 V16 偏高周数</span>
+                    <span class="ml-1 font-bold"
+                          x-text="weeklyReviewAnomalyStreaks().validator_v16_high_weeks ?? '-'"></span>
+                  </div>
+                  <div>
+                    <span class="text-slate-500">连续 V23 偏高周数</span>
+                    <span class="ml-1 font-bold"
+                          x-text="weeklyReviewAnomalyStreaks().validator_v23_high_weeks ?? '-'"></span>
+                  </div>
+                  <div>
+                    <span class="text-slate-500">连续 0 thesis 周数</span>
+                    <span class="ml-1 font-bold"
+                          x-text="weeklyReviewAnomalyStreaks().zero_thesis_weeks ?? '-'"></span>
+                  </div>
+                  <div>
+                    <span class="text-slate-500">连续 0 trade 周数</span>
+                    <span class="ml-1 font-bold"
+                          x-text="weeklyReviewAnomalyStreaks().zero_trade_weeks ?? '-'"></span>
+                  </div>
+                  <div>
+                    <span class="text-slate-500">连续 late phase 周数</span>
+                    <span class="ml-1 font-bold"
+                          x-text="weeklyReviewAnomalyStreaks().l3_extending_late_phase_weeks ?? '-'"></span>
+                  </div>
+                </div>
+                <div>
+                  <div class="text-slate-500">recent anomaly streaks</div>
+                  <template x-for="item in diagnosticEntries(weeklyReviewAnomalyStreaks())" :key="item.key">
+                    <div class="font-mono" x-text="item.key + ': ' + item.value"></div>
+                  </template>
+                </div>
+                <div>
+                  <div class="text-slate-500">recurring recommendations</div>
+                  <template x-if="weeklyReviewRecurringRecommendations().length === 0">
+                    <div class="text-slate-500 italic">暂无连续重复建议</div>
+                  </template>
+                  <template x-for="(r, i) in weeklyReviewRecurringRecommendations()" :key="i">
+                    <div class="border-l-2 border-slate-300 dark:border-slate-700 pl-2 mt-1">
+                      <div x-text="formatReviewValue(r.target)"></div>
+                      <div class="text-slate-500" x-text="'weeks_seen: ' + formatReviewValue(r.weeks_seen)"></div>
+                      <div class="text-slate-500" x-text="'action: ' + formatReviewValue(r.action)"></div>
+                      <div class="text-slate-500" x-text="'recent_weeks: ' + formatReviewValue(r.recent_weeks)"></div>
+                    </div>
+                  </template>
+                </div>
+              </div>
             </div>
             <!-- strategy_quality + ai_vs_actual_comparison -->
             <div>

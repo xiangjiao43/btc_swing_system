@@ -1372,6 +1372,7 @@ def job_weekly_review(
                 "l3_diagnostics",
                 "l4_diagnostics",
                 "validator_diagnostics",
+                "temporal_consistency_diagnostics",
             ):
                 if diag_key not in out and inp.get(diag_key) is not None:
                     out[diag_key] = inp[diag_key]

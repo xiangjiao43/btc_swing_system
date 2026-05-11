@@ -253,6 +253,14 @@ function app() {
             if (!r) return '';
             return r['具体调整路径'] || r['建议'] || r.suggested_action || '';
         },
+        weeklyReviewRecommendationConfidence(r) {
+            if (!r) return 'low';
+            return r.evidence_confidence || r.confidence || r.confidence_level || 'low';
+        },
+        weeklyReviewRecommendationConfidenceReason(r) {
+            if (!r) return '-';
+            return r.confidence_reason || r.evidence_reason || '-';
+        },
         weeklyReviewAiVsActual() {
             const sq = this.weeklyReviewOutput().strategy_quality || {};
             const rows = sq.ai_vs_actual_comparison || [];
@@ -284,6 +292,20 @@ function app() {
             return this.hasDiagnosticData(d.l3)
                 || this.hasDiagnosticData(d.l4)
                 || this.hasDiagnosticData(d.validator);
+        },
+        weeklyReviewTemporalDiagnostics() {
+            const out = this.weeklyReviewOutput();
+            return out.temporal_consistency_diagnostics || {};
+        },
+        hasWeeklyReviewTemporalDiagnostics() {
+            return this.hasDiagnosticData(this.weeklyReviewTemporalDiagnostics());
+        },
+        weeklyReviewAnomalyStreaks() {
+            return this.weeklyReviewTemporalDiagnostics().anomaly_streaks || {};
+        },
+        weeklyReviewRecurringRecommendations() {
+            const rows = this.weeklyReviewTemporalDiagnostics().recommendation_recurrence || [];
+            return Array.isArray(rows) ? rows : [];
         },
         diagnosticEntries(obj) {
             if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return [];

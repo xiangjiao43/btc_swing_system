@@ -117,6 +117,45 @@ def _numeric_summary(values: list[float]) -> dict[str, Any]:
     }
 
 
+def _safe_ratio(count: Optional[int], total: Optional[int]) -> Optional[float]:
+    if count is None or total is None or total <= 0:
+        return None
+    return round(count / total, 4)
+
+
+def _parse_rate_count_total(rate: Any) -> tuple[Optional[int], Optional[int]]:
+    if not isinstance(rate, str):
+        return None, None
+    try:
+        left, right = rate.strip().split("/", 1)
+        total = right.strip().split()[0]
+        return int(left.strip()), int(total)
+    except Exception:
+        return None, None
+
+
+def _trend_point(
+    *,
+    week_start_utc: str,
+    value: Optional[int] = None,
+    count: Optional[int] = None,
+    total: Optional[int] = None,
+    source: str,
+) -> dict[str, Any]:
+    out: dict[str, Any] = {
+        "week_start_utc": week_start_utc,
+        "source": source,
+    }
+    if value is not None:
+        out["value"] = value
+    if count is not None:
+        out["count"] = count
+    if total is not None:
+        out["total"] = total
+        out["rate"] = _safe_ratio(count, total)
+    return out
+
+
 def _extract_layers(state: dict[str, Any]) -> dict[str, Any]:
     return state.get("layers") or {}
 
@@ -1006,6 +1045,278 @@ def _aggregate_validator_diagnostics(rows: list[Any]) -> dict[str, Any]:
     }
 
 
+def _review_recommendation_text(rec: dict[str, Any]) -> str:
+    text = " ".join(
+        str(rec.get(k) or "")
+        for k in ("目标", "具体调整路径", "建议", "suggested_action")
+    ).lower()
+    return "".join(ch for ch in text if ch.isalnum() or "\u4e00" <= ch <= "\u9fff")
+
+
+def _extract_review_metric(
+    output: dict[str, Any], metric: str,
+) -> tuple[Optional[int], Optional[int]]:
+    if metric == "l3_extending_late_phase":
+        l3_diag = output.get("l3_diagnostics") or {}
+        anti_dist = l3_diag.get("anti_pattern_signal_distribution") or {}
+        count = anti_dist.get("extending_late_phase")
+        grade_dist = l3_diag.get("opportunity_grade_distribution") or {}
+        total = sum(v for v in grade_dist.values() if isinstance(v, int))
+        anti_pat = output.get("anti_pattern_signals") or {}
+        if count is None:
+            count = (anti_pat.get("anti_pattern_counts") or {}).get(
+                "extending_late_phase",
+            )
+        if not total:
+            total = anti_pat.get("total_runs_with_l3")
+        return (
+            int(count) if isinstance(count, int) else None,
+            int(total) if isinstance(total, int) and total >= 0 else None,
+        )
+
+    if metric == "l4_elevated":
+        l4_diag = output.get("l4_diagnostics") or {}
+        tier_dist = (
+            l4_diag.get("risk_tier_distribution")
+            or output.get("l4_risk_tier_distribution")
+            or {}
+        )
+        count = tier_dist.get("elevated")
+        total = sum(v for v in tier_dist.values() if isinstance(v, int))
+        return (
+            int(count) if isinstance(count, int) else None,
+            int(total) if isinstance(total, int) and total >= 0 else None,
+        )
+
+    if metric in ("validator_16_change_mind", "validator_23_conflict_missing"):
+        hc = output.get("hard_constraint_activation_review") or {}
+        row = hc.get(metric) or {}
+        count = row.get("activations")
+        parsed_count, parsed_total = _parse_rate_count_total(row.get("rate"))
+        return (
+            int(count) if isinstance(count, int) else parsed_count,
+            parsed_total,
+        )
+
+    return None, None
+
+
+def _current_temporal_week(
+    *,
+    week_start: datetime,
+    anti_pattern: dict[str, Any],
+    l4_risk_dist: dict[str, int],
+    constraints: dict[str, Any],
+    theses: dict[str, Any],
+    orders: dict[str, int],
+) -> dict[str, Any]:
+    week_start_utc = _to_iso(week_start)[:10]
+    valid_runs = (constraints.get("sample_base") or {}).get("valid_constraint_runs")
+    v_raw = constraints.get("v_activations_raw") or {}
+    l3_total = anti_pattern.get("total_runs_with_l3")
+    l3_count = (anti_pattern.get("anti_pattern_counts") or {}).get(
+        "extending_late_phase", 0,
+    )
+    l4_total = sum(v for v in l4_risk_dist.values() if isinstance(v, int))
+    return {
+        "week_start_utc": week_start_utc,
+        "l3_extending_late_phase": _trend_point(
+            week_start_utc=week_start_utc, count=int(l3_count or 0),
+            total=int(l3_total or 0), source="current_strategy_runs",
+        ),
+        "l4_elevated": _trend_point(
+            week_start_utc=week_start_utc,
+            count=int(l4_risk_dist.get("elevated") or 0),
+            total=int(l4_total or 0), source="current_strategy_runs",
+        ),
+        "validator_v16": _trend_point(
+            week_start_utc=week_start_utc,
+            count=int((v_raw.get("validator_16_change_mind") or {}).get("activations") or 0),
+            total=int(valid_runs or 0), source="current_strategy_runs",
+        ),
+        "validator_v23": _trend_point(
+            week_start_utc=week_start_utc,
+            count=int((v_raw.get("validator_23_conflict_missing") or {}).get("activations") or 0),
+            total=int(valid_runs or 0), source="current_strategy_runs",
+        ),
+        "thesis_creation": _trend_point(
+            week_start_utc=week_start_utc,
+            value=int(theses.get("thesis_created") or 0),
+            source="current_strategy_runs",
+        ),
+        "trade_execution": _trend_point(
+            week_start_utc=week_start_utc,
+            value=int(orders.get("orders_filled") or 0),
+            source="current_virtual_orders",
+        ),
+    }
+
+
+def _streak_from_points(
+    points: list[dict[str, Any]], predicate: Any,
+) -> int:
+    streak = 0
+    for p in points[:8]:
+        if predicate(p):
+            streak += 1
+        else:
+            break
+    return streak
+
+
+def _aggregate_temporal_consistency_diagnostics(
+    conn: sqlite3.Connection,
+    *,
+    week_start: datetime,
+    anti_pattern: dict[str, Any],
+    l4_risk_dist: dict[str, int],
+    constraints: dict[str, Any],
+    theses: dict[str, Any],
+    orders: dict[str, int],
+) -> dict[str, Any]:
+    """只读聚合时间连续性诊断;旧周报缺字段时返回空/跳过,不抛异常。"""
+    current = _current_temporal_week(
+        week_start=week_start, anti_pattern=anti_pattern,
+        l4_risk_dist=l4_risk_dist, constraints=constraints,
+        theses=theses, orders=orders,
+    )
+    trends = {
+        "l3_extending_late_phase_trend": [current["l3_extending_late_phase"]],
+        "l4_elevated_trend": [current["l4_elevated"]],
+        "validator_v16_trend": [current["validator_v16"]],
+        "validator_v23_trend": [current["validator_v23"]],
+        "thesis_creation_trend": [current["thesis_creation"]],
+        "trade_execution_trend": [current["trade_execution"]],
+    }
+
+    recommendation_seen: dict[str, dict[str, Any]] = {}
+    try:
+        rows = conn.execute(
+            "SELECT week_start_utc, output_json FROM weekly_reviews "
+            "WHERE week_start_utc < ? "
+            "ORDER BY week_start_utc DESC LIMIT 12",
+            (_to_iso(week_start)[:10],),
+        ).fetchall()
+    except Exception:
+        rows = []
+
+    for row in rows:
+        week_key = _row_value(row, "week_start_utc", 0)
+        output = _safe_json_loads(_row_value(row, "output_json", 1))
+        if not output:
+            continue
+
+        for metric, trend_key in (
+            ("l3_extending_late_phase", "l3_extending_late_phase_trend"),
+            ("l4_elevated", "l4_elevated_trend"),
+            ("validator_16_change_mind", "validator_v16_trend"),
+            ("validator_23_conflict_missing", "validator_v23_trend"),
+        ):
+            count, total = _extract_review_metric(output, metric)
+            if count is None and total is None:
+                continue
+            trends[trend_key].append(_trend_point(
+                week_start_utc=str(week_key), count=count, total=total,
+                source="weekly_reviews",
+            ))
+
+        perf = output.get("performance_summary") or {}
+        if isinstance(perf.get("thesis_created"), int):
+            trends["thesis_creation_trend"].append(_trend_point(
+                week_start_utc=str(week_key),
+                value=int(perf["thesis_created"]),
+                source="weekly_reviews",
+            ))
+        trades = perf.get("total_trades")
+        if trades is None:
+            trades = perf.get("orders_filled")
+        if isinstance(trades, int):
+            trends["trade_execution_trend"].append(_trend_point(
+                week_start_utc=str(week_key),
+                value=int(trades),
+                source="weekly_reviews",
+            ))
+
+        for rec in output.get("adjustment_recommendations") or []:
+            if not isinstance(rec, dict):
+                continue
+            key = _review_recommendation_text(rec)
+            if not key:
+                continue
+            item = recommendation_seen.setdefault(key, {
+                "target": rec.get("目标") or "",
+                "action": (
+                    rec.get("具体调整路径")
+                    or rec.get("建议")
+                    or rec.get("suggested_action")
+                    or ""
+                ),
+                "weeks_seen": 0,
+                "recent_weeks": [],
+                "latest_priority": rec.get("优先级"),
+                "latest_evidence_confidence": (
+                    rec.get("evidence_confidence")
+                    or rec.get("confidence")
+                    or rec.get("confidence_level")
+                ),
+            })
+            item["weeks_seen"] += 1
+            if len(item["recent_weeks"]) < 8:
+                item["recent_weeks"].append(str(week_key))
+
+    for key in trends:
+        trends[key] = trends[key][:8]
+
+    recurrence = [
+        item for item in recommendation_seen.values()
+        if item.get("weeks_seen", 0) >= 2
+    ]
+    recurrence.sort(
+        key=lambda x: (x.get("weeks_seen", 0), x.get("recent_weeks", [""])[0]),
+        reverse=True,
+    )
+
+    l3_points = trends["l3_extending_late_phase_trend"]
+    l4_points = trends["l4_elevated_trend"]
+    v16_points = trends["validator_v16_trend"]
+    v23_points = trends["validator_v23_trend"]
+    thesis_points = trends["thesis_creation_trend"]
+    trade_points = trends["trade_execution_trend"]
+    anomaly_streaks = {
+        "l3_extending_late_phase_weeks": _streak_from_points(
+            l3_points, lambda p: (p.get("rate") or 0) > 0.4,
+        ),
+        "l4_elevated_weeks": _streak_from_points(
+            l4_points, lambda p: (p.get("rate") or 0) > 0.5,
+        ),
+        "validator_v16_high_weeks": _streak_from_points(
+            v16_points, lambda p: (p.get("rate") or 0) > 0.4,
+        ),
+        "validator_v23_high_weeks": _streak_from_points(
+            v23_points, lambda p: (p.get("rate") or 0) > 0.4,
+        ),
+        "zero_thesis_weeks": _streak_from_points(
+            thesis_points, lambda p: p.get("value") == 0,
+        ),
+        "zero_trade_weeks": _streak_from_points(
+            trade_points, lambda p: p.get("value") == 0,
+        ),
+        "recent_weeks": [
+            {
+                "week_start_utc": p.get("week_start_utc"),
+                "l3_extending_late_phase_rate": p.get("rate"),
+            }
+            for p in l3_points[:8]
+        ],
+    }
+
+    return {
+        **trends,
+        "recommendation_recurrence": recurrence[:10],
+        "anomaly_streaks": anomaly_streaks,
+    }
+
+
 # ============================================================
 # 入口:build_weekly_review_input
 # ============================================================
@@ -1074,6 +1385,17 @@ def build_weekly_review_input(
     l3_diagnostics = _aggregate_l3_diagnostics(diagnostic_rows)
     l4_diagnostics = _aggregate_l4_diagnostics(diagnostic_rows)
     validator_diagnostics = _aggregate_validator_diagnostics(diagnostic_rows)
+    temporal_consistency_diagnostics = (
+        _aggregate_temporal_consistency_diagnostics(
+            conn,
+            week_start=week_start,
+            anti_pattern=anti_pattern,
+            l4_risk_dist=l4_risk_dist,
+            constraints=constraints,
+            theses=theses,
+            orders=orders,
+        )
+    )
 
     # 装配 performance_summary_raw(对齐 §3.3.9 schema 7 字段)
     performance_raw = {
@@ -1129,4 +1451,5 @@ def build_weekly_review_input(
         "l3_diagnostics": l3_diagnostics,
         "l4_diagnostics": l4_diagnostics,
         "validator_diagnostics": validator_diagnostics,
+        "temporal_consistency_diagnostics": temporal_consistency_diagnostics,
     }

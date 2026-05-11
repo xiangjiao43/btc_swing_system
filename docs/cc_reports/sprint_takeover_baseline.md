@@ -71,27 +71,33 @@
 ## 部署日志
 
 - 代码提交并推送:`9aed58e chore: align takeover baseline with v1.4`
-- 本次未 SSH 到服务器部署;服务端仍需用户按部署窗口拉取并重启。
-- 本地 `.env` 已补 orchestrator 开关;生产 `.env` 是否已有该开关需 SSH 后核查。
+- 报告提交并推送:`39b9db5 docs: add takeover baseline report`
+- 服务器部署:
+  - 部署前服务器 HEAD:`130eadb`
+  - 已 `git pull --ff-only origin main` 到 `39b9db5`
+  - 已用 `.venv/bin/python scripts/init_v14_tables.py data/btc_strategy.db` 跑幂等 DB 补齐
+  - 已 `sudo systemctl restart btc-strategy.service`
+  - `systemctl is-active btc-strategy.service` 返回 `active`
+  - `/api/system/health` 返回 `scheduler_running=true`, `scheduler_jobs_count=9`
+- 本地 `.env` 与生产 `.env` 均已确认 `BTC_USE_ORCHESTRATOR=true`;真实 key 未输出。
 
 ## 未覆盖项
 
-1. 生产服务器未执行 `git pull` / `systemctl restart`。
-2. 生产 `.env` 未核查 `BTC_USE_ORCHESTRATOR=true`。
-3. 生产 DB 未重新跑本次增强后的 `scripts/init_v14_tables.py`;若服务器已在 Sprint K++ 状态,大概率无需变更,但可幂等复核。
-4. `uv.lock` 本地仍有接手前的镜像源差异,需用户决定是否保留。
+1. `uv.lock` 本地仍有接手前的镜像源差异,本 sprint 未触碰。
+2. 未主动触发一次完整 AI 主 pipeline;本 sprint 只做接管基线与部署健康验证。
 
 ## 风险提示
 
 - 本 sprint 修改 `config/ai.yaml` 的 `protocol.sdk` 字段为 `anthropic`,当前代码未读取该字段,属于文档化对齐;若未来有人开始消费该字段,语义已与真实客户端一致。
-- 本地 DB 已迁移并有备份;生产端是否需要同样操作取决于服务器实际 schema。
+- 本地 DB 已迁移并有备份;生产端也已跑同一幂等脚本。
 - `AGENTS.md` 与 `CLAUDE.md` 基本重复,这是为了兼容 Codex / Claude 两套工具读取入口。
+- 老 `/api/health` 路由不读 scheduler 状态,会显示默认 `scheduler_running=false`;真实判断请看 `/api/system/health`。
 
 ## 本 sprint 删除清单
 
 | 删除对象 | 路径 / 位置 | 删除原因 |
 |---|---|---|
-| SQLite 表 `data_fetch_log` | 本地 `data/btc_strategy.db` | 已由 `fetch_attempts` 完整替代;本次通过 017 幂等 DROP 清理本地残留 |
+| SQLite 表 `data_fetch_log` | 本地与生产 `data/btc_strategy.db` | 已由 `fetch_attempts` 完整替代;本次通过 017 幂等 DROP 清理残留 |
 
 自检:代码层无 `data_fetch_log` 读写路径;命中仅剩 migration / schema 注释 / DAO 废弃说明。
 
@@ -100,7 +106,7 @@
 | 步骤 | 状态 |
 |---|---|
 | 本地 pytest 通过 | ✅ 1751 passed,1 skipped |
-| GitHub push(commit hash:9aed58e) | ✅ |
-| 服务器 git pull | 待用户执行:`ssh ubuntu@124.222.89.86 "cd /home/ubuntu/btc_swing_system && git pull origin main"` |
-| 服务器 systemctl restart | 待用户执行:`ssh ubuntu@124.222.89.86 "sudo systemctl restart btc-strategy.service"` |
-| 生产 DB 迁移 / 清污 | 待用户执行/可选核查:`ssh ubuntu@124.222.89.86 "cd /home/ubuntu/btc_swing_system && uv run python scripts/init_v14_tables.py data/btc_strategy.db"` |
+| GitHub push(commit hash:9aed58e,report hash:39b9db5) | ✅ |
+| 服务器 git pull | ✅ 已拉到 `39b9db5` |
+| 服务器 systemctl restart | ✅ active |
+| 生产 DB 迁移 / 清污 | ✅ 幂等脚本已跑,`fetch_attempts` 存在,`data_fetch_log` 已无表 |

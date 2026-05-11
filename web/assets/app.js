@@ -270,6 +270,9 @@ function app() {
             if (!r) return '-';
             return r.confidence_reason || r.evidence_reason || '-';
         },
+        weeklyReviewRecommendationOutcome(r) {
+            return (r && r.outcome_tracking) || {};
+        },
         weeklyReviewAiVsActual() {
             const sq = this.weeklyReviewOutput().strategy_quality || {};
             const rows = sq.ai_vs_actual_comparison || [];

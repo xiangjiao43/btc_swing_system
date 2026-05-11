@@ -451,6 +451,13 @@ def test_aggregates_temporal_consistency_diagnostics(conn):
                     "优先级": "medium",
                     "severity": "warning",
                     "evidence_confidence": "low",
+                    "outcome_tracking": {
+                        "implemented": False,
+                        "observed_outcome": "unknown",
+                        "confidence_accuracy": "low",
+                        "evaluation_notes": "尚未实施",
+                        "week_of_outcome": "",
+                    },
                 },
             ],
         },
@@ -480,6 +487,13 @@ def test_aggregates_temporal_consistency_diagnostics(conn):
                     "优先级": "high",
                     "severity": "warning",
                     "evidence_confidence": "medium",
+                    "outcome_tracking": {
+                        "implemented": True,
+                        "observed_outcome": "positive",
+                        "confidence_accuracy": "high",
+                        "evaluation_notes": "后续 elevated 频率下降",
+                        "week_of_outcome": "2026-W18",
+                    },
                 },
             ],
         },
@@ -504,6 +518,11 @@ def test_aggregates_temporal_consistency_diagnostics(conn):
     assert recurrence["weeks_seen"] == 2
     assert recurrence["last_seen"] == "2026-04-27"
     assert recurrence["confidence_levels_seen"] == ["low", "medium"]
+    assert recurrence["implemented_weeks"] == 1
+    assert recurrence["outcomes_seen"] == ["unknown", "positive"]
+    assert recurrence["latest_observed_outcome"] == "unknown"
+    assert recurrence["latest_confidence_accuracy"] == "low"
+    assert recurrence["outcome_history"][1]["observed_outcome"] == "positive"
     assert recurrence["latest_priority"] == "medium"
     assert recurrence["latest_severity"] == "warning"
 

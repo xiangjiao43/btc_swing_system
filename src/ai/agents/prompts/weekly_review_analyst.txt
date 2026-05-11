@@ -158,6 +158,14 @@
       "recommendation_action_type": "observe | audit | improve_prompt | improve_schema | improve_ui | improve_diagnostics | change_threshold | fix_bug | other",
       "evidence_confidence": "low | medium | high",
       "confidence_reason": "说明为什么是这个证据置信度",
+      "outcome_tracking": {
+        "recommendation_id": "同 recommendation_id",
+        "implemented": false,
+        "observed_outcome": "positive | neutral | negative | unknown",
+        "confidence_accuracy": "low | medium | high",
+        "evaluation_notes": "可选文本说明原因",
+        "week_of_outcome": "ISO week,没有可评估结果时为空字符串"
+      },
       "影响": "中文风险/收益描述"
     }
   ]
@@ -297,7 +305,8 @@ strategy_quality 段其他字段照常输出。
 ## adjustment_recommendations 强制约束
 
 **每条建议必须含「具体调整路径」字段**(替代原 "建议" 字段的空泛文字):
-每条建议也必须含 canonical 字段、`evidence_confidence` 与 `confidence_reason`。
+每条建议也必须含 canonical 字段、`evidence_confidence`、`confidence_reason`
+与 `outcome_tracking`。
 
 必须输出的 canonical 字段:
 - `recommendation_id`:跨周稳定 ID,用于以后统计 recurrence。必须 snake_case。
@@ -321,6 +330,13 @@ recommendation_id 纪律:
 - observe/audit 类建议不要伪装成 change_threshold
 - 如果证据不足,action_type 应为 observe 或 audit,不应为 change_threshold
 
+outcome_tracking 纪律:
+- `implemented` 只记录是否已由人工实施;你的输出不会自动实施任何建议
+- `observed_outcome` 只能是 positive / neutral / negative / unknown
+- `confidence_accuracy` 用于长期校准 evidence_confidence 是否靠谱
+- 没有后续结果时 observed_outcome=unknown,confidence_accuracy=low
+- outcome 只能支持复盘可信度,不能触发交易参数自动变更
+
 格式 1(具体阈值):
 ```json
 {
@@ -335,6 +351,14 @@ recommendation_id 纪律:
   "recommendation_action_type": "audit",
   "evidence_confidence": "medium",
   "confidence_reason": "连续 3 周重复且有 ai_vs_actual_comparison 支撑,但仍需人工复核",
+  "outcome_tracking": {
+    "recommendation_id": "audit_l3_extending_late_phase",
+    "implemented": false,
+    "observed_outcome": "unknown",
+    "confidence_accuracy": "low",
+    "evaluation_notes": "本周只是审计建议,尚未实施",
+    "week_of_outcome": ""
+  },
   "影响": "降低 grade 降级频率,B 级机会输出更多"
 }
 ```
@@ -353,6 +377,14 @@ recommendation_id 纪律:
   "recommendation_action_type": "observe",
   "evidence_confidence": "low",
   "confidence_reason": "没有实际成交且 thesis 样本不足,只能观察",
+  "outcome_tracking": {
+    "recommendation_id": "observe_validator_threshold_calibration",
+    "implemented": false,
+    "observed_outcome": "unknown",
+    "confidence_accuracy": "low",
+    "evaluation_notes": "观察建议,尚无实施结果",
+    "week_of_outcome": ""
+  },
   "影响": "短期 0 调整;长期保证基于真实数据调优"
 }
 ```

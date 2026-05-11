@@ -26,6 +26,8 @@ VALID_PRIORITIES = ("high", "medium", "low")
 VALID_SEVERITIES = ("critical", "warning", "info")
 VALID_THESIS_QUALITY = ("good", "acceptable", "poor")
 VALID_EVIDENCE_CONFIDENCE = ("low", "medium", "high")
+VALID_OBSERVED_OUTCOMES = ("positive", "neutral", "negative", "unknown")
+VALID_CONFIDENCE_ACCURACY = ("low", "medium", "high")
 VALID_RECOMMENDATION_CATEGORIES = (
     "l3_behavior",
     "l4_risk",
@@ -202,6 +204,48 @@ def _is_unstable_recommendation_id(value: Any) -> bool:
         r"[a-z0-9]{24,}",
     )
     return any(re.search(p, lowered) for p in patterns)
+
+
+def _normalize_outcome_tracking(rec: dict[str, Any]) -> dict[str, Any]:
+    raw = rec.get("outcome_tracking")
+    if not isinstance(raw, dict):
+        raw = {}
+    implemented_raw = raw.get("implemented", rec.get("implemented"))
+    implemented = implemented_raw if isinstance(implemented_raw, bool) else False
+    observed = str(
+        raw.get("observed_outcome")
+        or rec.get("observed_outcome")
+        or "unknown",
+    ).lower()
+    if observed not in VALID_OBSERVED_OUTCOMES:
+        observed = "unknown"
+    accuracy = str(
+        raw.get("confidence_accuracy")
+        or rec.get("confidence_accuracy")
+        or "low",
+    ).lower()
+    if accuracy not in VALID_CONFIDENCE_ACCURACY:
+        accuracy = "low"
+    return {
+        "recommendation_id": (
+            rec.get("normalized_recommendation_id")
+            or rec.get("recommendation_id")
+            or ""
+        ),
+        "implemented": implemented,
+        "observed_outcome": observed,
+        "confidence_accuracy": accuracy,
+        "evaluation_notes": str(
+            raw.get("evaluation_notes")
+            or rec.get("evaluation_notes")
+            or "",
+        ),
+        "week_of_outcome": str(
+            raw.get("week_of_outcome")
+            or rec.get("week_of_outcome")
+            or "",
+        ),
+    }
 
 
 class WeeklyReviewAnalyst(BaseAgent):
@@ -408,6 +452,14 @@ class WeeklyReviewAnalyst(BaseAgent):
             "change_threshold / fix_bug / other。",
             "   - observe/audit 类建议不要伪装成 change_threshold;证据不足时"
             "action_type 应为 observe 或 audit。",
+            "6. adjustment_recommendations 每条必须含 outcome_tracking:",
+            "   - implemented:boolean,只记录是否已人工实施,不得自动应用建议。",
+            "   - observed_outcome:positive / neutral / negative / unknown。",
+            "   - confidence_accuracy:low / medium / high,用于长期校准"
+            " evidence_confidence 是否靠谱。",
+            "   - evaluation_notes:简短说明证据。",
+            "   - week_of_outcome:ISO week;没有可评估结果时留空字符串。",
+            "   - outcome 只能支持复盘可信度,不能触发交易参数自动变更。",
             "",
             "若数据全 0(冷启动):仍要输出 5 段 + 23 V dict,"
             "evaluation 写 '数据不足,无法评估';adjustment_recommendations 至少",
@@ -512,6 +564,14 @@ class WeeklyReviewAnalyst(BaseAgent):
                     "recommendation_action_type": "fix_bug",
                     "evidence_confidence": "low",
                     "confidence_reason": "fallback 输出,没有时间连续性诊断证据",
+                    "outcome_tracking": {
+                        "recommendation_id": "fix_weekly_review_ai_failure",
+                        "implemented": False,
+                        "observed_outcome": "unknown",
+                        "confidence_accuracy": "low",
+                        "evaluation_notes": "fallback 输出,尚无实施记录和后续效果",
+                        "week_of_outcome": "",
+                    },
                     "影响": "周复盘缺失,无法发现硬约束阈值过严/过松问题",
                 },
             ],
@@ -632,6 +692,7 @@ class WeeklyReviewAnalyst(BaseAgent):
                 ) or normalized_id in recurrent_ids
                 if confidence == "low" and repeated:
                     r["possible_repetition_without_confirmation"] = True
+                r["outcome_tracking"] = _normalize_outcome_tracking(r)
             for r in recs:
                 if not isinstance(r, dict):
                     continue

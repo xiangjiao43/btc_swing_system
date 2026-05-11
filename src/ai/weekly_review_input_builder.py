@@ -1067,6 +1067,46 @@ def _recommendation_canonical_key(rec: dict[str, Any]) -> tuple[str, bool]:
     return _review_recommendation_text(rec), False
 
 
+def _recommendation_outcome_tracking(rec: dict[str, Any]) -> dict[str, Any]:
+    raw = rec.get("outcome_tracking")
+    if not isinstance(raw, dict):
+        raw = {}
+    return {
+        "recommendation_id": (
+            raw.get("recommendation_id")
+            or rec.get("normalized_recommendation_id")
+            or rec.get("recommendation_id")
+            or rec.get("id")
+            or rec.get("canonical_id")
+            or rec.get("issue_id")
+            or ""
+        ),
+        "implemented": raw.get("implemented")
+        if isinstance(raw.get("implemented"), bool)
+        else (rec.get("implemented") if isinstance(rec.get("implemented"), bool) else False),
+        "observed_outcome": (
+            raw.get("observed_outcome")
+            or rec.get("observed_outcome")
+            or "unknown"
+        ),
+        "confidence_accuracy": (
+            raw.get("confidence_accuracy")
+            or rec.get("confidence_accuracy")
+            or "low"
+        ),
+        "evaluation_notes": (
+            raw.get("evaluation_notes")
+            or rec.get("evaluation_notes")
+            or ""
+        ),
+        "week_of_outcome": (
+            raw.get("week_of_outcome")
+            or rec.get("week_of_outcome")
+            or ""
+        ),
+    }
+
+
 def _extract_review_metric(
     output: dict[str, Any], metric: str,
 ) -> tuple[Optional[int], Optional[int]]:
@@ -1286,6 +1326,11 @@ def _aggregate_temporal_consistency_diagnostics(
                 "recent_weeks": [],
                 "last_seen": str(week_key),
                 "confidence_levels_seen": [],
+                "implemented_weeks": 0,
+                "outcomes_seen": [],
+                "latest_observed_outcome": "unknown",
+                "latest_confidence_accuracy": "low",
+                "outcome_history": [],
                 "latest_priority": rec.get("优先级"),
                 "latest_severity": rec.get("severity") or rec.get("严重级别"),
                 "latest_evidence_confidence": (
@@ -1303,6 +1348,19 @@ def _aggregate_temporal_consistency_diagnostics(
             )
             if confidence and confidence not in item["confidence_levels_seen"]:
                 item["confidence_levels_seen"].append(confidence)
+            outcome = _recommendation_outcome_tracking(rec)
+            if outcome["implemented"] is True:
+                item["implemented_weeks"] += 1
+            if outcome["observed_outcome"] not in item["outcomes_seen"]:
+                item["outcomes_seen"].append(outcome["observed_outcome"])
+            if item["weeks_seen"] == 1:
+                item["latest_observed_outcome"] = outcome["observed_outcome"]
+                item["latest_confidence_accuracy"] = outcome["confidence_accuracy"]
+            if len(item["outcome_history"]) < 8:
+                item["outcome_history"].append({
+                    "week_start_utc": str(week_key),
+                    **outcome,
+                })
             if len(item["recent_weeks"]) < 8:
                 item["recent_weeks"].append(str(week_key))
 

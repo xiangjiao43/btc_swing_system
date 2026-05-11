@@ -104,7 +104,7 @@ def test_module_5_system_health_diagnosis_severity_colors(html):
     assert "border-amber-500" in html
 
 
-def test_module_5_adjustment_recommendations_priority(html):
+def test_module_5_adjustment_recommendations_priority(html, js):
     """优先级 high / medium / low 三色。"""
     assert "adjustment_recommendations" in html
     assert "目标" in html
@@ -116,6 +116,10 @@ def test_module_5_adjustment_recommendations_priority(html):
     assert "duplicate_recommendation_id" in html
     assert "unstable_recommendation_id" in html
     assert "证据置信度" in html
+    assert "outcome_tracking" in js
+    assert "observed_outcome" in html
+    assert "confidence_accuracy" in html
+    assert "outcome_notes" in html
     assert "possible_repetition_without_confirmation" in html
     assert "weeklyReviewRecommendationAction" in html
     assert "weeklyReviewRecommendationId" in html
@@ -130,6 +134,10 @@ def test_module_5_temporal_consistency_fields(html):
         "recurring recommendations",
         "recommendation_id",
         "confidence_levels_seen",
+        "implemented_weeks",
+        "outcomes_seen",
+        "latest_observed_outcome",
+        "latest_confidence_accuracy",
         "latest_priority",
         "latest_severity",
         "连续 elevated 周数",
@@ -320,6 +328,7 @@ def test_js_module_5_state(js):
     assert "hasWeeklyReviewTemporalDiagnostics" in js
     assert "weeklyReviewRecommendationConfidence" in js
     assert "weeklyReviewRecommendationId" in js
+    assert "weeklyReviewRecommendationOutcome" in js
     assert "diagnosticEntries" in js
 
 

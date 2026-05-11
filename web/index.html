@@ -1161,6 +1161,10 @@
                     <div class="text-slate-500" x-text="'具体调整路径: ' + weeklyReviewRecommendationAction(r)"></div>
                     <div class="text-slate-500"
                          x-text="'证据置信度: ' + weeklyReviewRecommendationConfidence(r) + ' | 原因: ' + weeklyReviewRecommendationConfidenceReason(r)"></div>
+                    <div class="text-slate-500"
+                         x-text="'outcome: implemented=' + formatReviewValue(weeklyReviewRecommendationOutcome(r).implemented) + ' | observed=' + formatReviewValue(weeklyReviewRecommendationOutcome(r).observed_outcome) + ' | confidence_accuracy=' + formatReviewValue(weeklyReviewRecommendationOutcome(r).confidence_accuracy) + ' | week=' + formatReviewValue(weeklyReviewRecommendationOutcome(r).week_of_outcome)"></div>
+                    <div class="text-slate-500"
+                         x-text="'outcome_notes: ' + formatReviewValue(weeklyReviewRecommendationOutcome(r).evaluation_notes)"></div>
                     <template x-if="r.duplicate_recommendation_id || r.unstable_recommendation_id">
                       <div class="text-amber-600 dark:text-amber-400">
                         <span x-show="r.duplicate_recommendation_id">重复 recommendation_id</span>
@@ -1236,6 +1240,8 @@
                       <div x-text="'category: ' + formatReviewValue(r.category) + ' | target: ' + formatReviewValue(r.target) + ' | action_type: ' + formatReviewValue(r.action_type)"></div>
                       <div class="text-slate-500" x-text="'weeks_seen: ' + formatReviewValue(r.weeks_seen)"></div>
                       <div class="text-slate-500" x-text="'confidence_levels_seen: ' + formatReviewValue(r.confidence_levels_seen)"></div>
+                      <div class="text-slate-500" x-text="'implemented_weeks: ' + formatReviewValue(r.implemented_weeks) + ', outcomes_seen: ' + formatReviewValue(r.outcomes_seen)"></div>
+                      <div class="text-slate-500" x-text="'latest_observed_outcome: ' + formatReviewValue(r.latest_observed_outcome) + ', latest_confidence_accuracy: ' + formatReviewValue(r.latest_confidence_accuracy)"></div>
                       <div class="text-slate-500" x-text="'latest_priority: ' + formatReviewValue(r.latest_priority) + ', latest_severity: ' + formatReviewValue(r.latest_severity)"></div>
                       <div class="text-slate-500" x-text="'action: ' + formatReviewValue(r.action)"></div>
                       <div class="text-slate-500" x-text="'recent_weeks: ' + formatReviewValue(r.recent_weeks)"></div>

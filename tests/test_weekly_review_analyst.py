@@ -11,7 +11,8 @@ from unittest.mock import MagicMock
 import pytest
 
 from src.ai.agents.weekly_review_analyst import (
-    VALID_EVIDENCE_CONFIDENCE, VALID_PRIORITIES,
+    VALID_CONFIDENCE_ACCURACY, VALID_EVIDENCE_CONFIDENCE,
+    VALID_OBSERVED_OUTCOMES, VALID_PRIORITIES,
     VALID_RECOMMENDATION_ACTION_TYPES, VALID_RECOMMENDATION_CATEGORIES,
     VALID_SEVERITIES,
     WeeklyReviewAnalyst,
@@ -247,6 +248,34 @@ def test_normalize_output_adds_canonical_recommendation_fields():
     assert rec["recommendation_category"] == "l4_risk"
     assert rec["recommendation_target"] == "l4_elevated_risk_breakdown"
     assert rec["recommendation_action_type"] == "audit"
+    assert rec["outcome_tracking"] == {
+        "recommendation_id": "audit_l4_elevated_risk_breakdown",
+        "implemented": False,
+        "observed_outcome": "unknown",
+        "confidence_accuracy": "low",
+        "evaluation_notes": "",
+        "week_of_outcome": "",
+    }
+
+
+def test_normalize_output_preserves_outcome_tracking():
+    payload = _make_full_output(high_recs=0, extra_recs_count=1)
+    rec = payload["adjustment_recommendations"][0]
+    rec["recommendation_id"] = "audit_l4_elevated_risk_breakdown"
+    rec["outcome_tracking"] = {
+        "implemented": True,
+        "observed_outcome": "positive",
+        "confidence_accuracy": "high",
+        "evaluation_notes": "连续两周 elevated 降低",
+        "week_of_outcome": "2026-W20",
+    }
+    normed = WeeklyReviewAnalyst.normalize_output(payload)
+    outcome = normed["adjustment_recommendations"][0]["outcome_tracking"]
+    assert outcome["recommendation_id"] == "audit_l4_elevated_risk_breakdown"
+    assert outcome["implemented"] is True
+    assert outcome["observed_outcome"] == "positive"
+    assert outcome["confidence_accuracy"] == "high"
+    assert outcome["week_of_outcome"] == "2026-W20"
 
 
 def test_normalize_output_accepts_recommendation_id_aliases():
@@ -424,5 +453,7 @@ def test_valid_enums():
     assert VALID_PRIORITIES == ("high", "medium", "low")
     assert VALID_SEVERITIES == ("critical", "warning", "info")
     assert VALID_EVIDENCE_CONFIDENCE == ("low", "medium", "high")
+    assert VALID_OBSERVED_OUTCOMES == ("positive", "neutral", "negative", "unknown")
+    assert VALID_CONFIDENCE_ACCURACY == ("low", "medium", "high")
     assert "l3_behavior" in VALID_RECOMMENDATION_CATEGORIES
     assert "change_threshold" in VALID_RECOMMENDATION_ACTION_TYPES

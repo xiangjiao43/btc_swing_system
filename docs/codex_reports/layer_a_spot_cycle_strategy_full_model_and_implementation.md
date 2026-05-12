@@ -504,7 +504,7 @@ Layer A 不进入 virtual account。虚拟账户仍只管理 Layer B。
 | 步骤 | 状态 |
 |---|---|
 | 本地 pytest 通过 | ✅ |
-| GitHub push(commit hash:xxxx) | 待本报告随代码提交后执行；最终 hash 记录在对话和 audit bundle metadata |
+| GitHub push(commit hash:c76ff56) | ✅ 功能提交已推送；本报告状态更新提交见最终对话和 audit bundle metadata |
 | 服务器 git pull | 待用户执行 |
 | 服务器 systemctl restart | 待用户执行 |
 | 生产 DB 迁移 / 清污 | N/A |

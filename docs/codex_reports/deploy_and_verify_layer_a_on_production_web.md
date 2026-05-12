@@ -294,9 +294,8 @@ Layer A 不进入虚拟账户，虚拟账户仍只管理 Layer B。
 | 步骤 | 状态 |
 |---|---|
 | 本地 pytest 通过 | ✅ 使用上一轮结果：Web 115 passed；Layer A 18 passed |
-| GitHub push | 待提交后更新 |
+| GitHub push(commit hash:11c63d0) | ✅ |
 | 服务器 git pull | ✅ 已到 `d467679` |
 | 服务器 systemctl restart | ✅ `btc-strategy.service active` |
 | 生产 DB 迁移 / 清污 | N/A |
 | 生产健康检查 `/api/system/health` | ✅ 服务 active；公网受 Basic Auth 保护 |
-

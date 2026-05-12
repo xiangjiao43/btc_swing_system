@@ -270,6 +270,17 @@ def test_col_19_full_state_json_contains_layers(conn):
     out = _map_orchestrator_result_to_state(_make_result(), _make_context(), conn)
     parsed = json.loads(out["full_state_json"])
     assert "layers" in parsed
+
+
+def test_col_19_full_state_json_contains_layer_a_spot_strategy(conn):
+    result = _make_result()
+    result["layer_a_spot_strategy"] = {
+        "enabled": True,
+        "a5_spot_adjudicator": {"spot_action": "hold"},
+    }
+    out = _map_orchestrator_result_to_state(result, _make_context(), conn)
+    parsed = json.loads(out["full_state_json"])
+    assert parsed["layer_a_spot_strategy"]["a5_spot_adjudicator"]["spot_action"] == "hold"
     assert set(parsed["layers"].keys()) == {"l1", "l2", "l3", "l4", "l5", "master"}
     # 每层有内容
     assert parsed["layers"]["l1"]["regime"] == "trend_up"

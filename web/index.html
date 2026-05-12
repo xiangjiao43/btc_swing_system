@@ -494,6 +494,109 @@
       </div>
     </section>
 
+    <!-- ============================================================ -->
+    <!-- 🌕 大周期策略(Layer A):现货仓独立策略,不进入虚拟账户       -->
+    <!-- ============================================================ -->
+    <section id="region-layer-a-spot" class="audit-card lg:col-span-5">
+      <header class="px-4 py-2.5 border-b border-slate-200 dark:border-slate-800">
+        <h2 class="text-base font-semibold flex items-center gap-2">
+          <span>🌕</span><span>大周期策略</span>
+          <span class="text-[11px] font-normal text-slate-500 ml-1">Layer A · 现货仓</span>
+        </h2>
+        <p class="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+          只判断 BTC 现货大周期;不做空、不进虚拟账户、不创建 thesis、不影响五层波段仓
+        </p>
+      </header>
+      <div class="p-3 space-y-3">
+        <template x-if="!spotStrategy()">
+          <div class="text-[12px] text-slate-500 dark:text-slate-400 italic">
+            暂无大周期策略，本 run 尚未记录 Layer A 输出。
+          </div>
+        </template>
+        <template x-if="spotStrategy()">
+          <div class="space-y-3">
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-[12px]">
+              <div>
+                <div class="stat-label">大周期阶段</div>
+                <div class="text-[13px] font-bold"
+                     x-text="spotCycleStageLabel(spotStrategy()?.a5_spot_adjudicator?.cycle_stage || spotStrategy()?.a1_cycle_stage?.cycle_stage)"></div>
+              </div>
+              <div>
+                <div class="stat-label">策略</div>
+                <div class="text-[13px] font-bold"
+                     x-text="spotActionLabel(spotStrategy()?.a5_spot_adjudicator?.spot_action)"></div>
+              </div>
+              <div>
+                <div class="stat-label">置信度</div>
+                <div class="text-[13px] font-bold"
+                     x-text="spotConfidenceLabel(spotStrategy()?.a5_spot_adjudicator?.confidence)"></div>
+              </div>
+              <div>
+                <div class="stat-label">风险</div>
+                <div class="text-[13px] font-bold"
+                     x-text="spotRiskLabel(spotStrategy()?.a4_spot_risk?.spot_risk_level)"></div>
+              </div>
+            </div>
+
+            <div class="rounded border border-slate-200 dark:border-slate-800 p-3">
+              <div class="text-[13px] font-bold leading-snug"
+                   x-text="spotStrategy()?.a5_spot_adjudicator?.headline || '大周期策略保持观察'"></div>
+              <p class="mt-1 text-[12px] leading-snug text-slate-700 dark:text-slate-300"
+                 x-text="spotStrategy()?.a5_spot_adjudicator?.human_summary || '-'"></p>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+              <template x-for="card in spotLayerCards()" :key="card.key">
+                <article class="border border-slate-200 dark:border-slate-800 rounded p-3 space-y-2 min-w-0">
+                  <header class="flex items-baseline justify-between gap-2">
+                    <h3 class="text-[12px] font-semibold text-slate-600 dark:text-slate-400"
+                        x-text="card.title"></h3>
+                    <span class="px-1.5 py-0.5 rounded text-[10px] bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400"
+                          x-text="card.badge"></span>
+                  </header>
+                  <div class="text-[13px] font-bold leading-snug" x-text="card.label || '-'"></div>
+                  <p class="text-[12px] leading-snug text-slate-700 dark:text-slate-300"
+                     x-text="card.summary || '-'"></p>
+                  <button @click="toggleLayerCard(card.key)"
+                          class="text-[11px] text-blue-600 dark:text-cyan-400 hover:underline">
+                    <span x-show="!layerCardOpen(card.key)">查看详细 ▼</span>
+                    <span x-show="layerCardOpen(card.key)">收起 ▲</span>
+                  </button>
+                  <div x-show="layerCardOpen(card.key)" x-cloak
+                       class="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800 text-[11.5px]">
+                    <div x-show="(card.supporting || []).length > 0">
+                      <div class="stat-label mb-1">支持证据</div>
+                      <ul class="space-y-0.5">
+                        <template x-for="item in (card.supporting || [])" :key="item">
+                          <li class="leading-snug" x-text="'• ' + item"></li>
+                        </template>
+                      </ul>
+                    </div>
+                    <div x-show="(card.opposing || []).length > 0">
+                      <div class="stat-label mb-1">反方证据</div>
+                      <ul class="space-y-0.5">
+                        <template x-for="item in (card.opposing || [])" :key="item">
+                          <li class="leading-snug" x-text="'• ' + item"></li>
+                        </template>
+                      </ul>
+                    </div>
+                    <div x-show="(card.dataQuality || []).length > 0">
+                      <div class="stat-label mb-1">数据质量备注</div>
+                      <ul class="space-y-0.5 text-slate-500 dark:text-slate-400">
+                        <template x-for="item in (card.dataQuality || [])" :key="item">
+                          <li class="leading-snug" x-text="'• ' + item"></li>
+                        </template>
+                      </ul>
+                    </div>
+                  </div>
+                </article>
+              </template>
+            </div>
+          </div>
+        </template>
+      </div>
+    </section>
+
     </div> <!-- /grid 核心建议与高阶信号 -->
 
     <!-- ============================================================ -->

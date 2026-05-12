@@ -388,8 +388,21 @@ def test_audit_card_style_consistency(html):
 
 def test_existing_regions_preserved(html):
     """§X:不删现有 12 卡 + 五层 6 卡。"""
-    for region in ("region-1", "region-layer-cards", "region-4", "region-5"):
+    for region in ("region-1", "region-layer-a-spot", "region-layer-cards", "region-4", "region-5"):
         assert f'id="{region}"' in html
+
+
+def test_layer_a_spot_js_helpers_exist(js):
+    for helper in (
+        "spotStrategy()",
+        "spotActionLabel",
+        "spotCycleStageLabel",
+        "spotLayerCards",
+    ):
+        assert helper in js
+    assert "dca_buy: '分批买入'" in js
+    assert "aggressive_buy: '强势买入'" in js
+    assert "aggressive_sell: '强力卖出'" in js
 
 
 # ============================================================

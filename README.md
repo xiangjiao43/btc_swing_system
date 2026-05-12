@@ -1,13 +1,15 @@
 # BTC 中长线低频双向波段交易辅助系统
 
-一个面向 BTC 现货与永续合约的中长线、低频、双向波段**交易辅助**系统。
+一个面向 BTC 现货大周期策略与永续合约中长线波段的低频**交易辅助**系统。
 定位是"决策助手",不是自动交易机器人:生成带证据的策略状态与行动建议,交易下单仍由人执行。
 
 ## 核心特征
 
 - **低频**:每日主裁决 + 事件触发 + 小时级硬失效位监控,刻意避开日内噪音
-- **双向**:LONG 与 SHORT 都是一等公民,但做空门槛更高
-- **证据驱动**:五层证据(L1 市场状态 / L2 方向结构 / L3 机会执行 / L4 风险失效 / L5 宏观)→ Master AI → Validator 24 → StrategyState / thesis / virtual account
+- **双层**:Layer A 判断 BTC 现货大周期策略;Layer B 继续负责中长线双向波段仓
+- **双向**:Layer B 中 LONG 与 SHORT 都是一等公民,但做空门槛更高;Layer A 只做现货多头/减仓判断
+- **证据驱动**:Layer B 五层证据(L1 市场状态 / L2 方向结构 / L3 机会执行 / L4 风险失效 / L5 宏观)→ Master AI → Validator 24 → StrategyState / thesis / virtual account
+- **现货大周期**:Layer A 输出分批买入 / 强势买入 / 持有 / 分批卖出 / 强力卖出;不进虚拟账户,不创建 thesis,不影响 Layer B 开平仓
 - **保护性默认**:数据新鲜度不足、证据冲突、事件高密度等情况下优先 HOLD / PROTECT
 
 详细建模见 [docs/modeling.md](docs/modeling.md)(v1.4,编码唯一蓝本)。

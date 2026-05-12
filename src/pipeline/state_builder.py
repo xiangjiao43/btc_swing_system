@@ -372,6 +372,19 @@ class StrategyStateBuilder:
                     "Sprint E: compute_stale_state 失败,orchestrator 跑无 "
                     "factor-grain 守卫: %s", _e,
                 )
+            try:
+                from src.ai.spot_cycle_context_builder import (
+                    SpotCycleContextBuilder,
+                )
+                context["layer_a_spot_context"] = (
+                    SpotCycleContextBuilder(self.conn)
+                    .build_spot_cycle_context(existing_context=context)
+                )
+            except Exception as _e:
+                logger.warning(
+                    "Layer A spot cycle context build failed; Layer B will "
+                    "continue unchanged: %s", _e,
+                )
             result = AIOrchestrator().run_full_a(context)
             mapped = _map_orchestrator_result_to_state(
                 result, context, self.conn,

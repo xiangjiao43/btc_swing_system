@@ -187,6 +187,7 @@ def _normalize_v13(
         "schema_version": schema_version,
         "summary_card": summary_card,
         "layer_cards": layer_cards,
+        "layer_a_spot_strategy": state.get("layer_a_spot_strategy"),
         "anti_patterns_active": [
             labels.ANTI_PATTERN_LABELS.get(k, k)
             for k, v in anti.items() if v

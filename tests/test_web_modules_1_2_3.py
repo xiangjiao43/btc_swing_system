@@ -185,21 +185,29 @@ def test_modules_use_font_mono_for_numbers(html):
 
 def test_existing_12_cards_not_removed(html):
     """§X:不删现有 12 卡 + 五层分析 6 卡 — 验证现有 region 仍在。"""
-    # region-1(AI 策略建议) / region-layer-cards(五层分析) / region-4 / region-5
-    for region in ("region-1", "region-layer-cards", "region-4", "region-5"):
+    # region-1(AI 策略建议) / Layer A / region-layer-cards(五层分析) / region-4 / region-5
+    for region in ("region-1", "region-layer-a-spot", "region-layer-cards", "region-4", "region-5"):
         assert f'id="{region}"' in html, f"现有 {region} 被误删!"
 
 
 def test_module_position_between_strategy_and_layers(html):
-    """v1.4 §9.2:模块 1+2+3 必须在 region-1(AI 策略)和 region-layer-cards 之间。"""
+    """v1.4 §9.2:Layer A + 模块 1+2+3 必须在 region-1 和五层分析之间。"""
     pos_strategy = html.find('id="region-1"')
+    pos_layer_a = html.find('id="region-layer-a-spot"')
     pos_va = html.find('id="region-virtual-account"')
     pos_thesis = html.find('id="region-active-thesis"')
     pos_orders = html.find('id="region-orders-position"')
     pos_layers = html.find('id="region-layer-cards"')
-    assert pos_strategy < pos_va < pos_thesis < pos_orders < pos_layers, (
-        "模块顺序错:必须 region-1 → 模块 1+2+3 → region-layer-cards"
+    assert pos_strategy < pos_layer_a < pos_va < pos_thesis < pos_orders < pos_layers, (
+        "模块顺序错:必须 region-1 → 大周期策略 → 模块 1+2+3 → region-layer-cards"
     )
+
+
+def test_layer_a_spot_module_static_contract(html):
+    assert html.count('id="region-layer-a-spot"') == 1
+    assert "大周期策略" in html
+    assert "spotLayerCards()" in html
+    assert "暂无大周期策略，本 run 尚未记录 Layer A 输出。" in html
 
 
 # ============================================================

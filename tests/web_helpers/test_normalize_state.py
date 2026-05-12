@@ -147,6 +147,22 @@ def test_v13_layer_cards_count_is_6():
     assert layers == ["l1", "l2", "l3", "l4", "l5", "master"]
 
 
+def test_v13_layer_a_spot_strategy_passthrough_when_present():
+    state = _v13_state_full()
+    state["layer_a_spot_strategy"] = {
+        "enabled": True,
+        "a5_spot_adjudicator": {"spot_action": "dca_buy"},
+    }
+    out = normalize_state(state, run_mode="ai_orchestrator")
+    assert out["layer_a_spot_strategy"]["a5_spot_adjudicator"]["spot_action"] == "dca_buy"
+
+
+def test_v13_layer_a_spot_strategy_none_for_old_runs():
+    out = normalize_state(_v13_state_full(), run_mode="ai_orchestrator")
+    assert "layer_a_spot_strategy" in out
+    assert out["layer_a_spot_strategy"] is None
+
+
 def test_v13_l1_label_translated():
     out = normalize_state(_v13_state_full(), run_mode="ai_orchestrator")
     l1_card = out["layer_cards"][0]

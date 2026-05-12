@@ -963,6 +963,108 @@ function app() {
             return [];
         },
 
+        // ============== Layer A 大周期现货策略 ==============
+        spotStrategy() {
+            return (this.state && this.state.layer_a_spot_strategy) || null;
+        },
+        spotActionLabel(v) {
+            const m = {
+                dca_buy: '分批买入',
+                aggressive_buy: '强势买入',
+                hold: '持有',
+                scale_out: '分批卖出',
+                aggressive_sell: '强力卖出',
+            };
+            return m[v] || '持有';
+        },
+        spotCycleStageLabel(v) {
+            const m = {
+                bear_bottom: '熊市底部',
+                accumulation: '底部吸筹',
+                early_bull: '牛市早期',
+                mid_bull: '牛市中段',
+                late_bull: '牛市末期',
+                distribution: '顶部派发',
+                bear_transition: '转熊阶段',
+                deep_bear: '深度熊市',
+                unclear: '不明确',
+            };
+            return m[v] || '不明确';
+        },
+        spotConfidenceLabel(v) {
+            return ({ low: '低', medium: '中', high: '高' })[v] || '低';
+        },
+        spotRiskLabel(v) {
+            return ({
+                low: '低',
+                moderate: '中等',
+                elevated: '偏高',
+                high: '高',
+                critical: '极端',
+            })[v] || '偏高';
+        },
+        spotLayerCards() {
+            const s = this.spotStrategy();
+            if (!s) return [];
+            const a1 = s.a1_cycle_stage || {};
+            const a2 = s.a2_onchain_macro || {};
+            const a3 = s.a3_spot_opportunity || {};
+            const a4 = s.a4_spot_risk || {};
+            const a5 = s.a5_spot_adjudicator || {};
+            return [
+                {
+                    key: 'layer_a_a1',
+                    title: 'A1 大周期阶段',
+                    badge: this.spotConfidenceLabel(a1.confidence),
+                    label: this.spotCycleStageLabel(a1.cycle_stage),
+                    summary: a1.human_summary,
+                    supporting: a1.bullish_evidence || [],
+                    opposing: [...(a1.bearish_evidence || []), ...(a1.conflicting_evidence || [])],
+                    dataQuality: a1.data_quality_notes || [],
+                },
+                {
+                    key: 'layer_a_a2',
+                    title: 'A2 链上与宏观',
+                    badge: this.spotConfidenceLabel(a2.confidence),
+                    label: a2.onchain_macro_stance || 'unclear',
+                    summary: a2.human_summary,
+                    supporting: a2.supporting_evidence || [],
+                    opposing: a2.opposing_evidence || [],
+                    dataQuality: a2.data_quality_notes || [],
+                },
+                {
+                    key: 'layer_a_a3',
+                    title: 'A3 现货策略机会',
+                    badge: this.spotConfidenceLabel(a3.confidence),
+                    label: this.spotActionLabel(a3.preferred_action_candidate),
+                    summary: a3.human_summary,
+                    supporting: [a3.buy_logic, ...(a3.suggested_plan || [])].filter(Boolean),
+                    opposing: [a3.sell_logic, ...(a3.do_not_do || [])].filter(Boolean),
+                    dataQuality: a3.data_quality_notes || [],
+                },
+                {
+                    key: 'layer_a_a4',
+                    title: 'A4 现货风险',
+                    badge: this.spotConfidenceLabel(a4.confidence),
+                    label: this.spotRiskLabel(a4.spot_risk_level),
+                    summary: a4.human_summary,
+                    supporting: [...(a4.risk_controls || []), ...(a4.overheat_signals || [])],
+                    opposing: [...(a4.main_risks || []), ...(a4.downside_risks || []), ...(a4.invalidation_watch || [])],
+                    dataQuality: a4.data_quality_notes || [],
+                },
+                {
+                    key: 'layer_a_a5',
+                    title: 'A5 大周期主裁',
+                    badge: this.spotConfidenceLabel(a5.confidence),
+                    label: this.spotActionLabel(a5.spot_action),
+                    summary: a5.human_summary,
+                    supporting: [...(a5.supporting_evidence || []), ...(a5.suggested_plan || [])],
+                    opposing: [...(a5.opposing_evidence || []), ...(a5.do_not_do || [])],
+                    dataQuality: [...(a5.data_quality_notes || []), ...((s.validator && s.validator.warnings) || [])],
+                },
+            ];
+        },
+
         // ============== 派生 ==============
         tp() {
             // adjudicator.trade_plan 优先,否则回退 state.trade_plan(mock)

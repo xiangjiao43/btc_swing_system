@@ -24,6 +24,11 @@ import time
 from typing import Any, Optional
 
 from .agents import (
+    A1SpotCycleAnalyst,
+    A2OnchainMacroAnalyst,
+    A3SpotOpportunityAnalyst,
+    A4SpotRiskAnalyst,
+    A5SpotAdjudicator,
     L1RegimeAnalyst,
     L2DirectionAnalyst,
     L3OpportunityAnalyst,
@@ -36,6 +41,8 @@ from .agents.emergency_simplified_a import EmergencySimplifiedA
 from .anti_pattern_signals import compute_anti_pattern_signals
 from .circuit_breaker import CircuitBreaker
 from .client import build_anthropic_client
+from .spot_strategy_normalizer import fallback_layer_a_output, normalize_layer_a_output
+from .spot_validator import validate_spot_strategy_output
 from .validator import validate_master_output
 from ..strategy.factor_dependencies import fresh_ratio_for_layer
 
@@ -176,6 +183,11 @@ class AIOrchestrator:
                 "l4": L4RiskAnalyst(client=anthropic_client),
                 "l5": L5MacroAnalyst(client=anthropic_client),
                 "master": MasterAdjudicator(client=anthropic_client),
+                "a1": A1SpotCycleAnalyst(client=anthropic_client),
+                "a2": A2OnchainMacroAnalyst(client=anthropic_client),
+                "a3": A3SpotOpportunityAnalyst(client=anthropic_client),
+                "a4": A4SpotRiskAnalyst(client=anthropic_client),
+                "a5": A5SpotAdjudicator(client=anthropic_client),
                 # Sprint 1.10-G:简化 A 应急 AI(event_price 触发时走它,不跑完整 6 AI)
                 "emergency_simplified_a": EmergencySimplifiedA(
                     client=anthropic_client,
@@ -351,11 +363,111 @@ class AIOrchestrator:
         result["layers"]["master"] = validated_output
         result["constraint_activations"] = constraint_activations
 
+        # ---- Layer A:大周期现货策略(独立轨道,不进入 layers / thesis / virtual account)----
+        result["layer_a_spot_strategy"] = self._run_layer_a_spot_strategy(
+            context, result,
+        )
+
         return result
 
     # ------------------------------------------------------------------
     # Sprint 1.10-G:简化 A 应急 AI 入口(event_price 触发用)
     # ------------------------------------------------------------------
+
+    def _run_layer_a_spot_strategy(
+        self,
+        context: dict[str, Any],
+        result: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Run Layer A A1-A5 if a spot-cycle context is provided.
+
+        Existing tests and legacy callers do not pass layer_a_spot_context; in
+        that case we return a displayable fallback and never call AI.  This keeps
+        Layer B behavior unchanged.
+        """
+        spot_ctx = context.get("layer_a_spot_context")
+        if not isinstance(spot_ctx, dict) or not spot_ctx:
+            return fallback_layer_a_output(
+                "暂无大周期策略，本 run 尚未记录 Layer A 输出。"
+            )
+
+        t0 = time.time()
+        try:
+            a1 = self._agents.get("a1", A1SpotCycleAnalyst()).analyze(
+                {"spot_cycle_context": spot_ctx}, client=build_anthropic_client(),
+            )
+        except Exception as e:
+            logger.warning("orchestrator: Layer A A1 raised: %s", e)
+            a1 = A1SpotCycleAnalyst()._fallback_output()
+        try:
+            a2 = self._agents.get("a2", A2OnchainMacroAnalyst()).analyze(
+                {"spot_cycle_context": spot_ctx, "a1_output": a1},
+                client=build_anthropic_client(),
+            )
+        except Exception as e:
+            logger.warning("orchestrator: Layer A A2 raised: %s", e)
+            a2 = A2OnchainMacroAnalyst()._fallback_output()
+        try:
+            a3 = self._agents.get("a3", A3SpotOpportunityAnalyst()).analyze(
+                {"spot_cycle_context": spot_ctx, "a1_output": a1, "a2_output": a2},
+                client=build_anthropic_client(),
+            )
+        except Exception as e:
+            logger.warning("orchestrator: Layer A A3 raised: %s", e)
+            a3 = A3SpotOpportunityAnalyst()._fallback_output()
+        try:
+            a4 = self._agents.get("a4", A4SpotRiskAnalyst()).analyze(
+                {
+                    "spot_cycle_context": spot_ctx,
+                    "a1_output": a1,
+                    "a2_output": a2,
+                    "a3_output": a3,
+                },
+                client=build_anthropic_client(),
+            )
+        except Exception as e:
+            logger.warning("orchestrator: Layer A A4 raised: %s", e)
+            a4 = A4SpotRiskAnalyst()._fallback_output()
+        try:
+            a5 = self._agents.get("a5", A5SpotAdjudicator()).analyze(
+                {
+                    "spot_cycle_context": spot_ctx,
+                    "a1_output": a1,
+                    "a2_output": a2,
+                    "a3_output": a3,
+                    "a4_output": a4,
+                },
+                client=build_anthropic_client(),
+            )
+        except Exception as e:
+            logger.warning("orchestrator: Layer A A5 raised: %s", e)
+            a5 = A5SpotAdjudicator()._fallback_output()
+
+        merged = normalize_layer_a_output({
+            "enabled": True,
+            "a1_cycle_stage": a1,
+            "a2_onchain_macro": a2,
+            "a3_spot_opportunity": a3,
+            "a4_spot_risk": a4,
+            "a5_spot_adjudicator": a5,
+            "unavailable_factors": spot_ctx.get("unavailable_factors") or [],
+            "model_notes": [
+                "Layer A 独立于 Layer B:不创建 thesis,不进入虚拟账户,不影响开平仓。"
+            ],
+        })
+        guard = validate_spot_strategy_output(merged, context=spot_ctx)
+        existing_validator = merged.get("validator") or {}
+        guard["violations"] = list(existing_validator.get("violations") or []) + list(
+            guard.get("violations") or []
+        )
+        guard["warnings"] = list(existing_validator.get("warnings") or []) + list(
+            guard.get("warnings") or []
+        )
+        guard["passed"] = len(guard["violations"]) == 0
+        merged["validator"] = guard
+        merged["latency_ms"] = int((time.time() - t0) * 1000)
+        result.setdefault("latency_ms", {})["layer_a_spot_strategy"] = merged["latency_ms"]
+        return merged
 
     def run_event_a(
         self,

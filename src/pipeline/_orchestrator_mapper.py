@@ -328,6 +328,7 @@ def _build_full_state_json(
         # _assemble_state 的同名字段对齐;前端 schema gate 兼容。
         "schema_version": "v14",
         "layers": result.get("layers") or {},
+        "layer_a_spot_strategy": result.get("layer_a_spot_strategy"),
         "validator": result.get("validator"),
         "status": result.get("status"),
         "latency_ms": result.get("latency_ms") or {},

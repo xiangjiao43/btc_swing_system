@@ -41,3 +41,29 @@ def test_fallback_output_is_displayable_hold_low_confidence():
     assert out["a5_spot_adjudicator"]["confidence"] == "low"
     assert out["a5_spot_adjudicator"]["human_summary"]
 
+
+def test_boundary_model_notes_do_not_create_layer_b_like_warning():
+    out = normalize_layer_a_output({
+        "a5_spot_adjudicator": {
+            "spot_action": "hold",
+            "cycle_stage": "early_bull",
+            "human_summary": "保持观察",
+            "do_not_do": ["不要做空", "不创建 thesis，不进入虚拟账户"],
+            "what_would_change_mind": ["链上证据改善"],
+        },
+        "model_notes": ["Layer A 不使用 A/B/C 机会等级"],
+    })
+    assert "layer_a_output_contains_layer_b_like_terms" not in out["validator"]["warnings"]
+
+
+def test_actionable_model_notes_keep_layer_b_like_warning():
+    out = normalize_layer_a_output({
+        "a5_spot_adjudicator": {
+            "spot_action": "hold",
+            "cycle_stage": "early_bull",
+            "human_summary": "保持观察",
+            "what_would_change_mind": ["链上证据改善"],
+        },
+        "model_notes": ["建议做空"],
+    })
+    assert "layer_a_output_contains_layer_b_like_terms" in out["validator"]["warnings"]

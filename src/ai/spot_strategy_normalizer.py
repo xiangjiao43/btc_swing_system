@@ -7,6 +7,8 @@ account.
 
 from __future__ import annotations
 
+import json
+import re
 from typing import Any
 
 
@@ -43,14 +45,42 @@ def _enum(v: Any, allowed: tuple[str, ...], default: str) -> str:
     return s if s in allowed else default
 
 
-def _contains_forbidden_text(v: Any) -> bool:
-    text = str(v or "").lower()
-    forbidden = (
-        "short", "做空", "空单", "hedge", "trend_short",
-        "entry", "stop_loss", "take_profit", "thesis", "leverage",
-        "position_size", "a/b/c", "opportunity_grade",
+def _blob(v: Any) -> str:
+    try:
+        return json.dumps(v, ensure_ascii=False, default=str)
+    except Exception:
+        return str(v)
+
+
+def _is_negated_boundary_statement(text: str, start: int) -> bool:
+    prefix = text[max(0, start - 18):start].lower()
+    return any(
+        neg in prefix
+        for neg in (
+            "不", "不要", "不得", "不能", "不允许", "禁止", "避免",
+            "no ", "not ", "never ", "do not ", "don't ", "cannot ",
+            "does not ", "is not ", "should not ", "must not ",
+        )
     )
-    return any(x in text for x in forbidden)
+
+
+def _contains_forbidden_text(v: Any) -> bool:
+    text = _blob(v)
+    patterns = (
+        re.compile(r"\btrend_short\b", re.I),
+        re.compile(r"\bhedge[_\s-]*short\b", re.I),
+        re.compile(r"\b(open|go|enter|take|recommend|suggest|建议|执行)\s+(a\s+)?short\b", re.I),
+        re.compile(r"(建议|执行|考虑|可以|应该|尝试)?\s*(开空|做空|空单)"),
+        re.compile(r"(创建|新建|生成|开启)\s*thesis", re.I),
+        re.compile(r"(设置|给出|生成|输出|使用)\s*(entry|entry_zone|entry_orders|stop_loss|take_profit|position_size|leverage)", re.I),
+        re.compile(r"(使用|输出|采用)\s*(A/B/C|a/b/c|NONE)\s*(机会等级|grade|评级)?", re.I),
+        re.compile(r"\b(opportunity_grade|execution_permission)\b", re.I),
+    )
+    for pattern in patterns:
+        for match in pattern.finditer(text):
+            if not _is_negated_boundary_statement(text, match.start()):
+                return True
+    return False
 
 
 def fallback_layer_a_output(reason: str = "Layer A AI 输出失败或证据不足") -> dict[str, Any]:
@@ -224,4 +254,3 @@ def normalize_layer_a_output(raw: Any) -> dict[str, Any]:
         out["validator"]["warnings"].append("layer_a_output_contains_layer_b_like_terms")
     out["validator"]["passed"] = len(out["validator"]["violations"]) == 0
     return out
-

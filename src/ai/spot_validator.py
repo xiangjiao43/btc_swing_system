@@ -8,15 +8,21 @@ the spot strategy decision for the AI.
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from .spot_strategy_normalizer import SPOT_ACTIONS
 
 
-_HARD_FORBIDDEN_TERMS = (
-    "short", "做空", "空单", "trend_short", "hedge", "对冲",
-    "opportunity_grade", "execution_permission", "a/b/c", "A/B/C", "NONE",
-    "leverage", "杠杆",
+_ACTION_FORBIDDEN_PATTERNS = (
+    (re.compile(r"\btrend_short\b", re.I), "trend_short"),
+    (re.compile(r"\bhedge[_\s-]*short\b", re.I), "hedge_short"),
+    (re.compile(r"\b(open|go|enter|take|recommend|suggest|建议|执行)\s+(a\s+)?short\b", re.I), "short"),
+    (re.compile(r"(建议|执行|考虑|可以|应该|尝试)?\s*(开空|做空|空单)"), "做空"),
+    (re.compile(r"(创建|新建|生成|开启)\s*thesis", re.I), "thesis"),
+    (re.compile(r"(设置|给出|生成|输出|使用)\s*(entry|entry_zone|entry_orders|stop_loss|take_profit|position_size|leverage)", re.I), "trade_plan_field"),
+    (re.compile(r"(使用|输出|采用)\s*(A/B/C|a/b/c|NONE)\s*(机会等级|grade|评级)?", re.I), "layer_b_grade"),
+    (re.compile(r"\b(opportunity_grade|execution_permission)\b", re.I), "layer_b_grade_field"),
 )
 
 _FORBIDDEN_FIELD_NAMES = (
@@ -43,6 +49,26 @@ def _blob(v: Any) -> str:
         return json.dumps(v, ensure_ascii=False, default=str)
     except Exception:
         return str(v)
+
+
+def _is_negated_boundary_statement(text: str, start: int) -> bool:
+    """Allow boundary notes such as "不做空" while still catching actions."""
+    prefix = text[max(0, start - 18):start].lower()
+    negators = (
+        "不", "不要", "不得", "不能", "不允许", "禁止", "避免",
+        "no ", "not ", "never ", "do not ", "don't ", "cannot ",
+        "does not ", "is not ", "should not ", "must not ",
+    )
+    return any(neg in prefix for neg in negators)
+
+
+def _find_actionable_forbidden_text(v: Any) -> str | None:
+    text = _blob(v)
+    for pattern, label in _ACTION_FORBIDDEN_PATTERNS:
+        for match in pattern.finditer(text):
+            if not _is_negated_boundary_statement(text, match.start()):
+                return label
+    return None
 
 
 def _contains_forbidden_field(v: Any) -> str | None:
@@ -78,11 +104,9 @@ def validate_spot_strategy_output(
     if action not in SPOT_ACTIONS:
         violations.append("invalid_spot_action")
 
-    text = _blob(output)
-    for term in _HARD_FORBIDDEN_TERMS:
-        if term in text:
-            violations.append(f"forbidden_layer_b_or_short_term:{term}")
-            break
+    forbidden_text = _find_actionable_forbidden_text(output)
+    if forbidden_text:
+        violations.append(f"forbidden_layer_b_or_short_term:{forbidden_text}")
     forbidden_field = _contains_forbidden_field(output)
     if forbidden_field:
         violations.append(f"forbidden_layer_b_field:{forbidden_field}")
@@ -125,7 +149,8 @@ def validate_spot_strategy_output(
     if unavailable and confidence == "high":
         warnings.append("high_confidence_with_many_missing_factors")
 
-    if any(k in text for k in ("entry_orders", "trade_plan", "virtual_account")):
+    forbidden_text = _find_actionable_forbidden_text(output)
+    if forbidden_text or _contains_forbidden_field(output):
         warnings.append("layer_a_output_looks_like_layer_b_trade_plan")
 
     return {

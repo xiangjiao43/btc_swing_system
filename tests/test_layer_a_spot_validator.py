@@ -51,6 +51,13 @@ def test_boundary_no_thesis_or_virtual_account_does_not_trigger_violation():
     assert guard["passed"] is True
 
 
+def test_descriptive_funding_short_text_does_not_trigger_violation():
+    out = _valid_output()
+    out["a4_spot_risk"]["risk_controls"] = ["负资金费率说明做多需支付做空，杠杆多头已被清洗"]
+    guard = validate_spot_strategy_output(out)
+    assert guard["passed"] is True
+
+
 def test_actionable_short_phrases_trigger_violation():
     for phrase in ("建议做空", "开空", "hedge short", "trend_short"):
         out = _valid_output()

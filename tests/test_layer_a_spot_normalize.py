@@ -67,3 +67,18 @@ def test_actionable_model_notes_keep_layer_b_like_warning():
         "model_notes": ["建议做空"],
     })
     assert "layer_a_output_contains_layer_b_like_terms" in out["validator"]["warnings"]
+
+
+def test_descriptive_funding_short_text_does_not_create_warning():
+    out = normalize_layer_a_output({
+        "a4_spot_risk": {
+            "human_summary": "负资金费率说明做多需支付做空，属于机制解释。",
+        },
+        "a5_spot_adjudicator": {
+            "spot_action": "hold",
+            "cycle_stage": "early_bull",
+            "human_summary": "保持观察",
+            "what_would_change_mind": ["链上证据改善"],
+        },
+    })
+    assert "layer_a_output_contains_layer_b_like_terms" not in out["validator"]["warnings"]

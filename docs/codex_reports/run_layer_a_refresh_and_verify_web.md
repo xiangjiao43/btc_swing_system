@@ -273,11 +273,13 @@ uv run pytest -q tests/test_layer_a_spot_validator.py tests/test_layer_a_spot_no
 18 passed
 ```
 
-待最终提交前继续运行：
+已运行：
 
 ```bash
 git diff --check
 ```
+
+结果：通过，无空白错误。
 
 ## 13. 是否影响 Layer B
 
@@ -316,9 +318,8 @@ Layer A 仍不进入虚拟账户。虚拟账户仍只管理 Layer B。
 | 步骤 | 状态 |
 |---|---|
 | 本地 pytest 通过 | ✅ |
-| GitHub push | 待提交后更新 |
+| GitHub push(commit hash:f6be003) | ✅ |
 | 服务器 git pull | N/A，本轮是本地验证 |
 | 服务器 systemctl restart | N/A，本轮是本地验证 |
 | 生产 DB 迁移 / 清污 | N/A |
 | 生产健康检查 `/api/system/health` | N/A，本轮检查的是本地 `/api/system/health` |
-

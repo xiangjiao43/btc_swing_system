@@ -22,5 +22,6 @@ def test_spot_cycle_context_builder_empty_db_does_not_crash():
     assert ctx["layer_a_boundaries"]["no_short"] is True
     assert ctx["layer_a_boundaries"]["no_thesis"] is True
     assert isinstance(ctx["unavailable_factors"], list)
+    assert ctx["factor_coverage"]["critical_unavailable_count"] >= 10
+    assert ctx["factor_coverage"]["confidence_cap"] == "low"
     assert ctx["data_quality_notes"]
-

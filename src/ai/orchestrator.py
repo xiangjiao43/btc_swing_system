@@ -451,6 +451,16 @@ class AIOrchestrator:
             "a4_spot_risk": a4,
             "a5_spot_adjudicator": a5,
             "unavailable_factors": spot_ctx.get("unavailable_factors") or [],
+            "factor_coverage": spot_ctx.get("factor_coverage") or {},
+            "input_context_snapshot": {
+                "schema_version": spot_ctx.get("schema_version"),
+                "built_at_utc": spot_ctx.get("built_at_utc"),
+                "data_quality_notes": spot_ctx.get("data_quality_notes") or [],
+                "factor_coverage": spot_ctx.get("factor_coverage") or {},
+                "available_factors": spot_ctx.get("available_factors") or {},
+                "unavailable_factors": spot_ctx.get("unavailable_factors") or [],
+                "series_samples": spot_ctx.get("series_samples") or {},
+            },
             "model_notes": [
                 "Layer A 独立于 Layer B:不创建 thesis,不进入虚拟账户,不影响开平仓。"
             ],

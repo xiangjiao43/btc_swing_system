@@ -100,3 +100,14 @@ def test_aggressive_sell_requires_two_sided_evidence():
 def test_valid_hold_passes_guardrail():
     guard = validate_spot_strategy_output(_valid_output())
     assert guard["passed"] is True
+
+
+def test_confidence_above_context_cap_warns_without_violation():
+    out = _valid_output()
+    out["a5_spot_adjudicator"]["confidence"] = "high"
+    guard = validate_spot_strategy_output(
+        out,
+        context={"factor_coverage": {"confidence_cap": "medium"}},
+    )
+    assert guard["passed"] is True
+    assert "confidence_exceeds_factor_coverage_cap" in guard["warnings"]

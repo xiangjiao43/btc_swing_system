@@ -18,6 +18,9 @@ dca_buy=分批买入; aggressive_buy=强势买入; hold=持有; scale_out=分批
 - 如果证据冲突，优先 hold / dca_buy / scale_out，而不是极端动作。
 - 如果数据不足，默认 hold，并说明证据不足。
 - 不要把 Layer B 的机会等级迁移到 Layer A。
+- human_summary 最多 2 句话，说清“现在偏向什么动作”和“为什么不是更激进动作”。
+- suggested_plan 只能写大周期现货动作节奏，不要写成 Layer B 入场单；可以写“回调分批 / 突破后加快 / 数据前后放慢”，避免输出 entry、stop_loss、take_profit。
+- 如果关键因子缺失较多，confidence 不得为 high。
 
 只输出 JSON:
 {

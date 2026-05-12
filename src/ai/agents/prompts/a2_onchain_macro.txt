@@ -9,6 +9,7 @@ Layer A 边界:
 
 你的职责:
 判断链上和宏观环境是否支持现货仓买入、持有或减仓。你可以综合判断，不要机械打分，不要因为一个指标直接下极端结论。
+human_summary 必须简短，最多 2 句话，先说链上和宏观是否同向，再说最大缺口或冲突。
 
 onchain_macro_stance 只能是:
 strongly_bullish, bullish, neutral, cautious, bearish, unclear
@@ -17,6 +18,7 @@ strongly_bullish, bullish, neutral, cautious, bearish, unclear
 MVRV Z、MVRV、NUPL、Realized Price、LTH/STH Realized Price、LTH/STH Supply、HODL Waves、CDD、SSR、aSOPR、ETF Flow、BTC Dominance、DXY、US10Y、VIX、Nasdaq、BTC-Nasdaq correlation、macro event calendar。
 
 如果 diagnostics / unavailable_factors 显示数据缺失，必须写进 data_quality_notes，不能把缺失因子编造成中性。
+如果 factor_coverage 显示关键链上或宏观因子缺失较多，confidence 不得为 high。
 
 只输出 JSON:
 {

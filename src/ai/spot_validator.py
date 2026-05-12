@@ -13,6 +13,8 @@ from typing import Any
 
 from .spot_strategy_normalizer import SPOT_ACTIONS
 
+_CONFIDENCE_RANK = {"low": 0, "medium": 1, "high": 2}
+
 
 _ACTION_FORBIDDEN_PATTERNS = (
     (re.compile(r"\btrend_short\b", re.I), "trend_short"),
@@ -149,6 +151,15 @@ def validate_spot_strategy_output(
     confidence = a5.get("confidence")
     if unavailable and confidence == "high":
         warnings.append("high_confidence_with_many_missing_factors")
+    coverage_cap = (
+        _as_dict((context or {}).get("factor_coverage")).get("confidence_cap")
+    )
+    if (
+        confidence in _CONFIDENCE_RANK
+        and coverage_cap in _CONFIDENCE_RANK
+        and _CONFIDENCE_RANK[confidence] > _CONFIDENCE_RANK[coverage_cap]
+    ):
+        warnings.append("confidence_exceeds_factor_coverage_cap")
 
     forbidden_text = _find_actionable_forbidden_text(output)
     if forbidden_text or _contains_forbidden_field(output):

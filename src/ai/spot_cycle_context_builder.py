@@ -88,6 +88,25 @@ _UNAVAILABLE_MODEL_FACTORS = {
     "liquidation_heatmap_levels": "not_found",
 }
 
+_CRITICAL_MODEL_FACTORS = {
+    "rhodl_ratio",
+    "reserve_risk",
+    "puell_multiple",
+    "percent_supply_in_profit",
+    "percent_supply_in_loss",
+    "lth_sopr",
+    "sth_sopr",
+    "lth_net_position_change",
+    "exchange_balance",
+    "exchange_net_position_change",
+    "us2y",
+    "real_yield",
+    "fed_funds_rate",
+    "cpi_core_cpi",
+    "m2",
+    "fed_balance_sheet",
+}
+
 
 def _series_latest(series: Any) -> tuple[Optional[float], Optional[str]]:
     if series is None:
@@ -317,6 +336,7 @@ class SpotCycleContextBuilder:
             for name, status in sorted(_UNAVAILABLE_MODEL_FACTORS.items())
         ]
         missing_notes = self._build_data_quality_notes(available, unavailable)
+        factor_coverage = self._build_factor_coverage(available, unavailable)
         return {
             "schema_version": "layer_a_spot_cycle_context_v1",
             "built_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -330,6 +350,7 @@ class SpotCycleContextBuilder:
             },
             "available_factors": available,
             "unavailable_factors": unavailable,
+            "factor_coverage": factor_coverage,
             "data_quality_notes": missing_notes,
             "series_samples": {
                 "mvrv_z_score_tail": _tail(onchain.get("mvrv_z_score") if isinstance(onchain, dict) else None, 12),
@@ -370,6 +391,66 @@ class SpotCycleContextBuilder:
             )
         return notes
 
+    @staticmethod
+    def _build_factor_coverage(
+        available: dict[str, Any], unavailable: list[dict[str, str]],
+    ) -> dict[str, Any]:
+        counts = {"available": 0, "missing": 0, "stale": 0}
+
+        def walk(obj: Any) -> None:
+            if isinstance(obj, dict) and "status" in obj and "actual_value" in obj:
+                status = str(obj.get("status") or "missing")
+                if status in counts:
+                    counts[status] += 1
+                return
+            if isinstance(obj, dict):
+                for v in obj.values():
+                    walk(v)
+
+        walk(available)
+        integrated_total = sum(counts.values())
+        critical_missing = [
+            item["factor"]
+            for item in unavailable
+            if item.get("factor") in _CRITICAL_MODEL_FACTORS
+        ]
+        critical_count = len(critical_missing)
+        coverage_ratio = (
+            counts["available"] / integrated_total if integrated_total else 0.0
+        )
+        if coverage_ratio < 0.5:
+            confidence_cap = "low"
+            cap_reason = "Layer A 已接入因子可用率低于 50%"
+        elif critical_count >= 10:
+            confidence_cap = "medium"
+            cap_reason = "10 个以上关键 Layer A 因子未稳定接入"
+        elif critical_count >= 5:
+            confidence_cap = "medium"
+            cap_reason = "5 个以上关键 Layer A 因子未稳定接入"
+        else:
+            confidence_cap = "high"
+            cap_reason = ""
+        notes: list[str] = []
+        if counts["missing"]:
+            notes.append(f"{counts['missing']} 个已接入因子当前缺值")
+        if counts["stale"]:
+            notes.append(f"{counts['stale']} 个已接入因子当前过期")
+        if critical_count:
+            notes.append(f"{critical_count} 个关键候选因子未稳定接入")
+        return {
+            "available_factor_count": counts["available"],
+            "missing_integrated_factor_count": counts["missing"],
+            "stale_factor_count": counts["stale"],
+            "total_integrated_factor_count": integrated_total,
+            "coverage_ratio": round(coverage_ratio, 4),
+            "total_unavailable_factors": len(unavailable),
+            "critical_unavailable_count": critical_count,
+            "critical_unavailable_factors": critical_missing,
+            "confidence_cap": confidence_cap,
+            "confidence_cap_reason": cap_reason,
+            "coverage_notes": notes,
+        }
+
 
 def build_spot_cycle_context(
     conn: sqlite3.Connection,
@@ -380,4 +461,3 @@ def build_spot_cycle_context(
     return SpotCycleContextBuilder(conn).build_spot_cycle_context(
         existing_context=existing_context, now_utc=now_utc,
     )
-

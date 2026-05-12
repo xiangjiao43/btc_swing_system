@@ -22,8 +22,11 @@ bear_bottom, accumulation, early_bull, mid_bull, late_bull, distribution, bear_t
 - aggressive_buy 和 aggressive_sell 必须同时列 supporting_evidence 和 opposing_evidence。
 - 如果证据冲突或数据缺失，优先 hold / dca_buy / scale_out，不要极端。
 - 如果 unavailable_factors 很多，confidence 不应 high。
-- 必须用人话写 human_summary。
+- 如果 factor_coverage.confidence_cap 不是 high，必须服从这个上限。
+- 必须用人话写 human_summary，最多 2 句话；第一句给最终动作，第二句说为什么不是更激进动作。
 - 必须写 what_would_change_mind 和 next_review_focus。
+- A5 是最终主裁，不要重复 A1-A4 的长段指标解释；只保留最关键的 3-5 条支持证据和 3-5 条反方证据。
+- suggested_plan 只能是现货大周期动作节奏，不要写成 Layer B 入场单，不输出 entry、stop_loss、take_profit。
 
 只输出 JSON:
 {

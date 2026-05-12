@@ -967,6 +967,9 @@ function app() {
         spotStrategy() {
             return (this.state && this.state.layer_a_spot_strategy) || null;
         },
+        spotStrategyFallbackText() {
+            return '暂无大周期策略，本 run 尚未记录 Layer A 输出。';
+        },
         spotActionLabel(v) {
             const m = {
                 dca_buy: '分批买入',

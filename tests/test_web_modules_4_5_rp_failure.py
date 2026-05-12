@@ -395,11 +395,14 @@ def test_existing_regions_preserved(html):
 def test_layer_a_spot_js_helpers_exist(js):
     for helper in (
         "spotStrategy()",
+        "spotStrategyFallbackText()",
         "spotActionLabel",
         "spotCycleStageLabel",
         "spotLayerCards",
     ):
         assert helper in js
+    assert "layer_a_spot_strategy" in js
+    assert "暂无大周期策略，本 run 尚未记录 Layer A 输出。" in js
     assert "dca_buy: '分批买入'" in js
     assert "aggressive_buy: '强势买入'" in js
     assert "aggressive_sell: '强力卖出'" in js

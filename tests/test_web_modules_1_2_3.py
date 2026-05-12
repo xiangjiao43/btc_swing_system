@@ -208,6 +208,7 @@ def test_layer_a_spot_module_static_contract(html):
     assert "大周期策略" in html
     assert "spotLayerCards()" in html
     assert "暂无大周期策略，本 run 尚未记录 Layer A 输出。" in html
+    assert 'src="/assets/app.js?v=layer-a-web-display-20260512"' in html
 
 
 # ============================================================
@@ -221,6 +222,13 @@ def test_js_v14_state_fields_declared(js):
         "activeThesis:", "positionSummary:", "ordersPending:",
     ):
         assert field in js, f"缺 Alpine state 字段:{field}"
+
+
+def test_layer_a_spot_js_renders_strategy_or_fallback(js):
+    assert "layer_a_spot_strategy" in js
+    assert "spotStrategy()" in js
+    assert "spotStrategyFallbackText()" in js
+    assert "暂无大周期策略，本 run 尚未记录 Layer A 输出。" in js
 
 
 def test_js_refresh_v14_modules_function(js):

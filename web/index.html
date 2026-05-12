@@ -20,7 +20,7 @@
       },
     };
   </script>
-  <script src="/assets/app.js"></script>
+  <script src="/assets/app.js?v=layer-a-web-display-20260512"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
 </head>
 
@@ -509,8 +509,9 @@
       </header>
       <div class="p-3 space-y-3">
         <template x-if="!spotStrategy()">
-          <div class="text-[12px] text-slate-500 dark:text-slate-400 italic">
-            暂无大周期策略，本 run 尚未记录 Layer A 输出。
+          <div class="text-[12px] text-slate-500 dark:text-slate-400 italic"
+               data-fallback="暂无大周期策略，本 run 尚未记录 Layer A 输出。">
+            <span x-text="spotStrategyFallbackText()"></span>
           </div>
         </template>
         <template x-if="spotStrategy()">

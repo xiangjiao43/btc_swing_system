@@ -27,12 +27,8 @@ _EXPECTED_METRICS: set[str] = {
     "sth_realized_price",
     "sopr_adjusted",  # = aSOPR (1.6 升级 primary,1.7 sopr 删除后唯一保留)
     # Layer A 大周期因子
-    "lth_sopr",
-    "sth_sopr",
     "percent_supply_in_profit",
-    "percent_supply_in_loss",
     "exchange_balance",
-    "exchange_net_position_change",
 }
 
 

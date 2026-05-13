@@ -89,14 +89,8 @@ class GlassnodeCollector:
     _PATH_HODL_WAVES             = f"{_BASE_PATH}/supply/hodl_waves"
 
     # Layer A cycle factors(2026-05):现货大周期专用,不改变 Layer B 交易逻辑。
-    _PATH_LTH_SOPR               = f"{_BASE_PATH}/indicators/sopr_lth"
-    _PATH_STH_SOPR               = f"{_BASE_PATH}/indicators/sopr_sth"
     _PATH_PERCENT_SUPPLY_IN_PROFIT = f"{_BASE_PATH}/supply/profit_relative"
-    _PATH_PERCENT_SUPPLY_IN_LOSS   = f"{_BASE_PATH}/supply/loss_relative"
     _PATH_EXCHANGE_BALANCE       = f"{_BASE_PATH}/distribution/balance_exchanges"
-    _PATH_EXCHANGE_NET_POSITION_CHANGE = (
-        f"{_BASE_PATH}/distribution/exchange_net_position_change"
-    )
 
     # 155 天切分(行业惯例 LTH/STH 阈值)。
     # 3m_6m 桶包含 90-180 天,桶中点 135 天 < 155 天 → 归 STH(简化处理)
@@ -640,42 +634,12 @@ class GlassnodeCollector:
     # Layer A cycle factors(只读大周期现货策略输入)
     # ==================================================================
 
-    def fetch_lth_sopr(
-        self, interval: str = "24h", since_days: int = 180,
-    ) -> list[dict[str, Any]]:
-        """LTH SOPR:长期持有人实现盈亏状态。"""
-        return self._fetch_series(
-            self._PATH_LTH_SOPR, "lth_sopr",
-            interval=interval, since_days=since_days,
-            source="glassnode_primary",
-        )
-
-    def fetch_sth_sopr(
-        self, interval: str = "24h", since_days: int = 180,
-    ) -> list[dict[str, Any]]:
-        """STH SOPR:短期持有人实现盈亏状态。"""
-        return self._fetch_series(
-            self._PATH_STH_SOPR, "sth_sopr",
-            interval=interval, since_days=since_days,
-            source="glassnode_primary",
-        )
-
     def fetch_percent_supply_in_profit(
         self, interval: str = "24h", since_days: int = 180,
     ) -> list[dict[str, Any]]:
         """Percent Supply in Profit:盈利供给比例。"""
         return self._fetch_series(
             self._PATH_PERCENT_SUPPLY_IN_PROFIT, "percent_supply_in_profit",
-            interval=interval, since_days=since_days,
-            source="glassnode_primary",
-        )
-
-    def fetch_percent_supply_in_loss(
-        self, interval: str = "24h", since_days: int = 180,
-    ) -> list[dict[str, Any]]:
-        """Percent Supply in Loss:亏损供给比例。"""
-        return self._fetch_series(
-            self._PATH_PERCENT_SUPPLY_IN_LOSS, "percent_supply_in_loss",
             interval=interval, since_days=since_days,
             source="glassnode_primary",
         )
@@ -687,18 +651,6 @@ class GlassnodeCollector:
         return self._fetch_series(
             self._PATH_EXCHANGE_BALANCE, "exchange_balance",
             interval=interval, since_days=since_days,
-            source="glassnode_primary",
-        )
-
-    def fetch_exchange_net_position_change(
-        self, interval: str = "24h", since_days: int = 180,
-    ) -> list[dict[str, Any]]:
-        """Exchange Net Position Change:交易所净头寸变化。"""
-        return self._fetch_series(
-            self._PATH_EXCHANGE_NET_POSITION_CHANGE,
-            "exchange_net_position_change",
-            interval=interval,
-            since_days=since_days,
             source="glassnode_primary",
         )
 
@@ -732,13 +684,8 @@ class GlassnodeCollector:
             ("sth_realized_price", self.fetch_sth_realized_price),
             ("sopr_adjusted",      self.fetch_sopr_adjusted),
             # Layer A cycle factors(不进入 Layer B 交易约束)
-            ("lth_sopr",           self.fetch_lth_sopr),
-            ("sth_sopr",           self.fetch_sth_sopr),
             ("percent_supply_in_profit", self.fetch_percent_supply_in_profit),
-            ("percent_supply_in_loss",   self.fetch_percent_supply_in_loss),
             ("exchange_balance",   self.fetch_exchange_balance),
-            ("exchange_net_position_change",
-                                     self.fetch_exchange_net_position_change),
             # Sprint 1.6(建模 v1.3 §2.4):4 个新链上端点
             ("sth_supply",         self.fetch_sth_supply),
             ("ssr",                self.fetch_ssr),

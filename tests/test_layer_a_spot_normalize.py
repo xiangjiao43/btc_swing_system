@@ -89,7 +89,7 @@ def test_confidence_cap_downgrades_high_when_five_critical_factors_missing():
         {"factor": name, "project_status": "not_found"}
         for name in (
             "rhodl_ratio", "reserve_risk", "puell_multiple",
-            "lth_net_position_change", "real_yield",
+            "percent_supply_in_loss", "lth_sopr",
         )
     ]
     out = normalize_layer_a_output({

@@ -15,8 +15,8 @@ low, moderate, elevated, high, critical
 human_summary 必须简短，最多 2 句话，先说风险等级，再说最大的 2-3 个风险来源。
 
 新增风险因子理解:
-- LTH/STH SOPR 与 Percent Supply in Profit/Loss 用来识别获利兑现、亏损投降、顶部拥挤或底部压力。
-- Exchange Balance / Net Position Change 用来识别交易所卖压或筹码出入交易所的风险。
+- Percent Supply in Profit 用来识别盈利筹码比例过高带来的兑现风险。
+- Exchange Balance 用来识别交易所潜在卖压。
 - US2Y / Fed Funds / M2 / Fed Balance Sheet 用来识别短端利率和流动性是否压制风险资产。
 
 如果数据缺失或过期，必须写进 data_quality_notes。

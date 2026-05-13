@@ -363,25 +363,25 @@ sources:
     role_in_v1: delayed
     serves: []
 
-  # ---- Layer A 大周期现货策略 · 第一批低风险接入因子 ----
   - name: glassnode_lth_sopr
     platform: glassnode
     endpoint: /v1/metrics/indicators/sopr_lth
     params: { a: BTC }
-    frequency: daily
+    frequency: null
     freshness_class: onchain
-    role_in_v1: primary
-    serves: [lth_sopr, layer_a_cycle_stage, layer_a_holder_behavior]
+    role_in_v1: delayed
+    serves: []
 
   - name: glassnode_sth_sopr
     platform: glassnode
     endpoint: /v1/metrics/indicators/sopr_sth
     params: { a: BTC }
-    frequency: daily
+    frequency: null
     freshness_class: onchain
-    role_in_v1: primary
-    serves: [sth_sopr, layer_a_cycle_stage, layer_a_holder_behavior]
+    role_in_v1: delayed
+    serves: []
 
+  # ---- Layer A 大周期现货策略 · 第一批低风险接入因子 ----
   - name: glassnode_percent_supply_in_profit
     platform: glassnode
     endpoint: /v1/metrics/supply/profit_relative
@@ -391,15 +391,6 @@ sources:
     role_in_v1: primary
     serves: [percent_supply_in_profit, layer_a_cycle_stage, layer_a_valuation]
 
-  - name: glassnode_percent_supply_in_loss
-    platform: glassnode
-    endpoint: /v1/metrics/supply/loss_relative
-    params: { a: BTC }
-    frequency: daily
-    freshness_class: onchain
-    role_in_v1: primary
-    serves: [percent_supply_in_loss, layer_a_cycle_stage, layer_a_valuation]
-
   - name: glassnode_exchange_balance
     platform: glassnode
     endpoint: /v1/metrics/distribution/balance_exchanges
@@ -408,15 +399,6 @@ sources:
     freshness_class: onchain
     role_in_v1: primary
     serves: [exchange_balance, layer_a_exchange_pressure]
-
-  - name: glassnode_exchange_net_position_change
-    platform: glassnode
-    endpoint: /v1/metrics/distribution/exchange_net_position_change
-    params: { a: BTC }
-    frequency: daily
-    freshness_class: onchain
-    role_in_v1: primary
-    serves: [exchange_net_position_change, layer_a_exchange_pressure]
 
   # ---- 第三类延后因子继续保留 ----
   - name: glassnode_active_addresses

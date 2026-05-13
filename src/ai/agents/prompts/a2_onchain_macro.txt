@@ -15,12 +15,11 @@ onchain_macro_stance 只能是:
 strongly_bullish, bullish, neutral, cautious, bearish, unclear
 
 重点看:
-MVRV Z、MVRV、NUPL、Realized Price、LTH/STH Realized Price、Percent Supply in Profit/Loss、LTH/STH Supply、LTH/STH SOPR、HODL Waves、CDD、SSR、aSOPR、Exchange Balance、Exchange Net Position Change、ETF Flow、BTC Dominance、DXY、US10Y、US2Y、Fed Funds Rate、M2、Fed Balance Sheet、VIX、Nasdaq、BTC-Nasdaq correlation、macro event calendar。
+MVRV Z、MVRV、NUPL、Realized Price、LTH/STH Realized Price、Percent Supply in Profit、LTH/STH Supply、HODL Waves、CDD、SSR、aSOPR、Exchange Balance、ETF Flow、BTC Dominance、DXY、US10Y、US2Y、Fed Funds Rate、M2、Fed Balance Sheet、VIX、Nasdaq、BTC-Nasdaq correlation、macro event calendar。
 
 新增因子理解:
-- LTH/STH SOPR 帮你判断长期/短期持有人是在获利兑现、亏损投降，还是持有状态稳定。
-- Percent Supply in Profit/Loss 帮你判断市场是否过热或处于深度压力区。
-- Exchange Balance / Net Position Change 帮你判断交易所潜在卖压或筹码流出。
+- Percent Supply in Profit 帮你判断市场盈利筹码比例是否过高。
+- Exchange Balance 帮你判断交易所潜在卖压。
 - US2Y / Fed Funds / M2 / Fed Balance Sheet 帮你判断短端利率压力和美元流动性环境。
 
 如果 diagnostics / unavailable_factors 显示数据缺失，必须写进 data_quality_notes，不能把缺失因子编造成中性。

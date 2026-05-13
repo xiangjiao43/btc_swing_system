@@ -216,35 +216,80 @@ git diff --check
 
 ## 13. 线上 pipeline run 结果
 
-待部署后补充。
+服务器已拉取到最终 commit `c540640` 并重启 `btc-strategy.service`。
+
+执行：
+
+```bash
+.venv/bin/python scripts/run_pipeline_once.py --trigger manual
+```
+
+这次命令长时间无输出，后续用 `pkill` 安全结束了本次挂起的 SSH 执行；随后直接查询数据库，确认最新 `strategy_runs` 已经写入新的 Layer A 输出。
+
+生产补采结果：
+
+- Glassnode 成功：`percent_supply_in_profit`, `exchange_balance`
+- Glassnode 未成功：`lth_sopr`, `sth_sopr`, `percent_supply_in_loss` 返回 404；`exchange_net_position_change` 验证时遇到 429，未确认稳定支持
+- FRED 成功：`us2y`, `fed_funds_rate`, `m2`, `fed_balance_sheet`
 
 ## 14. 最新 run_id
 
-待部署后补充。
+`c41d13eb2f0143f3b21b2dafcfc23191`
+
+生成时间：`2026-05-13T01:28:18Z`
 
 ## 15. A1 cycle_stage
 
-待部署后补充。
+`mid_bull`
 
 ## 16. A5 spot_action
 
-待部署后补充。
+`hold`
+
+Layer A validator：
+
+- `passed = true`
+- `violations = []`
+- `warnings = []`
 
 ## 17. critical_unavailable_count 接入前后对比
 
 | 项目 | 接入前 | 接入后 |
 |---|---:|---:|
-| critical_unavailable_count | 16 | 待生产 run 验证 |
+| critical_unavailable_count | 16 | 10 |
 
 ## 18. confidence_cap 接入前后对比
 
 | 项目 | 接入前 | 接入后 |
 |---|---|---|
-| confidence_cap | medium | 待生产 run 验证 |
+| confidence_cap | medium | medium |
+
+补充：
+
+- `coverage_ratio = 0.9592`
+- `available_factor_count = 47`
+- `missing_integrated_factor_count = 2`
+- 已确认进入 Layer A context：`percent_supply_in_profit`, `exchange_balance`, `us2y`, `fed_funds_rate`, `m2`, `fed_balance_sheet`
 
 ## 19. http://124.222.89.86/ 验证结果
 
-待部署后补充。
+公网访问 `http://124.222.89.86/` 和 `/api/strategy/current` 返回 `401 Basic Auth`，说明当前线上网页有外层登录保护；我没有读取或输出任何网页登录凭据。
+
+已完成替代验证：
+
+- 服务器本机 API `http://127.0.0.1:8000/api/strategy/current` 返回最新 run，并包含 `layer_a_spot_strategy`。
+- 返回摘要：
+  - `run_id = c41d13eb2f0143f3b21b2dafcfc23191`
+  - `a1_cycle_stage = mid_bull`
+  - `a5_spot_action = hold`
+  - `critical_unavailable_count = 10`
+  - `confidence_cap = medium`
+- 生产文件验证：
+  - `web/index.html` 存在“大周期策略”模块。
+  - `web/assets/app.js` 存在 `layer_a_spot_strategy` 渲染逻辑。
+  - `src/ai/spot_cycle_context_builder.py` 存在 `onchain_holder_behavior` 和 `macro_liquidity`。
+
+用户用已登录浏览器刷新 `http://124.222.89.86/` 后应能看到更新后的 Layer A 内容。
 
 ## 20. 是否影响 Layer B
 
@@ -285,8 +330,8 @@ git diff --check
 | 步骤 | 状态 |
 |---|---|
 | 本地 pytest 通过 | ✅ |
-| GitHub push | 待执行 |
-| 服务器 git pull | 待执行 |
-| 服务器 systemctl restart | 待执行 |
+| GitHub push | ✅ `4764492`, `c540640` |
+| 服务器 git pull | ✅ `/home/ubuntu/btc_swing_system` 到 `c540640` |
+| 服务器 systemctl restart | ✅ `btc-strategy.service` active |
 | 生产 DB 迁移 / 清污 | N/A |
-| 生产健康检查 `/api/system/health` | 待执行 |
+| 生产健康检查 `/api/system/health` | ✅ 本机接口返回 `status=ok` |

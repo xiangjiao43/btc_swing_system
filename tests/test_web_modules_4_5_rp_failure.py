@@ -70,6 +70,12 @@ def test_raw_factor_module_reuses_existing_region_for_layer_a_factors(html, js):
     assert "layerAFactorCardSpecs()" in js
     assert "layerAFactorContextValue" in js
     assert "layerAFactorUnavailableStatus" in js
+    assert "layerAFactorUnavailableLabel" in js
+    assert "layerAFactorCoverageSummary" in js
+    assert "layerAFactorDataQualitySummary" in js
+    assert "layerAFactorUnavailableSummary" in js
+    assert "layerAFactorCoverageSummary()" in html
+    assert "Layer A 因子覆盖" in js
 
 
 def test_layer_a_new_factor_names_are_available_to_raw_factor_cards(js):
@@ -89,6 +95,11 @@ def test_layer_a_new_factor_names_are_available_to_raw_factor_cards(js):
     assert "onchain_holder_behavior" in js
     assert "macro_liquidity" in js
     assert "Layer A context: " in js
+    assert "fetched_at_bjt" in js
+    assert "proxy_endpoint_404" in js
+    assert "unavailable / 未接入" in js
+    assert "uncertain_rate_limited" in js
+    assert "unavailable / 数据受限" in js
 
 
 # ============================================================

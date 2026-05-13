@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import math
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 import pandas as pd
@@ -148,6 +148,19 @@ def _round(v: Any, digits: int = 4) -> Any:
     return v
 
 
+def _utc_iso_to_bjt_pretty(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        bjt = dt.astimezone(timezone(timedelta(hours=8)))
+        return bjt.strftime("%Y-%m-%d %H:%M:%S (BJT)")
+    except Exception:
+        return value
+
+
 def _factor(
     name: str,
     value: Any,
@@ -254,9 +267,26 @@ class SpotCycleContextBuilder:
                 "bars_available": int(len(wclose)),
             }
 
+        def metric_meta(dao: type[OnchainDAO] | type[MacroDAO], name: str) -> dict[str, Any]:
+            row = dao.get_latest(self.conn, name)
+            if not row:
+                return {}
+            fetched_at_utc = row.get("inserted_at_utc")
+            captured_at_utc = row.get("captured_at_utc") or row.get("timestamp")
+            out: dict[str, Any] = {}
+            if fetched_at_utc:
+                out["fetched_at_utc"] = fetched_at_utc
+                out["fetched_at_bjt"] = _utc_iso_to_bjt_pretty(fetched_at_utc)
+            if captured_at_utc:
+                out["captured_at_utc"] = captured_at_utc
+            return out
+
         def metric(name: str) -> dict[str, Any]:
             value, ts = _series_latest(onchain.get(name) if isinstance(onchain, dict) else None)
-            return _factor(name, value, timestamp=ts, stale_map=stale_map, hours_map=hours_map)
+            return _factor(
+                name, value, timestamp=ts, stale_map=stale_map, hours_map=hours_map,
+                extra=metric_meta(OnchainDAO, name),
+            )
 
         def dmetric(name: str) -> dict[str, Any]:
             value, ts = _series_latest(derivatives.get(name) if isinstance(derivatives, dict) else None)
@@ -264,7 +294,10 @@ class SpotCycleContextBuilder:
 
         def mmetric(name: str) -> dict[str, Any]:
             value, ts = _series_latest(macro.get(name) if isinstance(macro, dict) else None)
-            return _factor(name, value, timestamp=ts, stale_map=stale_map, hours_map=hours_map)
+            return _factor(
+                name, value, timestamp=ts, stale_map=stale_map, hours_map=hours_map,
+                extra=metric_meta(MacroDAO, name),
+            )
 
         available = {
             "price_structure": {

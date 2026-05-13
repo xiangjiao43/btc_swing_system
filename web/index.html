@@ -1006,6 +1006,14 @@
         <p class="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
           系统从这些底层因子出发,逐层合成组合因子,再进入五层证据判断。每组内主要因子平铺展示,其他折叠。
         </p>
+        <div class="mt-1 space-y-0.5 text-[10.5px] text-slate-500 dark:text-slate-400"
+             x-show="spotStrategy()">
+          <p x-text="layerAFactorCoverageSummary()"></p>
+          <p class="truncate" :title="layerAFactorUnavailableSummary()"
+             x-text="layerAFactorUnavailableSummary()"></p>
+          <p class="truncate" :title="layerAFactorDataQualitySummary()"
+             x-text="layerAFactorDataQualitySummary()"></p>
+        </div>
       </header>
       <div class="divide-y divide-slate-100 dark:divide-slate-800">
         <template x-for="group in factorGroups()" :key="group.key">

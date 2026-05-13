@@ -1196,6 +1196,57 @@ function app() {
             const item = unavailable.find(x => x && x.factor === key);
             return item ? (item.project_status || 'unavailable') : null;
         },
+        layerAFactorUnavailableLabel(status) {
+            const labels = {
+                proxy_endpoint_404: 'unavailable / 未接入',
+                uncertain_rate_limited: 'unavailable / 数据受限',
+                not_found: 'unavailable / 未接入',
+                config_only: 'unavailable / 未启用',
+                deprecated_candidate: 'unavailable / 已废弃',
+                partial_event_calendar_only: 'unavailable / 仅事件日历部分可用',
+                ai_derived_not_precomputed_for_layer_a: 'unavailable / 尚未预计算',
+                missing: 'unavailable / 当前缺值',
+                unavailable: 'unavailable / 不可用',
+            };
+            return labels[status] || ('unavailable / ' + (status || '不可用'));
+        },
+        layerAFactorFetchedAt(factor) {
+            if (!factor) return null;
+            return factor.fetched_at_bjt || this.formatBJT(factor.fetched_at_utc);
+        },
+        layerAFactorCapturedAt(factor) {
+            if (!factor) return null;
+            return this.formatBJT(factor.captured_at_utc || factor.as_of);
+        },
+        layerAFactorCoverageSummary() {
+            const coverage = this.spotStrategy()?.factor_coverage
+                || this.spotStrategy()?.input_context_snapshot?.factor_coverage
+                || null;
+            if (!coverage) return 'Layer A 因子覆盖: 旧 run 未记录';
+            const available = coverage.available_factor_count ?? '-';
+            const missing = coverage.missing_integrated_factor_count ?? '-';
+            const stale = coverage.stale_factor_count ?? '-';
+            const critical = coverage.critical_unavailable_count ?? '-';
+            const cap = coverage.confidence_cap || '-';
+            return `Layer A 因子覆盖: 可用 ${available} / 缺值 ${missing} / 过期 ${stale} / 关键未接入 ${critical} / 置信度上限 ${cap}`;
+        },
+        layerAFactorUnavailableSummary() {
+            const unavailable = this.spotStrategy()?.unavailable_factors
+                || this.spotStrategy()?.input_context_snapshot?.unavailable_factors
+                || [];
+            if (!unavailable.length) return 'Layer A 未接入因子: 暂无';
+            return 'Layer A 未接入因子: ' + unavailable
+                .slice(0, 6)
+                .map(x => `${x.factor || '-'}(${this.layerAFactorUnavailableLabel(x.project_status || 'unavailable')})`)
+                .join('、');
+        },
+        layerAFactorDataQualitySummary() {
+            const notes = this.spotStrategy()?.data_quality_notes
+                || this.spotStrategy()?.input_context_snapshot?.data_quality_notes
+                || [];
+            if (!notes.length) return 'Layer A 数据质量: 暂无额外备注';
+            return 'Layer A 数据质量: ' + notes.slice(0, 2).join('；');
+        },
         layerAFactorCards() {
             return this.layerAFactorCardSpecs().map(spec => {
                 const factor = this.layerAFactorContextValue(spec);
@@ -1204,9 +1255,10 @@ function app() {
                 const available = status === 'available' && factor
                     && factor.actual_value !== undefined && factor.actual_value !== null;
                 const freshness = (factor && factor.freshness) || {};
+                const unavailableLabel = this.layerAFactorUnavailableLabel(status);
                 const interpretation = available
                     ? 'Layer A context: 可用'
-                    : 'Layer A context: ' + status;
+                    : 'Layer A context: ' + unavailableLabel;
                 return {
                     card_id: 'layer_a_' + spec.key,
                     group: spec.group,
@@ -1220,8 +1272,10 @@ function app() {
                     data_fresh: available && !freshness.is_stale,
                     plain_interpretation: interpretation,
                     linked_layer: 'Layer A',
-                    captured_at_bjt: (factor && factor.as_of) || status,
-                    fetched_at_bjt: null,
+                    captured_at_bjt: available
+                        ? (this.layerAFactorCapturedAt(factor) || this.layerAFactorFetchedAt(factor))
+                        : unavailableLabel,
+                    fetched_at_bjt: available ? this.layerAFactorFetchedAt(factor) : null,
                     source: spec.source,
                 };
             });

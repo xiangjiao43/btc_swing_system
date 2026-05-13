@@ -80,15 +80,49 @@ uv run python scripts/run_pipeline_once.py --trigger manual
 
 结果：300 秒超时，日志无有效输出。该现象与上一轮一致，更像本地 AI/API 等待过长。本轮改动是网页显示逻辑，最终以服务器 pipeline / API 验证为准。
 
-服务器 pipeline：待部署后补充。
+服务器执行：
+
+```bash
+cd /home/ubuntu/btc_swing_system
+.venv/bin/python scripts/run_pipeline_once.py --trigger manual
+```
+
+结果：
+
+- `run_id=6428d36ea2e34210891d3d78f6a43b80`
+- `persisted=true`
+- `ai_status=degraded_master_degraded_ai_failed`
+- `degraded_stages=["master"]`
+
+说明：本轮修的是网页原始因子显示一致性。虽然本次 Master AI 降级，但最新 run 已写入 Layer A context，且 Layer A validator 通过。
 
 ## 7. 最新 run_id
 
-待服务器 pipeline / API 验证后补充。
+- 最新 run_id：`6428d36ea2e34210891d3d78f6a43b80`
+- run 时间：`2026-05-13T03:06:53Z`
+- A1 cycle_stage：`mid_bull`
+- A5 spot_action：`dca_buy`
+- Layer A validator：`passed=true`
+- `percent_supply_in_profit.status=available`
+- `percent_supply_in_profit.actual_value=0.649`
+- `percent_supply_in_profit.fetched_at_bjt=2026-05-13 10:35:12 (BJT)`
+- `us2y.status=available`
+- `us2y.actual_value=3.95`
+- `us2y.fetched_at_bjt=2026-05-13 09:15:09 (BJT)`
 
 ## 8. 网页截图
 
-待服务器部署验证后补充。若公网仍由 Basic Auth / 网关保护，自动截图会记录认证保护页，并用服务器本机 API/HTML 结果作为技术验证。
+公网自动访问仍返回认证 / 网关保护，因此自动环境无法截取登录后的真实页面。已保存可获取的验证图：
+
+- `/private/tmp/layer_a_web_factor_display_consistency_fix/verification/production_web_check.png`
+
+服务器本机验证：
+
+- HTML 包含 `/assets/app.js?v=layer-a-factor-display-20260513`
+- HTML 包含 `factorStatusLine(c)`
+- HTML 包含「原始数据因子」和「大周期策略」
+- API 返回 `layer_a_spot_strategy`
+- API 中 `percent_supply_in_profit` 有数值、状态、抓取时间
 
 ## 9. 是否影响 Layer B / 虚拟账户 / 真实交易
 
@@ -105,19 +139,19 @@ uv run python scripts/run_pipeline_once.py --trigger manual
 
 - 旧浏览器缓存可能仍显示旧 JS；本轮已更新 app.js 版本参数，用户刷新后应加载新版本。
 - 公网自动访问如果被认证保护，自动截图无法看到登录后的页面，需要用户登录后肉眼确认。
-- 本地 pipeline 超时，服务器验证完成后需要补充最终 run_id 和网页验证结果。
+- 本地 pipeline 超时；服务器 pipeline 已 `persisted=true`，但 Master AI 降级。该降级不影响本轮网页显示修复验证。
 
 ## 12. 部署状态四件事清单
 
 | 步骤 | 状态 |
 |---|---|
 | 本地 pytest 通过 | ✅ |
-| GitHub push(commit hash) | 待执行 |
-| 服务器 git pull | 待执行 |
-| 服务器 systemctl restart | 待执行 |
+| GitHub push(commit hash: `7f6fc50`) | ✅ |
+| 服务器 git pull | ✅ |
+| 服务器 systemctl restart | ✅ |
 | 生产 DB 迁移 / 清污 | N/A |
-| 生产健康检查 `/api/system/health` | 待执行 |
+| 生产健康检查 `/api/system/health` | ✅ |
 
 ## 13. 审查包路径
 
-待生成。
+`/private/tmp/layer_a_web_factor_display_consistency_fix/layer_a_web_factor_display_consistency_fix_audit_bundle.zip`

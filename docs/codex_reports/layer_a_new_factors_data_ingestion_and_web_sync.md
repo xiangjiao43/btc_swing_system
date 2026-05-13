@@ -87,7 +87,46 @@ git diff --check
 
 ## 7. pipeline 日志和线上验证
 
-待部署后补充。
+服务器已部署到 commit `9c97c9a`，并重启 `btc-strategy.service`。
+
+生产 pipeline 命令：
+
+```bash
+cd /home/ubuntu/btc_swing_system
+.venv/bin/python scripts/run_pipeline_once.py --trigger manual
+```
+
+结果：
+
+- `pipeline_exit=124`
+- 原因：AI provider 返回 `当前模型过载 / model overloaded`
+- 本次 pipeline 未确认生成新 run
+
+只读 context 验证结果：
+
+| 因子 | status | actual_value | fetched_at_bjt |
+|---|---:|---:|---|
+| `percent_supply_in_profit` | available | `0.649` | `2026-05-13 10:35:12 (BJT)` |
+| `percent_supply_in_loss` | available | `0.351` | `2026-05-13 10:35:12 (BJT)` |
+| `exchange_balance` | available | `3002175.4435` | `2026-05-13 10:35:13 (BJT)` |
+| `exchange_net_position_change` | available | `-902.2366` | `2026-05-13 10:35:13 (BJT)` |
+| `us2y` | available | `3.95` | `2026-05-13 09:15:09 (BJT)` |
+| `fed_funds_rate` | available | `3.64` | `2026-05-13 09:15:12 (BJT)` |
+| `m2` | available | `22686.0` | `2026-05-13 09:15:16 (BJT)` |
+| `fed_balance_sheet` | available | `6709505.0` | `2026-05-13 09:15:17 (BJT)` |
+
+仍不可用：
+
+- `lth_sopr`: `not_supported_by_current_proxy`
+- `sth_sopr`: `not_supported_by_current_proxy`
+
+网页/服务验证：
+
+- `btc-strategy.service` 状态：`active`
+- `/api/system/health` 返回 `status=ok`
+- 服务器本机 HTML 包含「原始数据因子」「大周期策略」
+- 服务器本机 app.js 包含 `当前亏损供给占比`、`当前交易所净头寸变化`、`当前 M2` 等解释文案
+- 公网自动访问仍被认证 / 网关保护，无法截取登录后的真实页面；验证图保存在审查包
 
 ## 8. 是否影响范围
 
@@ -110,19 +149,20 @@ git diff --check
 - LTH SOPR / STH SOPR 在当前代理仍 404，无法真实接入；网页会显示 `未接入`。
 - 亏损供给比例是由盈利供给比例派生，依赖 Glassnode `profit_relative` 的口径稳定性。
 - 交易所净头寸变化是由交易所余额相邻两点变化派生，等价于“余额变化”，不是独立 Glassnode 端点。
-- 如果生产 pipeline 因 Master AI 等待或降级失败，本轮会用最新 DB / API 字段做只读验证，不伪造成功。
+- 生产 pipeline 因模型过载超时，未确认生成新 run；因此线上网页可能要等下一次成功 run 后才会看到新版派生因子写入 `full_state_json`。
+- 本轮已经用服务器 DB 只读构建新版 Layer A context，确认派生因子数值和抓取时间正确。
 
 ## 11. 部署状态四件事清单
 
 | 步骤 | 状态 |
 |---|---|
 | 本地 pytest 通过 | ✅ |
-| GitHub push(commit hash) | 待执行 |
-| 服务器 git pull | 待执行 |
-| 服务器 systemctl restart | 待执行 |
+| GitHub push(commit hash: `9c97c9a`) | ✅ |
+| 服务器 git pull | ✅ |
+| 服务器 systemctl restart | ✅ |
 | 生产 DB 迁移 / 清污 | N/A |
-| 生产健康检查 `/api/system/health` | 待执行 |
+| 生产健康检查 `/api/system/health` | ✅ |
 
 ## 12. 审查包路径
 
-待生成。
+`/private/tmp/layer_a_new_factors_data_ingestion_and_web_sync_audit.zip`

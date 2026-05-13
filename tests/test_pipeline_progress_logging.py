@@ -22,7 +22,7 @@ def _read_jsonl(path: Path) -> list[dict]:
 
 def test_pipeline_progress_writes_validation_log():
     path = init_pipeline_logging(run_label="pytest", validation=True)
-    assert str(path) == "/private/tmp/pipeline_debug_logs/validation_run.log"
+    assert path == Path.home() / "pipeline_debug_logs" / "validation_run.log"
 
     with pipeline_stage("pytest success stage") as span:
         span.set_status("degraded", message="synthetic degraded")
@@ -41,8 +41,8 @@ def test_pipeline_progress_writes_validation_log():
 def test_pipeline_progress_unique_logs_do_not_overwrite_history():
     first = init_pipeline_logging(run_label="pytest", validation=False)
     second = init_pipeline_logging(run_label="pytest", validation=False)
-    assert first.parent == Path("/private/tmp/pipeline_debug_logs")
-    assert second.parent == Path("/private/tmp/pipeline_debug_logs")
+    assert first.parent == Path.home() / "pipeline_debug_logs"
+    assert second.parent == Path.home() / "pipeline_debug_logs"
     assert first != second
 
 

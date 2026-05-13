@@ -1,8 +1,8 @@
 """Pipeline stage progress logging.
 
 This module is intentionally small: it only records stage start/end/failure
-timing to stdout and to `/private/tmp/pipeline_debug_logs/`. It does not
-change any trading decision.
+timing to stdout and to a per-user writable `pipeline_debug_logs` directory.
+It does not change any trading decision.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ import time
 from typing import Any, Iterator
 
 
-LOG_DIR = Path("/private/tmp/pipeline_debug_logs")
+LOG_DIR = Path.home() / "pipeline_debug_logs"
 _LOG_PATH: Path | None = None
 _RUN_LABEL: str | None = None
 

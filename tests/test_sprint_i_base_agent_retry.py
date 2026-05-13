@@ -126,3 +126,35 @@ def test_second_attempt_recovers():
     assert out["status"] == "success"
     assert client.messages.create.call_count == 2
     assert len(fake_sleep.call_args_list) == 1   # 仅第 2 次前 sleep
+
+
+def test_restricted_model_error_is_terminal_no_retry():
+    """403 Claude Code 专用模型限制 → 不是网络抖动,不应重试。"""
+    client = MagicMock()
+    err = Exception(
+        "Error code: 403 - This model is restricted to Claude Code clients "
+        "only and cannot be accessed through other API clients."
+    )
+    client.messages.create.side_effect = [err, _mock_response(_VALID_L1_JSON)]
+    agent = L1RegimeAnalyst(client=client)
+    with patch("src.ai.agents._base.time.sleep") as fake_sleep:
+        out = agent.analyze({"indicators": {}})
+    assert out["status"] == "degraded_ai_terminal_error"
+    assert client.messages.create.call_count == 1
+    fake_sleep.assert_not_called()
+
+
+def test_overloaded_error_stops_after_short_retry():
+    """模型过载最多短重试一次,避免单层拖到数百秒。"""
+    client = MagicMock()
+    err = Exception(
+        "Error code: 500 - Provider API error: 当前模型过载，请稍后重试 "
+        "(That model is currently overloaded.)"
+    )
+    client.messages.create.side_effect = [err, err, _mock_response(_VALID_L1_JSON)]
+    agent = L1RegimeAnalyst(client=client)
+    with patch("src.ai.agents._base.time.sleep") as fake_sleep:
+        out = agent.analyze({"indicators": {}})
+    assert out["status"] == "degraded_ai_failed"
+    assert client.messages.create.call_count == 2
+    assert len(fake_sleep.call_args_list) == 1

@@ -6,8 +6,9 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+from src.ai import client as client_mod
 from src.ai.client import (
-    DEFAULT_MODEL, effective_model, extract_model, extract_text,
+    DEFAULT_MODEL, build_anthropic_client, effective_model, extract_model, extract_text,
     extract_usage, normalize_base_url,
 )
 
@@ -58,3 +59,21 @@ def test_extract_model_with_fallback():
     assert extract_model(resp, "fallback") == "claude-sonnet-4-5-20250929"
     resp2 = MagicMock(spec=[])  # no model attribute
     assert extract_model(resp2, "fallback-model") == "fallback-model"
+
+
+def test_build_client_disables_sdk_hidden_retries(monkeypatch):
+    calls = {}
+
+    class FakeAnthropic:
+        def __init__(self, **kwargs):
+            calls.update(kwargs)
+
+    monkeypatch.setattr(client_mod, "Anthropic", FakeAnthropic)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("OPENAI_API_BASE", "https://us.novaiapi.com/v1")
+
+    build_anthropic_client(timeout=12.0)
+
+    assert calls["timeout"] == 12.0
+    assert calls["max_retries"] == 0
+    assert calls["base_url"] == "https://us.novaiapi.com"

@@ -62,7 +62,14 @@ def build_anthropic_client(
         logger.error("OPENAI_API_KEY not set in environment")
         return None
 
-    kwargs: dict[str, Any] = {"api_key": eff_key, "timeout": timeout}
+    # anthropic SDK 自带内部 retry。项目外层 BaseAgent 已有显式 retry、
+    # stage 日志和 fallback；关闭 SDK 隐藏 retry，避免一次 agent 调用被放大
+    # 成几分钟且日志看不出卡在哪。
+    kwargs: dict[str, Any] = {
+        "api_key": eff_key,
+        "timeout": timeout,
+        "max_retries": 0,
+    }
     if eff_base:
         kwargs["base_url"] = eff_base
     return Anthropic(**kwargs)

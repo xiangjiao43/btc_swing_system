@@ -43,6 +43,52 @@ _RETRY_TEMPERATURE = 0.4
 # 重试间 sleep 2s 让中转站 channel 路由切换,避免连续打到同一个坏 channel。
 _RETRY_SLEEP_SEC = 2.0
 
+_TERMINAL_ERROR_STATUS_CODES = {401, 403}
+_TERMINAL_ERROR_MARKERS = (
+    "restricted to claude code clients only",
+    "cannot be accessed through other api clients",
+    "permission denied",
+    "invalid api key",
+    "unauthorized",
+)
+_OVERLOADED_ERROR_MARKERS = (
+    "model is currently overloaded",
+    "当前模型过载",
+    "overloaded",
+)
+
+
+def _extract_status_code(exc: BaseException) -> int | None:
+    status = getattr(exc, "status_code", None)
+    if isinstance(status, int):
+        return status
+    text = str(exc).lower()
+    for code in (401, 403, 408, 429, 500, 502, 503, 504):
+        if f"error code: {code}" in text or f"status_code={code}" in text:
+            return code
+    return None
+
+
+def _is_terminal_ai_error(exc: BaseException) -> bool:
+    status = _extract_status_code(exc)
+    if status in _TERMINAL_ERROR_STATUS_CODES:
+        return True
+    text = str(exc).lower()
+    return any(marker in text for marker in _TERMINAL_ERROR_MARKERS)
+
+
+def _is_overloaded_ai_error(exc: BaseException) -> bool:
+    text = str(exc).lower()
+    return any(marker in text for marker in _OVERLOADED_ERROR_MARKERS)
+
+
+def _should_retry_ai_error(exc: BaseException, *, attempt: int) -> bool:
+    if _is_terminal_ai_error(exc):
+        return False
+    if _is_overloaded_ai_error(exc):
+        return attempt < 2
+    return True
+
 
 def build_factor_status_block_for_layer(
     layer_id: int, context: dict[str, Any],
@@ -196,6 +242,8 @@ class BaseAgent:
         """
         model = effective_model(self._model_override)
         last_error: Optional[str] = None
+        last_error_type: Optional[str] = None
+        terminal_error = False
         total_tokens_in = 0
         total_tokens_out = 0
         total_latency_ms = 0
@@ -234,10 +282,20 @@ class BaseAgent:
                     temperature=temperature,
                 )
             except Exception as e:
+                elapsed_ms = int((time.time() - start_ts) * 1000)
+                retryable = _should_retry_ai_error(e, attempt=attempt)
                 last_error = f"attempt {attempt}: {e}"
-                total_latency_ms += int((time.time() - start_ts) * 1000)
-                logger.warning("%s: attempt %d failed: %s",
-                               self.AGENT_NAME, attempt, e)
+                last_error_type = type(e).__name__
+                terminal_error = terminal_error or _is_terminal_ai_error(e)
+                total_latency_ms += elapsed_ms
+                logger.warning(
+                    "%s: attempt %d failed model=%s elapsed_ms=%d "
+                    "error_type=%s retryable=%s error=%s",
+                    self.AGENT_NAME, attempt, model, elapsed_ms,
+                    type(e).__name__, retryable, e,
+                )
+                if not retryable:
+                    break
                 continue
 
             total_latency_ms += int((time.time() - start_ts) * 1000)
@@ -263,8 +321,12 @@ class BaseAgent:
             return parsed
 
         out = self._fallback_output()
-        out["status"] = "degraded_ai_failed"
+        out["status"] = (
+            "degraded_ai_terminal_error" if terminal_error
+            else "degraded_ai_failed"
+        )
         out["error"] = (last_error or "all retries failed")[:200]
+        out["error_type"] = last_error_type
         out["model_used"] = last_model_used
         out["tokens_in"] = total_tokens_in
         out["tokens_out"] = total_tokens_out

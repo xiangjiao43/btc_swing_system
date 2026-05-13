@@ -208,7 +208,7 @@ def test_layer_a_spot_module_static_contract(html):
     assert "大周期策略" in html
     assert "spotLayerCards()" in html
     assert "暂无大周期策略，本 run 尚未记录 Layer A 输出。" in html
-    assert 'src="/assets/app.js?v=layer-a-web-display-20260512"' in html
+    assert 'src="/assets/app.js?v=layer-a-factor-display-20260513"' in html
 
 
 # ============================================================

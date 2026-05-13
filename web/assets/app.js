@@ -1210,6 +1210,11 @@ function app() {
             };
             return labels[status] || ('unavailable / ' + (status || '不可用'));
         },
+        layerAFactorStatusLabel(status, freshness) {
+            if (status === 'available' && !(freshness && freshness.is_stale)) return '可用';
+            if (status === 'stale' || (freshness && freshness.is_stale)) return 'unavailable / 数据过期';
+            return this.layerAFactorUnavailableLabel(status);
+        },
         layerAFactorFetchedAt(factor) {
             if (!factor) return null;
             return factor.fetched_at_bjt || this.formatBJT(factor.fetched_at_utc);
@@ -1252,13 +1257,14 @@ function app() {
                 const factor = this.layerAFactorContextValue(spec);
                 const unavailableStatus = this.layerAFactorUnavailableStatus(spec.key);
                 const status = (factor && factor.status) || unavailableStatus || 'unavailable';
-                const available = status === 'available' && factor
+                const hasValue = factor
                     && factor.actual_value !== undefined && factor.actual_value !== null;
                 const freshness = (factor && factor.freshness) || {};
-                const unavailableLabel = this.layerAFactorUnavailableLabel(status);
-                const interpretation = available
-                    ? 'Layer A context: 可用'
-                    : 'Layer A context: ' + unavailableLabel;
+                const available = status === 'available' && hasValue && !freshness.is_stale;
+                const statusLabel = this.layerAFactorStatusLabel(status, freshness);
+                const timestampLabel = this.layerAFactorFetchedAt(factor)
+                    || this.layerAFactorCapturedAt(factor);
+                const interpretation = `状态: ${statusLabel} · Layer A context`;
                 return {
                     card_id: 'layer_a_' + spec.key,
                     group: spec.group,
@@ -1266,16 +1272,16 @@ function app() {
                     is_primary: false,
                     name: spec.name,
                     name_en: spec.name_en,
-                    current_value: available ? factor.actual_value : null,
+                    current_value: hasValue ? factor.actual_value : null,
                     value_unit: spec.value_unit || '',
                     impact_direction: 'neutral',
                     data_fresh: available && !freshness.is_stale,
                     plain_interpretation: interpretation,
                     linked_layer: 'Layer A',
-                    captured_at_bjt: available
-                        ? (this.layerAFactorCapturedAt(factor) || this.layerAFactorFetchedAt(factor))
-                        : unavailableLabel,
-                    fetched_at_bjt: available ? this.layerAFactorFetchedAt(factor) : null,
+                    raw_status: status,
+                    status_label: statusLabel,
+                    captured_at_bjt: this.layerAFactorCapturedAt(factor),
+                    fetched_at_bjt: timestampLabel,
                     source: spec.source,
                 };
             });
@@ -1456,6 +1462,17 @@ function app() {
         },
         directionLabel(d) {
             return { bullish: '偏多', bearish: '偏空', neutral: '中性' }[d] || d || '中性';
+        },
+        factorStatusLabel(c) {
+            if (!c) return '-';
+            if (c.status_label) return c.status_label;
+            if (c.data_fresh === true) return '可用';
+            if (c.data_fresh === false) return 'unavailable / 需检查';
+            return '-';
+        },
+        factorStatusLine(c) {
+            const layer = c && c.linked_layer ? c.linked_layer : '-';
+            return '状态:' + this.factorStatusLabel(c) + ' · ' + layer;
         },
 
         // ---- Sprint 2.6-H.1:单行 fetched_at_bjt 显示 ----

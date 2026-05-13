@@ -97,15 +97,52 @@ uv run python scripts/run_pipeline_once.py --trigger manual
 
 结果：420 秒超时，日志无有效输出。本轮未把本地 pipeline 超时视为交易逻辑失败；后续以服务器生产环境 pipeline 验证为准。
 
-服务器 pipeline：待部署后补充。
+服务器执行：
+
+```bash
+cd /home/ubuntu/btc_swing_system
+.venv/bin/python scripts/run_pipeline_once.py --trigger manual
+```
+
+结果：
+
+- `run_id=97cbe8ac7ad84091bfea0e209e32b0da`
+- `persisted=true`
+- `ai_status=degraded_master_degraded_ai_failed`
+- `degraded_stages=["master"]`
+
+说明：本轮关注的是 Layer A context 和网页显示。虽然本次主裁 Master AI 降级，但最新 run 已成功持久化，且 `layer_a_spot_strategy` 存在、validator 通过。
 
 ## 9. 最新 run_id
 
-待服务器 pipeline 验证后补充。
+- 最新 run_id：`97cbe8ac7ad84091bfea0e209e32b0da`
+- run 时间：`2026-05-13T02:18:30Z`
+- A1 cycle_stage：`mid_bull`
+- A5 spot_action：`dca_buy`
+- Layer A validator：`passed=true`
+- validator violations：`[]`
+- validator warnings：`[]`
+- `critical_unavailable_count=10`
+- `confidence_cap=medium`
+- `percent_supply_in_profit.fetched_at_bjt=2026-05-13 09:35:14 (BJT)`
+- `us2y.fetched_at_bjt=2026-05-13 09:15:09 (BJT)`
 
 ## 10. 线上网页截图
 
-待服务器部署和验证后补充。若 `http://124.222.89.86/` 仍由 Basic Auth 保护，将记录 curl/API 验证结果，并保存可获取的验证产物。
+公网自动访问结果：
+
+- `curl http://124.222.89.86/api/strategy/current` 返回 `401 Authorization Required`
+- `curl -I http://124.222.89.86/` 返回网关/认证保护响应
+
+因此本轮无法在未提供认证信息的自动环境中截取登录后的真实网页。已保存可获取的验证图：
+
+- `/private/tmp/layer_a_web_factor_timestamp_fix/verification/production_web_auth_check.png`
+
+服务器本机验证结果：
+
+- `http://127.0.0.1:8000/` HTML 包含「大周期策略」「原始数据因子」「layerAFactorCoverageSummary()」
+- `http://127.0.0.1:8000/api/strategy/current` 返回 `layer_a_spot_strategy`
+- API 中 `percent_supply_in_profit` 和 `us2y` 均包含 `fetched_at_bjt`
 
 ## 11. 是否影响 Layer B / 虚拟账户 / 真实交易
 
@@ -119,21 +156,21 @@ uv run python scripts/run_pipeline_once.py --trigger manual
 
 ## 13. 风险和未完成
 
-- 旧 run 中尚未包含 `fetched_at_bjt` 的 Layer A context 时，网页会回退显示数据点时间，直到下一次新 pipeline 写入新版 context。
-- 本地 pipeline 超时，需以服务器生产环境 run 验证最新版字段是否写入最新 `strategy_run`。
-- 若公网网页存在 Basic Auth，自动截图可能只能截到认证页面；最终仍需用户登录后刷新确认。
+- 旧 run 中尚未包含 `fetched_at_bjt` 的 Layer A context 时，网页会回退显示数据点时间；新 run 已包含新版字段。
+- 本地 pipeline 超时，服务器 pipeline 已完成并 `persisted=true`，但 Master AI 降级。Layer A 输出和网页字段验证不受影响。
+- 公网网页存在认证/网关保护，自动环境无法看到登录后的真实页面；最终仍需用户登录后刷新确认。
 
 ## 14. 部署状态四件事清单
 
 | 步骤 | 状态 |
 |---|---|
 | 本地 pytest 通过 | ✅ |
-| GitHub push(commit hash) | 待执行 |
-| 服务器 git pull | 待执行 |
-| 服务器 systemctl restart | 待执行 |
+| GitHub push(commit hash: `0c303cb`) | ✅ |
+| 服务器 git pull | ✅ |
+| 服务器 systemctl restart | ✅ |
 | 生产 DB 迁移 / 清污 | N/A |
-| 生产健康检查 `/api/system/health` | 待执行 |
+| 生产健康检查 `/api/system/health` | ✅ |
 
 ## 15. 审查包路径
 
-待生成。
+`/private/tmp/layer_a_web_factor_timestamp_fix/layer_a_web_factor_timestamp_and_missing_data_fix_audit_bundle.zip`

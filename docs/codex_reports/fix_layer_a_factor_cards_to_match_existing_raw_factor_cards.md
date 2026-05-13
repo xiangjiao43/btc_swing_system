@@ -88,11 +88,41 @@ git diff --check
 
 ## 8. 线上 pipeline run 结果
 
-待部署后补充。
+服务器已执行：
+
+```bash
+cd /home/ubuntu/btc_swing_system
+.venv/bin/python scripts/run_pipeline_once.py --trigger manual
+```
+
+结果：本次命令未产出有效 pipeline 日志，未确认产生新 run。后续用服务器最新 `strategy_run` 和本机网页/API 验证本轮前端修复。
+
+服务器最新可读 run：
+
+- `run_id=6428d36ea2e34210891d3d78f6a43b80`
+- `generated_at_utc=2026-05-13T03:06:53Z`
+- `layer_a_spot_strategy` 存在
+- A1 cycle_stage：`mid_bull`
+- A5 spot_action：`dca_buy`
+- Layer A validator：`passed=true`
+- `M2.status=available`
+- `M2.actual_value=22686.0`
+- `M2.fetched_at_bjt=2026-05-13 09:15:16 (BJT)`
 
 ## 9. http://124.222.89.86/ 验证结果
 
-待部署后补充。
+公网自动访问仍返回认证 / 网关保护，因此自动环境无法看到登录后的真实页面。已保存可获取的验证图：
+
+- `/private/tmp/fix_layer_a_factor_cards_to_match_existing_raw_factor_cards/verification/production_web_check.png`
+
+服务器本机验证：
+
+- HTML 包含 `/assets/app.js?v=layer-a-factor-display-20260513`
+- HTML 包含「原始数据因子」和「大周期策略」
+- app.js 包含 `layerAFactorPlainReading`
+- app.js 包含 `当前 M2`、`当前交易所余额` 等新因子解释文案
+- app.js 不再包含 `Layer A context` 主卡片占位文案
+- `/api/system/health` 返回 `status=ok`
 
 ## 10. 是否影响范围
 
@@ -107,20 +137,20 @@ git diff --check
 
 ## 12. 风险和未完成
 
-- 线上页面若有认证保护，自动截图可能只能记录保护页；最终仍需用户登录后刷新确认。
-- 服务器 pipeline 若再次出现 Master AI 降级，会如实记录，但该降级不影响本轮网页显示修复。
+- 线上页面有认证 / 网关保护，自动截图只能记录保护页；最终仍需用户登录后刷新确认。
+- 本轮服务器 pipeline 命令未产出有效日志；因为本轮为前端卡片显示修复，最终用服务器本机 HTML/app.js/API 验证。
 
 ## 13. 部署状态四件事清单
 
 | 步骤 | 状态 |
 |---|---|
 | 本地 pytest 通过 | ✅ |
-| GitHub push(commit hash) | 待执行 |
-| 服务器 git pull | 待执行 |
-| 服务器 systemctl restart | 待执行 |
+| GitHub push(commit hash: `3646c2b`) | ✅ |
+| 服务器 git pull | ✅ |
+| 服务器 systemctl restart | ✅ |
 | 生产 DB 迁移 / 清污 | N/A |
-| 生产健康检查 `/api/system/health` | 待执行 |
+| 生产健康检查 `/api/system/health` | ✅ |
 
 ## 14. 审查包路径
 
-待生成。
+`/private/tmp/fix_layer_a_factor_cards_to_match_existing_raw_factor_cards/fix_layer_a_factor_cards_to_match_existing_raw_factor_cards_audit_bundle.zip`

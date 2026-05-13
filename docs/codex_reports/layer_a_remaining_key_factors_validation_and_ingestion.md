@@ -227,30 +227,66 @@ git diff --check
 
 ## 14. 线上 pipeline run 结果
 
-待部署后补充。
+服务器已拉取到 commit `fd572ee`，并重启 `btc-strategy.service`，`/api/system/health` 返回 ok。
+
+本轮线上补采结果：
+
+- Glassnode 新增 6 个目标因子均已写入 `onchain_metrics`。
+- FRED 新增 3 个目标 metric 均已写入 `macro_metrics`。
+
+安全 pipeline 结果：
+
+- 第一次手动 pipeline：`timeout 900 .venv/bin/python scripts/run_pipeline_once.py --trigger manual`，退出码 `124`，没有生成新 run。
+- 第二次手动 pipeline：用户中断等待后，按要求停止继续等待，并终止本次 `run_pipeline_once.py --trigger manual` 进程；没有继续重试。
+- 因此本轮“代码 + 数据采集入库”完成，但“新的 strategy_run 写入 full_state_json”尚未完成，需要用户后续手动在 AI 服务正常时再跑一次 pipeline。
 
 ## 15. 最新 run_id
 
-待部署后补充。
+当前最新 run 仍是上一轮成功 run：
+
+`209dea9bdefe42d7a5a25a79dfd345bf`
+
+生成时间：`2026-05-13T12:34:05+08:00`
 
 ## 16. A1 cycle_stage
 
-待部署后补充。
+当前最新 run 仍为旧 run，A1：
+
+`accumulation`
 
 ## 17. A5 spot_action
 
-待部署后补充。
+当前最新 run 仍为旧 run，A5：
+
+`dca_buy`
 
 ## 18. critical_unavailable_count 接入前后对比
 
 | 项目 | 接入前 | 接入后 |
 |---|---:|---:|
-| critical_unavailable_count | 8 | 待部署后补充 |
-| confidence_cap | medium | 待部署后补充 |
+| 代码 coverage 口径中的目标 critical 因子 | 8 | 0 |
+| 最新 strategy_run.full_state_json | 8 | 尚未刷新，新 run 待手动 pipeline |
+| confidence_cap | medium | 尚未刷新，新 run 待手动 pipeline |
+
+已确认生产 DB 当前新 metric 最新值：
+
+| metric | 最新值 | captured_at_utc | source |
+|---|---:|---|---|
+| lth_sopr | 1.1038125155213725 | 2026-05-12T00:00:00Z | glassnode_layer_a |
+| sth_sopr | 1.0016352851437256 | 2026-05-12T00:00:00Z | glassnode_layer_a |
+| rhodl_ratio | 1055.617362451965 | 2026-05-12T00:00:00Z | glassnode_layer_a |
+| reserve_risk | 0.0012001117887504892 | 2026-05-12T00:00:00Z | glassnode_layer_a |
+| puell_multiple | 0.7816386101439852 | 2026-05-12T00:00:00Z | glassnode_layer_a |
+| lth_net_position_change | 123394.33647730015 | 2026-05-12T00:00:00Z | glassnode_layer_a |
+| real_yield | 1.95 | 2026-05-11T00:00:00Z | fred |
+| cpi | 332.407 | 2026-04-01T00:00:00Z | fred |
+| core_cpi | 335.423 | 2026-04-01T00:00:00Z | fred |
 
 ## 19. http://124.222.89.86/ 验证结果
 
-待部署后补充。
+服务已重启并健康检查通过。由于 pipeline 未生成新 run，网页上的 latest run 暂时仍显示旧 full_state_json。
+
+公网 `http://124.222.89.86/` 有 Basic Auth 保护；自动化无法绕过登录确认最终视觉。用户需要在后续手动 pipeline 成功后刷新页面查看。
 
 ## 20. 是否影响 Layer B
 
@@ -266,7 +302,8 @@ git diff --check
 
 ## 23. 风险和未完成
 
-- 本轮新增 Glassnode endpoint 在生产探测均为 HTTP 200，但正式 pipeline 仍依赖当天数据源和 AI 服务可用性。
+- 本轮新增 Glassnode endpoint 在生产探测均为 HTTP 200，且生产 DB 已写入最新 metric。
+- 正式 pipeline 两次未完成：第一次 900 秒超时，第二次按用户要求停止等待。因此 latest `strategy_run.full_state_json` 尚未刷新到本轮新因子。
 - CPI/Core CPI 是月频数据，不能按日频指标理解；网页会显示真实抓取时间和数据日期。
 - 公网 `http://124.222.89.86/` 有 Basic Auth，自动化验证可能只能验证服务器本机 API / HTML / JS，最终视觉需要用户登录后刷新确认。
 
@@ -281,8 +318,9 @@ git diff --check
 | 步骤 | 状态 |
 |---|---|
 | 本地 pytest 通过 | ✅ |
-| GitHub push | 待执行 |
-| 服务器 git pull | 待执行 |
-| 服务器 systemctl restart | 待执行 |
+| GitHub push | ✅ commit `fd572ee` |
+| 服务器 git pull | ✅ |
+| 服务器 systemctl restart | ✅ |
 | 生产 DB 迁移 / 清污 | N/A |
-| 生产健康检查 `/api/system/health` | 待执行 |
+| 生产健康检查 `/api/system/health` | ✅ |
+| 生产 pipeline | ❌ AI 等待超时 / 用户要求停止继续等待 |

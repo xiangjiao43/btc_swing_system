@@ -1,9 +1,13 @@
 """tests/test_sprint_1_7_factor_deletions.py — Sprint 1.7 §X 反退化锁。
 
-Sprint 1.7 缩减版真删 3 个噪音因子(原 spec 11 个,7 个被 L 层引用留 1.8):
+Sprint 1.7 缩减版真删 3 个 Layer B 噪音因子(原 spec 11 个,7 个被 L 层引用留 1.8):
 - reserve_risk(无 L 层引用)
 - puell_multiple(无 L 层引用)
 - sopr(aSOPR=sopr_adjusted 在 1.6 已替代)
+
+2026-05 Layer A 大周期现货策略重新验证 reserve_risk / puell_multiple 官方
+endpoint,并作为只读周期因子恢复采集。它们仍不能回到 Layer B factor_card_emitter
+或 Layer B 交易约束。
 
 §X 反退化锁(防止未来回退或意外恢复):
 - collector 方法不存在
@@ -42,18 +46,16 @@ def glassnode_module():
 # A. Collector 方法 + 路径常量已删
 # ============================================================
 
-def test_no_fetch_reserve_risk_method(glassnode_module):
+def test_fetch_reserve_risk_method_is_layer_a_only(glassnode_module):
     cg = glassnode_module.GlassnodeCollector
-    assert not hasattr(cg, "fetch_reserve_risk"), (
-        "Sprint 1.7:fetch_reserve_risk 必须删除"
-    )
+    assert hasattr(cg, "fetch_reserve_risk")
+    assert cg._PATH_RESERVE_RISK.endswith("/indicators/reserve_risk")
 
 
-def test_no_fetch_puell_multiple_method(glassnode_module):
+def test_fetch_puell_multiple_method_is_layer_a_only(glassnode_module):
     cg = glassnode_module.GlassnodeCollector
-    assert not hasattr(cg, "fetch_puell_multiple"), (
-        "Sprint 1.7:fetch_puell_multiple 必须删除"
-    )
+    assert hasattr(cg, "fetch_puell_multiple")
+    assert cg._PATH_PUELL_MULTIPLE.endswith("/indicators/puell_multiple")
 
 
 def test_no_fetch_sopr_method(glassnode_module):
@@ -74,10 +76,12 @@ def test_fetch_sopr_adjusted_still_exists(glassnode_module):
 
 def test_no_path_constants(glassnode_module):
     cg = glassnode_module.GlassnodeCollector
-    for attr in ("_PATH_RESERVE_RISK", "_PATH_PUELL", "_PATH_SOPR"):
+    for attr in ("_PATH_PUELL", "_PATH_SOPR"):
         assert not hasattr(cg, attr), (
             f"Sprint 1.7:{attr} 必须删除"
         )
+    assert hasattr(cg, "_PATH_RESERVE_RISK")
+    assert hasattr(cg, "_PATH_PUELL_MULTIPLE")
     # aSOPR 路径常量必须保留
     assert hasattr(cg, "_PATH_SOPR_ADJUSTED")
 
@@ -88,10 +92,12 @@ def test_no_path_constants(glassnode_module):
 
 def test_glassnode_fetchers_no_deleted_names():
     from src.scheduler.jobs import _GLASSNODE_FETCHERS
-    for fn in ("fetch_sopr", "fetch_reserve_risk", "fetch_puell_multiple"):
+    for fn in ("fetch_sopr",):
         assert fn not in _GLASSNODE_FETCHERS, (
             f"Sprint 1.7:_GLASSNODE_FETCHERS 应不含 {fn}"
         )
+    assert "fetch_reserve_risk" in _GLASSNODE_FETCHERS
+    assert "fetch_puell_multiple" in _GLASSNODE_FETCHERS
     # 1.6 新加 + 保留的 aSOPR 应在
     assert "fetch_sopr_adjusted" in _GLASSNODE_FETCHERS
     assert "fetch_sth_supply" in _GLASSNODE_FETCHERS  # 1.6 新加
@@ -149,11 +155,12 @@ def test_catalog_no_deleted_source_entries():
         catalog = yaml.safe_load(f)
     sources = catalog.get("sources") or []
     source_names = [s.get("name") for s in sources if isinstance(s, dict)]
-    for name in ("glassnode_sopr", "glassnode_reserve_risk",
-                 "glassnode_puell_multiple"):
+    for name in ("glassnode_sopr",):
         assert name not in source_names, (
             f"Sprint 1.7:sources 应不含 {name}"
         )
+    assert "glassnode_reserve_risk" in source_names
+    assert "glassnode_puell_multiple" in source_names
     # aSOPR source 保留
     assert "glassnode_sopr_adjusted" in source_names
 

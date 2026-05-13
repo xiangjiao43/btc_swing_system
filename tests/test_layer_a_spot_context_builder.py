@@ -35,10 +35,12 @@ def test_spot_cycle_context_builder_empty_db_does_not_crash():
     ):
         assert name not in unavailable_names
     for name in (
-        "lth_sopr", "sth_sopr",
+        "lth_sopr", "sth_sopr", "rhodl_ratio", "reserve_risk",
+        "puell_multiple", "lth_net_position_change", "real_yield",
+        "cpi", "core_cpi",
     ):
-        assert name in unavailable_names
-    assert ctx["factor_coverage"]["critical_unavailable_count"] >= 5
+        assert name not in unavailable_names
+    assert ctx["factor_coverage"]["critical_unavailable_count"] == 0
     assert ctx["factor_coverage"]["confidence_cap"] == "low"
     assert ctx["data_quality_notes"]
 
@@ -56,6 +58,48 @@ def test_spot_cycle_context_builder_exposes_layer_a_factor_fetch_timestamps():
                 metric_value=0.915,
                 source="glassnode_primary",
                 fetched_at="2026-05-12T14:06:23Z",
+            ),
+            OnchainMetric(
+                timestamp="2026-05-12T00:00:00Z",
+                metric_name="lth_sopr",
+                metric_value=1.12,
+                source="glassnode_layer_a",
+                fetched_at="2026-05-12T14:06:20Z",
+            ),
+            OnchainMetric(
+                timestamp="2026-05-12T00:00:00Z",
+                metric_name="sth_sopr",
+                metric_value=0.99,
+                source="glassnode_layer_a",
+                fetched_at="2026-05-12T14:06:21Z",
+            ),
+            OnchainMetric(
+                timestamp="2026-05-12T00:00:00Z",
+                metric_name="rhodl_ratio",
+                metric_value=1055.6,
+                source="glassnode_layer_a",
+                fetched_at="2026-05-12T14:06:22Z",
+            ),
+            OnchainMetric(
+                timestamp="2026-05-12T00:00:00Z",
+                metric_name="reserve_risk",
+                metric_value=0.0012,
+                source="glassnode_layer_a",
+                fetched_at="2026-05-12T14:06:22Z",
+            ),
+            OnchainMetric(
+                timestamp="2026-05-12T00:00:00Z",
+                metric_name="puell_multiple",
+                metric_value=0.78,
+                source="glassnode_layer_a",
+                fetched_at="2026-05-12T14:06:22Z",
+            ),
+            OnchainMetric(
+                timestamp="2026-05-12T00:00:00Z",
+                metric_name="lth_net_position_change",
+                metric_value=123394.3,
+                source="glassnode_layer_a",
+                fetched_at="2026-05-12T14:06:22Z",
             ),
             OnchainMetric(
                 timestamp="2026-05-11T00:00:00Z",
@@ -80,6 +124,27 @@ def test_spot_cycle_context_builder_exposes_layer_a_factor_fetch_timestamps():
                 source="fred",
                 fetched_at="2026-05-12T14:07:30Z",
             ),
+            MacroMetric(
+                timestamp="2026-05-12T00:00:00Z",
+                metric_name="real_yield",
+                metric_value=1.95,
+                source="fred",
+                fetched_at="2026-05-12T14:07:31Z",
+            ),
+            MacroMetric(
+                timestamp="2026-04-01T00:00:00Z",
+                metric_name="cpi",
+                metric_value=332.407,
+                source="fred",
+                fetched_at="2026-05-12T14:07:32Z",
+            ),
+            MacroMetric(
+                timestamp="2026-04-01T00:00:00Z",
+                metric_name="core_cpi",
+                metric_value=335.423,
+                source="fred",
+                fetched_at="2026-05-12T14:07:33Z",
+            ),
         ])
         conn.commit()
 
@@ -89,10 +154,14 @@ def test_spot_cycle_context_builder_exposes_layer_a_factor_fetch_timestamps():
 
     profit = ctx["available_factors"]["onchain_holder_behavior"]["percent_supply_in_profit"]
     loss = ctx["available_factors"]["onchain_holder_behavior"]["percent_supply_in_loss"]
+    lth_sopr = ctx["available_factors"]["onchain_holder_behavior"]["lth_sopr"]
+    rhodl = ctx["available_factors"]["onchain_valuation"]["rhodl_ratio"]
     exchange_net_position_change = (
         ctx["available_factors"]["onchain_holder_behavior"]["exchange_net_position_change"]
     )
     us2y = ctx["available_factors"]["macro_liquidity"]["us2y"]
+    real_yield = ctx["available_factors"]["macro_inflation_rates"]["real_yield"]
+    cpi = ctx["available_factors"]["macro_inflation_rates"]["cpi"]
     assert profit["status"] == "available"
     assert profit["fetched_at_utc"] == "2026-05-12T14:06:23Z"
     assert profit["fetched_at_bjt"] == "2026-05-12 22:06:23 (BJT)"
@@ -101,6 +170,11 @@ def test_spot_cycle_context_builder_exposes_layer_a_factor_fetch_timestamps():
     assert loss["actual_value"] == 0.085
     assert loss["source"] == "glassnode_onchain_derived"
     assert loss["fetched_at_bjt"] == "2026-05-12 22:06:23 (BJT)"
+    assert lth_sopr["status"] == "available"
+    assert lth_sopr["actual_value"] == 1.12
+    assert lth_sopr["fetched_at_bjt"] == "2026-05-12 22:06:20 (BJT)"
+    assert rhodl["status"] == "available"
+    assert rhodl["actual_value"] == 1055.6
     assert exchange_net_position_change["status"] == "available"
     assert exchange_net_position_change["actual_value"] == -25.0
     assert exchange_net_position_change["source"] == "glassnode_onchain_derived"
@@ -108,3 +182,7 @@ def test_spot_cycle_context_builder_exposes_layer_a_factor_fetch_timestamps():
     assert us2y["status"] == "available"
     assert us2y["fetched_at_utc"] == "2026-05-12T14:07:30Z"
     assert us2y["fetched_at_bjt"] == "2026-05-12 22:07:30 (BJT)"
+    assert real_yield["status"] == "available"
+    assert real_yield["actual_value"] == 1.95
+    assert cpi["status"] == "available"
+    assert cpi["actual_value"] == 332.407

@@ -24,16 +24,7 @@ ONCHAIN_MACRO_STANCES = (
 SPOT_RISK_LEVELS = ("low", "moderate", "elevated", "high", "critical")
 
 _CONFIDENCE_RANK = {"low": 0, "medium": 1, "high": 2}
-_CRITICAL_COVERAGE_FACTORS = {
-    "rhodl_ratio",
-    "reserve_risk",
-    "puell_multiple",
-    "lth_sopr",
-    "sth_sopr",
-    "lth_net_position_change",
-    "real_yield",
-    "cpi_core_cpi",
-}
+_CRITICAL_COVERAGE_FACTORS: set[str] = set()
 
 
 def _as_dict(v: Any) -> dict[str, Any]:

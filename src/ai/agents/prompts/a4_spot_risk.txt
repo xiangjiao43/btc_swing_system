@@ -16,8 +16,10 @@ human_summary 必须简短，最多 2 句话，先说风险等级，再说最大
 
 新增风险因子理解:
 - Percent Supply in Profit 用来识别盈利筹码比例过高带来的兑现风险。
+- RHODL Ratio / Reserve Risk / Puell Multiple 用来识别周期估值过热、长期风险回报恶化或矿工收入过热。
+- LTH/STH SOPR 与 LTH Net Position Change 用来识别长期/短期持有人兑现和分发风险。
 - Exchange Balance 用来识别交易所潜在卖压。
-- US2Y / Fed Funds / M2 / Fed Balance Sheet 用来识别短端利率和流动性是否压制风险资产。
+- Real Yield / CPI / Core CPI / US2Y / Fed Funds / M2 / Fed Balance Sheet 用来识别实际利率、通胀和流动性是否压制风险资产。
 
 如果数据缺失或过期，必须写进 data_quality_notes。
 如果关键风险因子缺失较多，confidence 不得为 high。Layer A 是现货策略，可以说明“无杠杆降低强平风险”，但不要因此忽略宏观、链上分发和数据缺失风险。

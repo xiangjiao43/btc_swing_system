@@ -20,7 +20,7 @@ _EXPECTED_METRICS: set[str] = {
     "lth_supply",
     "exchange_net_flow",
     "btc_price_close",
-    # Display(Sprint 1.7 后):删除 sopr / reserve_risk / puell_multiple(噪音因子)
+    # Display(Sprint 1.7 后):删除 raw sopr;reserve/puell 仅作为 Layer A 周期因子恢复
     "mvrv",
     "realized_price",
     "lth_realized_price",
@@ -29,6 +29,12 @@ _EXPECTED_METRICS: set[str] = {
     # Layer A 大周期因子
     "percent_supply_in_profit",
     "exchange_balance",
+    "lth_sopr",
+    "sth_sopr",
+    "rhodl_ratio",
+    "reserve_risk",
+    "puell_multiple",
+    "lth_net_position_change",
 }
 
 

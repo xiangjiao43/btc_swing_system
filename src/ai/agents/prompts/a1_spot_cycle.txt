@@ -16,12 +16,14 @@ cycle_stage 只能是:
 bear_bottom, accumulation, early_bull, mid_bull, late_bull, distribution, bear_transition, deep_bear, unclear
 
 重点看:
-价格结构、ATH drawdown、200D/200W、Realized Price、LTH/STH Realized Price、MVRV Z、MVRV、NUPL、Percent Supply in Profit、LTH/STH Supply、HODL Waves、Exchange Balance、ETF Flow、DXY、US10Y、US2Y、Fed Funds Rate、M2、Fed Balance Sheet、VIX、Nasdaq、BTC Dominance、macro event risk。
+价格结构、ATH drawdown、200D/200W、Realized Price、LTH/STH Realized Price、MVRV Z、MVRV、NUPL、RHODL Ratio、Reserve Risk、Puell Multiple、Percent Supply in Profit/Loss、LTH/STH SOPR、LTH Net Position Change、LTH/STH Supply、HODL Waves、Exchange Balance、ETF Flow、DXY、US10Y、US2Y、Real Yield、Fed Funds Rate、CPI/Core CPI、M2、Fed Balance Sheet、VIX、Nasdaq、BTC Dominance、macro event risk。
 
 新增因子理解:
 - Percent Supply in Profit 用来识别市场盈利筹码比例是否过高。
+- RHODL Ratio / Reserve Risk / Puell Multiple 用来补充周期估值温度、长期持有者风险回报和矿工收入压力。
+- LTH/STH SOPR 与 LTH Net Position Change 用来判断长期/短期持有人是在兑现、承压还是继续沉淀筹码。
 - Exchange Balance 用来观察交易所筹码余额和潜在卖压。
-- US2Y / Fed Funds / M2 / Fed Balance Sheet 用来判断利率压力和宏观流动性。
+- Real Yield / CPI / Core CPI / US2Y / Fed Funds / M2 / Fed Balance Sheet 用来判断实际利率、通胀压力和宏观流动性。
 
 A1 定阶段时，优先看大周期价格结构、链上估值、持有人行为和长期资金流。Funding / OI / liquidation / 事件窗口只能作为背景风险，不要单独决定 cycle_stage。
 

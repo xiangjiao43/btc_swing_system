@@ -39,7 +39,10 @@ SERIES_TO_METRIC: dict[str, str] = {
     # 利率类
     "DGS10":    "dgs10",              # 10-year Treasury yield(daily)
     "DGS2":     "us2y",               # 2-year Treasury yield(daily)
+    "DFII10":   "real_yield",         # 10-year real yield(daily)
     "FEDFUNDS": "fed_funds_rate",     # Effective federal funds rate(monthly)
+    "CPIAUCSL": "cpi",                # CPI index(monthly)
+    "CPILFESL": "core_cpi",           # Core CPI index(monthly)
     # 股指(Sprint 1.7:删 SP500 — 与 NASDAQ 90%+ 重叠)
     "NASDAQCOM": "nasdaq",            # NASDAQ Composite(daily,1971-至今)
     # 波动率与美元
@@ -155,7 +158,7 @@ class FredCollector:
         self, conn: sqlite3.Connection, since_days: int = 365
     ) -> dict[str, int]:
         """
-        抓 4 个 series。无 API key 时返回 {} 不报错(__skipped 占位)。
+        抓已登记的宏观 series。无 API key 时返回 {} 不报错(__skipped 占位)。
 
         Returns:
             {metric_name: rows_upserted} 或 {"__skipped": 0}

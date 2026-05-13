@@ -84,14 +84,7 @@ def test_descriptive_funding_short_text_does_not_create_warning():
     assert "layer_a_output_contains_layer_b_like_terms" not in out["validator"]["warnings"]
 
 
-def test_confidence_cap_downgrades_high_when_five_critical_factors_missing():
-    missing = [
-        {"factor": name, "project_status": "not_found"}
-        for name in (
-            "rhodl_ratio", "reserve_risk", "puell_multiple",
-            "lth_net_position_change", "lth_sopr",
-        )
-    ]
+def test_confidence_cap_downgrades_high_when_factor_coverage_is_low():
     out = normalize_layer_a_output({
         "a1_cycle_stage": {
             "cycle_stage": "accumulation",
@@ -110,13 +103,14 @@ def test_confidence_cap_downgrades_high_when_five_critical_factors_missing():
             "human_summary": "分批买入",
             "what_would_change_mind": ["关键因子改善"],
         },
-        "unavailable_factors": missing,
+        "unavailable_factors": [],
+        "factor_coverage": {"coverage_ratio": 0.45},
     })
-    assert out["factor_coverage"]["critical_unavailable_count"] == 5
-    assert out["factor_coverage"]["confidence_cap"] == "medium"
-    assert out["a1_cycle_stage"]["confidence"] == "medium"
-    assert out["a2_onchain_macro"]["confidence"] == "medium"
-    assert out["a5_spot_adjudicator"]["confidence"] == "medium"
+    assert out["factor_coverage"]["critical_unavailable_count"] == 0
+    assert out["factor_coverage"]["confidence_cap"] == "low"
+    assert out["a1_cycle_stage"]["confidence"] == "low"
+    assert out["a2_onchain_macro"]["confidence"] == "low"
+    assert out["a5_spot_adjudicator"]["confidence"] == "low"
     assert "confidence_capped_by_factor_coverage" in out["validator"]["warnings"]
     assert out["confidence_adjustments"]
 
@@ -135,7 +129,7 @@ def test_confidence_cap_keeps_high_when_critical_missing_is_small():
             {"factor": "options_iv_skew", "project_status": "not_found"},
         ],
     })
-    assert out["factor_coverage"]["critical_unavailable_count"] == 1
+    assert out["factor_coverage"]["critical_unavailable_count"] == 0
     assert out["factor_coverage"]["confidence_cap"] == "high"
     assert out["a5_spot_adjudicator"]["confidence"] == "high"
 

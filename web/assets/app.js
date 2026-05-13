@@ -1096,6 +1096,39 @@ function app() {
                     paths: [['onchain_holder_behavior', 'sth_sopr']],
                 },
                 {
+                    key: 'rhodl_ratio',
+                    name: 'RHODL Ratio',
+                    name_en: 'Realized HODL Ratio',
+                    group: 'onchain',
+                    source: 'Glassnode',
+                    paths: [['onchain_valuation', 'rhodl_ratio']],
+                },
+                {
+                    key: 'reserve_risk',
+                    name: 'Reserve Risk',
+                    name_en: 'Reserve Risk',
+                    group: 'onchain',
+                    source: 'Glassnode',
+                    paths: [['onchain_valuation', 'reserve_risk']],
+                },
+                {
+                    key: 'puell_multiple',
+                    name: 'Puell Multiple',
+                    name_en: 'Puell Multiple',
+                    group: 'onchain',
+                    source: 'Glassnode',
+                    paths: [['onchain_valuation', 'puell_multiple']],
+                },
+                {
+                    key: 'lth_net_position_change',
+                    name: 'LTH 净头寸变化',
+                    name_en: 'LTH Net Position Change',
+                    group: 'onchain',
+                    source: 'Glassnode',
+                    value_unit: 'BTC',
+                    paths: [['onchain_holder_behavior', 'lth_net_position_change']],
+                },
+                {
                     key: 'percent_supply_in_profit',
                     name: '盈利供给比例',
                     name_en: 'Percent Supply in Profit',
@@ -1155,6 +1188,35 @@ function app() {
                         ['macro_liquidity', 'fed_funds_rate'],
                         ['macro', 'fed_funds_rate'],
                     ],
+                },
+                {
+                    key: 'real_yield',
+                    name: '美国 10 年期实际利率',
+                    name_en: '10Y Real Yield',
+                    group: 'macro',
+                    source: 'FRED',
+                    value_unit: '%',
+                    paths: [
+                        ['macro_inflation_rates', 'real_yield'],
+                        ['macro_liquidity', 'real_yield'],
+                        ['macro', 'real_yield'],
+                    ],
+                },
+                {
+                    key: 'cpi',
+                    name: 'CPI',
+                    name_en: 'Consumer Price Index',
+                    group: 'macro',
+                    source: 'FRED',
+                    paths: [['macro_inflation_rates', 'cpi'], ['macro', 'cpi']],
+                },
+                {
+                    key: 'core_cpi',
+                    name: '核心 CPI',
+                    name_en: 'Core CPI',
+                    group: 'macro',
+                    source: 'FRED',
+                    paths: [['macro_inflation_rates', 'core_cpi'], ['macro', 'core_cpi']],
                 },
                 {
                     key: 'm2',
@@ -1269,12 +1331,19 @@ function app() {
                 const purpose = {
                     lth_sopr: 'LTH SOPR 用于观察长期持有人是否在获利卖出',
                     sth_sopr: 'STH SOPR 用于观察短期持有人是否接近盈亏平衡',
+                    rhodl_ratio: 'RHODL Ratio 用于观察大周期估值温度',
+                    reserve_risk: 'Reserve Risk 用于观察长期持有者信心与价格风险',
+                    puell_multiple: 'Puell Multiple 用于观察矿工收入压力与周期位置',
+                    lth_net_position_change: 'LTH 净头寸变化用于观察长期持有人增持或减持方向',
                     percent_supply_in_profit: '盈利供给比例用于判断市场筹码盈利面是否过热',
                     percent_supply_in_loss: '亏损供给比例用于判断市场是否仍有恐慌或承压筹码',
                     exchange_balance: '交易所余额用于观察可交易供给压力',
                     exchange_net_position_change: '交易所净头寸变化用于观察资金流入或流出交易所',
                     us2y: '美国 2 年期收益率用于观察短端利率压力',
                     fed_funds_rate: '联邦基金利率用于观察政策利率环境',
+                    real_yield: '美国 10 年期实际利率用于观察通胀调整后的利率压力',
+                    cpi: 'CPI 用于观察通胀压力',
+                    core_cpi: '核心 CPI 用于观察剔除食品能源后的基础通胀压力',
                     m2: 'M2 用于观察美元流动性规模',
                     fed_balance_sheet: '美联储资产负债表用于观察基础流动性环境',
                 }[spec.key] || `${spec.name} 用于 Layer A 大周期判断`;
@@ -1292,6 +1361,30 @@ function app() {
                     : value >= 0.98 ? '短期持有人接近盈亏平衡'
                     : '短期筹码仍处于亏损承压状态';
                 return `📊 当前 STH SOPR ${shown}，${state} 🔍 <1 往往代表短期筹码承压。`;
+            }
+            if (spec.key === 'rhodl_ratio') {
+                const state = value >= 10000 ? '大周期估值温度偏热'
+                    : value >= 2000 ? '估值温度处于中高区'
+                    : '估值温度仍偏低或处在修复区';
+                return `📊 当前 RHODL Ratio ${shown}，${state} 🔍 越高越需要警惕周期顶部过热，越低越接近底部估值区。`;
+            }
+            if (spec.key === 'reserve_risk') {
+                const state = value >= 0.02 ? '长期持有者风险回报开始偏热'
+                    : value >= 0.005 ? '长期持有者风险回报处于中性区'
+                    : '长期持有者信心相对价格风险仍较健康';
+                return `📊 当前 Reserve Risk ${shown}，${state} 🔍 低位偏长期吸筹，高位偏周期过热。`;
+            }
+            if (spec.key === 'puell_multiple') {
+                const state = value >= 3 ? '矿工收入相对高企，需警惕周期过热'
+                    : value >= 1 ? '矿工收入处于正常扩张区'
+                    : '矿工收入偏低，更接近压力释放或底部修复区';
+                return `📊 当前 Puell Multiple ${shown}，${state} 🔍 高位常见于过热，低位常见于矿工压力释放。`;
+            }
+            if (spec.key === 'lth_net_position_change') {
+                const state = value > 0 ? '长期持有人净增持，偏筹码沉淀'
+                    : value < 0 ? '长期持有人净减持，偏分发压力'
+                    : '长期持有人净变化接近 0';
+                return `📊 当前 LTH 净头寸变化 ${shown}，${state} 🔍 增持偏累积，减持偏派发。`;
             }
             if (spec.key === 'percent_supply_in_profit') {
                 const state = value >= 0.9 ? '绝大多数筹码盈利，需警惕过热'
@@ -1325,6 +1418,18 @@ function app() {
                     : value >= 2 ? '政策利率仍有约束但低于紧缩高峰'
                     : '政策利率环境相对宽松';
                 return `📊 当前联邦基金利率 ${shown}，${state} 🔍 高利率通常压制风险资产估值。`;
+            }
+            if (spec.key === 'real_yield') {
+                const state = value >= 2 ? '实际利率压力偏高'
+                    : value >= 1 ? '实际利率仍有一定压力'
+                    : '实际利率压力相对缓和';
+                return `📊 当前美国 10 年期实际利率 ${shown}，${state} 🔍 实际利率上升通常压制 BTC 等风险资产估值。`;
+            }
+            if (spec.key === 'cpi') {
+                return `📊 当前 CPI ${shown}，反映整体通胀水平 🔍 通胀偏高会影响降息预期和风险资产估值。`;
+            }
+            if (spec.key === 'core_cpi') {
+                return `📊 当前核心 CPI ${shown}，反映更稳定的基础通胀压力 🔍 粘性通胀偏高会延后流动性宽松。`;
             }
             if (spec.key === 'm2') {
                 return `📊 当前 M2 为 ${shown}，反映美元流动性规模 🔍 扩张偏利好风险资产，收缩偏压制。`;

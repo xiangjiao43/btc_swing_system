@@ -91,6 +91,12 @@ class GlassnodeCollector:
     # Layer A cycle factors(2026-05):现货大周期专用,不改变 Layer B 交易逻辑。
     _PATH_PERCENT_SUPPLY_IN_PROFIT = f"{_BASE_PATH}/supply/profit_relative"
     _PATH_EXCHANGE_BALANCE       = f"{_BASE_PATH}/distribution/balance_exchanges"
+    _PATH_LTH_SOPR               = f"{_BASE_PATH}/indicators/sopr_more_155"
+    _PATH_STH_SOPR               = f"{_BASE_PATH}/indicators/sopr_less_155"
+    _PATH_RHODL_RATIO            = f"{_BASE_PATH}/indicators/rhodl_ratio"
+    _PATH_RESERVE_RISK           = f"{_BASE_PATH}/indicators/reserve_risk"
+    _PATH_PUELL_MULTIPLE         = f"{_BASE_PATH}/indicators/puell_multiple"
+    _PATH_LTH_NET_CHANGE         = f"{_BASE_PATH}/supply/lth_net_change"
 
     # 155 天切分(行业惯例 LTH/STH 阈值)。
     # 3m_6m 桶包含 90-180 天,桶中点 135 天 < 155 天 → 归 STH(简化处理)
@@ -627,8 +633,8 @@ class GlassnodeCollector:
             source="glassnode_display",
         )
 
-    # Sprint 1.7:fetch_reserve_risk / fetch_puell_multiple 已删除
-    # (噪音因子,无 L 层引用)。
+    # Sprint 1.7:fetch_reserve_risk / fetch_puell_multiple 曾因无 Layer B L 层引用删除。
+    # 2026-05 Layer A 大周期现货策略重新引入为只读周期因子,不进入 Layer B 交易约束。
 
     # ==================================================================
     # Layer A cycle factors(只读大周期现货策略输入)
@@ -652,6 +658,66 @@ class GlassnodeCollector:
             self._PATH_EXCHANGE_BALANCE, "exchange_balance",
             interval=interval, since_days=since_days,
             source="glassnode_primary",
+        )
+
+    def fetch_lth_sopr(
+        self, interval: str = "24h", since_days: int = 180,
+    ) -> list[dict[str, Any]]:
+        """LTH SOPR:长期持有人已实现盈亏倍数。"""
+        return self._fetch_series(
+            self._PATH_LTH_SOPR, "lth_sopr",
+            interval=interval, since_days=since_days,
+            source="glassnode_layer_a",
+        )
+
+    def fetch_sth_sopr(
+        self, interval: str = "24h", since_days: int = 180,
+    ) -> list[dict[str, Any]]:
+        """STH SOPR:短期持有人已实现盈亏倍数。"""
+        return self._fetch_series(
+            self._PATH_STH_SOPR, "sth_sopr",
+            interval=interval, since_days=since_days,
+            source="glassnode_layer_a",
+        )
+
+    def fetch_rhodl_ratio(
+        self, interval: str = "24h", since_days: int = 180,
+    ) -> list[dict[str, Any]]:
+        """RHODL Ratio:大周期估值温度。"""
+        return self._fetch_series(
+            self._PATH_RHODL_RATIO, "rhodl_ratio",
+            interval=interval, since_days=since_days,
+            source="glassnode_layer_a",
+        )
+
+    def fetch_reserve_risk(
+        self, interval: str = "24h", since_days: int = 180,
+    ) -> list[dict[str, Any]]:
+        """Reserve Risk:长期持有者信心与价格风险。"""
+        return self._fetch_series(
+            self._PATH_RESERVE_RISK, "reserve_risk",
+            interval=interval, since_days=since_days,
+            source="glassnode_layer_a",
+        )
+
+    def fetch_puell_multiple(
+        self, interval: str = "24h", since_days: int = 180,
+    ) -> list[dict[str, Any]]:
+        """Puell Multiple:矿工收入与周期位置。"""
+        return self._fetch_series(
+            self._PATH_PUELL_MULTIPLE, "puell_multiple",
+            interval=interval, since_days=since_days,
+            source="glassnode_layer_a",
+        )
+
+    def fetch_lth_net_position_change(
+        self, interval: str = "24h", since_days: int = 180,
+    ) -> list[dict[str, Any]]:
+        """LTH net position change:长期持有人 30 日净持仓变化。"""
+        return self._fetch_series(
+            self._PATH_LTH_NET_CHANGE, "lth_net_position_change",
+            interval=interval, since_days=since_days,
+            source="glassnode_layer_a",
         )
 
     # ==================================================================
@@ -686,6 +752,12 @@ class GlassnodeCollector:
             # Layer A cycle factors(不进入 Layer B 交易约束)
             ("percent_supply_in_profit", self.fetch_percent_supply_in_profit),
             ("exchange_balance",   self.fetch_exchange_balance),
+            ("lth_sopr",            self.fetch_lth_sopr),
+            ("sth_sopr",            self.fetch_sth_sopr),
+            ("rhodl_ratio",         self.fetch_rhodl_ratio),
+            ("reserve_risk",        self.fetch_reserve_risk),
+            ("puell_multiple",      self.fetch_puell_multiple),
+            ("lth_net_position_change", self.fetch_lth_net_position_change),
             # Sprint 1.6(建模 v1.3 §2.4):4 个新链上端点
             ("sth_supply",         self.fetch_sth_supply),
             ("ssr",                self.fetch_ssr),

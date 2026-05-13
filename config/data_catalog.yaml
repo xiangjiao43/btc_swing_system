@@ -365,23 +365,23 @@ sources:
 
   - name: glassnode_lth_sopr
     platform: glassnode
-    endpoint: /v1/metrics/indicators/sopr_lth
+    endpoint: /v1/metrics/indicators/sopr_more_155
     params: { a: BTC }
-    frequency: null
+    frequency: daily
     freshness_class: onchain
-    role_in_v1: delayed
-    serves: []
+    role_in_v1: primary
+    serves: [lth_sopr, layer_a_holder_behavior]
 
   - name: glassnode_sth_sopr
     platform: glassnode
-    endpoint: /v1/metrics/indicators/sopr_sth
+    endpoint: /v1/metrics/indicators/sopr_less_155
     params: { a: BTC }
-    frequency: null
+    frequency: daily
     freshness_class: onchain
-    role_in_v1: delayed
-    serves: []
+    role_in_v1: primary
+    serves: [sth_sopr, layer_a_holder_behavior]
 
-  # ---- Layer A 大周期现货策略 · 第一批低风险接入因子 ----
+  # ---- Layer A 大周期现货策略 · 低风险接入因子 ----
   - name: glassnode_percent_supply_in_profit
     platform: glassnode
     endpoint: /v1/metrics/supply/profit_relative
@@ -399,6 +399,42 @@ sources:
     freshness_class: onchain
     role_in_v1: primary
     serves: [exchange_balance, layer_a_exchange_pressure]
+
+  - name: glassnode_rhodl_ratio
+    platform: glassnode
+    endpoint: /v1/metrics/indicators/rhodl_ratio
+    params: { a: BTC }
+    frequency: daily
+    freshness_class: onchain
+    role_in_v1: primary
+    serves: [rhodl_ratio, layer_a_cycle_valuation]
+
+  - name: glassnode_reserve_risk
+    platform: glassnode
+    endpoint: /v1/metrics/indicators/reserve_risk
+    params: { a: BTC }
+    frequency: daily
+    freshness_class: onchain
+    role_in_v1: primary
+    serves: [reserve_risk, layer_a_cycle_valuation]
+
+  - name: glassnode_puell_multiple
+    platform: glassnode
+    endpoint: /v1/metrics/indicators/puell_multiple
+    params: { a: BTC }
+    frequency: daily
+    freshness_class: onchain
+    role_in_v1: primary
+    serves: [puell_multiple, layer_a_cycle_valuation]
+
+  - name: glassnode_lth_net_position_change
+    platform: glassnode
+    endpoint: /v1/metrics/supply/lth_net_change
+    params: { a: BTC }
+    frequency: daily
+    freshness_class: onchain
+    role_in_v1: primary
+    serves: [lth_net_position_change, layer_a_holder_behavior]
 
   # ---- 第三类延后因子继续保留 ----
   - name: glassnode_active_addresses
@@ -480,6 +516,15 @@ sources:
     role_in_v1: primary
     serves: [us2y, layer_a_macro_liquidity]
 
+  - name: fred_real_yield
+    platform: fred
+    endpoint: /series/observations
+    params: { series_id: DFII10, file_type: json }
+    frequency: daily
+    freshness_class: macro
+    role_in_v1: primary
+    serves: [real_yield, layer_a_macro_inflation_rates]
+
   - name: fred_fed_funds_rate
     platform: fred
     endpoint: /series/observations
@@ -488,6 +533,24 @@ sources:
     freshness_class: macro
     role_in_v1: primary
     serves: [fed_funds_rate, layer_a_macro_liquidity]
+
+  - name: fred_cpi
+    platform: fred
+    endpoint: /series/observations
+    params: { series_id: CPIAUCSL, file_type: json }
+    frequency: monthly
+    freshness_class: macro
+    role_in_v1: primary
+    serves: [cpi, layer_a_macro_inflation_rates]
+
+  - name: fred_core_cpi
+    platform: fred
+    endpoint: /series/observations
+    params: { series_id: CPILFESL, file_type: json }
+    frequency: monthly
+    freshness_class: macro
+    role_in_v1: primary
+    serves: [core_cpi, layer_a_macro_inflation_rates]
 
   - name: fred_m2
     platform: fred

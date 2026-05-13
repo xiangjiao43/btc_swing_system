@@ -46,6 +46,12 @@ _FACTOR_SOURCE = {
     "percent_supply_in_loss": "glassnode_onchain_derived",
     "exchange_balance": "glassnode_onchain",
     "exchange_net_position_change": "glassnode_onchain_derived",
+    "lth_sopr": "glassnode_layer_a",
+    "sth_sopr": "glassnode_layer_a",
+    "rhodl_ratio": "glassnode_layer_a",
+    "reserve_risk": "glassnode_layer_a",
+    "puell_multiple": "glassnode_layer_a",
+    "lth_net_position_change": "glassnode_layer_a",
     "exchange_net_flow": "glassnode_onchain",
     "sopr_adjusted": "glassnode_onchain",
     "hodl_waves": "glassnode_onchain",
@@ -61,7 +67,10 @@ _FACTOR_SOURCE = {
     "dgs10": "fred_macro",
     "us10y": "fred_macro",
     "us2y": "fred_macro",
+    "real_yield": "fred_macro",
     "fed_funds_rate": "fred_macro",
+    "cpi": "fred_macro",
+    "core_cpi": "fred_macro",
     "m2": "fred_macro",
     "fed_balance_sheet": "fred_macro",
     "vix": "fred_macro",
@@ -70,34 +79,17 @@ _FACTOR_SOURCE = {
 
 _UNAVAILABLE_MODEL_FACTORS = {
     "market_cap_realized_cap": "not_found",
-    "rhodl_ratio": "not_found",
-    "reserve_risk": "deprecated_candidate",
-    "puell_multiple": "deprecated_candidate",
-    "lth_net_position_change": "not_found",
-    "lth_sopr": "not_supported_by_current_proxy",
-    "sth_sopr": "not_supported_by_current_proxy",
     "liveliness": "config_only",
     "stablecoin_supply_liquidity": "not_found",
     "monthly_structure_1m": "not_found",
     "major_support_resistance": "ai_derived_not_precomputed_for_layer_a",
-    "real_yield": "not_found",
-    "cpi_core_cpi": "partial_event_calendar_only",
     "unemployment": "deprecated_candidate",
     "futures_basis_premium": "deprecated_candidate",
     "options_iv_skew": "not_found",
     "liquidation_heatmap_levels": "not_found",
 }
 
-_CRITICAL_MODEL_FACTORS = {
-    "rhodl_ratio",
-    "reserve_risk",
-    "puell_multiple",
-    "lth_sopr",
-    "sth_sopr",
-    "lth_net_position_change",
-    "real_yield",
-    "cpi_core_cpi",
-}
+_CRITICAL_MODEL_FACTORS: set[str] = set()
 
 
 def _series_latest(series: Any) -> tuple[Optional[float], Optional[str]]:
@@ -342,6 +334,9 @@ class SpotCycleContextBuilder:
                 "lth_mvrv": metric("lth_mvrv"),
                 "sth_mvrv": metric("sth_mvrv"),
                 "percent_supply_in_profit": metric("percent_supply_in_profit"),
+                "rhodl_ratio": metric("rhodl_ratio"),
+                "reserve_risk": metric("reserve_risk"),
+                "puell_multiple": metric("puell_multiple"),
             },
             "holder_behavior": {
                 "lth_supply": metric("lth_supply"),
@@ -354,6 +349,9 @@ class SpotCycleContextBuilder:
                 "ssr": metric("ssr"),
             },
             "onchain_holder_behavior": {
+                "lth_sopr": metric("lth_sopr"),
+                "sth_sopr": metric("sth_sopr"),
+                "lth_net_position_change": metric("lth_net_position_change"),
                 "percent_supply_in_profit": metric("percent_supply_in_profit"),
                 "percent_supply_in_loss": _factor(
                     "percent_supply_in_loss",
@@ -387,7 +385,10 @@ class SpotCycleContextBuilder:
                 "dxy": mmetric("dxy"),
                 "us10y": mmetric("dgs10") if "dgs10" in macro else mmetric("us10y"),
                 "us2y": mmetric("us2y"),
+                "real_yield": mmetric("real_yield"),
                 "fed_funds_rate": mmetric("fed_funds_rate"),
+                "cpi": mmetric("cpi"),
+                "core_cpi": mmetric("core_cpi"),
                 "m2": mmetric("m2"),
                 "fed_balance_sheet": mmetric("fed_balance_sheet"),
                 "vix": mmetric("vix"),
@@ -396,9 +397,15 @@ class SpotCycleContextBuilder:
             },
             "macro_liquidity": {
                 "us2y": mmetric("us2y"),
+                "real_yield": mmetric("real_yield"),
                 "fed_funds_rate": mmetric("fed_funds_rate"),
                 "m2": mmetric("m2"),
                 "fed_balance_sheet": mmetric("fed_balance_sheet"),
+            },
+            "macro_inflation_rates": {
+                "real_yield": mmetric("real_yield"),
+                "cpi": mmetric("cpi"),
+                "core_cpi": mmetric("core_cpi"),
             },
             "market_context": {
                 "btc_dominance": dmetric("btc_dominance"),

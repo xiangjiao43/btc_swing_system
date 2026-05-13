@@ -224,8 +224,11 @@ _GLASSNODE_FETCHERS: tuple[str, ...] = (
     "fetch_sopr_adjusted",
     # Layer A 大周期现货策略专用因子;只采集入库,不改变 Layer B 交易逻辑。
     "fetch_percent_supply_in_profit", "fetch_exchange_balance",
-    # Sprint 1.7:删除 fetch_sopr / fetch_reserve_risk / fetch_puell_multiple
-    # (噪音因子;aSOPR=fetch_sopr_adjusted 已替代 SOPR 在 cycle_position 中的位置)
+    "fetch_lth_sopr", "fetch_sth_sopr", "fetch_rhodl_ratio",
+    "fetch_reserve_risk", "fetch_puell_multiple",
+    "fetch_lth_net_position_change",
+    # Sprint 1.7:删除 Layer B 的 fetch_sopr / reserve_risk / puell 用法。
+    # 2026-05:reserve_risk / puell_multiple 仅作为 Layer A 只读周期因子恢复采集。
     # Sprint 1.6(建模 v1.3 §2.4):4 新链上端点
     "fetch_sth_supply", "fetch_ssr", "fetch_cdd", "fetch_hodl_waves",
 )

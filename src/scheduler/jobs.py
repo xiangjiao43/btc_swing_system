@@ -191,6 +191,49 @@ def job_pipeline_run_8h_onchain(
     )
 
 
+def job_layer_a_spot_strategy(
+    *,
+    conn_factory: Optional[Callable[[], Any]] = None,
+) -> dict[str, Any]:
+    """每日 10:00 BJT 独立运行 Layer A 大周期现货策略。
+
+    只运行 A1-A5 + Spot Validator + latest_layer_a_spot_strategy 持久化。
+    不运行 Layer B,不创建 thesis,不触碰虚拟账户。
+    """
+    from ..data.storage.connection import get_connection
+    from ..pipeline.layer_a_spot_runner import LayerASpotStrategyRunner
+
+    cf = conn_factory or get_connection
+    conn = None
+    try:
+        conn = cf()
+        runner = LayerASpotStrategyRunner(conn)
+        result = runner.run(run_trigger="scheduled_layer_a_spot", persist=True)
+        return {
+            "status": result.status,
+            "run_id": result.run_id,
+            "generated_at_utc": result.generated_at_utc,
+            "generated_at_bjt": result.generated_at_bjt,
+            "persisted": result.persisted,
+            "duration_ms": result.duration_ms,
+            "degraded_stages": result.degraded_stages,
+            "failure_count": len(result.failures),
+        }
+    except Exception as e:
+        logger.exception("job_layer_a_spot_strategy crashed: %s", e)
+        return {
+            "status": "error",
+            "error_type": type(e).__name__,
+            "error_message": str(e)[:300],
+        }
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
 # Sprint 2.7-B §X:job_data_collection 已完整删除。
 # 替代:job_collect_klines_1h / job_collect_klines_daily /
 #       job_collect_klines_weekly / job_collect_macro / job_collect_onchain
@@ -1592,6 +1635,7 @@ _JOB_FUNCTIONS: dict[str, Callable[..., Any]] = {
     # Sprint 2.7-C:pipeline 2 个 wrapper(对应 yaml 2 个 cron 条目)
     "pipeline_run_regular": job_pipeline_run_regular,
     "pipeline_run_8h_onchain": job_pipeline_run_8h_onchain,
+    "layer_a_spot_strategy": job_layer_a_spot_strategy,
     # Sprint 1.10-G:RetryPolicy 异步 wrapper(D3=a,event 触发的 pipeline_run 走它)
     "pipeline_run_with_retry": job_pipeline_run_with_retry,
     # Sprint 2.7-A/B:5 个 collector + event_listener(2.7-D 已完整实施 +

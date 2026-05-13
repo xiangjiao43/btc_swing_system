@@ -970,6 +970,15 @@ function app() {
         spotStrategyFallbackText() {
             return '暂无大周期策略，本 run 尚未记录 Layer A 输出。';
         },
+        spotStrategyUpdatedAt() {
+            const s = this.spotStrategy() || {};
+            if (s.generated_at_bjt) return s.generated_at_bjt;
+            if (s.generated_at_utc) return this.formatBJT(s.generated_at_utc);
+            const m = (this.state && this.state.meta) || {};
+            if (m.layer_a_spot_updated_at_bjt) return m.layer_a_spot_updated_at_bjt;
+            if (m.layer_a_spot_updated_at_utc) return this.formatBJT(m.layer_a_spot_updated_at_utc);
+            return '-';
+        },
         spotActionLabel(v) {
             const m = {
                 dca_buy: '分批买入',

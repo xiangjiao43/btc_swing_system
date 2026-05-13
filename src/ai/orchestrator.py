@@ -218,7 +218,12 @@ class AIOrchestrator:
     # Public
     # ------------------------------------------------------------------
 
-    def run_full_a(self, context: dict[str, Any]) -> dict[str, Any]:
+    def run_full_a(
+        self,
+        context: dict[str, Any],
+        *,
+        include_layer_a: bool = True,
+    ) -> dict[str, Any]:
         """完整 A 流程(每日 16:00 用)。
 
         context 必含(Sprint 1.9-A.4 起,per-agent 嵌套结构):
@@ -394,14 +399,16 @@ class AIOrchestrator:
         result["layers"]["master"] = validated_output
         result["constraint_activations"] = constraint_activations
 
-        # ---- Layer A:大周期现货策略(独立轨道,不进入 layers / thesis / virtual account)----
-        with pipeline_stage("run Layer A spot strategy") as span:
-            result["layer_a_spot_strategy"] = self._run_layer_a_spot_strategy(
-                context, result,
-            )
-            validator = result["layer_a_spot_strategy"].get("validator") or {}
-            if not validator.get("passed", True):
-                span.mark_degraded("Layer A spot validator reported warnings/violations")
+        # Layer A 现货大周期策略已拆成 10:00 独立任务。
+        # 11:35 Layer B 主 pipeline 默认不运行 Layer A,避免连续 AI 调用互相拖慢。
+        if include_layer_a:
+            with pipeline_stage("run Layer A spot strategy") as span:
+                result["layer_a_spot_strategy"] = self.run_layer_a_spot_only(
+                    context,
+                )
+                validator = result["layer_a_spot_strategy"].get("validator") or {}
+                if not validator.get("passed", True):
+                    span.mark_degraded("Layer A spot validator reported warnings/violations")
 
         return result
 
@@ -527,6 +534,16 @@ class AIOrchestrator:
         merged["latency_ms"] = int((time.time() - t0) * 1000)
         result.setdefault("latency_ms", {})["layer_a_spot_strategy"] = merged["latency_ms"]
         return merged
+
+    def run_layer_a_spot_only(self, context: dict[str, Any]) -> dict[str, Any]:
+        """Run only Layer A A1-A5.
+
+        This public wrapper is used by the standalone 10:00 Layer A job.  It
+        does not run Layer B L1-L5 / Master / Validator, does not create thesis,
+        and does not touch virtual account.
+        """
+        temp_result: dict[str, Any] = {"latency_ms": {}}
+        return self._run_layer_a_spot_strategy(context, temp_result)
 
     def run_event_a(
         self,

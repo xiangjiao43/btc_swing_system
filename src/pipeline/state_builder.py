@@ -241,6 +241,7 @@ class StrategyStateBuilder:
         account_state_provider: Optional[Callable[[], dict[str, Any]]] = None,
         preflight_retry_after_sec: float = 300.0,
         preflight_sleep_fn: Optional[Callable[[float], None]] = None,
+        include_layer_a: bool = False,
     ) -> None:
         """
         Args:
@@ -255,6 +256,8 @@ class StrategyStateBuilder:
                                        测试可传 0 立即重试(配合 sleep_fn=lambda s: None)
             preflight_sleep_fn: 注入的 sleep 函数(默认 time.sleep);测试可传
                                 lambda s: None 跳过等待
+            include_layer_a: 兼容旧 all-in-one 路径。生产 11:35 Layer B 主
+                             pipeline 保持 False;Layer A 改由 10:00 独立任务运行。
         """
         self.conn = conn
         self.rules_version = rules_version
@@ -266,6 +269,7 @@ class StrategyStateBuilder:
         self._account_state_provider = account_state_provider
         self._preflight_retry_after_sec = preflight_retry_after_sec
         self._preflight_sleep_fn = preflight_sleep_fn or time.sleep
+        self.include_layer_a = include_layer_a
         # 延迟 import 避免循环依赖
         if state_machine is None:
             from ..strategy.state_machine import StateMachine
@@ -376,22 +380,26 @@ class StrategyStateBuilder:
                     "Sprint E: compute_stale_state 失败,orchestrator 跑无 "
                     "factor-grain 守卫: %s", _e,
                 )
-            try:
-                from src.ai.spot_cycle_context_builder import (
-                    SpotCycleContextBuilder,
-                )
-                with pipeline_stage("build Layer A context"):
-                    context["layer_a_spot_context"] = (
-                        SpotCycleContextBuilder(self.conn)
-                        .build_spot_cycle_context(existing_context=context)
+            if self.include_layer_a:
+                try:
+                    from src.ai.spot_cycle_context_builder import (
+                        SpotCycleContextBuilder,
                     )
-            except Exception as _e:
-                logger.warning(
-                    "Layer A spot cycle context build failed; Layer B will "
-                    "continue unchanged: %s", _e,
-                )
+                    with pipeline_stage("build Layer A context"):
+                        context["layer_a_spot_context"] = (
+                            SpotCycleContextBuilder(self.conn)
+                            .build_spot_cycle_context(existing_context=context)
+                        )
+                except Exception as _e:
+                    logger.warning(
+                        "Layer A spot cycle context build failed; Layer B will "
+                        "continue unchanged: %s", _e,
+                    )
             with pipeline_stage("run AI orchestrator") as span:
-                result = AIOrchestrator().run_full_a(context)
+                result = AIOrchestrator().run_full_a(
+                    context,
+                    include_layer_a=self.include_layer_a,
+                )
                 if str(result.get("status") or "ok") != "ok":
                     span.mark_degraded(result.get("status"))
             with pipeline_stage("map orchestrator result"):

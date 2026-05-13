@@ -206,6 +206,7 @@ def test_module_position_between_strategy_and_layers(html):
 def test_layer_a_spot_module_static_contract(html):
     assert html.count('id="region-layer-a-spot"') == 1
     assert "大周期策略" in html
+    assert "大周期策略更新时间" in html
     assert "spotLayerCards()" in html
     assert "暂无大周期策略，本 run 尚未记录 Layer A 输出。" in html
     assert 'src="/assets/app.js?v=layer-a-factor-display-20260513"' in html
@@ -228,6 +229,7 @@ def test_layer_a_spot_js_renders_strategy_or_fallback(js):
     assert "layer_a_spot_strategy" in js
     assert "spotStrategy()" in js
     assert "spotStrategyFallbackText()" in js
+    assert "spotStrategyUpdatedAt()" in js
     assert "暂无大周期策略，本 run 尚未记录 Layer A 输出。" in js
 
 

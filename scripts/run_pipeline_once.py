@@ -37,6 +37,7 @@ from src.ai.spot_cycle_context_builder import SpotCycleContextBuilder
 from src.data.freshness import compute_stale_state
 from src.data.storage.connection import get_connection, init_db
 from src.pipeline import StrategyStateBuilder
+from src.pipeline.layer_a_spot_runner import LayerASpotStrategyRunner
 from src.utils.pipeline_progress import (
     init_pipeline_logging,
     pipeline_stage,
@@ -134,6 +135,8 @@ def main() -> int:
                         help="跑完不写入 strategy_state_history")
     parser.add_argument("--validate-stages", action="store_true",
                         help="只验证初始化/context 日志,跳过完整 AI 和持久化")
+    parser.add_argument("--layer", choices=("swing", "spot", "all"), default="swing",
+                        help="swing=只跑 Layer B 主策略;spot=只跑 Layer A;all=兼容旧路径两者都跑")
     parser.add_argument("--rules-version", default=None,
                         help="覆盖 DEFAULT_RULES_VERSION")
     parser.add_argument("--klines-lookback", type=int, default=600)
@@ -148,7 +151,12 @@ def main() -> int:
     record_instant_stage("load env", status="success")
 
     if args.validate_stages:
+        if args.layer == "spot":
+            return _run_spot_layer(args, log_path, validate_stages=True)
         return _validate_stages(args, log_path)
+
+    if args.layer == "spot":
+        return _run_spot_layer(args, log_path, validate_stages=False)
 
     with pipeline_stage("init_db"):
         init_db(verbose=False)
@@ -158,6 +166,7 @@ def main() -> int:
     try:
         builder_kwargs: dict[str, Any] = {
             "klines_lookback": args.klines_lookback,
+            "include_layer_a": args.layer == "all",
         }
         if args.rules_version:
             builder_kwargs["rules_version"] = args.rules_version
@@ -211,6 +220,54 @@ def _pipeline_status(result: Any) -> str:
     if ai_status and ai_status != "ok":
         return "degraded"
     return "success"
+
+
+def _run_spot_layer(args: argparse.Namespace, log_path: Path, *, validate_stages: bool) -> int:
+    with pipeline_stage("init_db") as span:
+        if validate_stages:
+            span.mark_skipped("--validate-stages does not initialize/migrate DB")
+        else:
+            init_db(verbose=False)
+    with pipeline_stage("open_db_connection"):
+        conn = get_connection()
+    try:
+        with pipeline_stage("build LayerASpotStrategyRunner"):
+            runner = LayerASpotStrategyRunner(conn, klines_lookback=args.klines_lookback)
+        result = runner.run(
+            run_trigger=args.trigger,
+            persist=not args.dry_run,
+            validate_stages=validate_stages,
+        )
+        layer_a = result.layer_a_spot_strategy or {}
+        a1 = layer_a.get("a1_cycle_stage") or {}
+        a5 = layer_a.get("a5_spot_adjudicator") or {}
+        validator = layer_a.get("validator") or {}
+        out = {
+            "run_id": result.run_id,
+            "generated_at_utc": result.generated_at_utc,
+            "generated_at_bjt": result.generated_at_bjt,
+            "persisted": result.persisted,
+            "status": result.status,
+            "duration_ms": result.duration_ms,
+            "pipeline_log_path": str(log_path),
+            "layer": "spot",
+            "validation": validate_stages,
+            "a1_cycle_stage": a1.get("cycle_stage"),
+            "a5_spot_action": a5.get("spot_action"),
+            "validator_passed": validator.get("passed"),
+            "degraded_stages": result.degraded_stages,
+            "failures": result.failures,
+        }
+        print(json.dumps(out, ensure_ascii=False, indent=2, default=str))
+        if result.failures:
+            return 2
+        if result.degraded_stages:
+            return 1
+        if not result.persisted and not (args.dry_run or validate_stages):
+            return 2
+        return 0
+    finally:
+        conn.close()
 
 
 def _validate_stages(args: argparse.Namespace, log_path: Path) -> int:

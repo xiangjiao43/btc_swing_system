@@ -20,7 +20,11 @@ from typing import Any, AsyncIterator
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
-from ...data.storage.dao import LatestFactorCardsDAO, StrategyStateDAO
+from ...data.storage.dao import (
+    LatestFactorCardsDAO,
+    LatestLayerASpotStrategyDAO,
+    StrategyStateDAO,
+)
 from ..models import HistoryPage, StrategyStateRow
 from ...web_helpers import normalize_state
 
@@ -230,6 +234,39 @@ def _overlay_latest_factor_cards(
     return row
 
 
+def _overlay_latest_layer_a_spot_strategy(
+    row: dict[str, Any], conn: Any,
+) -> dict[str, Any]:
+    """Overlay latest standalone Layer A result onto latest Layer B state.
+
+    Layer A is now persisted separately by the 10:00 BJT job.  This helper keeps
+    /api/strategy/current displaying the latest Layer A result without
+    overwriting the latest Layer B strategy_run.
+    """
+    if row is None:
+        return row
+    latest = LatestLayerASpotStrategyDAO.get_latest(conn)
+    if latest is None:
+        return row
+    state = row.get("state")
+    if isinstance(state, str):
+        try:
+            state = json.loads(state)
+        except (json.JSONDecodeError, ValueError):
+            state = {}
+        row = dict(row)
+        row["state"] = state
+    if isinstance(state, dict):
+        state["layer_a_spot_strategy"] = latest["layer_a"]
+        state.setdefault("meta", {})["layer_a_spot_updated_at_utc"] = (
+            latest.get("generated_at_utc")
+        )
+        state.setdefault("meta", {})["layer_a_spot_updated_at_bjt"] = (
+            latest.get("generated_at_bjt")
+        )
+    return row
+
+
 def _get_current_impl(request: Request) -> StrategyStateRow:
     ctx = request.app.state.ctx
     conn = ctx.conn_factory()
@@ -237,6 +274,7 @@ def _get_current_impl(request: Request) -> StrategyStateRow:
     try:
         row = StrategyStateDAO.get_latest_state(conn)
         row = _overlay_latest_factor_cards(row, conn)
+        row = _overlay_latest_layer_a_spot_strategy(row, conn)
         # Sprint 1.10-I §9.5:加 4 个 v1.4 摘要字段(向后兼容)
         v14_summaries = _build_v14_summaries(conn)
     finally:
@@ -285,6 +323,7 @@ async def strategy_stream(request: Request) -> StreamingResponse:
                 # Sprint 2.8-A.1:SSE 推送也走 latest_factor_cards 覆盖,
                 # 与 /current 行为一致(避免 push 把前端硬刷拿到的新卡 revert 回旧值)
                 row = _overlay_latest_factor_cards(row, conn)
+                row = _overlay_latest_layer_a_spot_strategy(row, conn)
             finally:
                 try:
                     conn.close()
@@ -309,6 +348,7 @@ async def strategy_stream(request: Request) -> StreamingResponse:
                     row = StrategyStateDAO.get_latest_state(conn)
                     # Sprint 2.8-A.1:轮询推送也覆盖
                     row = _overlay_latest_factor_cards(row, conn)
+                    row = _overlay_latest_layer_a_spot_strategy(row, conn)
                 finally:
                     try:
                         conn.close()

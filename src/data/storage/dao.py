@@ -1148,6 +1148,77 @@ class LatestFactorCardsDAO:
         return {"cards": cards, "refreshed_at_utc": refreshed}
 
 
+class LatestLayerASpotStrategyDAO:
+    """latest_layer_a_spot_strategy 单行 DAO。
+
+    Layer A 10:00 独立运行时只更新这张表,不覆盖 Layer B 的
+    strategy_runs 最新记录。
+    """
+
+    @staticmethod
+    def upsert(
+        conn: sqlite3.Connection,
+        *,
+        run_id: str,
+        generated_at_utc: str,
+        generated_at_bjt: str,
+        run_trigger: str,
+        status: str,
+        ai_model_actual: Optional[str],
+        layer_a: dict[str, Any],
+        updated_at_utc: Optional[str] = None,
+    ) -> None:
+        ts = updated_at_utc or _utc_now_iso()
+        conn.execute(
+            "INSERT INTO latest_layer_a_spot_strategy ("
+            "  id, run_id, generated_at_utc, generated_at_bjt, run_trigger, "
+            "  status, ai_model_actual, layer_a_json, updated_at_utc"
+            ") VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(id) DO UPDATE SET "
+            "  run_id = excluded.run_id, "
+            "  generated_at_utc = excluded.generated_at_utc, "
+            "  generated_at_bjt = excluded.generated_at_bjt, "
+            "  run_trigger = excluded.run_trigger, "
+            "  status = excluded.status, "
+            "  ai_model_actual = excluded.ai_model_actual, "
+            "  layer_a_json = excluded.layer_a_json, "
+            "  updated_at_utc = excluded.updated_at_utc",
+            (
+                run_id,
+                generated_at_utc,
+                generated_at_bjt,
+                run_trigger,
+                status,
+                ai_model_actual,
+                json.dumps(layer_a, ensure_ascii=False, default=str),
+                ts,
+            ),
+        )
+
+    @staticmethod
+    def get_latest(conn: sqlite3.Connection) -> Optional[dict[str, Any]]:
+        row = conn.execute(
+            "SELECT run_id, generated_at_utc, generated_at_bjt, run_trigger, "
+            "status, ai_model_actual, layer_a_json, updated_at_utc "
+            "FROM latest_layer_a_spot_strategy WHERE id = 1"
+        ).fetchone()
+        if row is None:
+            return None
+        d = dict(row)
+        try:
+            layer_a = json.loads(d.pop("layer_a_json") or "{}")
+        except (TypeError, ValueError):
+            layer_a = {}
+        if isinstance(layer_a, dict):
+            layer_a.setdefault("run_id", d.get("run_id"))
+            layer_a.setdefault("generated_at_utc", d.get("generated_at_utc"))
+            layer_a.setdefault("generated_at_bjt", d.get("generated_at_bjt"))
+            layer_a.setdefault("run_trigger", d.get("run_trigger"))
+            layer_a.setdefault("source", "latest_layer_a_spot_strategy")
+        d["layer_a"] = layer_a
+        return d
+
+
 def _map_strategy_run_to_legacy(row: dict[str, Any]) -> dict[str, Any]:
     """把 strategy_runs 新 schema 映射回 Sprint 1 老 schema 字段,避免调用方大改。
 
@@ -2104,4 +2175,3 @@ def _safe_json_loads(raw: Any) -> Any:
         return v if isinstance(v, list) else []
     except (json.JSONDecodeError, TypeError, ValueError):
         return []
-

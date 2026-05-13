@@ -8,7 +8,8 @@
 #   collect_klines_weekly    每周一 08:01,1w K 线
 #   collect_macro            每天 06:00,FRED 9 个 series
 #   collect_onchain          每天 08:35/09:35/10:35,Glassnode 3 档
-#   pipeline_run_regular     每天 11:35 BJT 主裁决
+#   layer_a_spot_strategy    每天 10:00 BJT,Layer A 大周期现货策略
+#   pipeline_run_regular     每天 11:35 BJT,Layer B 主策略 pipeline
 #   pipeline_run_8h_onchain  disabled,历史 8h 链上档
 #   event_listener           60 秒高频,event_price / event_macro
 #   hard_invalidation_monitor 每 1h 规则平仓检查
@@ -112,10 +113,20 @@ jobs:
     max_instances: 1
     description: 'Glassnode 13 个 metric(3 档:主 + 2 补救;quota fail 短路)'
 
-  # ------------- 主 pipeline(2 个 cron entry,共享 pipeline_run 函数)-------
+  # ------------- Layer A / Layer B pipeline --------------------
+
+  layer_a_spot_strategy:
+    enabled: true
+    # 北京时间 10:00 = UTC 02:00。Layer A 单独运行,避免与 11:35
+    # Layer B 主策略连续调用 AI 导致 503 / 502 或长时间等待。
+    cron: {hour: 10, minute: 0}
+    misfire_grace_time: 300
+    coalesce: true
+    max_instances: 1
+    description: 'Layer A 大周期现货策略(10:00 BJT 每日 1 档;只跑 A1-A5 + Spot Validator + latest Layer A 持久化)'
 
   # v1.4 主裁决:每日 1 档,配合 BTC_USE_ORCHESTRATOR=true 走
-  # src/ai/orchestrator.py(L1-L5 + Master + Validator 24)。
+  # src/ai/orchestrator.py(Layer B L1-L5 + Master + Validator 24)。
   # pipeline_run_8h_onchain 用户决策保持 disabled(8h 链上档是 v1.2 残余,
   # 1.9.1 持仓健康检查会重新设计)。
   pipeline_run_regular:
@@ -128,7 +139,7 @@ jobs:
     misfire_grace_time: 300
     coalesce: true
     max_instances: 1
-    description: 'Pipeline 主循环(11:35 BJT 每日 1 档,run_trigger=scheduled;Sprint F.1 从 16:05 改 11:35)'
+    description: 'Layer B 波段主循环(11:35 BJT 每日 1 档,run_trigger=scheduled;不自动运行 Layer A)'
 
   pipeline_run_8h_onchain:
     enabled: false

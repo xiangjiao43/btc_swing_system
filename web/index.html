@@ -506,6 +506,9 @@
         <p class="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
           只判断 BTC 现货大周期;不做空、不进虚拟账户、不创建 thesis、不影响五层波段仓
         </p>
+        <p class="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5"
+           x-show="spotStrategy()"
+           x-text="'大周期策略更新时间：' + spotStrategyUpdatedAt()"></p>
       </header>
       <div class="p-3 space-y-3">
         <template x-if="!spotStrategy()">

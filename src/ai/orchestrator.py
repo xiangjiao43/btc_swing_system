@@ -45,6 +45,7 @@ from .spot_strategy_normalizer import fallback_layer_a_output, normalize_layer_a
 from .spot_validator import validate_spot_strategy_output
 from .validator import validate_master_output
 from ..strategy.factor_dependencies import fresh_ratio_for_layer
+from ..utils.pipeline_progress import pipeline_stage
 
 
 logger = logging.getLogger(__name__)
@@ -234,27 +235,32 @@ class AIOrchestrator:
         }
 
         # ---- 1. L1 ----
-        l1_out = self._run_l1(context, shared, result)
+        with pipeline_stage("run Layer B L1"):
+            l1_out = self._run_l1(context, shared, result)
         result["layers"]["l1"] = l1_out
 
         # ---- 2. L2(注入 l1_output)----
-        l2_out = self._run_l2(context, shared, l1_out, result)
+        with pipeline_stage("run Layer B L2"):
+            l2_out = self._run_l2(context, shared, l1_out, result)
         result["layers"]["l2"] = l2_out
 
         # ---- 5. L5(独立,无依赖)— 提前跑,L3 anti_pattern 需 extreme_event_flags ----
-        l5_out = self._run_l5(context, result)
+        with pipeline_stage("run Layer B L5"):
+            l5_out = self._run_l5(context, result)
         result["layers"]["l5"] = l5_out
 
         # ---- 3. L3(注入 l1+l2 output + anti_pattern_signals)----
-        l3_out = self._run_l3(
-            context, shared, l1_out, l2_out, l5_out, result,
-        )
+        with pipeline_stage("run Layer B L3"):
+            l3_out = self._run_l3(
+                context, shared, l1_out, l2_out, l5_out, result,
+            )
         result["layers"]["l3"] = l3_out
 
         # ---- 4. L4(注入 l1+l2+l3 output)----
-        l4_out = self._run_l4(
-            context, shared, l1_out, l2_out, l3_out, result,
-        )
+        with pipeline_stage("run Layer B L4"):
+            l4_out = self._run_l4(
+                context, shared, l1_out, l2_out, l3_out, result,
+            )
         result["layers"]["l4"] = l4_out
 
         # ---- 计算 _system_provided multipliers ----
@@ -263,10 +269,11 @@ class AIOrchestrator:
         event_mult = self._compute_event_multiplier(events_72h)
 
         # ---- 6. 主裁(注入 l1-l5 output + _system_provided)----
-        master_out = self._run_master(
-            context, shared, l1_out, l2_out, l3_out, l4_out, l5_out,
-            crowding_mult, event_mult, result,
-        )
+        with pipeline_stage("run Layer B Master"):
+            master_out = self._run_master(
+                context, shared, l1_out, l2_out, l3_out, l4_out, l5_out,
+                crowding_mult, event_mult, result,
+            )
         result["layers"]["master"] = master_out
 
         # ---- 7. Validator(v1.4 24 条,Sprint 1.10-E)----
@@ -302,9 +309,10 @@ class AIOrchestrator:
             "initial_stop_loss_price": master_ctx.get("initial_stop_loss_price"),
             "active_thesis_avg_price": master_ctx.get("active_thesis_avg_price"),
         }
-        validated_output, constraint_activations = validate_master_output(
-            master_out, validator_ctx,
-        )
+        with pipeline_stage("validators"):
+            validated_output, constraint_activations = validate_master_output(
+                master_out, validator_ctx,
+            )
 
         # Sprint 1.10-F:Validator 触发同 run 重试(V8/V9/V11/V21)
         # D3=b:V21 retry hint 塞入 master input 的 _v21_retry_hint 字段
@@ -364,9 +372,10 @@ class AIOrchestrator:
         result["constraint_activations"] = constraint_activations
 
         # ---- Layer A:大周期现货策略(独立轨道,不进入 layers / thesis / virtual account)----
-        result["layer_a_spot_strategy"] = self._run_layer_a_spot_strategy(
-            context, result,
-        )
+        with pipeline_stage("run Layer A spot strategy"):
+            result["layer_a_spot_strategy"] = self._run_layer_a_spot_strategy(
+                context, result,
+            )
 
         return result
 
@@ -393,52 +402,61 @@ class AIOrchestrator:
 
         t0 = time.time()
         try:
-            a1 = self._agents.get("a1", A1SpotCycleAnalyst()).analyze(
-                {"spot_cycle_context": spot_ctx}, client=build_anthropic_client(),
-            )
+            with pipeline_stage("run Layer A A1"):
+                a1 = self._agents.get("a1", A1SpotCycleAnalyst()).analyze(
+                    {"spot_cycle_context": spot_ctx}, client=build_anthropic_client(),
+                )
         except Exception as e:
             logger.warning("orchestrator: Layer A A1 raised: %s", e)
             a1 = A1SpotCycleAnalyst()._fallback_output()
         try:
-            a2 = self._agents.get("a2", A2OnchainMacroAnalyst()).analyze(
-                {"spot_cycle_context": spot_ctx, "a1_output": a1},
-                client=build_anthropic_client(),
-            )
+            with pipeline_stage("run Layer A A2"):
+                a2 = self._agents.get("a2", A2OnchainMacroAnalyst()).analyze(
+                    {"spot_cycle_context": spot_ctx, "a1_output": a1},
+                    client=build_anthropic_client(),
+                )
         except Exception as e:
             logger.warning("orchestrator: Layer A A2 raised: %s", e)
             a2 = A2OnchainMacroAnalyst()._fallback_output()
         try:
-            a3 = self._agents.get("a3", A3SpotOpportunityAnalyst()).analyze(
-                {"spot_cycle_context": spot_ctx, "a1_output": a1, "a2_output": a2},
-                client=build_anthropic_client(),
-            )
+            with pipeline_stage("run Layer A A3"):
+                a3 = self._agents.get("a3", A3SpotOpportunityAnalyst()).analyze(
+                    {
+                        "spot_cycle_context": spot_ctx,
+                        "a1_output": a1,
+                        "a2_output": a2,
+                    },
+                    client=build_anthropic_client(),
+                )
         except Exception as e:
             logger.warning("orchestrator: Layer A A3 raised: %s", e)
             a3 = A3SpotOpportunityAnalyst()._fallback_output()
         try:
-            a4 = self._agents.get("a4", A4SpotRiskAnalyst()).analyze(
-                {
-                    "spot_cycle_context": spot_ctx,
-                    "a1_output": a1,
-                    "a2_output": a2,
-                    "a3_output": a3,
-                },
-                client=build_anthropic_client(),
-            )
+            with pipeline_stage("run Layer A A4"):
+                a4 = self._agents.get("a4", A4SpotRiskAnalyst()).analyze(
+                    {
+                        "spot_cycle_context": spot_ctx,
+                        "a1_output": a1,
+                        "a2_output": a2,
+                        "a3_output": a3,
+                    },
+                    client=build_anthropic_client(),
+                )
         except Exception as e:
             logger.warning("orchestrator: Layer A A4 raised: %s", e)
             a4 = A4SpotRiskAnalyst()._fallback_output()
         try:
-            a5 = self._agents.get("a5", A5SpotAdjudicator()).analyze(
-                {
-                    "spot_cycle_context": spot_ctx,
-                    "a1_output": a1,
-                    "a2_output": a2,
-                    "a3_output": a3,
-                    "a4_output": a4,
-                },
-                client=build_anthropic_client(),
-            )
+            with pipeline_stage("run Layer A A5"):
+                a5 = self._agents.get("a5", A5SpotAdjudicator()).analyze(
+                    {
+                        "spot_cycle_context": spot_ctx,
+                        "a1_output": a1,
+                        "a2_output": a2,
+                        "a3_output": a3,
+                        "a4_output": a4,
+                    },
+                    client=build_anthropic_client(),
+                )
         except Exception as e:
             logger.warning("orchestrator: Layer A A5 raised: %s", e)
             a5 = A5SpotAdjudicator()._fallback_output()

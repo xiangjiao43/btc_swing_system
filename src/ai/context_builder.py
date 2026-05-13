@@ -43,6 +43,7 @@ from ..data.storage.dao import (
     StrategyStateDAO,
 )
 from .extreme_event_detector import detect_extreme_events
+from ..utils.pipeline_progress import pipeline_stage
 
 
 logger = logging.getLogger(__name__)
@@ -606,39 +607,47 @@ class ContextBuilder:
           orchestrator 调,因需 l1+l2 输出)
         - previous_l1-l5 从 strategy_runs.full_state_json 解析(零 schema 改动)
         """
-        klines_1d = BTCKlinesDAO.get_recent_as_df(
-            self.conn, "1d", limit=self.klines_lookback,
-        )
-        klines_4h = BTCKlinesDAO.get_recent_as_df(
-            self.conn, "4h", limit=self.klines_lookback,
-        )
-        derivatives = DerivativesDAO.get_all_metrics(
-            self.conn, lookback_days=self.macro_lookback_days,
-        )
-        onchain = OnchainDAO.get_all_metrics(
-            self.conn, lookback_days=self.macro_lookback_days,
-        )
-        macro = MacroDAO.get_all_metrics(
-            self.conn, lookback_days=self.macro_lookback_days,
-        )
-        events_72h = EventsCalendarDAO.get_upcoming_within_hours(
-            self.conn, hours=self.events_window_hours, now_utc=now_utc,
-        )
+        with pipeline_stage("fetch / load market data"):
+            klines_1d = BTCKlinesDAO.get_recent_as_df(
+                self.conn, "1d", limit=self.klines_lookback,
+            )
+            klines_4h = BTCKlinesDAO.get_recent_as_df(
+                self.conn, "4h", limit=self.klines_lookback,
+            )
+        with pipeline_stage("fetch / load derivatives data"):
+            derivatives = DerivativesDAO.get_all_metrics(
+                self.conn, lookback_days=self.macro_lookback_days,
+            )
+        with pipeline_stage("fetch / load onchain data"):
+            onchain = OnchainDAO.get_all_metrics(
+                self.conn, lookback_days=self.macro_lookback_days,
+            )
+        with pipeline_stage("fetch / load macro data"):
+            macro = MacroDAO.get_all_metrics(
+                self.conn, lookback_days=self.macro_lookback_days,
+            )
+        with pipeline_stage("fetch / load event calendar"):
+            events_72h = EventsCalendarDAO.get_upcoming_within_hours(
+                self.conn, hours=self.events_window_hours, now_utc=now_utc,
+            )
         events_count_72h = len(events_72h)
 
         # 类 A 计算
-        ema1d = compute_emas_1d(klines_1d)
-        ema4h = compute_emas_4h(klines_4h)
-        adx = compute_adx_14(klines_1d)
-        atr = compute_atr_features(klines_1d)
-        swing = detect_swing_points(klines_1d, depth=5)
-        lth_sth = compute_lth_sth_changes(onchain)
-        ex_flow = compute_exchange_flow_features(onchain)
-        funding = compute_funding_features(derivatives)
-        oi = compute_oi_features(derivatives)
-        price = compute_price_features(klines_1d)
-        macro_feats = compute_macro_features(macro)
-        btc_corr_60d = compute_btc_macro_corr_60d(klines_1d, macro, key="nasdaq")
+        with pipeline_stage("build Layer B context indicators"):
+            ema1d = compute_emas_1d(klines_1d)
+            ema4h = compute_emas_4h(klines_4h)
+            adx = compute_adx_14(klines_1d)
+            atr = compute_atr_features(klines_1d)
+            swing = detect_swing_points(klines_1d, depth=5)
+            lth_sth = compute_lth_sth_changes(onchain)
+            ex_flow = compute_exchange_flow_features(onchain)
+            funding = compute_funding_features(derivatives)
+            oi = compute_oi_features(derivatives)
+            price = compute_price_features(klines_1d)
+            macro_feats = compute_macro_features(macro)
+            btc_corr_60d = compute_btc_macro_corr_60d(
+                klines_1d, macro, key="nasdaq",
+            )
 
         # ❌1 + ❌2:Step 4 新增
         klines_1d_30d_close = (

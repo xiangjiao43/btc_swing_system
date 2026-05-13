@@ -43,6 +43,7 @@ from ..data.storage.dao import (
     StrategyStateDAO,
 )
 from ..composite import CyclePositionFactor
+from ..utils.pipeline_progress import pipeline_stage
 
 # Sprint 1.8.1:旧 v1.2 evidence layers / composites / adjudicator 已退役
 # (1.9 切到 AIOrchestrator)。下方 try/except 让 state_builder 仍 import
@@ -358,13 +359,16 @@ class StrategyStateBuilder:
 
         start_ts = time.time()
         try:
-            context = ContextBuilder(self.conn).build_full_context()
-            previous_run = StrategyStateDAO.get_latest_state(self.conn)
+            with pipeline_stage("build data context"):
+                context = ContextBuilder(self.conn).build_full_context()
+            with pipeline_stage("load previous strategy_run"):
+                previous_run = StrategyStateDAO.get_latest_state(self.conn)
             # Sprint E Step 3:注入 source_stale_map / source_hours_map 给
             # orchestrator 用(sub-agent prompt + confidence override)
             try:
                 from src.data.freshness import compute_stale_state
-                stale_map, hours_map = compute_stale_state(self.conn)
+                with pipeline_stage("compute data freshness"):
+                    stale_map, hours_map = compute_stale_state(self.conn)
                 context["_source_stale_map"] = stale_map
                 context["_source_hours_map"] = hours_map
             except Exception as _e:
@@ -376,22 +380,25 @@ class StrategyStateBuilder:
                 from src.ai.spot_cycle_context_builder import (
                     SpotCycleContextBuilder,
                 )
-                context["layer_a_spot_context"] = (
-                    SpotCycleContextBuilder(self.conn)
-                    .build_spot_cycle_context(existing_context=context)
-                )
+                with pipeline_stage("build Layer A context"):
+                    context["layer_a_spot_context"] = (
+                        SpotCycleContextBuilder(self.conn)
+                        .build_spot_cycle_context(existing_context=context)
+                    )
             except Exception as _e:
                 logger.warning(
                     "Layer A spot cycle context build failed; Layer B will "
                     "continue unchanged: %s", _e,
                 )
-            result = AIOrchestrator().run_full_a(context)
-            mapped = _map_orchestrator_result_to_state(
-                result, context, self.conn,
-                run_trigger=run_trigger,
-                rules_version=self.rules_version,
-                previous_run=previous_run,
-            )
+            with pipeline_stage("run AI orchestrator"):
+                result = AIOrchestrator().run_full_a(context)
+            with pipeline_stage("map orchestrator result"):
+                mapped = _map_orchestrator_result_to_state(
+                    result, context, self.conn,
+                    run_trigger=run_trigger,
+                    rules_version=self.rules_version,
+                    previous_run=previous_run,
+                )
             # Sprint G P0(2026-05-09):接通 master.trade_plan →
             # ThesisManager.create_thesis 持久化链路。审计报告
             # docs/cc_reports/run_2026_05_03_16_08_audit.md 揭示 60 天
@@ -401,13 +408,14 @@ class StrategyStateBuilder:
                 from src.strategy.thesis_persistence import (
                     try_create_thesis_from_master_run,
                 )
-                tp_result = try_create_thesis_from_master_run(
-                    self.conn,
-                    orchestrator_result=result,
-                    fallback_level=mapped.get("fallback_level"),
-                    run_id=mapped["run_id"],
-                    now_utc=mapped["generated_at_utc"],
-                )
+                with pipeline_stage("thesis persistence check"):
+                    tp_result = try_create_thesis_from_master_run(
+                        self.conn,
+                        orchestrator_result=result,
+                        fallback_level=mapped.get("fallback_level"),
+                        run_id=mapped["run_id"],
+                        now_utc=mapped["generated_at_utc"],
+                    )
                 if tp_result.get("created"):
                     logger.info(
                         "thesis_persistence: created %s (schema=%s)",
@@ -442,44 +450,45 @@ class StrategyStateBuilder:
         persisted = False
         if persist and self.conn is not None:
             try:
-                # Sprint 1.10-K-A commit 2 §X(v1.4 §11.2):删 observation_category
-                # / cold_start INSERT 列引用(配合 schema.sql / dao.py / migration 015)
-                # Sprint 1.10-L commit 11a §X(V24 写入修复):加 constraint_activations_json
-                # 列(原 17 → 18)— 1.10-E 引入此列但 mapper 一直未装,生产 138 行全 NULL
-                self.conn.execute(
-                    """
-                    INSERT INTO strategy_runs (
-                        run_id, generated_at_utc, generated_at_bjt,
-                        reference_timestamp_utc, previous_run_id,
-                        action_state, stance, btc_price_usd,
-                        state_transitioned, run_trigger, run_mode,
-                        fallback_level, system_version, rules_version,
-                        strategy_flavor, ai_model_actual, full_state_json,
-                        constraint_activations_json
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        mapped["run_id"],
-                        mapped["generated_at_utc"],
-                        mapped["generated_at_bjt"],
-                        mapped["reference_timestamp_utc"],
-                        mapped["previous_run_id"],
-                        mapped["action_state"],
-                        mapped["stance"],
-                        mapped["btc_price_usd"],
-                        mapped["state_transitioned"],
-                        mapped["run_trigger"],
-                        mapped["run_mode"],
-                        mapped["fallback_level"],
-                        mapped["system_version"],
-                        mapped["rules_version"],
-                        mapped["strategy_flavor"],
-                        mapped["ai_model_actual"],
-                        mapped["full_state_json"],
-                        mapped["constraint_activations_json"],
-                    ),
-                )
-                self.conn.commit()
+                with pipeline_stage("persist strategy_run"):
+                    # Sprint 1.10-K-A commit 2 §X(v1.4 §11.2):删 observation_category
+                    # / cold_start INSERT 列引用(配合 schema.sql / dao.py / migration 015)
+                    # Sprint 1.10-L commit 11a §X(V24 写入修复):加 constraint_activations_json
+                    # 列(原 17 → 18)— 1.10-E 引入此列但 mapper 一直未装,生产 138 行全 NULL
+                    self.conn.execute(
+                        """
+                        INSERT INTO strategy_runs (
+                            run_id, generated_at_utc, generated_at_bjt,
+                            reference_timestamp_utc, previous_run_id,
+                            action_state, stance, btc_price_usd,
+                            state_transitioned, run_trigger, run_mode,
+                            fallback_level, system_version, rules_version,
+                            strategy_flavor, ai_model_actual, full_state_json,
+                            constraint_activations_json
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            mapped["run_id"],
+                            mapped["generated_at_utc"],
+                            mapped["generated_at_bjt"],
+                            mapped["reference_timestamp_utc"],
+                            mapped["previous_run_id"],
+                            mapped["action_state"],
+                            mapped["stance"],
+                            mapped["btc_price_usd"],
+                            mapped["state_transitioned"],
+                            mapped["run_trigger"],
+                            mapped["run_mode"],
+                            mapped["fallback_level"],
+                            mapped["system_version"],
+                            mapped["rules_version"],
+                            mapped["strategy_flavor"],
+                            mapped["ai_model_actual"],
+                            mapped["full_state_json"],
+                            mapped["constraint_activations_json"],
+                        ),
+                    )
+                    self.conn.commit()
                 persisted = True
             except Exception as e:
                 logger.warning("v13 INSERT strategy_runs failed: %s", e)

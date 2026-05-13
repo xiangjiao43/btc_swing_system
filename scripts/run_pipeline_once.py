@@ -34,6 +34,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from src import _env_loader  # noqa: F401
 from src.data.storage.connection import get_connection, init_db
 from src.pipeline import StrategyStateBuilder
+from src.utils.pipeline_progress import pipeline_stage
+
+
+print("[pipeline] END load env elapsed=0.00s success=true", flush=True)
 
 
 def _summarize(state: dict[str, Any]) -> dict[str, Any]:
@@ -111,8 +115,10 @@ def main() -> int:
                         help="打印完整 state JSON 而非摘要")
     args = parser.parse_args()
 
-    init_db(verbose=False)
-    conn = get_connection()
+    with pipeline_stage("init_db"):
+        init_db(verbose=False)
+    with pipeline_stage("open_db_connection"):
+        conn = get_connection()
 
     try:
         builder_kwargs: dict[str, Any] = {
@@ -121,11 +127,13 @@ def main() -> int:
         if args.rules_version:
             builder_kwargs["rules_version"] = args.rules_version
 
-        builder = StrategyStateBuilder(conn, **builder_kwargs)
-        result = builder.run(
-            run_trigger=args.trigger,
-            persist=not args.dry_run,
-        )
+        with pipeline_stage("build StrategyStateBuilder"):
+            builder = StrategyStateBuilder(conn, **builder_kwargs)
+        with pipeline_stage("run StrategyStateBuilder"):
+            result = builder.run(
+                run_trigger=args.trigger,
+                persist=not args.dry_run,
+            )
 
         out = {
             "run_id": result.run_id,

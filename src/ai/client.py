@@ -25,10 +25,9 @@ logger = logging.getLogger(__name__)
 
 
 DEFAULT_MODEL: str = "claude-sonnet-4-5-20250929"
-# Sprint 1.9-A.5.2 fix:45s → 300s。多模态请求(L1/L2/L4 chart_b64 ~150KB
-# base64)+ 中转站(novaiapi.com)实测可能超过 45s。300s 是安全上限,正常
-# 调用通常 5-15s。BaseAgent 有 2 次 retry,理论最坏 600s/层(用户已知情)。
-DEFAULT_TIMEOUT_SEC: float = 300.0
+# 手动 pipeline 需要能在中转站无响应时及时降级,避免用户只看到
+# "[env_loader]" 后长期无输出。BaseAgent 仍会按重试策略 fallback。
+DEFAULT_TIMEOUT_SEC: float = 60.0
 
 
 def normalize_base_url(base_url: Optional[str]) -> Optional[str]:

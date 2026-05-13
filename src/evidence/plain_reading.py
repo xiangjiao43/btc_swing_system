@@ -26,6 +26,245 @@ def _fmt_conf(v: Any) -> str:
         return "未知"
 
 
+_LAYER_A_RAW_FACTOR_LABELS: dict[str, dict[str, str]] = {
+    "lth_sopr": {
+        "name": "LTH SOPR",
+        "purpose": "LTH SOPR 用于观察长期持有人是否在获利卖出",
+    },
+    "sth_sopr": {
+        "name": "STH SOPR",
+        "purpose": "STH SOPR 用于观察短期持有人是否接近盈亏平衡",
+    },
+    "rhodl_ratio": {
+        "name": "RHODL Ratio",
+        "purpose": "RHODL Ratio 用于观察大周期估值温度",
+    },
+    "reserve_risk": {
+        "name": "Reserve Risk",
+        "purpose": "Reserve Risk 用于观察长期持有者信心与价格风险",
+    },
+    "puell_multiple": {
+        "name": "Puell Multiple",
+        "purpose": "Puell Multiple 用于观察矿工收入压力与周期位置",
+    },
+    "lth_net_position_change": {
+        "name": "LTH 净头寸变化",
+        "purpose": "LTH 净头寸变化用于观察长期持有人增持或减持方向",
+    },
+    "percent_supply_in_profit": {
+        "name": "盈利供给比例",
+        "purpose": "盈利供给比例用于判断市场筹码盈利面是否过热",
+    },
+    "percent_supply_in_loss": {
+        "name": "亏损供给比例",
+        "purpose": "亏损供给比例用于判断市场是否仍有恐慌或承压筹码",
+    },
+    "exchange_balance": {
+        "name": "交易所余额",
+        "purpose": "交易所余额用于观察可交易供给压力",
+    },
+    "exchange_net_position_change": {
+        "name": "交易所净头寸变化",
+        "purpose": "交易所净头寸变化用于观察资金流入或流出交易所",
+    },
+    "us2y": {
+        "name": "美国 2 年期收益率",
+        "purpose": "美国 2 年期收益率用于观察短端利率压力",
+    },
+    "fed_funds_rate": {
+        "name": "联邦基金利率",
+        "purpose": "联邦基金利率用于观察政策利率环境",
+    },
+    "real_yield": {
+        "name": "美国 10 年期实际利率",
+        "purpose": "美国 10 年期实际利率用于观察通胀调整后的利率压力",
+    },
+    "cpi": {
+        "name": "CPI",
+        "purpose": "CPI 用于观察通胀压力",
+    },
+    "core_cpi": {
+        "name": "核心 CPI",
+        "purpose": "核心 CPI 用于观察剔除食品能源后的基础通胀压力",
+    },
+    "m2": {
+        "name": "M2",
+        "purpose": "M2 用于观察美元流动性规模",
+    },
+    "fed_balance_sheet": {
+        "name": "美联储资产负债表",
+        "purpose": "美联储资产负债表用于观察基础流动性环境",
+    },
+}
+
+_LAYER_A_RAW_FACTOR_STATUS_LABELS: dict[str, str] = {
+    "available": "可用",
+    "stale": "数据过期",
+    "proxy_endpoint_404": "未接入",
+    "not_supported_by_current_proxy": "未接入",
+    "uncertain_rate_limited": "数据受限",
+    "not_found": "未接入",
+    "config_only": "未启用",
+    "deprecated_candidate": "已废弃",
+    "partial_event_calendar_only": "仅事件日历部分可用",
+    "ai_derived_not_precomputed_for_layer_a": "尚未预计算",
+    "missing": "当前缺值",
+    "unavailable": "不可用",
+}
+
+
+def _fmt_raw_factor_value(value: Any, unit: str | None = None) -> str:
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    if abs(f) >= 1000:
+        base = f"{f:,.0f}" if f.is_integer() else f"{f:,.2f}"
+    elif abs(f) >= 10:
+        base = f"{f:.2f}".rstrip("0").rstrip(".")
+    else:
+        base = f"{f:.4g}"
+    return f"{base}{unit or ''}"
+
+
+def _layer_a_status_label(factor: dict[str, Any] | None,
+                          status_label: str | None) -> str:
+    if status_label:
+        return status_label
+    raw = (factor or {}).get("status") or "unavailable"
+    return _LAYER_A_RAW_FACTOR_STATUS_LABELS.get(str(raw), str(raw))
+
+
+def plain_reading_layer_a_raw_factor(
+    factor_key: str,
+    factor: dict[str, Any] | None = None,
+    *,
+    status_label: str | None = None,
+    value_unit: str | None = None,
+) -> str:
+    """Layer A 原始因子卡片说明。
+
+    这是规则化模板,不调 AI,用于把新增 Layer A 原始因子的数值翻成网页
+    能直接审计的人话说明。AI 仍只负责 A1-A5 大周期策略综合判断。
+    """
+    info = _LAYER_A_RAW_FACTOR_LABELS.get(
+        factor_key,
+        {"name": factor_key, "purpose": f"{factor_key} 用于 Layer A 大周期判断"},
+    )
+    factor = factor or {}
+    value = factor.get("actual_value")
+    has_value = value is not None
+    label = _layer_a_status_label(factor, status_label)
+    if not has_value:
+        unavailable = "当前缺值" if label == "当前缺值" else f"当前数据{label}"
+        return f"📊 {info['purpose']}；{unavailable}。"
+
+    shown = _fmt_raw_factor_value(value, value_unit or factor.get("value_unit"))
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return f"📊 当前 {info['name']} {shown}，{info['purpose']}。"
+
+    if factor_key == "lth_sopr":
+        state = (
+            "长期持有人获利卖出压力较明显" if v > 1.03
+            else "长期持有人整体处于轻微盈利卖出状态" if v >= 1
+            else "长期持有人仍接近亏损卖出或承压状态"
+        )
+        return f"📊 当前 LTH SOPR {shown}，{state} 🔍 >1 = 获利卖出，<1 = 亏损卖出。"
+    if factor_key == "sth_sopr":
+        state = (
+            "短期持有人获利释放较明显" if v >= 1.03
+            else "短期持有人接近盈亏平衡" if v >= 0.98
+            else "短期筹码仍处于亏损承压状态"
+        )
+        return f"📊 当前 STH SOPR {shown}，{state} 🔍 <1 往往代表短期筹码承压。"
+    if factor_key == "rhodl_ratio":
+        state = (
+            "大周期估值温度偏热" if v >= 10000
+            else "估值温度处于中高区" if v >= 2000
+            else "估值温度仍偏低或处在修复区"
+        )
+        return (
+            f"📊 当前 RHODL Ratio {shown}，{state} 🔍 "
+            "越高越需要警惕周期顶部过热，越低越接近底部估值区。"
+        )
+    if factor_key == "reserve_risk":
+        state = (
+            "长期持有者风险回报开始偏热" if v >= 0.02
+            else "长期持有者风险回报处于中性区" if v >= 0.005
+            else "长期持有者信心相对价格风险仍较健康"
+        )
+        return f"📊 当前 Reserve Risk {shown}，{state} 🔍 低位偏长期吸筹，高位偏周期过热。"
+    if factor_key == "puell_multiple":
+        state = (
+            "矿工收入相对高企，需警惕周期过热" if v >= 3
+            else "矿工收入处于正常扩张区" if v >= 1
+            else "矿工收入偏低，更接近压力释放或底部修复区"
+        )
+        return f"📊 当前 Puell Multiple {shown}，{state} 🔍 高位常见于过热，低位常见于矿工压力释放。"
+    if factor_key == "lth_net_position_change":
+        state = (
+            "长期持有人净增持，偏筹码沉淀" if v > 0
+            else "长期持有人净减持，偏分发压力" if v < 0
+            else "长期持有人净变化接近 0"
+        )
+        return f"📊 当前 LTH 净头寸变化 {shown}，{state} 🔍 增持偏累积，减持偏派发。"
+    if factor_key == "percent_supply_in_profit":
+        state = (
+            "绝大多数筹码盈利，需警惕过热" if v >= 0.9
+            else "市场多数筹码处于盈利状态" if v >= 0.55
+            else "盈利筹码比例偏低，更接近压力释放区"
+        )
+        return f"📊 当前盈利供给占比 {shown}，{state} 🔍 极高时需警惕过热，极低时常见于底部区。"
+    if factor_key == "percent_supply_in_loss":
+        state = (
+            "市场仍有较多筹码承压" if v >= 0.5
+            else "市场仍有部分筹码承压" if v >= 0.2
+            else "亏损筹码占比较低，整体压力较轻"
+        )
+        return f"📊 当前亏损供给占比 {shown}，{state} 🔍 高亏损占比通常对应恐慌或底部修复阶段。"
+    if factor_key == "exchange_balance":
+        return f"📊 当前交易所余额 {shown}，反映可交易供给压力 🔍 余额上升偏卖压，余额下降偏长期持有。"
+    if factor_key == "exchange_net_position_change":
+        state = (
+            "资金净流入交易所，偏卖压" if v > 0
+            else "资金净流出交易所，偏囤币" if v < 0
+            else "净变化接近 0，交易所压力不明显"
+        )
+        return f"📊 当前交易所净头寸变化 {shown}，{state} 🔍 流入偏卖压，流出偏囤币。"
+    if factor_key == "us2y":
+        state = (
+            "短端利率压力仍偏高" if v >= 4
+            else "短端利率仍有压力但边际可观察" if v >= 3
+            else "短端利率压力相对缓和"
+        )
+        return f"📊 当前美国 2 年期收益率 {shown}，{state} 🔍 上升通常压制风险资产，下降偏流动性改善。"
+    if factor_key == "fed_funds_rate":
+        state = (
+            "政策利率环境仍偏紧" if v >= 4
+            else "政策利率仍有约束但低于紧缩高峰" if v >= 2
+            else "政策利率环境相对宽松"
+        )
+        return f"📊 当前联邦基金利率 {shown}，{state} 🔍 高利率通常压制风险资产估值。"
+    if factor_key == "real_yield":
+        state = (
+            "实际利率压力偏高" if v >= 2
+            else "实际利率仍有一定压力" if v >= 1
+            else "实际利率压力相对缓和"
+        )
+        return f"📊 当前美国 10 年期实际利率 {shown}，{state} 🔍 实际利率上升通常压制 BTC 等风险资产估值。"
+    if factor_key == "cpi":
+        return f"📊 当前 CPI {shown}，反映整体通胀水平 🔍 通胀偏高会影响降息预期和风险资产估值。"
+    if factor_key == "core_cpi":
+        return f"📊 当前核心 CPI {shown}，反映更稳定的基础通胀压力 🔍 粘性通胀偏高会延后流动性宽松。"
+    if factor_key == "m2":
+        return f"📊 当前 M2 为 {shown}，反映美元流动性规模 🔍 扩张偏利好风险资产，收缩偏压制。"
+    if factor_key == "fed_balance_sheet":
+        return f"📊 当前美联储资产负债表 {shown}，反映基础流动性环境 🔍 扩表偏宽松，缩表偏紧缩。"
+    return f"📊 当前 {info['name']} {shown}，用于 Layer A 大周期判断。"
+
+
 # ============================================================
 # L1 市场状态
 # ============================================================

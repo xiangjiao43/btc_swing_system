@@ -5,9 +5,12 @@ tests/test_plain_reading.py — Sprint 2.2 Task C 验收。
 
 from __future__ import annotations
 
+import inspect
+
 from src.evidence.plain_reading import (
     inject_plain_readings, plain_reading_l1, plain_reading_l2,
     plain_reading_l3, plain_reading_l4, plain_reading_l5,
+    plain_reading_layer_a_raw_factor,
 )
 
 
@@ -255,3 +258,57 @@ def test_inject_writes_five_fields():
     for i in range(1, 6):
         pr = state["evidence_reports"][f"layer_{i}"]["plain_reading"]
         assert isinstance(pr, str) and len(pr) > 5
+
+
+# ================== Layer A raw factor cards ==================
+
+def test_layer_a_raw_factor_plain_readings_cover_new_factors():
+    """Layer A 原始因子的人话说明走规则模板,不是 AI 生成。"""
+    keys = (
+        "lth_sopr",
+        "sth_sopr",
+        "rhodl_ratio",
+        "reserve_risk",
+        "puell_multiple",
+        "lth_net_position_change",
+        "percent_supply_in_profit",
+        "percent_supply_in_loss",
+        "exchange_balance",
+        "exchange_net_position_change",
+        "us2y",
+        "fed_funds_rate",
+        "real_yield",
+        "cpi",
+        "core_cpi",
+        "m2",
+        "fed_balance_sheet",
+    )
+    for key in keys:
+        text = plain_reading_layer_a_raw_factor(
+            key, {"actual_value": 1.02, "status": "available"}
+        )
+        assert "📊" in text
+        assert "当前" in text
+        assert "Layer A context" not in text
+
+
+def test_layer_a_raw_factor_unavailable_text_hides_internal_errors():
+    text = plain_reading_layer_a_raw_factor(
+        "lth_sopr", {"status": "proxy_endpoint_404"}
+    )
+    assert "LTH SOPR 用于观察长期持有人" in text
+    assert "未接入" in text
+    assert "proxy_endpoint_404" not in text
+
+    limited = plain_reading_layer_a_raw_factor(
+        "reserve_risk", {"status": "uncertain_rate_limited"}
+    )
+    assert "Reserve Risk 用于观察长期持有者" in limited
+    assert "数据受限" in limited
+    assert "uncertain_rate_limited" not in limited
+
+
+def test_layer_a_raw_factor_plain_reading_has_no_ai_call_dependency():
+    src = inspect.getsource(plain_reading_layer_a_raw_factor)
+    forbidden = ("ai_client", "call_ai", "run_agent", "BaseAgent", "prompt")
+    assert not any(term in src for term in forbidden)

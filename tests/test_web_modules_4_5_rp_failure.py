@@ -121,6 +121,14 @@ def test_layer_a_new_factor_names_are_available_to_raw_factor_cards(js):
 def test_layer_a_raw_factor_cards_have_plain_readings_and_no_status_placeholder(js):
     """Layer A 新因子必须像老因子一样有一句话解释,不能显示内部占位文案。"""
     assert "const interpretation = `状态:" not in js
+    helper_start = js.index("layerAFactorPlainReading")
+    helper_end = js.index("layerAFactorCards()", helper_start)
+    helper_src = js[helper_start:helper_end]
+    cards_end = js.index("rawFactorCards()", helper_end)
+    cards_src = js[helper_end:cards_end]
+    assert "human_summary" not in helper_src
+    assert "human_summary" not in cards_src
+    assert "plain_interpretation: interpretation" in cards_src
     for phrase in (
         "当前 LTH SOPR",
         "当前 STH SOPR",

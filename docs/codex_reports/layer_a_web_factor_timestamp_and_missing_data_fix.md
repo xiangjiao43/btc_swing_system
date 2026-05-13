@@ -165,8 +165,8 @@ cd /home/ubuntu/btc_swing_system
 | 步骤 | 状态 |
 |---|---|
 | 本地 pytest 通过 | ✅ |
-| GitHub push(commit hash: `0c303cb`) | ✅ |
-| 服务器 git pull | ✅ |
+| GitHub push(commit hash: `0c303cb` 代码修复；`22e04f7` 报告补全) | ✅ |
+| 服务器 git pull | ✅，最终 commit `22e04f7` |
 | 服务器 systemctl restart | ✅ |
 | 生产 DB 迁移 / 清污 | N/A |
 | 生产健康检查 `/api/system/health` | ✅ |

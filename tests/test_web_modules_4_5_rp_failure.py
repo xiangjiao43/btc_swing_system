@@ -79,6 +79,7 @@ def test_raw_factor_module_reuses_existing_region_for_layer_a_factors(html, js):
     assert "状态:" in js
     assert "layerAFactorCoverageSummary()" in html
     assert "Layer A 因子覆盖" in js
+    assert html.count("factorStatusLine(c)") == 1
 
 
 def test_layer_a_new_factor_names_are_available_to_raw_factor_cards(js):
@@ -97,15 +98,42 @@ def test_layer_a_new_factor_names_are_available_to_raw_factor_cards(js):
         assert factor in js
     assert "onchain_holder_behavior" in js
     assert "macro_liquidity" in js
-    assert "Layer A context" in js
+    assert "Layer A context" not in js
     assert "fetched_at_bjt" in js
     assert "proxy_endpoint_404" in js
-    assert "unavailable / 未接入" in js
+    assert "未接入" in js
     assert "uncertain_rate_limited" in js
-    assert "unavailable / 数据受限" in js
+    assert "数据受限" in js
     assert "raw_status" in js
     assert "status_label" in js
     assert "current_value: hasValue ? factor.actual_value : null" in js
+    assert "layerAFactorPlainReading" in js
+    assert "this.layerAFactorPlainReading" in js
+
+
+def test_layer_a_raw_factor_cards_have_plain_readings_and_no_status_placeholder(js):
+    """Layer A 新因子必须像老因子一样有一句话解释,不能显示内部占位文案。"""
+    assert "const interpretation = `状态:" not in js
+    for phrase in (
+        "当前 LTH SOPR",
+        "当前 STH SOPR",
+        "当前盈利供给占比",
+        "当前亏损供给占比",
+        "当前交易所余额",
+        "当前交易所净头寸变化",
+        "当前美国 2 年期收益率",
+        "当前联邦基金利率",
+        "当前 M2",
+        "当前美联储资产负债表",
+    ):
+        assert phrase in js
+    for unavailable_phrase in (
+        "当前数据${statusText}",
+        "数据受限",
+        "LTH SOPR 用于观察长期持有人",
+        "交易所净头寸变化用于观察资金流入或流出交易所",
+    ):
+        assert unavailable_phrase in js
 
 
 # ============================================================

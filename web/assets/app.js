@@ -1101,7 +1101,6 @@ function app() {
                     name_en: 'Percent Supply in Profit',
                     group: 'onchain',
                     source: 'Glassnode',
-                    value_unit: '%',
                     paths: [
                         ['onchain_holder_behavior', 'percent_supply_in_profit'],
                         ['onchain_valuation', 'percent_supply_in_profit'],
@@ -1113,7 +1112,6 @@ function app() {
                     name_en: 'Percent Supply in Loss',
                     group: 'onchain',
                     source: 'Glassnode',
-                    value_unit: '%',
                     paths: [['onchain_holder_behavior', 'percent_supply_in_loss']],
                 },
                 {
@@ -1164,6 +1162,7 @@ function app() {
                     name_en: 'M2 Money Stock',
                     group: 'macro',
                     source: 'FRED',
+                    value_unit: 'B',
                     paths: [['macro_liquidity', 'm2'], ['macro', 'm2']],
                 },
                 {
@@ -1172,6 +1171,7 @@ function app() {
                     name_en: 'Fed Balance Sheet',
                     group: 'macro',
                     source: 'FRED',
+                    value_unit: 'M',
                     paths: [
                         ['macro_liquidity', 'fed_balance_sheet'],
                         ['macro', 'fed_balance_sheet'],
@@ -1198,21 +1198,21 @@ function app() {
         },
         layerAFactorUnavailableLabel(status) {
             const labels = {
-                proxy_endpoint_404: 'unavailable / 未接入',
-                uncertain_rate_limited: 'unavailable / 数据受限',
-                not_found: 'unavailable / 未接入',
-                config_only: 'unavailable / 未启用',
-                deprecated_candidate: 'unavailable / 已废弃',
-                partial_event_calendar_only: 'unavailable / 仅事件日历部分可用',
-                ai_derived_not_precomputed_for_layer_a: 'unavailable / 尚未预计算',
-                missing: 'unavailable / 当前缺值',
-                unavailable: 'unavailable / 不可用',
+                proxy_endpoint_404: '未接入',
+                uncertain_rate_limited: '数据受限',
+                not_found: '未接入',
+                config_only: '未启用',
+                deprecated_candidate: '已废弃',
+                partial_event_calendar_only: '仅事件日历部分可用',
+                ai_derived_not_precomputed_for_layer_a: '尚未预计算',
+                missing: '当前缺值',
+                unavailable: '不可用',
             };
-            return labels[status] || ('unavailable / ' + (status || '不可用'));
+            return labels[status] || (status || '不可用');
         },
         layerAFactorStatusLabel(status, freshness) {
             if (status === 'available' && !(freshness && freshness.is_stale)) return '可用';
-            if (status === 'stale' || (freshness && freshness.is_stale)) return 'unavailable / 数据过期';
+            if (status === 'stale' || (freshness && freshness.is_stale)) return '数据过期';
             return this.layerAFactorUnavailableLabel(status);
         },
         layerAFactorFetchedAt(factor) {
@@ -1252,6 +1252,87 @@ function app() {
             if (!notes.length) return 'Layer A 数据质量: 暂无额外备注';
             return 'Layer A 数据质量: ' + notes.slice(0, 2).join('；');
         },
+        layerAFactorValueText(value, unit) {
+            const base = this.formatFactorValue(value);
+            return unit ? `${base}${unit}` : base;
+        },
+        layerAFactorPlainReading(spec, factor, statusLabel, hasValue) {
+            const value = hasValue ? Number(factor.actual_value) : null;
+            const shown = hasValue ? this.layerAFactorValueText(value, spec.value_unit || '') : null;
+            const statusText = statusLabel || '不可用';
+            const unavailable = statusText === '当前缺值'
+                ? '当前缺值'
+                : `当前数据${statusText}`;
+            const unavailableLine = (purpose) => `📊 ${purpose}；${unavailable}。`;
+            if (!hasValue) {
+                const purpose = {
+                    lth_sopr: 'LTH SOPR 用于观察长期持有人是否在获利卖出',
+                    sth_sopr: 'STH SOPR 用于观察短期持有人是否接近盈亏平衡',
+                    percent_supply_in_profit: '盈利供给比例用于判断市场筹码盈利面是否过热',
+                    percent_supply_in_loss: '亏损供给比例用于判断市场是否仍有恐慌或承压筹码',
+                    exchange_balance: '交易所余额用于观察可交易供给压力',
+                    exchange_net_position_change: '交易所净头寸变化用于观察资金流入或流出交易所',
+                    us2y: '美国 2 年期收益率用于观察短端利率压力',
+                    fed_funds_rate: '联邦基金利率用于观察政策利率环境',
+                    m2: 'M2 用于观察美元流动性规模',
+                    fed_balance_sheet: '美联储资产负债表用于观察基础流动性环境',
+                }[spec.key] || `${spec.name} 用于 Layer A 大周期判断`;
+                return unavailableLine(purpose);
+            }
+
+            if (spec.key === 'lth_sopr') {
+                const state = value > 1.03 ? '长期持有人获利卖出压力较明显'
+                    : value >= 1 ? '长期持有人整体处于轻微盈利卖出状态'
+                    : '长期持有人仍接近亏损卖出或承压状态';
+                return `📊 当前 LTH SOPR ${shown}，${state} 🔍 >1 = 获利卖出，<1 = 亏损卖出。`;
+            }
+            if (spec.key === 'sth_sopr') {
+                const state = value >= 1.03 ? '短期持有人获利释放较明显'
+                    : value >= 0.98 ? '短期持有人接近盈亏平衡'
+                    : '短期筹码仍处于亏损承压状态';
+                return `📊 当前 STH SOPR ${shown}，${state} 🔍 <1 往往代表短期筹码承压。`;
+            }
+            if (spec.key === 'percent_supply_in_profit') {
+                const state = value >= 0.9 ? '绝大多数筹码盈利，需警惕过热'
+                    : value >= 0.55 ? '市场多数筹码处于盈利状态'
+                    : '盈利筹码比例偏低，更接近压力释放区';
+                return `📊 当前盈利供给占比 ${shown}，${state} 🔍 极高时需警惕过热，极低时常见于底部区。`;
+            }
+            if (spec.key === 'percent_supply_in_loss') {
+                const state = value >= 0.5 ? '市场仍有较多筹码承压'
+                    : value >= 0.2 ? '市场仍有部分筹码承压'
+                    : '亏损筹码占比较低，整体压力较轻';
+                return `📊 当前亏损供给占比 ${shown}，${state} 🔍 高亏损占比通常对应恐慌或底部修复阶段。`;
+            }
+            if (spec.key === 'exchange_balance') {
+                return `📊 当前交易所余额 ${shown}，反映可交易供给压力 🔍 余额上升偏卖压，余额下降偏长期持有。`;
+            }
+            if (spec.key === 'exchange_net_position_change') {
+                const state = value > 0 ? '资金净流入交易所，偏卖压'
+                    : value < 0 ? '资金净流出交易所，偏囤币'
+                    : '净变化接近 0，交易所压力不明显';
+                return `📊 当前交易所净头寸变化 ${shown}，${state} 🔍 流入偏卖压，流出偏囤币。`;
+            }
+            if (spec.key === 'us2y') {
+                const state = value >= 4 ? '短端利率压力仍偏高'
+                    : value >= 3 ? '短端利率仍有压力但边际可观察'
+                    : '短端利率压力相对缓和';
+                return `📊 当前美国 2 年期收益率 ${shown}，${state} 🔍 上升通常压制风险资产，下降偏流动性改善。`;
+            }
+            if (spec.key === 'fed_funds_rate') {
+                const state = value >= 4 ? '政策利率环境仍偏紧'
+                    : value >= 2 ? '政策利率仍有约束但低于紧缩高峰'
+                    : '政策利率环境相对宽松';
+                return `📊 当前联邦基金利率 ${shown}，${state} 🔍 高利率通常压制风险资产估值。`;
+            }
+            if (spec.key === 'm2') {
+                return `📊 当前 M2 为 ${shown}，反映美元流动性规模 🔍 扩张偏利好风险资产，收缩偏压制。`;
+            }
+            if (spec.key === 'fed_balance_sheet') {
+                return `📊 当前美联储资产负债表 ${shown}，反映基础流动性环境 🔍 扩表偏宽松，缩表偏紧缩。`;
+            }
+            return `📊 当前 ${spec.name} ${shown}，用于 Layer A 大周期判断。`;
+        },
         layerAFactorCards() {
             return this.layerAFactorCardSpecs().map(spec => {
                 const factor = this.layerAFactorContextValue(spec);
@@ -1264,7 +1345,9 @@ function app() {
                 const statusLabel = this.layerAFactorStatusLabel(status, freshness);
                 const timestampLabel = this.layerAFactorFetchedAt(factor)
                     || this.layerAFactorCapturedAt(factor);
-                const interpretation = `状态: ${statusLabel} · Layer A context`;
+                const interpretation = this.layerAFactorPlainReading(
+                    spec, factor, statusLabel, hasValue,
+                );
                 return {
                     card_id: 'layer_a_' + spec.key,
                     group: spec.group,
@@ -1467,7 +1550,7 @@ function app() {
             if (!c) return '-';
             if (c.status_label) return c.status_label;
             if (c.data_fresh === true) return '可用';
-            if (c.data_fresh === false) return 'unavailable / 需检查';
+            if (c.data_fresh === false) return '需检查';
             return '-';
         },
         factorStatusLine(c) {

@@ -152,14 +152,74 @@ git diff --check
 
 ## 8. 生产验证结果
 
-待代码 push 后在生产服务器执行：
+生产服务器已执行：
 
-- `git pull --ff-only`
-- 重启 `btc-strategy.service`
-- 运行安全 pipeline
-- 验证 `http://124.222.89.86/`
+```bash
+cd /home/ubuntu/btc_swing_system
+git pull --ff-only
+sudo systemctl restart btc-strategy.service
+```
 
-本节会在生产验证完成后更新。
+结果：
+
+| 项目 | 结果 |
+|---|---|
+| 服务器 commit | `50fb972 Optimize Layer A confidence and coverage modeling` |
+| 服务状态 | `active` |
+| `/api/system/health` | `status=ok`, `db_accessible=true`, `scheduler_running=true` |
+
+生产安全 pipeline：
+
+```bash
+cd /home/ubuntu/btc_swing_system
+.venv/bin/python scripts/run_pipeline_once.py --trigger manual
+```
+
+说明：SSH 包装命令本地侧未正常返回且日志为空，但远端已无 `run_pipeline_once.py` 残留进程；随后只读查询生产 DB，确认新 run 已写入。因此本轮按 DB 最新 run 结果作为生产验证证据。
+
+生产最新 run：
+
+| 字段 | 值 |
+|---|---|
+| run_id | `19fac5ec5a3241b9afdacc4427e81e33` |
+| generated_at_utc | `2026-05-12T09:06:54Z` |
+| btc_price_usd | `80862.5` |
+| A1 cycle_stage | `accumulation` |
+| A1 confidence | `medium` |
+| A2 stance | `bullish` |
+| A2 confidence | `medium` |
+| A3 action candidate | `dca_buy` |
+| A3 confidence | `medium` |
+| A4 risk | `moderate` |
+| A4 confidence | `medium` |
+| A5 spot_action | `dca_buy` |
+| A5 confidence | `medium` |
+| factor_coverage.coverage_ratio | `0.9459` |
+| factor_coverage.confidence_cap | `medium` |
+| critical_unavailable_count | `16` |
+| has_input_context_snapshot | `true` |
+| validator.passed | `true` |
+| validator.violations | `[]` |
+
+线上 API 内部验证：
+
+```text
+has_layer_a=True
+a1=accumulation
+a1_conf=medium
+a5=dca_buy
+a5_conf=medium
+coverage_cap=medium
+validator={'passed': True, 'violations': [], 'warnings': []}
+```
+
+线上网页验证：
+
+- 生产 FastAPI 首页返回 `200`；
+- HTML 仍包含“大周期策略”模块；
+- HTML 仍包含 Layer B “五层分析”；
+- HTML 引用 `/assets/app.js?v=layer-a-web-display-20260512`；
+- 公网 `http://124.222.89.86/` 未登录返回 `401`，仍是 Basic Auth 保护，属于预期。
 
 ## 9. 是否影响 Layer B / 虚拟账户 / 真实交易
 
@@ -192,8 +252,8 @@ git diff --check
 | 步骤 | 状态 |
 |---|---|
 | 本地 pytest 通过 | ✅ 138 passed |
-| GitHub push | 待提交后更新 |
-| 服务器 git pull | 待提交后执行 |
-| 服务器 systemctl restart | 待提交后执行 |
+| GitHub push | ✅ `50fb972` |
+| 服务器 git pull | ✅ `50fb972` |
+| 服务器 systemctl restart | ✅ `active` |
 | 生产 DB 迁移 / 清污 | N/A |
-| 生产健康检查 `/api/system/health` | 待生产验证后更新 |
+| 生产健康检查 `/api/system/health` | ✅ `status=ok` |

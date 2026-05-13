@@ -32,12 +32,36 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src import _env_loader  # noqa: F401
+from src.ai.context_builder import ContextBuilder
+from src.ai.spot_cycle_context_builder import SpotCycleContextBuilder
+from src.data.freshness import compute_stale_state
 from src.data.storage.connection import get_connection, init_db
 from src.pipeline import StrategyStateBuilder
-from src.utils.pipeline_progress import pipeline_stage
+from src.utils.pipeline_progress import (
+    init_pipeline_logging,
+    pipeline_stage,
+    record_instant_stage,
+    record_pipeline_result,
+)
 
 
-print("[pipeline] END load env elapsed=0.00s success=true", flush=True)
+_AI_STAGE_NAMES = (
+    "run Layer B L1",
+    "run Layer B L2",
+    "run Layer B L3",
+    "run Layer B L4",
+    "run Layer B L5",
+    "run Layer B Master",
+    "validators",
+    "run Layer A spot strategy",
+    "run Layer A A1",
+    "run Layer A A2",
+    "run Layer A A3",
+    "run Layer A A4",
+    "run Layer A A5",
+    "thesis persistence check",
+    "persist strategy_run",
+)
 
 
 def _summarize(state: dict[str, Any]) -> dict[str, Any]:
@@ -108,12 +132,23 @@ def main() -> int:
                         help="run_trigger 值(默认 manual)")
     parser.add_argument("--dry-run", action="store_true",
                         help="跑完不写入 strategy_state_history")
+    parser.add_argument("--validate-stages", action="store_true",
+                        help="只验证初始化/context 日志,跳过完整 AI 和持久化")
     parser.add_argument("--rules-version", default=None,
                         help="覆盖 DEFAULT_RULES_VERSION")
     parser.add_argument("--klines-lookback", type=int, default=600)
     parser.add_argument("--json", action="store_true",
                         help="打印完整 state JSON 而非摘要")
     args = parser.parse_args()
+
+    log_path = init_pipeline_logging(
+        run_label=args.trigger,
+        validation=bool(args.validate_stages),
+    )
+    record_instant_stage("load env", status="success")
+
+    if args.validate_stages:
+        return _validate_stages(args, log_path)
 
     with pipeline_stage("init_db"):
         init_db(verbose=False)
@@ -129,11 +164,13 @@ def main() -> int:
 
         with pipeline_stage("build StrategyStateBuilder"):
             builder = StrategyStateBuilder(conn, **builder_kwargs)
-        with pipeline_stage("run StrategyStateBuilder"):
+        with pipeline_stage("run StrategyStateBuilder") as span:
             result = builder.run(
                 run_trigger=args.trigger,
                 persist=not args.dry_run,
             )
+            if result.failures or result.degraded_stages:
+                span.mark_degraded("result contains failures/degraded stages")
 
         out = {
             "run_id": result.run_id,
@@ -143,6 +180,8 @@ def main() -> int:
             "duration_ms": result.duration_ms,
             "degraded_stages": result.degraded_stages,
             "failures": result.failures,
+            "pipeline_status": _pipeline_status(result),
+            "pipeline_log_path": str(log_path),
         }
         if args.json:
             out["state"] = result.state
@@ -151,11 +190,81 @@ def main() -> int:
 
         print(json.dumps(out, ensure_ascii=False, indent=2, default=str))
 
+        final_status = _pipeline_status(result)
+        record_pipeline_result(final_status, extra=out)
+
         if not result.persisted:
             return 2
         if result.failures or result.degraded_stages:
             return 1
         return 0
+    finally:
+        conn.close()
+
+
+def _pipeline_status(result: Any) -> str:
+    if not getattr(result, "persisted", False):
+        return "partial"
+    if getattr(result, "failures", None) or getattr(result, "degraded_stages", None):
+        return "degraded"
+    ai_status = str(getattr(result, "ai_status", "") or "")
+    if ai_status and ai_status != "ok":
+        return "degraded"
+    return "success"
+
+
+def _validate_stages(args: argparse.Namespace, log_path: Path) -> int:
+    """Short validation: build contexts and logs, skip full AI/persist."""
+    with pipeline_stage("init_db") as span:
+        span.mark_skipped("--validate-stages does not initialize/migrate DB")
+    with pipeline_stage("open_db_connection"):
+        conn = get_connection()
+    try:
+        with pipeline_stage("build StrategyStateBuilder"):
+            StrategyStateBuilder(conn, klines_lookback=args.klines_lookback)
+        with pipeline_stage("build data context"):
+            context = ContextBuilder(conn, klines_lookback=args.klines_lookback).build_full_context()
+        with pipeline_stage("compute data freshness"):
+            stale_map, hours_map = compute_stale_state(conn)
+            context["_source_stale_map"] = stale_map
+            context["_source_hours_map"] = hours_map
+        with pipeline_stage("build Layer A context"):
+            context["layer_a_spot_context"] = (
+                SpotCycleContextBuilder(conn)
+                .build_spot_cycle_context(existing_context=context)
+            )
+        for stage in _AI_STAGE_NAMES:
+            record_instant_stage(
+                stage,
+                status="skipped",
+                message="--validate-stages skips full AI, validators, thesis, and persist",
+            )
+        out = {
+            "pipeline_status": "success",
+            "validation": True,
+            "pipeline_log_path": str(log_path),
+            "checked": [
+                "env",
+                "db_connection",
+                "Layer B context",
+                "data freshness",
+                "Layer A context",
+            ],
+        }
+        record_pipeline_result("success", extra=out)
+        print(json.dumps(out, ensure_ascii=False, indent=2, default=str))
+        return 0
+    except Exception as exc:
+        out = {
+            "pipeline_status": "partial",
+            "validation": True,
+            "pipeline_log_path": str(log_path),
+            "error_type": type(exc).__name__,
+            "error_message": str(exc)[:300],
+        }
+        record_pipeline_result("partial", extra=out)
+        print(json.dumps(out, ensure_ascii=False, indent=2, default=str))
+        return 2
     finally:
         conn.close()
 

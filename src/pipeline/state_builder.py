@@ -390,8 +390,10 @@ class StrategyStateBuilder:
                     "Layer A spot cycle context build failed; Layer B will "
                     "continue unchanged: %s", _e,
                 )
-            with pipeline_stage("run AI orchestrator"):
+            with pipeline_stage("run AI orchestrator") as span:
                 result = AIOrchestrator().run_full_a(context)
+                if str(result.get("status") or "ok") != "ok":
+                    span.mark_degraded(result.get("status"))
             with pipeline_stage("map orchestrator result"):
                 mapped = _map_orchestrator_result_to_state(
                     result, context, self.conn,
@@ -408,7 +410,7 @@ class StrategyStateBuilder:
                 from src.strategy.thesis_persistence import (
                     try_create_thesis_from_master_run,
                 )
-                with pipeline_stage("thesis persistence check"):
+                with pipeline_stage("thesis persistence check") as span:
                     tp_result = try_create_thesis_from_master_run(
                         self.conn,
                         orchestrator_result=result,
@@ -416,6 +418,8 @@ class StrategyStateBuilder:
                         run_id=mapped["run_id"],
                         now_utc=mapped["generated_at_utc"],
                     )
+                    if not tp_result.get("created"):
+                        span.mark_skipped(tp_result.get("skip_reason"))
                 if tp_result.get("created"):
                     logger.info(
                         "thesis_persistence: created %s (schema=%s)",
@@ -450,7 +454,7 @@ class StrategyStateBuilder:
         persisted = False
         if persist and self.conn is not None:
             try:
-                with pipeline_stage("persist strategy_run"):
+                with pipeline_stage("persist strategy_run") as span:
                     # Sprint 1.10-K-A commit 2 §X(v1.4 §11.2):删 observation_category
                     # / cold_start INSERT 列引用(配合 schema.sql / dao.py / migration 015)
                     # Sprint 1.10-L commit 11a §X(V24 写入修复):加 constraint_activations_json
@@ -489,9 +493,14 @@ class StrategyStateBuilder:
                         ),
                     )
                     self.conn.commit()
+                    if not persist:
+                        span.mark_skipped("persist=false")
                 persisted = True
             except Exception as e:
                 logger.warning("v13 INSERT strategy_runs failed: %s", e)
+        else:
+            with pipeline_stage("persist strategy_run") as span:
+                span.mark_skipped("persist=false")
 
         # Sprint 1.9-A.5.3:把 summary 放进 state,供 scripts/run_pipeline_once.py
         # 的 _summarize() 优先读(原 v12 路径不变,_summarize 检测 v13 标记)

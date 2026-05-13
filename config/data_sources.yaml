@@ -23,7 +23,7 @@
 # 各 source 未显式指定字段时,回退到这里。减少重复。
 # 单位: *_sec = 秒; requests_per_minute = 每分钟请求数
 defaults:
-  timeout_sec: 10
+  timeout_sec: 15
   retry:
     max_attempts: 3          # 首次请求失败后最多重试的次数(不含首次)
     backoff_sec: 2           # 首次重试前的等待秒数(exponential 模式时作为基数)
@@ -92,7 +92,7 @@ sources:
     api_key_env: "COINGLASS_API_KEY"
     api_key_header_name: "x-key"                        # 旧系统验证过(小写连字符)
     api_key_query_name: null
-    timeout_sec: 20                                     # 旧系统值
+    timeout_sec: 15
     retry:
       max_attempts: 3                                   # 首次 + 2 次重试
       backoff_sec: 8                                    # 旧系统值
@@ -152,7 +152,7 @@ sources:
     api_key_env: "FRED_API_KEY"
     api_key_header_name: null
     api_key_query_name: "api_key"
-    timeout_sec: 10
+    timeout_sec: 15
     retry:
       max_attempts: 3
       backoff_sec: 2

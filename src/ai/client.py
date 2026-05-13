@@ -25,9 +25,9 @@ logger = logging.getLogger(__name__)
 
 
 DEFAULT_MODEL: str = "claude-sonnet-4-5-20250929"
-# 手动 pipeline 需要能在中转站无响应时及时降级,避免用户只看到
-# "[env_loader]" 后长期无输出。BaseAgent 仍会按重试策略 fallback。
-DEFAULT_TIMEOUT_SEC: float = 60.0
+# 手动 pipeline 需要能在中转站无响应时及时降级。120s 是单次 AI 请求上限,
+# BaseAgent 仍会按原有重试策略 fallback/degraded。
+DEFAULT_TIMEOUT_SEC: float = 120.0
 
 
 def normalize_base_url(base_url: Optional[str]) -> Optional[str]:

@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 
 _PROMPTS_DIR = Path(__file__).parent / "prompts"
-_DEFAULT_TIMEOUT_SEC = 60.0
+_DEFAULT_TIMEOUT_SEC = 120.0
 _DEFAULT_MAX_TOKENS = 2048
 _DEFAULT_TEMPERATURE = 0.2
 _RETRY_TEMPERATURE = 0.4

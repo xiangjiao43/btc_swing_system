@@ -45,6 +45,7 @@ from ._field_extractors import (
     extract_value,
     safe_float,
 )
+from ...utils.pipeline_progress import pipeline_stage
 
 
 logger = logging.getLogger(__name__)
@@ -250,37 +251,38 @@ class CoinglassCollector:
         logger.info("CoinGlass GET %s params=%s", url, params)
 
         last_exc: Exception | None = None
-        for attempt in range(1, max_attempts + 1):
-            self._throttle()
-            try:
-                resp = self._session.request(
-                    method, url, params=params, timeout=self.timeout_sec
-                )
-                if resp.status_code in retry_on_status:
-                    raise _RetryableHTTPError(
-                        f"HTTP {resp.status_code}: {resp.text[:200]}"
+        with pipeline_stage(f"external CoinGlass request {path}"):
+            for attempt in range(1, max_attempts + 1):
+                self._throttle()
+                try:
+                    resp = self._session.request(
+                        method, url, params=params, timeout=self.timeout_sec
                     )
-                if not resp.ok:
-                    raise CoinglassCollectorError(
-                        f"HTTP {resp.status_code} (non-retry) on {path}: "
-                        f"{resp.text[:200]}"
+                    if resp.status_code in retry_on_status:
+                        raise _RetryableHTTPError(
+                            f"HTTP {resp.status_code}: {resp.text[:200]}"
+                        )
+                    if not resp.ok:
+                        raise CoinglassCollectorError(
+                            f"HTTP {resp.status_code} (non-retry) on {path}: "
+                            f"{resp.text[:200]}"
+                        )
+                    return resp.json()
+                except (requests.RequestException, _RetryableHTTPError, ValueError) as e:
+                    last_exc = e
+                    if attempt >= max_attempts:
+                        break
+                    if strategy == "exponential":
+                        delay = backoff * (2 ** (attempt - 1))
+                    elif strategy == "linear":
+                        delay = backoff * attempt
+                    else:  # fixed
+                        delay = backoff
+                    logger.warning(
+                        "CoinGlass request failed (attempt %d/%d) %s: %s. Retrying in %.1fs",
+                        attempt, max_attempts, path, e, delay,
                     )
-                return resp.json()
-            except (requests.RequestException, _RetryableHTTPError, ValueError) as e:
-                last_exc = e
-                if attempt >= max_attempts:
-                    break
-                if strategy == "exponential":
-                    delay = backoff * (2 ** (attempt - 1))
-                elif strategy == "linear":
-                    delay = backoff * attempt
-                else:  # fixed
-                    delay = backoff
-                logger.warning(
-                    "CoinGlass request failed (attempt %d/%d) %s: %s. Retrying in %.1fs",
-                    attempt, max_attempts, path, e, delay,
-                )
-                time.sleep(delay)
+                    time.sleep(delay)
 
         raise CoinglassCollectorError(
             f"CoinGlass request failed after {max_attempts} attempts: {url} "

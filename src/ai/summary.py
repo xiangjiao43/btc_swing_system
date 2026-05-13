@@ -34,7 +34,7 @@ class AISummaryError(Exception):
 
 # 默认模型与超时
 _DEFAULT_MODEL: str = "claude-sonnet-4-5-20250929"
-_DEFAULT_TIMEOUT_SEC: float = 45.0
+_DEFAULT_TIMEOUT_SEC: float = 120.0
 _MAX_RETRIES: int = 2     # 重试 2 次 → 共 3 次尝试
 _RETRY_BACKOFF_SEC: float = 3.0
 

@@ -66,6 +66,21 @@ def _stale_state_from_context(
     )
 
 
+def _progress_status_from_output(output: dict[str, Any] | None) -> str:
+    status = str((output or {}).get("status") or "")
+    if not status:
+        return "success"
+    if status.startswith("success") or status == "ok":
+        return "success"
+    if status.startswith("degraded") or status.startswith("fallback"):
+        return "degraded"
+    if status.startswith("skipped"):
+        return "skipped"
+    if status.startswith("failed") or status.startswith("error"):
+        return "failure"
+    return "success"
+
+
 def _build_data_missing_stub(
     layer_id: int, agent: Any, fresh_ratio: float,
 ) -> dict[str, Any]:
@@ -235,32 +250,37 @@ class AIOrchestrator:
         }
 
         # ---- 1. L1 ----
-        with pipeline_stage("run Layer B L1"):
+        with pipeline_stage("run Layer B L1") as span:
             l1_out = self._run_l1(context, shared, result)
+            span.set_status(_progress_status_from_output(l1_out))
         result["layers"]["l1"] = l1_out
 
         # ---- 2. L2(注入 l1_output)----
-        with pipeline_stage("run Layer B L2"):
+        with pipeline_stage("run Layer B L2") as span:
             l2_out = self._run_l2(context, shared, l1_out, result)
+            span.set_status(_progress_status_from_output(l2_out))
         result["layers"]["l2"] = l2_out
 
         # ---- 5. L5(独立,无依赖)— 提前跑,L3 anti_pattern 需 extreme_event_flags ----
-        with pipeline_stage("run Layer B L5"):
+        with pipeline_stage("run Layer B L5") as span:
             l5_out = self._run_l5(context, result)
+            span.set_status(_progress_status_from_output(l5_out))
         result["layers"]["l5"] = l5_out
 
         # ---- 3. L3(注入 l1+l2 output + anti_pattern_signals)----
-        with pipeline_stage("run Layer B L3"):
+        with pipeline_stage("run Layer B L3") as span:
             l3_out = self._run_l3(
                 context, shared, l1_out, l2_out, l5_out, result,
             )
+            span.set_status(_progress_status_from_output(l3_out))
         result["layers"]["l3"] = l3_out
 
         # ---- 4. L4(注入 l1+l2+l3 output)----
-        with pipeline_stage("run Layer B L4"):
+        with pipeline_stage("run Layer B L4") as span:
             l4_out = self._run_l4(
                 context, shared, l1_out, l2_out, l3_out, result,
             )
+            span.set_status(_progress_status_from_output(l4_out))
         result["layers"]["l4"] = l4_out
 
         # ---- 计算 _system_provided multipliers ----
@@ -269,11 +289,12 @@ class AIOrchestrator:
         event_mult = self._compute_event_multiplier(events_72h)
 
         # ---- 6. 主裁(注入 l1-l5 output + _system_provided)----
-        with pipeline_stage("run Layer B Master"):
+        with pipeline_stage("run Layer B Master") as span:
             master_out = self._run_master(
                 context, shared, l1_out, l2_out, l3_out, l4_out, l5_out,
                 crowding_mult, event_mult, result,
             )
+            span.set_status(_progress_status_from_output(master_out))
         result["layers"]["master"] = master_out
 
         # ---- 7. Validator(v1.4 24 条,Sprint 1.10-E)----
@@ -309,10 +330,12 @@ class AIOrchestrator:
             "initial_stop_loss_price": master_ctx.get("initial_stop_loss_price"),
             "active_thesis_avg_price": master_ctx.get("active_thesis_avg_price"),
         }
-        with pipeline_stage("validators"):
+        with pipeline_stage("validators") as span:
             validated_output, constraint_activations = validate_master_output(
                 master_out, validator_ctx,
             )
+            if constraint_activations.get("validator_needs_retry"):
+                span.mark_degraded("validator requested master retry")
 
         # Sprint 1.10-F:Validator 触发同 run 重试(V8/V9/V11/V21)
         # D3=b:V21 retry hint 塞入 master input 的 _v21_retry_hint 字段
@@ -372,10 +395,13 @@ class AIOrchestrator:
         result["constraint_activations"] = constraint_activations
 
         # ---- Layer A:大周期现货策略(独立轨道,不进入 layers / thesis / virtual account)----
-        with pipeline_stage("run Layer A spot strategy"):
+        with pipeline_stage("run Layer A spot strategy") as span:
             result["layer_a_spot_strategy"] = self._run_layer_a_spot_strategy(
                 context, result,
             )
+            validator = result["layer_a_spot_strategy"].get("validator") or {}
+            if not validator.get("passed", True):
+                span.mark_degraded("Layer A spot validator reported warnings/violations")
 
         return result
 
@@ -402,24 +428,26 @@ class AIOrchestrator:
 
         t0 = time.time()
         try:
-            with pipeline_stage("run Layer A A1"):
+            with pipeline_stage("run Layer A A1") as span:
                 a1 = self._agents.get("a1", A1SpotCycleAnalyst()).analyze(
                     {"spot_cycle_context": spot_ctx}, client=build_anthropic_client(),
                 )
+                span.set_status(_progress_status_from_output(a1))
         except Exception as e:
             logger.warning("orchestrator: Layer A A1 raised: %s", e)
             a1 = A1SpotCycleAnalyst()._fallback_output()
         try:
-            with pipeline_stage("run Layer A A2"):
+            with pipeline_stage("run Layer A A2") as span:
                 a2 = self._agents.get("a2", A2OnchainMacroAnalyst()).analyze(
                     {"spot_cycle_context": spot_ctx, "a1_output": a1},
                     client=build_anthropic_client(),
                 )
+                span.set_status(_progress_status_from_output(a2))
         except Exception as e:
             logger.warning("orchestrator: Layer A A2 raised: %s", e)
             a2 = A2OnchainMacroAnalyst()._fallback_output()
         try:
-            with pipeline_stage("run Layer A A3"):
+            with pipeline_stage("run Layer A A3") as span:
                 a3 = self._agents.get("a3", A3SpotOpportunityAnalyst()).analyze(
                     {
                         "spot_cycle_context": spot_ctx,
@@ -428,11 +456,12 @@ class AIOrchestrator:
                     },
                     client=build_anthropic_client(),
                 )
+                span.set_status(_progress_status_from_output(a3))
         except Exception as e:
             logger.warning("orchestrator: Layer A A3 raised: %s", e)
             a3 = A3SpotOpportunityAnalyst()._fallback_output()
         try:
-            with pipeline_stage("run Layer A A4"):
+            with pipeline_stage("run Layer A A4") as span:
                 a4 = self._agents.get("a4", A4SpotRiskAnalyst()).analyze(
                     {
                         "spot_cycle_context": spot_ctx,
@@ -442,11 +471,12 @@ class AIOrchestrator:
                     },
                     client=build_anthropic_client(),
                 )
+                span.set_status(_progress_status_from_output(a4))
         except Exception as e:
             logger.warning("orchestrator: Layer A A4 raised: %s", e)
             a4 = A4SpotRiskAnalyst()._fallback_output()
         try:
-            with pipeline_stage("run Layer A A5"):
+            with pipeline_stage("run Layer A A5") as span:
                 a5 = self._agents.get("a5", A5SpotAdjudicator()).analyze(
                     {
                         "spot_cycle_context": spot_ctx,
@@ -457,6 +487,7 @@ class AIOrchestrator:
                     },
                     client=build_anthropic_client(),
                 )
+                span.set_status(_progress_status_from_output(a5))
         except Exception as e:
             logger.warning("orchestrator: Layer A A5 raised: %s", e)
             a5 = A5SpotAdjudicator()._fallback_output()

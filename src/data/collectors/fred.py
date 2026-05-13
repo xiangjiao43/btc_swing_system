@@ -23,6 +23,8 @@ import requests
 
 from ..storage.dao import MacroDAO, MacroMetric
 from ._field_extractors import safe_float
+from ._config_loader import load_source_config
+from ...utils.pipeline_progress import pipeline_stage
 
 
 logger = logging.getLogger(__name__)
@@ -72,10 +74,12 @@ class FredCollector:
     _USER_AGENT = "btc_swing_system/0.1-fred"
 
     def __init__(self) -> None:
+        cfg = load_source_config("fred")
         self.api_key: str = os.getenv("FRED_API_KEY", "").strip()
         self.base_url: str = (
-            os.getenv("FRED_BASE_URL") or self._DEFAULT_BASE_URL
+            os.getenv("FRED_BASE_URL") or cfg.get("base_url") or self._DEFAULT_BASE_URL
         ).rstrip("/")
+        self.timeout_sec: int = int(cfg.get("timeout_sec") or 15)
         self.enabled: bool = bool(self.api_key)
 
         if not self.enabled:
@@ -122,7 +126,8 @@ class FredCollector:
         url = f"{self.base_url}/series/observations"
         logger.info("FRED GET %s series_id=%s start=%s", url, series_id, start_date)
 
-        resp = self._session.get(url, params=params, timeout=20)
+        with pipeline_stage(f"external FRED request {series_id}"):
+            resp = self._session.get(url, params=params, timeout=self.timeout_sec)
         if not resp.ok:
             raise FredCollectorError(
                 f"FRED HTTP {resp.status_code} on {series_id}: {resp.text[:200]}"

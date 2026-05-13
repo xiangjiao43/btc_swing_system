@@ -1077,9 +1077,162 @@ function app() {
             )) || {};
         },
         // 区域 4 分组(Sprint 2.3 tuning:顺序改为价格→衍生→链上→宏观→事件)
-        factorGroups() {
+        layerAFactorCardSpecs() {
+            return [
+                {
+                    key: 'lth_sopr',
+                    name: 'LTH SOPR',
+                    name_en: 'Long-Term Holder SOPR',
+                    group: 'onchain',
+                    source: 'Glassnode',
+                    paths: [['onchain_holder_behavior', 'lth_sopr']],
+                },
+                {
+                    key: 'sth_sopr',
+                    name: 'STH SOPR',
+                    name_en: 'Short-Term Holder SOPR',
+                    group: 'onchain',
+                    source: 'Glassnode',
+                    paths: [['onchain_holder_behavior', 'sth_sopr']],
+                },
+                {
+                    key: 'percent_supply_in_profit',
+                    name: '盈利供给比例',
+                    name_en: 'Percent Supply in Profit',
+                    group: 'onchain',
+                    source: 'Glassnode',
+                    value_unit: '%',
+                    paths: [
+                        ['onchain_holder_behavior', 'percent_supply_in_profit'],
+                        ['onchain_valuation', 'percent_supply_in_profit'],
+                    ],
+                },
+                {
+                    key: 'percent_supply_in_loss',
+                    name: '亏损供给比例',
+                    name_en: 'Percent Supply in Loss',
+                    group: 'onchain',
+                    source: 'Glassnode',
+                    value_unit: '%',
+                    paths: [['onchain_holder_behavior', 'percent_supply_in_loss']],
+                },
+                {
+                    key: 'exchange_balance',
+                    name: '交易所余额',
+                    name_en: 'Exchange Balance',
+                    group: 'onchain',
+                    source: 'Glassnode',
+                    value_unit: 'BTC',
+                    paths: [
+                        ['onchain_holder_behavior', 'exchange_balance'],
+                        ['exchange_and_flows', 'exchange_balance'],
+                    ],
+                },
+                {
+                    key: 'exchange_net_position_change',
+                    name: '交易所净头寸变化',
+                    name_en: 'Exchange Net Position Change',
+                    group: 'onchain',
+                    source: 'Glassnode',
+                    value_unit: 'BTC',
+                    paths: [['onchain_holder_behavior', 'exchange_net_position_change']],
+                },
+                {
+                    key: 'us2y',
+                    name: '美国 2 年期收益率',
+                    name_en: 'US2Y',
+                    group: 'macro',
+                    source: 'FRED',
+                    value_unit: '%',
+                    paths: [['macro_liquidity', 'us2y'], ['macro', 'us2y']],
+                },
+                {
+                    key: 'fed_funds_rate',
+                    name: '联邦基金利率',
+                    name_en: 'Fed Funds Rate',
+                    group: 'macro',
+                    source: 'FRED',
+                    value_unit: '%',
+                    paths: [
+                        ['macro_liquidity', 'fed_funds_rate'],
+                        ['macro', 'fed_funds_rate'],
+                    ],
+                },
+                {
+                    key: 'm2',
+                    name: 'M2',
+                    name_en: 'M2 Money Stock',
+                    group: 'macro',
+                    source: 'FRED',
+                    paths: [['macro_liquidity', 'm2'], ['macro', 'm2']],
+                },
+                {
+                    key: 'fed_balance_sheet',
+                    name: '美联储资产负债表',
+                    name_en: 'Fed Balance Sheet',
+                    group: 'macro',
+                    source: 'FRED',
+                    paths: [
+                        ['macro_liquidity', 'fed_balance_sheet'],
+                        ['macro', 'fed_balance_sheet'],
+                    ],
+                },
+            ];
+        },
+        layerAFactorContextValue(spec) {
+            const snapshot = this.spotStrategy()?.input_context_snapshot || {};
+            const factors = snapshot.available_factors || {};
+            for (const path of (spec.paths || [])) {
+                let cur = factors;
+                for (const part of path) cur = cur && cur[part];
+                if (cur && typeof cur === 'object') return cur;
+            }
+            return null;
+        },
+        layerAFactorUnavailableStatus(key) {
+            const unavailable = this.spotStrategy()?.unavailable_factors
+                || this.spotStrategy()?.input_context_snapshot?.unavailable_factors
+                || [];
+            const item = unavailable.find(x => x && x.factor === key);
+            return item ? (item.project_status || 'unavailable') : null;
+        },
+        layerAFactorCards() {
+            return this.layerAFactorCardSpecs().map(spec => {
+                const factor = this.layerAFactorContextValue(spec);
+                const unavailableStatus = this.layerAFactorUnavailableStatus(spec.key);
+                const status = (factor && factor.status) || unavailableStatus || 'unavailable';
+                const available = status === 'available' && factor
+                    && factor.actual_value !== undefined && factor.actual_value !== null;
+                const freshness = (factor && factor.freshness) || {};
+                const interpretation = available
+                    ? 'Layer A context: 可用'
+                    : 'Layer A context: ' + status;
+                return {
+                    card_id: 'layer_a_' + spec.key,
+                    group: spec.group,
+                    tier: 'raw',
+                    is_primary: false,
+                    name: spec.name,
+                    name_en: spec.name_en,
+                    current_value: available ? factor.actual_value : null,
+                    value_unit: spec.value_unit || '',
+                    impact_direction: 'neutral',
+                    data_fresh: available && !freshness.is_stale,
+                    plain_interpretation: interpretation,
+                    linked_layer: 'Layer A',
+                    captured_at_bjt: (factor && factor.as_of) || status,
+                    fetched_at_bjt: null,
+                    source: spec.source,
+                };
+            });
+        },
+        rawFactorCards() {
             const cards = ((this.state && this.state.factor_cards) || [])
                 .filter(c => c.tier !== 'composite');
+            return [...cards, ...this.layerAFactorCards()];
+        },
+        factorGroups() {
+            const cards = this.rawFactorCards();
             const specs = [
                 { key: 'price_technical',label: '价格技术',  icon: '🕯️', source: 'CoinGlass klines' },
                 { key: 'derivatives',    label: '衍生品',    icon: '📈', source: 'CoinGlass' },

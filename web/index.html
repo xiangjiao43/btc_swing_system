@@ -1001,7 +1001,7 @@
         <h2 class="text-base font-semibold flex items-center gap-2">
           <span>📂</span><span>原始数据因子</span>
           <span class="text-[11px] font-normal text-slate-500 ml-2"
-                x-text="'共 ' + (state.factor_cards || []).filter(c => c.tier !== 'composite').length + ' 个'"></span>
+                x-text="'共 ' + rawFactorCards().length + ' 个'"></span>
         </h2>
         <p class="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
           系统从这些底层因子出发,逐层合成组合因子,再进入五层证据判断。每组内主要因子平铺展示,其他折叠。

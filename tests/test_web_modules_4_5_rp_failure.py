@@ -61,6 +61,36 @@ def test_module_4_position_after_layers(html):
     assert pos_layers < pos_timeline < pos_region_4
 
 
+def test_raw_factor_module_reuses_existing_region_for_layer_a_factors(html, js):
+    """Layer A 新因子只能进入原始数据因子模块,不能新开模块。"""
+    assert html.count('id="region-4"') == 1
+    assert html.count("原始数据因子") == 1
+    assert "rawFactorCards().length" in html
+    assert "layerAFactorCards()" in js
+    assert "layerAFactorCardSpecs()" in js
+    assert "layerAFactorContextValue" in js
+    assert "layerAFactorUnavailableStatus" in js
+
+
+def test_layer_a_new_factor_names_are_available_to_raw_factor_cards(js):
+    for factor in (
+        "lth_sopr",
+        "sth_sopr",
+        "percent_supply_in_profit",
+        "percent_supply_in_loss",
+        "exchange_balance",
+        "exchange_net_position_change",
+        "us2y",
+        "fed_funds_rate",
+        "m2",
+        "fed_balance_sheet",
+    ):
+        assert factor in js
+    assert "onchain_holder_behavior" in js
+    assert "macro_liquidity" in js
+    assert "Layer A context: " in js
+
+
 # ============================================================
 # 2. 模块 5:周复盘报告
 # ============================================================

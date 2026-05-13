@@ -98,7 +98,7 @@ uv run pytest -q tests/test_web_modules_1_2_3.py tests/test_web_modules_4_5_rp_f
 git diff --check
 ```
 
-结果：待最终提交前复核。
+结果：通过。
 
 ## 8. pipeline run 结果
 
@@ -132,7 +132,33 @@ uv run python scripts/run_pipeline_once.py --trigger manual
 
 ## 10. 线上网页验证
 
-待部署后补充。
+已部署到服务器：
+
+- GitHub commit：`b24c875 Sync Layer A factors into raw data web module`
+- 服务器目录：`/home/ubuntu/btc_swing_system`
+- 服务器已 `git pull --ff-only`
+- 已执行 `sudo systemctl restart btc-strategy.service`
+- 服务状态：`active`
+
+线上验证结果：
+
+- 服务器本机 API `http://127.0.0.1:8000/api/strategy/current` 返回最新 run `c41d13eb2f0143f3b21b2dafcfc23191`。
+- API 中 `layer_a_spot_strategy` 存在。
+- `input_context_snapshot.available_factors` 中存在：
+  - `onchain_holder_behavior`
+  - `macro_liquidity`
+- `unavailable_factors` 中正确显示：
+  - `lth_sopr = proxy_endpoint_404`
+  - `sth_sopr = proxy_endpoint_404`
+  - `percent_supply_in_loss = proxy_endpoint_404`
+  - `exchange_net_position_change = uncertain_rate_limited`
+- 服务器网页文件已包含：
+  - `rawFactorCards()`
+  - `layerAFactorCards()`
+  - `lth_sopr`
+  - `fed_balance_sheet`
+
+公网 `http://124.222.89.86/` 返回 `401 Basic Auth`，说明有登录保护。我没有读取或输出网页登录凭据。用户用已有登录状态刷新即可看到新因子。
 
 ## 11. 风险和未完成
 
@@ -143,15 +169,15 @@ uv run python scripts/run_pipeline_once.py --trigger manual
 
 ## 12. 审查包路径
 
-待生成后补充。
+`/private/tmp/layer_a_new_factors_web_sync_audit_bundle.zip`
 
 ## 13. 部署状态四件事清单
 
 | 步骤 | 状态 |
 |---|---|
 | 本地 pytest 通过 | ✅ |
-| GitHub push | 待执行 |
-| 服务器 git pull | 待执行 |
-| 服务器 systemctl restart | 待执行 |
+| GitHub push | ✅ `b24c875` |
+| 服务器 git pull | ✅ 到 `b24c875` |
+| 服务器 systemctl restart | ✅ `btc-strategy.service` active |
 | 生产 DB 迁移 / 清污 | N/A |
-| 生产健康检查 `/api/system/health` | 待执行 |
+| 生产健康检查 `/api/system/health` | ✅ 本机接口 `status=ok` |

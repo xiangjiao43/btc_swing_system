@@ -1,7 +1,7 @@
 """tests/test_glassnode_collect_all.py — Sprint 2.6-F Commit 1。
 
-Regression guard:GlassnodeCollector.collect_and_save_all 必须把所有 13 个
-expected metric(primary 5 + display 7 + btc_price_close)注册到 tasks 列表。
+Regression guard:GlassnodeCollector.collect_and_save_all 必须把核心链上指标
+注册到 tasks 列表。
 若有人不小心删掉 lth_realized_price / sth_realized_price / sopr_adjusted (aSOPR),
 这个测试立刻失败。
 """
@@ -26,11 +26,18 @@ _EXPECTED_METRICS: set[str] = {
     "lth_realized_price",
     "sth_realized_price",
     "sopr_adjusted",  # = aSOPR (1.6 升级 primary,1.7 sopr 删除后唯一保留)
+    # Layer A 大周期因子
+    "lth_sopr",
+    "sth_sopr",
+    "percent_supply_in_profit",
+    "percent_supply_in_loss",
+    "exchange_balance",
+    "exchange_net_position_change",
 }
 
 
 def test_collect_and_save_all_registers_all_expected_metrics():
-    """source-level guard:13 个 metric 标签都出现在 collect_and_save_all 函数体里。
+    """source-level guard:metric 标签都出现在 collect_and_save_all 函数体里。
 
     用 inspect.getsource 读源码,避免真调用 (那会发 HTTP request)。
     Sprint 2.6-I:lth/sth_realized_price 通过 /breakdowns/* 客户端聚合恢复。

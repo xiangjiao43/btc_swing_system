@@ -19,6 +19,7 @@ bear_bottom, accumulation, early_bull, mid_bull, late_bull, distribution, bear_t
 
 判断原则:
 - 你要综合 A1-A4，而不是机械投票。
+- 新增 Layer A 因子包括 LTH/STH SOPR、Percent Supply in Profit/Loss、Exchange Balance、Exchange Net Position Change、US2Y、Fed Funds Rate、M2、Fed Balance Sheet。它们用于增强大周期和现货风险判断，但不能被机械阈值化。
 - aggressive_buy 和 aggressive_sell 必须同时列 supporting_evidence 和 opposing_evidence。
 - 如果证据冲突或数据缺失，优先 hold / dca_buy / scale_out，不要极端。
 - 如果 unavailable_factors 很多，confidence 不应 high。

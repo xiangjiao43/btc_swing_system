@@ -84,14 +84,12 @@ def test_descriptive_funding_short_text_does_not_create_warning():
     assert "layer_a_output_contains_layer_b_like_terms" not in out["validator"]["warnings"]
 
 
-def test_confidence_cap_downgrades_high_when_many_critical_factors_missing():
+def test_confidence_cap_downgrades_high_when_five_critical_factors_missing():
     missing = [
         {"factor": name, "project_status": "not_found"}
         for name in (
             "rhodl_ratio", "reserve_risk", "puell_multiple",
-            "percent_supply_in_profit", "percent_supply_in_loss",
-            "lth_sopr", "sth_sopr", "exchange_balance",
-            "us2y", "m2",
+            "lth_net_position_change", "real_yield",
         )
     ]
     out = normalize_layer_a_output({
@@ -114,7 +112,7 @@ def test_confidence_cap_downgrades_high_when_many_critical_factors_missing():
         },
         "unavailable_factors": missing,
     })
-    assert out["factor_coverage"]["critical_unavailable_count"] == 10
+    assert out["factor_coverage"]["critical_unavailable_count"] == 5
     assert out["factor_coverage"]["confidence_cap"] == "medium"
     assert out["a1_cycle_stage"]["confidence"] == "medium"
     assert out["a2_onchain_macro"]["confidence"] == "medium"

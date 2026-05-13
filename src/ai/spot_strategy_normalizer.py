@@ -28,19 +28,9 @@ _CRITICAL_COVERAGE_FACTORS = {
     "rhodl_ratio",
     "reserve_risk",
     "puell_multiple",
-    "percent_supply_in_profit",
-    "percent_supply_in_loss",
-    "lth_sopr",
-    "sth_sopr",
     "lth_net_position_change",
-    "exchange_balance",
-    "exchange_net_position_change",
-    "us2y",
     "real_yield",
-    "fed_funds_rate",
     "cpi_core_cpi",
-    "m2",
-    "fed_balance_sheet",
 }
 
 

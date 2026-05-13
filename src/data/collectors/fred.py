@@ -38,11 +38,16 @@ class FredCollectorError(RuntimeError):
 SERIES_TO_METRIC: dict[str, str] = {
     # 利率类
     "DGS10":    "dgs10",              # 10-year Treasury yield(daily)
+    "DGS2":     "us2y",               # 2-year Treasury yield(daily)
+    "FEDFUNDS": "fed_funds_rate",     # Effective federal funds rate(monthly)
     # 股指(Sprint 1.7:删 SP500 — 与 NASDAQ 90%+ 重叠)
     "NASDAQCOM": "nasdaq",            # NASDAQ Composite(daily,1971-至今)
     # 波动率与美元
     "VIXCLS":   "vix",                # CBOE VIX(daily,1990-至今)
     "DTWEXBGS": "dxy",                # Trade Weighted USD Index(Fed 官方版,语义等同 ICE DXY)
+    # Layer A 宏观流动性
+    "M2SL":     "m2",                 # M2 money stock(monthly)
+    "WALCL":    "fed_balance_sheet",  # Fed total assets(weekly)
     # Sprint 1.8.1 删除:dff / cpi / unemployment_rate / sp500 / gold_price
     # (因子退役 — 详见 docs/cc_reports/sprint_1_8_1_full.md)
 }

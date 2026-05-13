@@ -43,7 +43,9 @@ _FACTOR_SOURCE = {
     "lth_supply": "glassnode_onchain",
     "sth_supply": "glassnode_onchain",
     "percent_supply_in_profit": "glassnode_onchain",
+    "percent_supply_in_loss": "glassnode_onchain_derived",
     "exchange_balance": "glassnode_onchain",
+    "exchange_net_position_change": "glassnode_onchain_derived",
     "exchange_net_flow": "glassnode_onchain",
     "sopr_adjusted": "glassnode_onchain",
     "hodl_waves": "glassnode_onchain",
@@ -71,12 +73,10 @@ _UNAVAILABLE_MODEL_FACTORS = {
     "rhodl_ratio": "not_found",
     "reserve_risk": "deprecated_candidate",
     "puell_multiple": "deprecated_candidate",
-    "percent_supply_in_loss": "proxy_endpoint_404",
     "lth_net_position_change": "not_found",
-    "lth_sopr": "proxy_endpoint_404",
-    "sth_sopr": "proxy_endpoint_404",
+    "lth_sopr": "not_supported_by_current_proxy",
+    "sth_sopr": "not_supported_by_current_proxy",
     "liveliness": "config_only",
-    "exchange_net_position_change": "uncertain_rate_limited",
     "stablecoin_supply_liquidity": "not_found",
     "monthly_structure_1m": "not_found",
     "major_support_resistance": "ai_derived_not_precomputed_for_layer_a",
@@ -92,11 +92,9 @@ _CRITICAL_MODEL_FACTORS = {
     "rhodl_ratio",
     "reserve_risk",
     "puell_multiple",
-    "percent_supply_in_loss",
     "lth_sopr",
     "sth_sopr",
     "lth_net_position_change",
-    "exchange_net_position_change",
     "real_yield",
     "cpi_core_cpi",
 }
@@ -128,6 +126,20 @@ def _pct_change(series: Any, periods: int) -> Optional[float]:
         return (cur / prev - 1.0) * 100.0
     except Exception:
         return None
+
+
+def _series_latest_delta(series: Any, periods: int = 1) -> tuple[Optional[float], Optional[str]]:
+    if series is None:
+        return None, None
+    try:
+        s = series.dropna().astype(float)
+        if len(s) <= periods:
+            return None, None
+        ts = s.index[-1]
+        ts_s = ts.isoformat() if hasattr(ts, "isoformat") else str(ts)
+        return float(s.iloc[-1] - s.iloc[-periods - 1]), ts_s
+    except Exception:
+        return None, None
 
 
 def _tail(series: Any, n: int = 30) -> list[dict[str, Any]]:
@@ -299,6 +311,18 @@ class SpotCycleContextBuilder:
                 extra=metric_meta(MacroDAO, name),
             )
 
+        profit_value, profit_ts = _series_latest(
+            onchain.get("percent_supply_in_profit") if isinstance(onchain, dict) else None
+        )
+        percent_supply_in_loss = (
+            1.0 - profit_value
+            if isinstance(profit_value, (int, float)) and 0 <= profit_value <= 1
+            else None
+        )
+        exchange_balance_delta, exchange_balance_delta_ts = _series_latest_delta(
+            onchain.get("exchange_balance") if isinstance(onchain, dict) else None
+        )
+
         available = {
             "price_structure": {
                 "current_close": _factor("current_close", current_close, source="coinglass_derivatives", stale_map=stale_map, hours_map=hours_map),
@@ -331,7 +355,25 @@ class SpotCycleContextBuilder:
             },
             "onchain_holder_behavior": {
                 "percent_supply_in_profit": metric("percent_supply_in_profit"),
+                "percent_supply_in_loss": _factor(
+                    "percent_supply_in_loss",
+                    percent_supply_in_loss,
+                    timestamp=profit_ts,
+                    source="glassnode_onchain_derived",
+                    stale_map=stale_map,
+                    hours_map=hours_map,
+                    extra=metric_meta(OnchainDAO, "percent_supply_in_profit"),
+                ),
                 "exchange_balance": metric("exchange_balance"),
+                "exchange_net_position_change": _factor(
+                    "exchange_net_position_change",
+                    exchange_balance_delta,
+                    timestamp=exchange_balance_delta_ts,
+                    source="glassnode_onchain_derived",
+                    stale_map=stale_map,
+                    hours_map=hours_map,
+                    extra=metric_meta(OnchainDAO, "exchange_balance"),
+                ),
             },
             "exchange_and_flows": {
                 "exchange_net_flow": metric("exchange_net_flow"),

@@ -1199,6 +1199,7 @@ function app() {
         layerAFactorUnavailableLabel(status) {
             const labels = {
                 proxy_endpoint_404: '未接入',
+                not_supported_by_current_proxy: '未接入',
                 uncertain_rate_limited: '数据受限',
                 not_found: '未接入',
                 config_only: '未启用',

@@ -513,63 +513,56 @@
             <div class="grid grid-cols-1 lg:grid-cols-3 gap-3">
               <article id="region-virtual-account" class="rounded border border-slate-200 dark:border-slate-800 p-3 space-y-2">
                 <h4 class="text-[12px] font-semibold text-slate-600 dark:text-slate-400">虚拟账户</h4>
-                <template x-if="!virtualAccount">
-                  <div class="text-slate-500 dark:text-slate-400 italic text-[12px]">
-                    virtual_account 未初始化(冷启动)
+                <div class="grid grid-cols-2 gap-2 text-[12px]">
+                  <div>
+                    <div class="stat-label">初始资金</div>
+                    <div class="font-mono tabular-nums" x-text="virtualInitialCapitalLabel()"></div>
                   </div>
-                </template>
-                <template x-if="virtualAccount">
-                  <div class="grid grid-cols-2 gap-2 text-[12px]">
-                    <div>
-                      <div class="stat-label">初始资金</div>
-                      <div class="font-mono tabular-nums" x-text="formatUsd(virtualAccount.initial_capital)"></div>
-                    </div>
-                    <div>
-                      <div class="stat-label">权益</div>
-                      <div class="font-bold font-mono tabular-nums" x-text="formatUsd(virtualAccount.total_equity)"></div>
-                    </div>
-                    <div>
-                      <div class="stat-label">现金</div>
-                      <div class="font-mono tabular-nums" x-text="formatUsd(virtualAccount.available_cash)"></div>
-                    </div>
-                    <div>
-                      <div class="stat-label">历史收益率</div>
-                      <div class="font-mono tabular-nums"
-                           :class="(accountReturns.total_pct ?? 0) >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'"
-                           x-text="formatPct(accountReturns.total_pct, true)"></div>
-                    </div>
-                    <div>
-                      <div class="stat-label">盈利/回撤</div>
-                      <div class="font-mono tabular-nums"
-                           :class="(accountReturns.total_pct ?? 0) >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'"
-                           x-text="formatPct(accountReturns.total_pct, true) + ' / ' + cardDistanceToStop()"></div>
-                    </div>
-                    <div>
-                      <div class="stat-label">日收益</div>
-                      <div class="font-mono tabular-nums"
-                           :class="(accountReturns.daily_pct ?? 0) >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'"
-                           x-text="formatPct(accountReturns.daily_pct, true)"></div>
-                    </div>
-                    <div>
-                      <div class="stat-label">周收益</div>
-                      <div class="font-mono tabular-nums"
-                           :class="(accountReturns.weekly_pct ?? 0) >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'"
-                           x-text="formatPct(accountReturns.weekly_pct, true)"></div>
-                    </div>
-                    <div>
-                      <div class="stat-label">月收益</div>
-                      <div class="font-mono tabular-nums"
-                           :class="(accountReturns.monthly_pct ?? 0) >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'"
-                           x-text="formatPct(accountReturns.monthly_pct, true)"></div>
-                    </div>
-                    <div>
-                      <div class="stat-label">年收益</div>
-                      <div class="font-mono tabular-nums"
-                           :class="(accountReturns.yearly_pct ?? 0) >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'"
-                           x-text="formatPct(accountReturns.yearly_pct, true)"></div>
-                    </div>
+                  <div>
+                    <div class="stat-label">权益</div>
+                    <div class="font-bold font-mono tabular-nums" x-text="virtualEquityLabel()"></div>
                   </div>
-                </template>
+                  <div>
+                    <div class="stat-label">现金</div>
+                    <div class="font-mono tabular-nums" x-text="virtualCashLabel()"></div>
+                  </div>
+                  <div>
+                    <div class="stat-label">历史收益率</div>
+                    <div class="font-mono tabular-nums"
+                         :class="accountReturnClass('total_pct')"
+                         x-text="accountReturnLabel('total_pct')"></div>
+                  </div>
+                  <div>
+                    <div class="stat-label">盈利/回撤</div>
+                    <div class="font-mono tabular-nums"
+                         :class="accountReturnClass('total_pct')"
+                         x-text="accountProfitDrawdownLabel()"></div>
+                  </div>
+                  <div>
+                    <div class="stat-label">日收益</div>
+                    <div class="font-mono tabular-nums"
+                         :class="accountReturnClass('daily_pct')"
+                         x-text="accountReturnLabel('daily_pct')"></div>
+                  </div>
+                  <div>
+                    <div class="stat-label">周收益</div>
+                    <div class="font-mono tabular-nums"
+                         :class="accountReturnClass('weekly_pct')"
+                         x-text="accountReturnLabel('weekly_pct')"></div>
+                  </div>
+                  <div>
+                    <div class="stat-label">月收益</div>
+                    <div class="font-mono tabular-nums"
+                         :class="accountReturnClass('monthly_pct')"
+                         x-text="accountReturnLabel('monthly_pct')"></div>
+                  </div>
+                  <div>
+                    <div class="stat-label">年收益</div>
+                    <div class="font-mono tabular-nums"
+                         :class="accountReturnClass('yearly_pct')"
+                         x-text="accountReturnLabel('yearly_pct')"></div>
+                  </div>
+                </div>
                 <div x-show="accountHistory.length >= 2">
                   <div class="stat-label mb-1">30 天资金曲线</div>
                   <svg viewBox="0 0 300 60" class="w-full h-12" preserveAspectRatio="none">

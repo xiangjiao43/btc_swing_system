@@ -57,23 +57,41 @@ def test_module_1_displays_total_equity_and_initial(html):
 
 
 def test_module_1_alpine_binds_virtual_account(html):
-    """Alpine x-text 引用 virtualAccount.total_equity / initial_capital。"""
-    assert 'virtualAccount.total_equity' in html
-    assert 'virtualAccount.initial_capital' in html
-    assert 'virtualAccount.available_cash' in html
+    """虚拟账户卡片和当前持仓一样走固定字段 helper。"""
+    start = html.find('id="region-virtual-account"')
+    end = html.find('id="region-position-summary"')
+    card = html[start:end]
+    assert "virtualInitialCapitalLabel()" in card
+    assert "virtualEquityLabel()" in card
+    assert "virtualCashLabel()" in card
+    assert "virtual_account 未初始化" not in card
 
 
 def test_module_1_displays_returns(html):
-    assert 'accountReturns.total_pct' in html
-    for field in (
-        "accountReturns.daily_pct",
-        "accountReturns.weekly_pct",
-        "accountReturns.monthly_pct",
-        "accountReturns.yearly_pct",
-    ):
-        assert field in html
+    assert "accountProfitDrawdownLabel()" in html
+    for key in ("total_pct", "daily_pct", "weekly_pct", "monthly_pct", "yearly_pct"):
+        assert f"accountReturnLabel('{key}')" in html or f"accountReturnClass('{key}')" in html
     assert "text-emerald-600 dark:text-emerald-400" in html
     assert "text-rose-600 dark:text-rose-400" in html
+
+
+def test_module_1_aligns_with_position_two_column_layout(html, js):
+    """虚拟账户与当前持仓保持相同两列字段网格,不改变卡片样式。"""
+    start = html.find('id="region-virtual-account"')
+    end = html.find('id="region-position-summary"')
+    card = html[start:end]
+    assert 'class="rounded border border-slate-200 dark:border-slate-800 p-3 space-y-2"' in card
+    assert 'class="grid grid-cols-2 gap-2 text-[12px]"' in card
+    assert "col-span-2 grid grid-cols-3" not in card
+    for helper in (
+        "virtualInitialCapitalLabel()",
+        "virtualEquityLabel()",
+        "virtualCashLabel()",
+        "accountReturnLabel(key)",
+        "accountReturnClass(key)",
+        "accountProfitDrawdownLabel()",
+    ):
+        assert helper in js
 
 
 def test_module_1_sparkline_svg(html):
@@ -92,8 +110,13 @@ def test_module_1_no_chartjs_dependency(html):
 
 
 def test_module_1_cold_start_placeholder(html):
-    """无 virtual_account 数据 → 显示冷启动占位。"""
-    assert "virtual_account 未初始化" in html
+    """无 virtual_account 数据时仍显示固定字段,不再只显示冷启动占位。"""
+    start = html.find('id="region-virtual-account"')
+    end = html.find('id="region-position-summary"')
+    card = html[start:end]
+    assert "virtual_account 未初始化" not in card
+    for label in ("初始资金", "权益", "现金", "历史收益率"):
+        assert label in card
 
 
 # ============================================================

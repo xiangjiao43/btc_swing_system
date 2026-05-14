@@ -434,6 +434,28 @@ function app() {
             });
             return '$' + n.toFixed(2);
         },
+        virtualInitialCapitalLabel() {
+            return this.formatUsd(this.virtualAccount?.initial_capital);
+        },
+        virtualEquityLabel() {
+            return this.formatUsd(this.virtualAccount?.total_equity);
+        },
+        virtualCashLabel() {
+            return this.formatUsd(this.virtualAccount?.available_cash);
+        },
+        accountReturnLabel(key) {
+            return this.formatPct(this.accountReturns?.[key], true);
+        },
+        accountReturnClass(key) {
+            const v = this.accountReturns?.[key];
+            if (v == null || isNaN(v)) return 'text-slate-500 dark:text-slate-400';
+            return Number(v) >= 0
+                ? 'text-emerald-600 dark:text-emerald-400'
+                : 'text-rose-600 dark:text-rose-400';
+        },
+        accountProfitDrawdownLabel() {
+            return `${this.accountReturnLabel('total_pct')} / ${this.cardDistanceToStop()}`;
+        },
         async _refreshSystemHealth() {
             try {
                 const r = await fetch('/api/system/health-detail',

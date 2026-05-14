@@ -521,6 +521,10 @@
                 <template x-if="virtualAccount">
                   <div class="grid grid-cols-2 gap-2 text-[12px]">
                     <div>
+                      <div class="stat-label">初始资金</div>
+                      <div class="font-mono tabular-nums" x-text="formatUsd(virtualAccount.initial_capital)"></div>
+                    </div>
+                    <div>
                       <div class="stat-label">权益</div>
                       <div class="font-bold font-mono tabular-nums" x-text="formatUsd(virtualAccount.total_equity)"></div>
                     </div>
@@ -529,38 +533,40 @@
                       <div class="font-mono tabular-nums" x-text="formatUsd(virtualAccount.available_cash)"></div>
                     </div>
                     <div>
-                      <div class="stat-label">PnL</div>
+                      <div class="stat-label">历史收益率</div>
                       <div class="font-mono tabular-nums"
                            :class="(accountReturns.total_pct ?? 0) >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'"
                            x-text="formatPct(accountReturns.total_pct, true)"></div>
                     </div>
                     <div>
-                      <div class="stat-label">回撤</div>
-                      <div class="font-mono tabular-nums" x-text="cardDistanceToStop()"></div>
+                      <div class="stat-label">盈利/回撤</div>
+                      <div class="font-mono tabular-nums"
+                           :class="(accountReturns.total_pct ?? 0) >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'"
+                           x-text="formatPct(accountReturns.total_pct, true) + ' / ' + cardDistanceToStop()"></div>
                     </div>
-                    <div class="col-span-2">
-                      <div class="stat-label">初始资金</div>
-                      <div class="font-mono tabular-nums" x-text="formatUsd(virtualAccount.initial_capital)"></div>
+                    <div>
+                      <div class="stat-label">日收益</div>
+                      <div class="font-mono tabular-nums"
+                           :class="(accountReturns.daily_pct ?? 0) >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'"
+                           x-text="formatPct(accountReturns.daily_pct, true)"></div>
                     </div>
-                    <div class="col-span-2 grid grid-cols-3 gap-2 pt-1 border-t border-slate-100 dark:border-slate-800">
-                      <div>
-                        <div class="stat-label">日收益</div>
-                        <div class="font-mono tabular-nums"
-                             :class="(accountReturns.daily_pct ?? 0) >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'"
-                             x-text="formatPct(accountReturns.daily_pct, true)"></div>
-                      </div>
-                      <div>
-                        <div class="stat-label">月收益</div>
-                        <div class="font-mono tabular-nums"
-                             :class="(accountReturns.monthly_pct ?? 0) >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'"
-                             x-text="formatPct(accountReturns.monthly_pct, true)"></div>
-                      </div>
-                      <div>
-                        <div class="stat-label">年收益</div>
-                        <div class="font-mono tabular-nums"
-                             :class="(accountReturns.yearly_pct ?? 0) >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'"
-                             x-text="formatPct(accountReturns.yearly_pct, true)"></div>
-                      </div>
+                    <div>
+                      <div class="stat-label">周收益</div>
+                      <div class="font-mono tabular-nums"
+                           :class="(accountReturns.weekly_pct ?? 0) >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'"
+                           x-text="formatPct(accountReturns.weekly_pct, true)"></div>
+                    </div>
+                    <div>
+                      <div class="stat-label">月收益</div>
+                      <div class="font-mono tabular-nums"
+                           :class="(accountReturns.monthly_pct ?? 0) >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'"
+                           x-text="formatPct(accountReturns.monthly_pct, true)"></div>
+                    </div>
+                    <div>
+                      <div class="stat-label">年收益</div>
+                      <div class="font-mono tabular-nums"
+                           :class="(accountReturns.yearly_pct ?? 0) >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'"
+                           x-text="formatPct(accountReturns.yearly_pct, true)"></div>
                     </div>
                   </div>
                 </template>

@@ -37,12 +37,23 @@ def test_module_1_virtual_account_section_exists(html):
 
 
 def test_module_1_displays_total_equity_and_initial(html):
-    """账户与执行里的虚拟账户必须含权益 + 现金 + PnL + 回撤。"""
-    assert "权益" in html
-    assert "初始资金" in html
-    assert "现金" in html
-    assert "PnL" in html
-    assert "回撤" in html
+    """账户与执行里的虚拟账户显示用户指定的 9 个字段。"""
+    start = html.find('id="region-virtual-account"')
+    end = html.find('id="region-position-summary"')
+    card = html[start:end]
+    for label in (
+        "初始资金",
+        "权益",
+        "现金",
+        "历史收益率",
+        "盈利/回撤",
+        "日收益",
+        "周收益",
+        "月收益",
+        "年收益",
+    ):
+        assert label in card
+    assert "PnL" not in card
 
 
 def test_module_1_alpine_binds_virtual_account(html):
@@ -54,10 +65,9 @@ def test_module_1_alpine_binds_virtual_account(html):
 
 def test_module_1_displays_returns(html):
     assert 'accountReturns.total_pct' in html
-    for label in ("日收益", "月收益", "年收益"):
-        assert label in html
     for field in (
         "accountReturns.daily_pct",
+        "accountReturns.weekly_pct",
         "accountReturns.monthly_pct",
         "accountReturns.yearly_pct",
     ):

@@ -86,15 +86,12 @@ def test_module_2_active_thesis_section_exists(html):
 
 
 def test_module_2_displays_thesis_fields(html):
-    """挂单 / thesis 小卡只保留失效条件和待触发挂单。"""
+    """挂单 / thesis 小卡恢复完整字段。"""
     start = html.find('id="region-active-thesis"')
     end = html.find('id="region-thesis-timeline"')
     card = html[start:end]
-    assert "失效条件" in card
-    assert "待触发挂单" in card
-    assert "等待入场区" not in card
-    assert "thesis_id" not in card
-    assert "阶段" not in card
+    for label in ("thesis_id", "阶段", "等待入场区", "失效条件"):
+        assert label in card
 
 
 def test_module_2_no_active_placeholder(html):
@@ -112,8 +109,9 @@ def test_module_2_alpine_binds_active_thesis(html):
     end = html.find('id="region-thesis-timeline"')
     card = html[start:end]
     assert "swingInvalidationPlan()" in card
-    assert "activeThesis.thesis_id" not in card
-    assert "activeThesis.lifecycle_stage" not in card
+    assert "activeThesis.thesis_id" in card
+    assert "activeThesis.lifecycle_stage" in card
+    assert "cardEntryZones()" in card
 
 
 # ============================================================
@@ -123,7 +121,7 @@ def test_module_2_alpine_binds_active_thesis(html):
 def test_module_3_orders_position_section_exists(html):
     assert 'id="region-orders-position"' in html
     assert "待触发挂单" in html
-    start = html.find('id="region-active-thesis"')
+    start = html.find('id="region-orders-position"')
     end = html.find('id="region-thesis-timeline"')
     card = html[start:end]
     assert 'id="region-orders-position"' in card
@@ -141,8 +139,8 @@ def test_module_3_displays_position_summary(html):
 
 
 def test_module_3_displays_pending_orders_table(html):
-    """挂单 / thesis 内部待触发挂单表:类型 / 价格 / 仓位。"""
-    start = html.find('id="region-active-thesis"')
+    """待触发挂单表恢复完整列:类型 / 价格 / 仓位 / 距当前。"""
+    start = html.find('id="region-orders-position"')
     end = html.find('id="region-thesis-timeline"')
     card = html[start:end]
     assert "待触发挂单" in card
@@ -150,12 +148,13 @@ def test_module_3_displays_pending_orders_table(html):
     assert "o.order_type" in card
     assert "o.price" in card
     assert "o.size_pct" in card
-    assert "距当前" not in card
-    assert "distanceFromLive(o.price)" not in card
-    assert len(re.findall(r"<th\b", card)) == 3
+    assert "距当前" in card
+    assert "distanceFromLive(o.price)" in card
+    assert len(re.findall(r"<th\b", card)) == 4
 
 
 def test_module_3_no_active_placeholder(html):
+    assert "当前无 active thesis,无挂单" in html
     assert "无待触发挂单" in html
 
 
@@ -270,16 +269,16 @@ def test_swing_strategy_wrapper_static_contract(html):
     assert "判断 BTC 中长线波段;可做多、可做空;创建 thesis、管理虚拟账户和挂单持仓" in html
     assert html.count('id="region-swing-summary"') == 1
     assert html.count('id="region-swing-account-execution"') == 1
-    for label in ("当前状态", "方向"):
+    for label in ("当前状态", "方向", "机会等级", "主裁动作", "置信度"):
         assert label in html
     summary_start = html.find('id="region-swing-summary"')
     summary_end = html.find('id="region-swing-account-execution"')
     summary = html[summary_start:summary_end]
     for label in ("机会等级", "主裁动作", "置信度"):
-        assert label not in summary
+        assert label in summary
     for label in ("虚拟账户", "当前持仓", "挂单 / thesis", "交易员结论"):
         assert label in html
-    assert "账户与执行" not in html
+    assert "账户与执行" in html
     assert "AI 主裁结论" not in html
     assert "五层分析" not in html
     assert "L1-L5 + 主裁" not in html
@@ -301,7 +300,7 @@ def test_swing_account_execution_contains_required_blocks(html):
     assert pos_account < pos_va < pos_position < pos_thesis < pos_orders < pos_layers
     for label in ("虚拟账户", "当前持仓", "挂单 / thesis", "当前无持仓 / 等待入场信号"):
         assert label in html
-    assert "账户与执行" not in html
+    assert "账户与执行" in html
 
 
 def test_system_health_three_column_layer_order(html):
@@ -388,8 +387,8 @@ def test_layer_b_five_layer_header_replaced_by_adjudicator_summary(html, js):
     assert "swingAdjudicatorCard()" in js
 
 
-def test_swing_strategy_inner_cards_are_unframed(html):
-    """波段策略内部小模块无强边框、无新增底色,只保留外层波段策略大卡边框。"""
+def test_swing_strategy_inner_cards_restore_original_borders(html):
+    """波段策略内部小模块恢复截图状态的边框卡片。"""
     for region in (
         "region-swing-summary",
         "region-swing-account-execution",
@@ -401,25 +400,23 @@ def test_swing_strategy_inner_cards_are_unframed(html):
     ):
         pos = html.find(f'id="{region}"')
         assert pos != -1, f"{region} 缺失"
-        snippet = html[pos:pos + 180]
-        assert "border border-slate-200" not in snippet
+        snippet = html[pos:pos + 220]
+        assert "border border-slate-200" in snippet
         assert "bg-slate-50" not in snippet
         assert "dark:bg-slate-900" not in snippet
-    assert "xl:grid-cols-6" in html
+    assert "lg:grid-cols-3" in html
     assert 'id="region-layer-b-swing" class="audit-card"' in html
 
 
-def test_swing_summary_status_direction_single_bar(html):
-    """波段策略顶部摘要只保留 当前状态 + 方向 一条横向信息条。"""
+def test_swing_summary_restores_full_five_cards(html):
+    """波段策略顶部摘要恢复 5 个摘要块。"""
     start = html.find('id="region-swing-summary"')
     end = html.find('id="region-swing-account-execution"')
     summary = html[start:end]
-    assert "当前状态" in summary
-    assert "方向" in summary
-    assert "机会等级" not in summary
-    assert "主裁动作" not in summary
-    assert "置信度" not in summary
-    assert "border-l border-slate-100" in summary
+    for label in ("当前状态", "方向", "机会等级", "主裁动作", "置信度"):
+        assert label in summary
+    assert "md:grid-cols-5" in summary
+    assert summary.count("rounded border border-slate-200") >= 5
 
 
 def test_layer_a_spot_module_static_contract(html):
@@ -493,7 +490,7 @@ def test_js_sparkline_helper_pure_svg(js):
 def test_js_format_helpers(js):
     """formatUsd helper。"""
     assert "formatUsd" in js
-    assert "distanceFromLive" not in js
+    assert "distanceFromLive" in js
 
 
 def test_js_no_new_dependencies(js):

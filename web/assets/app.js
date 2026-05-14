@@ -434,6 +434,13 @@ function app() {
             });
             return '$' + n.toFixed(2);
         },
+        distanceFromLive(orderPrice) {
+            const live = this.livePrice();
+            const price = Number(orderPrice);
+            if (!live || !price || isNaN(price)) return '-';
+            const pct = ((price - live) / live) * 100;
+            return (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%';
+        },
 
         async _refreshSystemHealth() {
             try {

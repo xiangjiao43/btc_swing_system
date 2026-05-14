@@ -72,6 +72,19 @@ adjudicator:
   strict_schema_validation: true
 
 
+# -------- Fallback Models -------------------------------------------
+# 可选。仅用于 AI provider / 中转站临时过载或模型权限错误时的降级调用。
+# 默认不填具体模型，避免把未验证模型伪装成可用。
+# 如需启用，优先在 .env 配置:
+#   OPENAI_FALLBACK_MODEL=普通 API 可访问的模型名
+# 或:
+#   OPENAI_FALLBACK_MODELS=model_a,model_b
+fallback_models:
+  model_name_env: "OPENAI_FALLBACK_MODEL"
+  model_names_env: "OPENAI_FALLBACK_MODELS"
+  model_name_defaults: []
+
+
 # -------- L5 宏观摘要(Layer-5 Macro Summarizer)--------------------
 # 对应建模 §4.6(L5 层由 AI 主导),生成 2-3 行叙事 + event_flag。
 # 任务更短,可以用更激进的 temperature 保证生动度,max_tokens 小。

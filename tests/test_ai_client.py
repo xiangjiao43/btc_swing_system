@@ -8,8 +8,9 @@ from unittest.mock import MagicMock
 
 from src.ai import client as client_mod
 from src.ai.client import (
-    DEFAULT_MODEL, build_anthropic_client, effective_model, extract_model, extract_text,
-    extract_usage, normalize_base_url,
+    DEFAULT_MODEL, build_anthropic_client, effective_fallback_models,
+    effective_model, extract_model, extract_text, extract_usage,
+    normalize_base_url,
 )
 
 
@@ -77,3 +78,11 @@ def test_build_client_disables_sdk_hidden_retries(monkeypatch):
     assert calls["timeout"] == 12.0
     assert calls["max_retries"] == 0
     assert calls["base_url"] == "https://us.novaiapi.com"
+
+
+def test_effective_fallback_models_from_env(monkeypatch):
+    monkeypatch.setenv("OPENAI_MODEL", "primary-model")
+    monkeypatch.setenv("OPENAI_FALLBACK_MODELS", "fallback-a, primary-model, fallback-b")
+    monkeypatch.delenv("OPENAI_FALLBACK_MODEL", raising=False)
+
+    assert effective_fallback_models("primary-model") == ["fallback-a", "fallback-b"]

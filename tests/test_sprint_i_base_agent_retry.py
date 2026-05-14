@@ -144,6 +144,29 @@ def test_restricted_model_error_is_terminal_no_retry():
     fake_sleep.assert_not_called()
 
 
+def test_restricted_model_error_uses_configured_fallback():
+    """403 primary 失败时,若有 fallback model,立即切 fallback。"""
+    client = MagicMock()
+    err = Exception(
+        "Error code: 403 - This model is restricted to Claude Code clients "
+        "only and cannot be accessed through other API clients."
+    )
+    client.messages.create.side_effect = [err, _mock_response(_VALID_L1_JSON)]
+    agent = L1RegimeAnalyst(client=client)
+    with (
+        patch("src.ai.agents._base.effective_fallback_models",
+              return_value=["claude-fallback-api-model"]),
+        patch("src.ai.agents._base.time.sleep") as fake_sleep,
+    ):
+        out = agent.analyze({"indicators": {}})
+    assert out["status"] == "success"
+    assert out["fallback_model_used"] is True
+    assert client.messages.create.call_count == 2
+    assert client.messages.create.call_args_list[0].kwargs["model"] == "claude-sonnet-4-5-20250929"
+    assert client.messages.create.call_args_list[1].kwargs["model"] == "claude-fallback-api-model"
+    fake_sleep.assert_not_called()
+
+
 def test_overloaded_error_stops_after_short_retry():
     """模型过载最多短重试一次,避免单层拖到数百秒。"""
     client = MagicMock()
@@ -157,4 +180,31 @@ def test_overloaded_error_stops_after_short_retry():
         out = agent.analyze({"indicators": {}})
     assert out["status"] == "degraded_ai_failed"
     assert client.messages.create.call_count == 2
+    assert len(fake_sleep.call_args_list) == 1
+
+
+def test_overloaded_error_uses_fallback_after_short_retry():
+    """overloaded primary 两次失败后切 fallback,不再试第 3 次 primary。"""
+    client = MagicMock()
+    err = Exception(
+        "Error code: 500 - Provider API error: 当前模型过载，请稍后重试 "
+        "(That model is currently overloaded.)"
+    )
+    client.messages.create.side_effect = [err, err, _mock_response(_VALID_L1_JSON)]
+    agent = L1RegimeAnalyst(client=client)
+    with (
+        patch("src.ai.agents._base.effective_fallback_models",
+              return_value=["claude-fallback-api-model"]),
+        patch("src.ai.agents._base.time.sleep") as fake_sleep,
+    ):
+        out = agent.analyze({"indicators": {}})
+    assert out["status"] == "success"
+    assert out["fallback_model_used"] is True
+    assert client.messages.create.call_count == 3
+    models = [c.kwargs["model"] for c in client.messages.create.call_args_list]
+    assert models == [
+        "claude-sonnet-4-5-20250929",
+        "claude-sonnet-4-5-20250929",
+        "claude-fallback-api-model",
+    ]
     assert len(fake_sleep.call_args_list) == 1

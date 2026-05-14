@@ -13,7 +13,10 @@ from __future__ import annotations
 
 import logging
 import os
+from pathlib import Path
 from typing import Any, Optional
+
+import yaml
 
 try:
     from anthropic import Anthropic
@@ -28,6 +31,8 @@ DEFAULT_MODEL: str = "claude-sonnet-4-5-20250929"
 # 手动 pipeline 需要能在中转站无响应时及时降级。120s 是单次 AI 请求上限,
 # BaseAgent 仍会按原有重试策略 fallback/degraded。
 DEFAULT_TIMEOUT_SEC: float = 120.0
+_ROOT = Path(__file__).resolve().parents[2]
+_AI_CONFIG_PATH = _ROOT / "config" / "ai.yaml"
 
 
 def normalize_base_url(base_url: Optional[str]) -> Optional[str]:
@@ -77,6 +82,51 @@ def build_anthropic_client(
 
 def effective_model(override: Optional[str] = None) -> str:
     return override or os.getenv("OPENAI_MODEL") or DEFAULT_MODEL
+
+
+def _split_models(value: str | None) -> list[str]:
+    if not value:
+        return []
+    return [x.strip() for x in value.split(",") if x.strip()]
+
+
+def _load_ai_config() -> dict[str, Any]:
+    try:
+        with _AI_CONFIG_PATH.open("r", encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def effective_fallback_models(primary_model: str | None = None) -> list[str]:
+    """Return fallback models from env/config without guessing model names.
+
+    Priority:
+      1. OPENAI_FALLBACK_MODELS comma-separated list
+      2. OPENAI_FALLBACK_MODEL single value
+      3. config/ai.yaml fallback_models.model_name_defaults
+    """
+    models = _split_models(os.getenv("OPENAI_FALLBACK_MODELS"))
+    if not models:
+        models = _split_models(os.getenv("OPENAI_FALLBACK_MODEL"))
+    if not models:
+        fb_cfg = (_load_ai_config().get("fallback_models") or {})
+        defaults = fb_cfg.get("model_name_defaults") or []
+        if isinstance(defaults, str):
+            models = _split_models(defaults)
+        elif isinstance(defaults, list):
+            models = [str(x).strip() for x in defaults if str(x).strip()]
+
+    primary = (primary_model or effective_model()).strip()
+    seen: set[str] = set()
+    out: list[str] = []
+    for model in models:
+        if model == primary or model in seen:
+            continue
+        seen.add(model)
+        out.append(model)
+    return out
 
 
 def extract_text(response: Any) -> str:

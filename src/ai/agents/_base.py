@@ -23,8 +23,8 @@ from pathlib import Path
 from typing import Any, Optional
 
 from ..client import (
-    build_anthropic_client, effective_model, extract_text, extract_usage,
-    extract_model,
+    build_anthropic_client, effective_fallback_models, effective_model,
+    extract_text, extract_usage, extract_model,
 )
 
 
@@ -56,6 +56,11 @@ _OVERLOADED_ERROR_MARKERS = (
     "当前模型过载",
     "overloaded",
 )
+_TIMEOUT_ERROR_MARKERS = (
+    "timeout",
+    "timed out",
+    "read timeout",
+)
 
 
 def _extract_status_code(exc: BaseException) -> int | None:
@@ -82,8 +87,16 @@ def _is_overloaded_ai_error(exc: BaseException) -> bool:
     return any(marker in text for marker in _OVERLOADED_ERROR_MARKERS)
 
 
+def _is_timeout_ai_error(exc: BaseException) -> bool:
+    text = str(exc).lower()
+    cls_name = type(exc).__name__.lower()
+    return any(marker in text or marker in cls_name for marker in _TIMEOUT_ERROR_MARKERS)
+
+
 def _should_retry_ai_error(exc: BaseException, *, attempt: int) -> bool:
     if _is_terminal_ai_error(exc):
+        return False
+    if _is_timeout_ai_error(exc):
         return False
     if _is_overloaded_ai_error(exc):
         return attempt < 2
@@ -240,14 +253,16 @@ class BaseAgent:
         重路由(中转站偶发 400 "Model not supported" 是 channel 路由问题,
         不是 model id 问题)。
         """
-        model = effective_model(self._model_override)
+        primary_model = effective_model(self._model_override)
+        model_sequence = [primary_model] + effective_fallback_models(primary_model)
         last_error: Optional[str] = None
         last_error_type: Optional[str] = None
         terminal_error = False
         total_tokens_in = 0
         total_tokens_out = 0
         total_latency_ms = 0
-        last_model_used = model
+        last_model_used = primary_model
+        fallback_models_attempted: list[str] = []
 
         if chart_b64:
             user_content: Any = [
@@ -269,56 +284,67 @@ class BaseAgent:
             _RETRY_TEMPERATURE,
             _RETRY_TEMPERATURE,
         )
-        for attempt, temperature in enumerate(attempts_temps, start=1):
-            if attempt > 1:
-                time.sleep(_RETRY_SLEEP_SEC)
-            start_ts = time.time()
-            try:
-                resp = client.messages.create(
-                    model=model,
-                    system=system_prompt,
-                    messages=[{"role": "user", "content": user_content}],
-                    max_tokens=self._max_tokens,
-                    temperature=temperature,
-                )
-            except Exception as e:
-                elapsed_ms = int((time.time() - start_ts) * 1000)
-                retryable = _should_retry_ai_error(e, attempt=attempt)
-                last_error = f"attempt {attempt}: {e}"
-                last_error_type = type(e).__name__
-                terminal_error = terminal_error or _is_terminal_ai_error(e)
-                total_latency_ms += elapsed_ms
+        for model_index, model in enumerate(model_sequence):
+            fallback_used = model_index > 0
+            if fallback_used:
+                fallback_models_attempted.append(model)
                 logger.warning(
-                    "%s: attempt %d failed model=%s elapsed_ms=%d "
-                    "error_type=%s retryable=%s error=%s",
-                    self.AGENT_NAME, attempt, model, elapsed_ms,
-                    type(e).__name__, retryable, e,
+                    "%s: switching to fallback model=%s after primary failure",
+                    self.AGENT_NAME, model,
                 )
-                if not retryable:
-                    break
-                continue
+            for attempt, temperature in enumerate(attempts_temps, start=1):
+                if attempt > 1:
+                    time.sleep(_RETRY_SLEEP_SEC)
+                start_ts = time.time()
+                try:
+                    resp = client.messages.create(
+                        model=model,
+                        system=system_prompt,
+                        messages=[{"role": "user", "content": user_content}],
+                        max_tokens=self._max_tokens,
+                        temperature=temperature,
+                    )
+                except Exception as e:
+                    elapsed_ms = int((time.time() - start_ts) * 1000)
+                    retryable = _should_retry_ai_error(e, attempt=attempt)
+                    last_error = f"model {model} attempt {attempt}: {e}"
+                    last_error_type = type(e).__name__
+                    terminal_error = terminal_error or _is_terminal_ai_error(e)
+                    total_latency_ms += elapsed_ms
+                    logger.warning(
+                        "%s: attempt %d failed model=%s fallback_used=%s "
+                        "elapsed_ms=%d error_type=%s retryable=%s error=%s",
+                        self.AGENT_NAME, attempt, model, fallback_used,
+                        elapsed_ms, type(e).__name__, retryable, e,
+                    )
+                    if not retryable:
+                        break
+                    continue
 
-            total_latency_ms += int((time.time() - start_ts) * 1000)
-            total_tokens_in += extract_usage(resp, "input_tokens")
-            total_tokens_out += extract_usage(resp, "output_tokens")
-            last_model_used = extract_model(resp, model)
+                total_latency_ms += int((time.time() - start_ts) * 1000)
+                total_tokens_in += extract_usage(resp, "input_tokens")
+                total_tokens_out += extract_usage(resp, "output_tokens")
+                last_model_used = extract_model(resp, model)
 
-            text = extract_text(resp)
-            parsed = _parse_json_loose(text)
-            if parsed is None:
-                last_error = (
-                    f"attempt {attempt}: JSON parse failed; "
-                    f"text[:200]={(text or '')[:200]!r}"
-                )
-                continue
+                text = extract_text(resp)
+                parsed = _parse_json_loose(text)
+                if parsed is None:
+                    last_error = (
+                        f"model {model} attempt {attempt}: JSON parse failed; "
+                        f"text[:200]={(text or '')[:200]!r}"
+                    )
+                    continue
 
-            parsed.setdefault("agent", self.AGENT_NAME)
-            parsed.setdefault("status", "success")
-            parsed["model_used"] = last_model_used
-            parsed["tokens_in"] = total_tokens_in
-            parsed["tokens_out"] = total_tokens_out
-            parsed["latency_ms"] = total_latency_ms
-            return parsed
+                parsed.setdefault("agent", self.AGENT_NAME)
+                parsed.setdefault("status", "success")
+                parsed["model_used"] = last_model_used
+                parsed["model_requested"] = model
+                parsed["fallback_model_used"] = fallback_used
+                parsed["fallback_models_attempted"] = fallback_models_attempted
+                parsed["tokens_in"] = total_tokens_in
+                parsed["tokens_out"] = total_tokens_out
+                parsed["latency_ms"] = total_latency_ms
+                return parsed
 
         out = self._fallback_output()
         out["status"] = (
@@ -328,6 +354,8 @@ class BaseAgent:
         out["error"] = (last_error or "all retries failed")[:200]
         out["error_type"] = last_error_type
         out["model_used"] = last_model_used
+        out["model_requested"] = primary_model
+        out["fallback_models_attempted"] = fallback_models_attempted
         out["tokens_in"] = total_tokens_in
         out["tokens_out"] = total_tokens_out
         out["latency_ms"] = total_latency_ms

@@ -25,6 +25,7 @@ if str(ROOT) not in sys.path:
 
 from src.ai.client import (  # noqa: E402
     build_anthropic_client,
+    effective_fallback_models,
     effective_model,
     normalize_base_url,
 )
@@ -110,9 +111,12 @@ def main() -> int:
         "primary": _run_ping(model, timeout=args.timeout),
         "fallback": None,
     }
-    fallback_model = os.getenv("OPENAI_FALLBACK_MODEL")
-    if fallback_model and fallback_model != model:
-        result["fallback"] = _run_ping(fallback_model, timeout=args.timeout)
+    fallback_models = effective_fallback_models(model)
+    if fallback_models:
+        result["fallback"] = [
+            _run_ping(fallback_model, timeout=args.timeout)
+            for fallback_model in fallback_models
+        ]
     else:
         result["fallback"] = "no_fallback_model_configured"
 

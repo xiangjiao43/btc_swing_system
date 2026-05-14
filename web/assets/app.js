@@ -529,33 +529,6 @@ function app() {
             }
             return '-';
         },
-        masterLayerCard() {
-            const cards = (this.state && this.state.layer_cards) || [];
-            return cards.find(c => c && (c.layer === 'master' || c.layer === 'adjudicator')) || {};
-        },
-        swingTraderConclusion() {
-            const sc = (this.state && this.state.summary_card) || {};
-            if (sc.headline) return sc.headline;
-            return `${this.swingMasterAction()} · ${this.cardOpportunityGrade()} · ${this.swingDirection()}`;
-        },
-        swingTraderReason() {
-            const card = this.masterLayerCard();
-            return this.compactSpotText(
-                card.summary || (this.activeThesis && this.activeThesis.core_logic)
-                || '暂无主裁摘要',
-                140,
-            );
-        },
-        swingExecutionPlan() {
-            const parts = [];
-            const entry = this.cardEntryZones();
-            const cap = this.cardPositionCap();
-            const tps = this.cardTakeProfits();
-            if (entry !== '-') parts.push('入场 ' + entry);
-            if (cap !== '-') parts.push('仓位上限 ' + cap);
-            if (tps !== '-') parts.push('止盈 ' + tps);
-            return parts.length ? parts.join('；') : '暂无执行计划';
-        },
         swingInvalidationPlan() {
             const parts = [];
             const stop = this.cardStopLoss();

@@ -387,8 +387,8 @@ def test_rp_health_fetch_in_modules_refresh(js):
 # ============================================================
 
 def test_failure_status_section_exists(html):
-    """AI 失败状态 section + show 条件 aiFailureStatus()。"""
-    assert "AI 主裁结论" in html
+    """AI 失败提示保留,但不再作为独立 AI 主裁结论大块展示。"""
+    assert "AI 主裁结论" not in html
     assert "aiFailureStatus()" in html
     assert "aiFailureDetail()" in html
     assert "⚠️" in html
@@ -501,8 +501,9 @@ def test_audit_card_style_consistency(html):
 
 def test_existing_regions_preserved(html):
     """§X:不删现有 12 卡 + 五层 6 卡。"""
-    for region in ("region-1", "region-layer-a-spot", "region-layer-cards", "region-4", "region-5"):
+    for region in ("region-layer-a-spot", "region-layer-cards", "region-4", "region-5"):
         assert f'id="{region}"' in html
+    assert 'id="region-1"' not in html
 
 
 def test_layer_a_spot_js_helpers_exist(js):

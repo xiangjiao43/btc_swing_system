@@ -856,6 +856,64 @@ function app() {
             return `${b.getFullYear()}-${pad(b.getMonth() + 1)}-${pad(b.getDate())} ` +
                    `${pad(b.getHours())}:${pad(b.getMinutes())} (BJT)`;
         },
+        compactTimestamp(v) {
+            if (!v) return '-';
+            const s = String(v).replace(/\s*\(BJT\)\s*$/, '');
+            const m = s.match(/(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})(?::\d{2})?/);
+            if (m) return `${m[2]}-${m[3]} ${m[4]}:${m[5]}`;
+            return s;
+        },
+        topSpotActionSummary() {
+            const s = this.spotStrategy();
+            if (!s) return '暂无';
+            const a5 = s.a5_spot_adjudicator || {};
+            return a5.spot_action ? this.spotActionLabel(a5.spot_action) : '暂无';
+        },
+        topSpotStageSummary() {
+            const s = this.spotStrategy();
+            if (!s) return '暂无';
+            const a5 = s.a5_spot_adjudicator || {};
+            const a1 = s.a1_cycle_stage || {};
+            const stage = a5.cycle_stage || a1.cycle_stage;
+            return stage ? this.spotCycleStageLabel(stage) : '暂无';
+        },
+        topSpotUpdatedAt() {
+            const t = this.spotStrategyUpdatedAt();
+            return t && t !== '-' ? this.compactTimestamp(t) : '暂无更新';
+        },
+        topSwingStatusSummary() {
+            if (!this.state || !this.state.main_strategy) return '暂无';
+            return this.swingCurrentStatus();
+        },
+        topSwingActionSummary() {
+            if (!this.state || !this.state.main_strategy) return '暂无';
+            const action = this.swingMasterAction();
+            if (action && action !== '-') return action;
+            return this.cardOpportunityGrade() || '暂无';
+        },
+        topSwingUpdatedAt() {
+            const t = this.swingStrategyUpdatedAt();
+            return t && t !== '-' ? this.compactTimestamp(t) : '暂无更新';
+        },
+        topSystemStatusSummary() {
+            const s = this.systemHealth && this.systemHealth.overall_status;
+            if (s === 'all_healthy') return '运行正常';
+            if (s === 'partial_degraded') return '部分降级';
+            if (s === 'critical') return '数据中断 / 关键缺失';
+            return '未知';
+        },
+        topDataStatusSummary() {
+            const dh = (this.state && this.state.data_health) || {};
+            const overall = dh.overall;
+            if (overall === 'green') return '数据正常';
+            if (overall === 'yellow') return '部分延迟';
+            if (overall === 'red') return '数据异常';
+            return '未知';
+        },
+        topFallbackSummary() {
+            const level = this.state && this.state.meta && this.state.meta.fallback_level;
+            return level ? this.fallbackLabel(level) : '无 fallback';
+        },
 
         async _loadState() {
             this.loading = true;

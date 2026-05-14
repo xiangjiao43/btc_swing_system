@@ -165,6 +165,56 @@ def test_modules_use_font_mono_for_numbers(html):
     assert cnt >= 15, f"font-mono 用得太少({cnt}),v1.4 §9.1 风格未对齐"
 
 
+def test_top_market_overview_uses_dual_layer_summary(html):
+    """顶部行情卡片右侧改为大周期 / 波段 / 系统状态三块摘要。"""
+    start = html.find('id="top-market-overview"')
+    end = html.find("<!-- 🩺 系统自检", start)
+    top = html[start:end]
+    assert "BTC 现价" in top
+    assert "采集 " in top
+    for label in ("大周期策略", "波段策略", "系统状态"):
+        assert label in top
+    for helper in (
+        "topSpotActionSummary()",
+        "topSpotStageSummary()",
+        "topSpotUpdatedAt()",
+        "topSwingStatusSummary()",
+        "topSwingActionSummary()",
+        "topSwingUpdatedAt()",
+        "topSystemStatusSummary()",
+        "topDataStatusSummary()",
+        "topFallbackSummary()",
+    ):
+        assert helper in top
+
+
+def test_top_market_overview_removed_old_repeated_fields(html):
+    """顶部不再重复展示下方模块已有的老字段。"""
+    start = html.find('id="top-market-overview"')
+    end = html.find("<!-- 🩺 系统自检", start)
+    top = html[start:end]
+    for old in ("生命周期", "机会 / 许可", "观察类别", "下次运行", "数据 / Fallback"):
+        assert old not in top
+
+
+def test_top_market_overview_js_helpers_declared(js):
+    for helper in (
+        "topSpotActionSummary()",
+        "topSpotStageSummary()",
+        "topSpotUpdatedAt()",
+        "topSwingStatusSummary()",
+        "topSwingActionSummary()",
+        "topSwingUpdatedAt()",
+        "topSystemStatusSummary()",
+        "topDataStatusSummary()",
+        "topFallbackSummary()",
+        "compactTimestamp(v)",
+    ):
+        assert helper in js
+    for fallback in ("return '暂无'", "return '未知'", "'无 fallback'"):
+        assert fallback in js
+
+
 def test_existing_12_cards_not_removed(html):
     """§X:不删现有 12 卡 + 五层分析 6 卡 — 验证现有 region 仍在。"""
     # region-1(AI 策略建议) / Layer A / Layer B 波段策略 / region-layer-cards(五层分析) / region-4 / region-5

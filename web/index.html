@@ -193,9 +193,9 @@
     <!-- ============================================================ -->
     <!-- 顶部全局状态条(§9.3)                                        -->
     <!-- ============================================================ -->
-    <section class="audit-card px-3 py-2">
-      <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3 items-start">
-        <div class="col-span-2 md:col-span-1 lg:col-span-2">
+    <section class="audit-card px-3 py-2" id="top-market-overview">
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3 items-start">
+        <div class="md:col-span-2 lg:col-span-2">
           <div class="stat-label flex items-center gap-1.5">
             <span>BTC 现价</span>
             <span class="text-[8.5px] normal-case text-slate-400 dark:text-slate-500 tracking-normal"
@@ -216,56 +216,28 @@
                   title="数据陈旧:现货 > 2 分钟 / K 线 fallback > 30 分钟">·stale</span>
           </div>
         </div>
-        <div>
-          <div class="stat-label">状态</div>
-          <span class="inline-block px-1.5 py-0.5 rounded text-[13px] font-bold font-mono"
-                :class="stateColor(state.main_strategy.action_state)"
-                x-text="state.main_strategy.action_state"></span>
+        <div class="rounded border border-slate-200 dark:border-slate-800 px-2.5 py-2 min-w-0">
+          <div class="stat-label">大周期策略</div>
+          <div class="text-[13px] font-bold truncate" x-text="topSpotActionSummary()"></div>
+          <div class="text-[11px] text-slate-500 dark:text-slate-400 truncate"
+               x-text="topSpotStageSummary()"></div>
+          <div class="text-[10px] font-mono tabular-nums text-slate-500 truncate"
+               x-text="topSpotUpdatedAt()"></div>
         </div>
-        <div>
-          <div class="stat-label">生命周期</div>
-          <div :class="(state.main_strategy.lifecycle_phase || '-') === '-'
-                       ? 'text-[13px] placeholder-dash'
-                       : 'text-[13px]'"
-               x-text="state.main_strategy.lifecycle_phase || '-'"></div>
+        <div class="rounded border border-slate-200 dark:border-slate-800 px-2.5 py-2 min-w-0">
+          <div class="stat-label">波段策略</div>
+          <div class="text-[13px] font-bold truncate" x-text="topSwingStatusSummary()"></div>
+          <div class="text-[11px] text-slate-500 dark:text-slate-400 truncate"
+               x-text="topSwingActionSummary()"></div>
+          <div class="text-[10px] font-mono tabular-nums text-slate-500 truncate"
+               x-text="topSwingUpdatedAt()"></div>
         </div>
-        <div>
-          <div class="stat-label">机会 / 许可</div>
-          <div :class="((state.main_strategy.opportunity_grade || '-') + ' / ' +
-                        (state.main_strategy.execution_permission || '-')) === '- / -'
-                       ? 'text-[13px] placeholder-dash'
-                       : 'text-[13px] font-mono'"
-               x-text="(state.main_strategy.opportunity_grade || '-') + ' / ' +
-                       (state.main_strategy.execution_permission || '-')"></div>
-        </div>
-        <div>
-          <div class="stat-label">观察类别</div>
-          <span class="inline-block px-1.5 py-0.5 rounded-full text-[10.5px]"
-                :class="observationColor(state.main_strategy.observation_category)"
-                x-text="observationLabel(state.main_strategy.observation_category)"></span>
-        </div>
-        <div>
-          <div class="stat-label">下次运行</div>
-          <div :class="(countdownLabel === '-' || !countdownLabel)
-                       ? 'text-[13px] placeholder-dash'
-                       : 'text-[13px] font-mono tabular-nums'"
-               x-text="countdownLabel || '-'"></div>
-        </div>
-        <div class="col-span-2 md:col-span-1">
-          <div class="stat-label">数据 / Fallback</div>
-          <div class="flex items-center gap-1.5 text-[11px]">
-            <span class="inline-block w-1.5 h-1.5 rounded-full"
-                  :class="healthColor(state.data_health && state.data_health.overall)"></span>
-            <span :class="(state.data_health && state.data_health.data_completeness_pct != null)
-                          ? 'font-mono tabular-nums'
-                          : 'placeholder-dash'"
-                  x-text="(state.data_health && state.data_health.data_completeness_pct != null
-                           ? state.data_health.data_completeness_pct.toFixed(0) + '%'
-                           : '-')"></span>
-            <span class="text-slate-400">|</span>
-            <span :class="fallbackLabelClass(state.meta && state.meta.fallback_level)"
-                  x-text="fallbackLabel(state.meta && state.meta.fallback_level)"></span>
-          </div>
+        <div class="rounded border border-slate-200 dark:border-slate-800 px-2.5 py-2 min-w-0">
+          <div class="stat-label">系统状态</div>
+          <div class="text-[13px] font-bold truncate" x-text="topSystemStatusSummary()"></div>
+          <div class="text-[11px] text-slate-500 dark:text-slate-400 truncate"
+               x-text="topDataStatusSummary()"></div>
+          <div class="text-[10px] text-slate-500 truncate" x-text="topFallbackSummary()"></div>
         </div>
       </div>
     </section>

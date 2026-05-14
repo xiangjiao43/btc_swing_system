@@ -435,14 +435,6 @@ function app() {
             return '$' + n.toFixed(2);
         },
 
-        // Sprint 1.10-I §9.2.3:挂单价距当前 BTC 现价的 %(带 ± 号)
-        distanceFromLive(orderPrice) {
-            const live = this.livePrice();
-            if (!live || !orderPrice) return '-';
-            const pct = ((Number(orderPrice) - live) / live) * 100;
-            return (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%';
-        },
-
         async _refreshSystemHealth() {
             try {
                 const r = await fetch('/api/system/health-detail',

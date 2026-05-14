@@ -587,60 +587,41 @@
 
               <article id="region-active-thesis" class="rounded border border-slate-200 dark:border-slate-800 p-3 space-y-2">
                 <h4 class="text-[12px] font-semibold text-slate-600 dark:text-slate-400">挂单 / thesis</h4>
-                <template x-if="!activeThesis || !activeThesis.thesis_id">
+                <template x-if="!activeThesis || Object.keys(activeThesis || {}).length === 0">
                   <div class="text-slate-500 dark:text-slate-400 italic text-[12px]">
                     当前无 active thesis
                   </div>
                 </template>
-                <template x-if="activeThesis && activeThesis.thesis_id">
+                <template x-if="activeThesis && Object.keys(activeThesis || {}).length > 0">
                   <div class="space-y-2 text-[12px]">
-                    <div class="grid grid-cols-2 gap-2">
-                      <div>
-                        <div class="stat-label">thesis_id</div>
-                        <div class="font-mono text-[11px]" x-text="activeThesis.thesis_id"></div>
-                      </div>
-                      <div>
-                        <div class="stat-label">阶段</div>
-                        <div class="font-mono" x-text="activeThesis.lifecycle_stage || '-'"></div>
-                      </div>
-                      <div>
-                        <div class="stat-label">等待入场区</div>
-                        <div class="font-mono text-[11px]" x-text="cardEntryZones()"></div>
-                      </div>
-                      <div>
-                        <div class="stat-label">失效条件</div>
-                        <div class="font-mono text-[11px]" x-text="swingInvalidationPlan()"></div>
-                      </div>
+                    <div>
+                      <div class="stat-label">失效条件</div>
+                      <div class="font-mono text-[11px]" x-text="swingInvalidationPlan()"></div>
                     </div>
                   </div>
                 </template>
-              </article>
-            </div>
 
-            <div id="region-orders-position" class="rounded border border-slate-200 dark:border-slate-800 p-3 text-[12px]">
-              <div class="stat-label mb-1" x-text="'待触发挂单(' + (ordersPending.items || []).length + ')'"></div>
-              <template x-if="!ordersPending.active_thesis_id">
-                <div class="text-slate-500 dark:text-slate-400 italic">当前无 active thesis,无挂单</div>
-              </template>
-              <table x-show="ordersPending.active_thesis_id" class="w-full text-[11px] font-mono tabular-nums">
-                <thead class="text-slate-500 border-b border-slate-200 dark:border-slate-800">
-                  <tr><th class="text-left">类型</th><th class="text-right">价格</th>
-                      <th class="text-right">仓位</th><th class="text-right">距当前</th></tr>
-                </thead>
-                <tbody>
-                  <template x-for="o in (ordersPending.items || [])" :key="o.order_id">
-                    <tr>
-                      <td x-text="o.order_type"></td>
-                      <td class="text-right" x-text="'$' + Number(o.price).toLocaleString()"></td>
-                      <td class="text-right" x-text="(o.size_pct ?? 0).toFixed(1) + '%'"></td>
-                      <td class="text-right" x-text="distanceFromLive(o.price)"></td>
-                    </tr>
-                  </template>
-                  <tr x-show="(ordersPending.items || []).length === 0">
-                    <td colspan="4" class="text-slate-500 italic py-1">无待触发挂单</td>
-                  </tr>
-                </tbody>
-              </table>
+                <div id="region-orders-position" class="pt-2 border-t border-slate-100 dark:border-slate-800 text-[12px]">
+                  <div class="stat-label mb-1" x-text="'待触发挂单(' + (ordersPending.items || []).length + ')'"></div>
+                  <table class="w-full text-[11px] font-mono tabular-nums">
+                    <thead class="text-slate-500 border-b border-slate-200 dark:border-slate-800">
+                      <tr><th class="text-left">类型</th><th class="text-right">价格</th><th class="text-right">仓位</th></tr>
+                    </thead>
+                    <tbody>
+                      <template x-for="o in (ordersPending.items || [])" :key="o.order_id">
+                        <tr>
+                          <td x-text="o.order_type"></td>
+                          <td class="text-right" x-text="'$' + Number(o.price).toLocaleString()"></td>
+                          <td class="text-right" x-text="(o.size_pct ?? 0).toFixed(1) + '%'"></td>
+                        </tr>
+                      </template>
+                      <tr x-show="(ordersPending.items || []).length === 0">
+                        <td colspan="3" class="text-slate-500 italic py-1">无待触发挂单</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </article>
             </div>
 
             <div id="region-thesis-timeline" class="rounded border border-slate-200 dark:border-slate-800 p-3 text-[12px]">

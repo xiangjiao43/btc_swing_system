@@ -217,7 +217,7 @@ def test_top_market_overview_js_helpers_declared(js):
 
 def test_existing_12_cards_not_removed(html):
     """§X:不删现有 12 卡 + 五层分析 6 卡 — 验证现有 region 仍在。"""
-    # Layer A / Layer B 波段策略 / region-layer-cards(五层分析) / region-4 / region-5
+    # Layer A / Layer B 波段策略 / region-layer-cards / region-4 / region-5
     for region in (
         "region-layer-a-spot",
         "region-layer-b-swing",
@@ -229,18 +229,19 @@ def test_existing_12_cards_not_removed(html):
 
 
 def test_module_position_between_strategy_and_layers(html):
-    """波段策略内部顺序:摘要区 → 账户与执行 → 五层分析。"""
+    """波段策略内部顺序:摘要区 → 账户与执行 → 主裁摘要 → L1-L5 卡片。"""
     pos_layer_a = html.find('id="region-layer-a-spot"')
     pos_swing = html.find('id="region-layer-b-swing"')
     pos_summary = html.find('id="region-swing-summary"')
     pos_account = html.find('id="region-swing-account-execution"')
+    pos_adjudicator = html.find('id="region-swing-adjudicator-summary"')
     pos_layers = html.find('id="region-layer-cards"')
     pos_raw = html.find('id="region-4"')
     assert pos_layer_a < pos_swing < pos_raw, (
         "模块顺序错:必须大周期策略 → 波段策略 → 原始数据因子"
     )
-    assert pos_swing < pos_summary < pos_account < pos_layers < pos_raw, (
-        "波段策略内部顺序错:必须 摘要区 → 账户与执行 → 五层分析"
+    assert pos_swing < pos_summary < pos_account < pos_layers < pos_adjudicator < pos_raw, (
+        "波段策略内部顺序错:必须 摘要区 → 账户与执行 → 主裁摘要 → L1-L5 卡片"
     )
 
 
@@ -255,9 +256,13 @@ def test_swing_strategy_wrapper_static_contract(html):
     assert html.count('id="region-swing-account-execution"') == 1
     for label in ("当前状态", "方向", "机会等级", "主裁动作", "置信度"):
         assert label in html
-    for label in ("账户与执行", "五层分析"):
+    for label in ("账户与执行", "交易员结论"):
         assert label in html
     assert "AI 主裁结论" not in html
+    assert "五层分析" not in html
+    assert "L1-L5 + 主裁" not in html
+    assert "每层 AI 独立分析" not in html
+    assert html.count('id="region-swing-adjudicator-summary"') == 1
     assert html.count('id="region-active-thesis"') == 1
     assert html.count('id="region-virtual-account"') == 1
     assert html.count('id="region-orders-position"') == 1
@@ -304,6 +309,9 @@ def test_swing_strategy_js_helpers_declared(js):
     assert "swingDirection()" in js
     assert "swingMasterAction()" in js
     assert "swingConfidenceScore()" in js
+    assert "swingAdjudicatorAdvice()" in js
+    assert "swingAdjudicatorSummary()" in js
+    assert "swingAdjudicatorCard()" in js
     assert "swingInvalidationPlan()" in js
     assert "layerAHealthItems()" in js
     for label in ("A1", "A2", "A3", "A4", "A5"):
@@ -343,6 +351,18 @@ def test_redundant_ai_adjudicator_block_removed(html, js):
     assert "swingTraderReason()" not in js
     assert "swingExecutionPlan()" not in js
     assert 'id="region-layer-cards"' in html
+
+
+def test_layer_b_five_layer_header_replaced_by_adjudicator_summary(html, js):
+    """波段策略不再显示五层分析标题栏,改为主裁交易员摘要框。"""
+    assert 'id="region-swing-adjudicator-summary"' in html
+    assert 'x-text="swingAdjudicatorAdvice()"' in html
+    assert 'x-text="swingAdjudicatorSummary()"' in html
+    assert "五层分析" not in html
+    assert "L1-L5 + 主裁" not in html
+    assert "每层 AI 独立分析" not in html
+    assert "交易员结论：主裁 AI 降级，系统使用 fallback。" in js
+    assert "swingAdjudicatorCard()" in js
 
 
 def test_layer_a_spot_module_static_contract(html):

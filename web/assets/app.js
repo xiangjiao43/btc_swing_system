@@ -529,6 +529,47 @@ function app() {
             }
             return '-';
         },
+        swingAdjudicatorCard() {
+            const cards = (this.state && this.state.layer_cards) || [];
+            return cards.find(c => c && (c.layer === 'master' || c.layer === 'adjudicator')) || {};
+        },
+        swingDirectionLabel() {
+            const sc = (this.state && this.state.summary_card) || {};
+            if (sc.stance_label) return sc.stance_label;
+            const d = String(this.swingDirection() || '').toLowerCase();
+            if (d.includes('long')) return '看多';
+            if (d.includes('short')) return '看空';
+            if (d === 'none' || d === '-') return '无方向';
+            return this.swingDirection();
+        },
+        swingAdjudicatorAdvice() {
+            if (this.aiFailureStatus()) {
+                return '交易员结论：主裁 AI 降级，系统使用 fallback。';
+            }
+            const action = this.swingMasterAction() || '-';
+            const grade = this.cardOpportunityGrade() || '-';
+            const direction = this.swingDirectionLabel();
+            return this.compactSpotText(`交易员结论：${action} · ${grade} · ${direction}`, 88);
+        },
+        swingAdjudicatorSummary() {
+            if (this.aiFailureStatus()) {
+                return this.compactSpotText(
+                    this.aiFailureDetail() || this.swingInvalidationPlan() || '暂无 fallback 详情',
+                    132,
+                );
+            }
+            const card = this.swingAdjudicatorCard();
+            const sc = (this.state && this.state.summary_card) || {};
+            const ai = (this.state && this.state.ai_verdict) || {};
+            const reason = card.summary || ai.one_line_summary || sc.headline
+                || (this.activeThesis && this.activeThesis.core_logic)
+                || '暂无主裁摘要';
+            const invalidation = this.swingInvalidationPlan();
+            const suffix = invalidation && invalidation !== '-'
+                ? `；关键失效条件：${invalidation}`
+                : '';
+            return this.compactSpotText(reason + suffix, 150);
+        },
         swingInvalidationPlan() {
             const parts = [];
             const stop = this.cardStopLoss();

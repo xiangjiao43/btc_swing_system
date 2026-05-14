@@ -20,7 +20,7 @@
       },
     };
   </script>
-  <script src="/assets/app.js?v=layer-b-swing-health-layout-20260514"></script>
+  <script src="/assets/app.js?v=layer-b-swing-dashboard-20260514"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
 </head>
 
@@ -491,7 +491,7 @@
     </section>
 
     <!-- ============================================================ -->
-    <!-- 🌊 波段策略(Layer B):中长线波段仓,管理 thesis / 虚拟账户 / 挂单 -->
+    <!-- 🌊 波段策略(Layer B):中长线波段仓仪表盘                     -->
     <!-- ============================================================ -->
     <section id="region-layer-b-swing" class="audit-card">
       <header class="px-4 py-2.5 border-b border-slate-200 dark:border-slate-800">
@@ -506,527 +506,338 @@
            x-show="state"
            x-text="'波段策略更新时间：' + swingStrategyUpdatedAt()"></p>
       </header>
-      <div class="p-3 space-y-3">
-    <!-- ============================================================ -->
-    <!-- 📋 模块 2:当前 thesis 卡(Sprint 1.10-I §9.2.2)             -->
-    <!-- ============================================================ -->
-    <section id="region-active-thesis" class="audit-card">
-      <header class="px-4 py-2.5 border-b border-slate-200 dark:border-slate-800">
-        <h2 class="text-base font-semibold flex items-center gap-2">
-          <span>📋</span><span>当前 thesis</span>
-        </h2>
-      </header>
-      <div class="p-3 text-[12px]">
-        <template x-if="!activeThesis || !activeThesis.thesis_id">
-          <div class="text-slate-500 dark:text-slate-400 italic">
-            当前无 active thesis
+
+      <div class="p-3 space-y-4">
+        <!-- 摘要区:只做展示归纳,不改 Layer B 数据来源 -->
+        <section id="region-swing-summary" class="grid grid-cols-2 md:grid-cols-5 gap-3 text-[12px]">
+          <div class="rounded border border-slate-200 dark:border-slate-800 p-2">
+            <div class="stat-label">当前状态</div>
+            <div class="text-[13px] font-bold" x-text="swingCurrentStatus()"></div>
           </div>
-        </template>
-        <template x-if="activeThesis && activeThesis.thesis_id">
-          <div class="space-y-2">
-            <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
-              <div>
-                <div class="stat-label">thesis_id</div>
-                <div class="font-mono text-[11px]"
-                     x-text="activeThesis.thesis_id"></div>
-              </div>
-              <div>
-                <div class="stat-label">方向</div>
-                <span class="inline-block px-1.5 py-0.5 rounded font-bold font-mono"
-                      :class="activeThesis.direction === 'long'
-                                ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400'
-                                : 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-400'"
-                      x-text="activeThesis.direction"></span>
-              </div>
-              <div>
-                <div class="stat-label">置信度</div>
-                <div class="font-mono tabular-nums font-bold"
-                     x-text="(activeThesis.confidence_score ?? '-') + ' / 100'"></div>
-              </div>
-              <div>
-                <div class="stat-label">阶段</div>
-                <div class="font-mono"
-                     x-text="activeThesis.lifecycle_stage || '-'"></div>
-              </div>
-            </div>
-            <div>
-              <div class="stat-label">core_logic</div>
-              <div class="text-[12px] leading-snug"
-                   x-text="activeThesis.core_logic || '-'"></div>
-            </div>
-            <div x-show="activeThesis.last_assessment">
-              <div class="stat-label">最近评估</div>
-              <div class="text-[12px]">
-                <span class="font-mono font-bold"
-                      x-text="activeThesis.last_assessment"></span>
-                <span class="text-slate-500"
-                      x-text="activeThesis.last_assessment_note
-                              ? ' - ' + activeThesis.last_assessment_note : ''"></span>
-              </div>
-            </div>
-            <div x-show="(activeThesis.break_conditions || []).length > 0">
-              <div class="stat-label">break_conditions(失效条件)</div>
-              <ul class="list-disc list-inside text-[12px] space-y-0.5 mt-0.5">
-                <template x-for="(b, i) in (activeThesis.break_conditions || [])"
-                          :key="i">
-                  <li x-text="b" class="leading-snug"></li>
+          <div class="rounded border border-slate-200 dark:border-slate-800 p-2">
+            <div class="stat-label">方向</div>
+            <div class="text-[13px] font-bold" x-text="swingDirection()"></div>
+          </div>
+          <div class="rounded border border-slate-200 dark:border-slate-800 p-2">
+            <div class="stat-label">机会等级</div>
+            <div class="text-[13px] font-bold" x-text="cardOpportunityGrade()"></div>
+          </div>
+          <div class="rounded border border-slate-200 dark:border-slate-800 p-2">
+            <div class="stat-label">主裁动作</div>
+            <div class="text-[13px] font-bold" x-text="swingMasterAction()"></div>
+          </div>
+          <div class="rounded border border-slate-200 dark:border-slate-800 p-2">
+            <div class="stat-label">置信度</div>
+            <div class="text-[13px] font-bold font-mono tabular-nums" x-text="swingConfidenceScore()"></div>
+          </div>
+        </section>
+
+        <!-- 1. 账户与执行 -->
+        <section id="region-swing-account-execution" class="rounded border border-slate-200 dark:border-slate-800">
+          <header class="px-3 py-2 border-b border-slate-200 dark:border-slate-800">
+            <h3 class="text-[13px] font-semibold flex items-center gap-2">
+              <span>💼</span><span>账户与执行</span>
+            </h3>
+          </header>
+          <div class="p-3 space-y-3">
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-3">
+              <article id="region-virtual-account" class="rounded border border-slate-200 dark:border-slate-800 p-3 space-y-2">
+                <h4 class="text-[12px] font-semibold text-slate-600 dark:text-slate-400">虚拟账户</h4>
+                <template x-if="!virtualAccount">
+                  <div class="text-slate-500 dark:text-slate-400 italic text-[12px]">
+                    virtual_account 未初始化(冷启动)
+                  </div>
                 </template>
-              </ul>
-            </div>
-            <div x-show="activeThesis.is_60d_capped"
-                 class="text-[11px] text-amber-600 dark:text-amber-400">
-              ⚠ 已达 60 天上限(60d_capped)
-            </div>
-          </div>
-        </template>
-      </div>
-    </section>
-    <!-- ============================================================ -->
-    <!-- 🎯 AI 策略建议(1.8.2-D 重构):13 张小卡,分 4 行             -->
-    <!-- ============================================================ -->
-    <section id="region-1" class="audit-card lg:col-span-5">
-      <header class="px-4 py-2.5 border-b border-slate-200 dark:border-slate-800">
-        <h2 class="text-base font-semibold flex items-center gap-2">
-          <span>🎯</span><span>AI 策略建议</span>
-          <!-- v1.4.2 fix(问题 2):双字段兜底 — v14 schema gate 跳过
-               _to_display_state_v13 后 state.meta.generated_at_bjt 经常 null
-               (用户截图:hard refresh 后右侧仍空)。改读 summary_card.decision_time
-               + state.ai_model_actual 兜底。-->
-          <span class="ml-auto text-[10px] text-slate-500"
-                x-show="state.meta?.generated_at_bjt || state.summary_card?.decision_time"
-                x-text="'AI 输出于 ' + (state.meta?.generated_at_bjt || state.summary_card?.decision_time || '-') +
-                        ((state.meta?.ai_model_actual || state.ai_model_actual)
-                         ? ' · ' + simplifyAiModel(state.meta?.ai_model_actual || state.ai_model_actual)
-                         : '')"></span>
-        </h2>
-      </header>
-      <!-- 1.8.2-K.1:12 卡字号字重统一对齐顶部状态条(.stat-label + text-[13px]),
-           多值卡(入场区间/止盈/硬失效)合并 1 行逗号分隔 -->
-      <div class="p-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-x-8 gap-y-6">
-        <div>
-          <div class="stat-label">方向</div>
-          <div class="text-[13px]"
-               :class="(state.summary_card?.stance_label || '-') === '-'
-                       ? 'placeholder-dash'
-                       : 'font-bold text-slate-900 dark:text-slate-100'"
-               x-text="state.summary_card?.stance_label || '-'"></div>
-        </div>
-        <div>
-          <div class="stat-label">状态</div>
-          <div class="text-[13px]"
-               :class="(state.summary_card?.action_state_label || '-') === '-'
-                       ? 'placeholder-dash'
-                       : 'font-bold text-slate-900 dark:text-slate-100'"
-               x-text="state.summary_card?.action_state_label || '-'"></div>
-        </div>
-        <div>
-          <div class="stat-label">机会等级</div>
-          <div class="text-[13px]"
-               :class="cardOpportunityGrade() === '-'
-                       ? 'placeholder-dash'
-                       : 'font-bold text-slate-900 dark:text-slate-100'"
-               x-text="cardOpportunityGrade()"></div>
-        </div>
-        <div>
-          <div class="stat-label">信心指数</div>
-          <div class="text-[13px]"
-               :class="cardConfidence() === '-'
-                       ? 'placeholder-dash'
-                       : 'font-bold text-slate-900 dark:text-slate-100'"
-               x-text="cardConfidence()"></div>
-        </div>
-        <div>
-          <div class="stat-label">入场区间</div>
-          <div class="text-[13px]"
-               :class="cardEntryZones() === '-'
-                       ? 'placeholder-dash'
-                       : 'font-bold font-mono text-slate-900 dark:text-slate-100'"
-               x-text="cardEntryZones()"></div>
-        </div>
-        <div>
-          <div class="stat-label">止损价</div>
-          <div class="text-[13px]"
-               :class="cardStopLoss() === '-'
-                       ? 'placeholder-dash'
-                       : 'font-bold font-mono text-slate-900 dark:text-slate-100'"
-               x-text="cardStopLoss()"></div>
-        </div>
-        <div>
-          <div class="stat-label">止盈分批</div>
-          <div class="text-[13px]"
-               :class="cardTakeProfits() === '-'
-                       ? 'placeholder-dash'
-                       : 'font-bold font-mono text-slate-900 dark:text-slate-100'"
-               x-text="cardTakeProfits()"></div>
-        </div>
-        <div>
-          <div class="stat-label">仓位上限</div>
-          <div class="text-[13px]"
-               :class="cardPositionCap() === '-'
-                       ? 'placeholder-dash'
-                       : 'font-bold text-slate-900 dark:text-slate-100'"
-               x-text="cardPositionCap()"></div>
-        </div>
-        <div>
-          <div class="stat-label">当前浮盈</div>
-          <div class="text-[13px]"
-               :class="cardCurrentPnl() === '-'
-                       ? 'placeholder-dash'
-                       : 'font-bold text-slate-900 dark:text-slate-100'"
-               x-text="cardCurrentPnl()"></div>
-        </div>
-        <div>
-          <div class="stat-label">距离止损</div>
-          <div class="text-[13px]"
-               :class="cardDistanceToStop() === '-'
-                       ? 'placeholder-dash'
-                       : 'font-bold font-mono text-slate-900 dark:text-slate-100'"
-               x-text="cardDistanceToStop()"></div>
-        </div>
-        <div>
-          <div class="stat-label">持仓时长</div>
-          <div class="text-[13px]"
-               :class="cardHoldingDuration() === '-'
-                       ? 'placeholder-dash'
-                       : 'font-bold text-slate-900 dark:text-slate-100'"
-               x-text="cardHoldingDuration()"></div>
-        </div>
-        <div>
-          <div class="stat-label">分级失效位</div>
-          <template x-if="cardHardInvalidationsEmpty()">
-            <div class="text-[13px] placeholder-dash">-</div>
-          </template>
-          <template x-if="!cardHardInvalidationsEmpty()">
-            <div class="text-[12px] font-mono space-y-0.5">
-              <template x-for="lv in cardHardInvalidations()"
-                        :key="(lv.type || '') + '_' + lv.price">
-                <div class="leading-tight whitespace-nowrap">
-                  <span :class="severityClass(lv.severity_rank)"
-                        x-text="lv.severity_label"></span>
-                  <span class="text-slate-500 dark:text-slate-400 mx-1"
-                        x-text="lv.type_label"></span>
-                  <span class="font-bold text-slate-900 dark:text-slate-100"
-                        x-text="': $' + Number(lv.price).toLocaleString()"></span>
+                <template x-if="virtualAccount">
+                  <div class="grid grid-cols-2 gap-2 text-[12px]">
+                    <div>
+                      <div class="stat-label">权益</div>
+                      <div class="font-bold font-mono tabular-nums" x-text="formatUsd(virtualAccount.total_equity)"></div>
+                    </div>
+                    <div>
+                      <div class="stat-label">现金</div>
+                      <div class="font-mono tabular-nums" x-text="formatUsd(virtualAccount.available_cash)"></div>
+                    </div>
+                    <div>
+                      <div class="stat-label">PnL</div>
+                      <div class="font-mono tabular-nums"
+                           :class="(accountReturns.total_pct ?? 0) >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'"
+                           x-text="formatPct(accountReturns.total_pct, true)"></div>
+                    </div>
+                    <div>
+                      <div class="stat-label">回撤</div>
+                      <div class="font-mono tabular-nums" x-text="cardDistanceToStop()"></div>
+                    </div>
+                    <div class="col-span-2">
+                      <div class="stat-label">初始资金</div>
+                      <div class="font-mono tabular-nums" x-text="formatUsd(virtualAccount.initial_capital)"></div>
+                    </div>
+                  </div>
+                </template>
+                <div x-show="accountHistory.length >= 2">
+                  <div class="stat-label mb-1">30 天资金曲线</div>
+                  <svg viewBox="0 0 300 60" class="w-full h-12" preserveAspectRatio="none">
+                    <polyline :points="sparklinePoints(accountHistory)" fill="none" stroke="currentColor"
+                              stroke-width="1.2" class="text-emerald-600 dark:text-emerald-400" />
+                  </svg>
                 </div>
+              </article>
+
+              <article id="region-position-summary" class="rounded border border-slate-200 dark:border-slate-800 p-3 space-y-2">
+                <h4 class="text-[12px] font-semibold text-slate-600 dark:text-slate-400">当前持仓</h4>
+                <template x-if="!positionSummary || !(positionSummary.entry_orders_filled > 0)">
+                  <div class="text-slate-500 dark:text-slate-400 italic text-[12px]">
+                    当前无持仓 / 等待入场信号
+                  </div>
+                </template>
+                <template x-if="positionSummary && positionSummary.entry_orders_filled > 0">
+                  <div class="grid grid-cols-2 gap-2 text-[12px]">
+                    <div>
+                      <div class="stat-label">方向</div>
+                      <div class="font-bold" x-text="positionSummary.direction || '-'"></div>
+                    </div>
+                    <div>
+                      <div class="stat-label">BTC 数量</div>
+                      <div class="font-mono tabular-nums" x-text="positionSummary.btc_amount?.toFixed(6) ?? '-'"></div>
+                    </div>
+                    <div>
+                      <div class="stat-label">入场价</div>
+                      <div class="font-mono tabular-nums"
+                           x-text="positionSummary.avg_entry_price ? '$' + positionSummary.avg_entry_price.toLocaleString() : '-'"></div>
+                    </div>
+                    <div>
+                      <div class="stat-label">浮盈亏</div>
+                      <div class="font-mono tabular-nums" x-text="cardCurrentPnl()"></div>
+                    </div>
+                  </div>
+                </template>
+              </article>
+
+              <article id="region-active-thesis" class="rounded border border-slate-200 dark:border-slate-800 p-3 space-y-2">
+                <h4 class="text-[12px] font-semibold text-slate-600 dark:text-slate-400">挂单 / thesis</h4>
+                <template x-if="!activeThesis || !activeThesis.thesis_id">
+                  <div class="text-slate-500 dark:text-slate-400 italic text-[12px]">
+                    当前无 active thesis
+                  </div>
+                </template>
+                <template x-if="activeThesis && activeThesis.thesis_id">
+                  <div class="space-y-2 text-[12px]">
+                    <div class="grid grid-cols-2 gap-2">
+                      <div>
+                        <div class="stat-label">thesis_id</div>
+                        <div class="font-mono text-[11px]" x-text="activeThesis.thesis_id"></div>
+                      </div>
+                      <div>
+                        <div class="stat-label">阶段</div>
+                        <div class="font-mono" x-text="activeThesis.lifecycle_stage || '-'"></div>
+                      </div>
+                      <div>
+                        <div class="stat-label">等待入场区</div>
+                        <div class="font-mono text-[11px]" x-text="cardEntryZones()"></div>
+                      </div>
+                      <div>
+                        <div class="stat-label">失效条件</div>
+                        <div class="font-mono text-[11px]" x-text="swingInvalidationPlan()"></div>
+                      </div>
+                    </div>
+                  </div>
+                </template>
+              </article>
+            </div>
+
+            <div id="region-orders-position" class="rounded border border-slate-200 dark:border-slate-800 p-3 text-[12px]">
+              <div class="stat-label mb-1" x-text="'待触发挂单(' + (ordersPending.items || []).length + ')'"></div>
+              <template x-if="!ordersPending.active_thesis_id">
+                <div class="text-slate-500 dark:text-slate-400 italic">当前无 active thesis,无挂单</div>
               </template>
-            </div>
-          </template>
-        </div>
-      </div>
-    </section>
-    <!-- ============================================================ -->
-    <!-- ⚠️ AI 失败状态显示(Sprint 1.10-I §9.4 + §6.3.4)            -->
-    <!-- 替换"无机会"模糊显示;数据源 strategy_runs.retry_log_json     -->
-    <!-- ============================================================ -->
-    <section x-show="aiFailureStatus()"
-             class="audit-card border-amber-300 dark:border-amber-800
-                    bg-amber-50/30 dark:bg-amber-950/20 px-3 py-2.5">
-      <div class="flex items-start gap-2 text-[12px]">
-        <span class="text-base shrink-0">⚠️</span>
-        <div class="space-y-0.5">
-          <div class="font-bold text-amber-700 dark:text-amber-400"
-               x-text="aiFailureStatus()"></div>
-          <div x-show="aiFailureDetail()"
-               class="text-[11px] text-slate-600 dark:text-slate-400 font-mono"
-               x-text="aiFailureDetail()"></div>
-        </div>
-      </div>
-    </section>
-    <!-- ============================================================ -->
-    <!-- 💼 模块 1:虚拟账户面板(Sprint 1.10-I §9.2.1)              -->
-    <!-- 位置:AI 策略建议 ↓ + 五层分析 ↑                              -->
-    <!-- ============================================================ -->
-    <section id="region-virtual-account" class="audit-card">
-      <header class="px-4 py-2.5 border-b border-slate-200 dark:border-slate-800">
-        <h2 class="text-base font-semibold flex items-center gap-2">
-          <span>💼</span><span>虚拟账户</span>
-        </h2>
-      </header>
-      <div class="p-3 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 text-[12px]">
-        <template x-if="!virtualAccount">
-          <div class="col-span-full text-slate-500 dark:text-slate-400 italic">
-            virtual_account 未初始化(冷启动)
-          </div>
-        </template>
-        <template x-if="virtualAccount">
-          <div class="contents">
-            <div>
-              <div class="stat-label">总资产</div>
-              <div class="text-[14px] font-bold font-mono tabular-nums"
-                   x-text="formatUsd(virtualAccount.total_equity)"></div>
-            </div>
-            <div>
-              <div class="stat-label">初始资金</div>
-              <div class="text-[14px] font-mono tabular-nums"
-                   x-text="formatUsd(virtualAccount.initial_capital)"></div>
-            </div>
-            <div>
-              <div class="stat-label">总收益</div>
-              <div class="text-[14px] font-mono tabular-nums"
-                   :class="(accountReturns.total_pct ?? 0) >= 0
-                            ? 'text-emerald-600 dark:text-emerald-400'
-                            : 'text-rose-600 dark:text-rose-400'"
-                   x-text="formatPct(accountReturns.total_pct, true)"></div>
-            </div>
-            <div>
-              <div class="stat-label">日 / 周</div>
-              <div class="text-[12px] font-mono tabular-nums"
-                   x-text="formatPct(accountReturns.daily_pct, true) + ' / ' +
-                            formatPct(accountReturns.weekly_pct, true)"></div>
-            </div>
-            <div>
-              <div class="stat-label">月 / 年</div>
-              <div class="text-[12px] font-mono tabular-nums"
-                   x-text="formatPct(accountReturns.monthly_pct, true) + ' / ' +
-                            formatPct(accountReturns.yearly_pct, true)"></div>
-            </div>
-            <div>
-              <div class="stat-label">可用 / 持仓</div>
-              <div class="text-[12px] font-mono tabular-nums"
-                   x-text="formatUsd(virtualAccount.available_cash) + ' / ' +
-                            formatUsd((virtualAccount.total_equity || 0) -
-                                      (virtualAccount.available_cash || 0))"></div>
-            </div>
-          </div>
-        </template>
-      </div>
-      <!-- 资金曲线 30 天 sparkline(D1=c 纯 SVG,无新 JS 库)-->
-      <div class="px-3 pb-3" x-show="accountHistory.length >= 2">
-        <div class="stat-label mb-1">30 天资金曲线</div>
-        <svg viewBox="0 0 300 60" class="w-full h-12"
-             preserveAspectRatio="none">
-          <polyline :points="sparklinePoints(accountHistory)"
-                    fill="none" stroke="currentColor" stroke-width="1.2"
-                    class="text-emerald-600 dark:text-emerald-400" />
-        </svg>
-      </div>
-    </section>
-    <!-- ============================================================ -->
-    <!-- 📦 模块 3:挂单 + 持仓状态(Sprint 1.10-I §9.2.3)            -->
-    <!-- ============================================================ -->
-    <section id="region-orders-position" class="audit-card">
-      <header class="px-4 py-2.5 border-b border-slate-200 dark:border-slate-800">
-        <h2 class="text-base font-semibold flex items-center gap-2">
-          <span>📦</span><span>挂单 + 持仓</span>
-        </h2>
-      </header>
-      <div class="p-3 text-[12px] space-y-3">
-        <template x-if="!ordersPending.active_thesis_id">
-          <div class="text-slate-500 dark:text-slate-400 italic">
-            当前无 active thesis,无挂单
-          </div>
-        </template>
-        <template x-if="ordersPending.active_thesis_id">
-          <div class="space-y-3">
-            <!-- 持仓摘要 -->
-            <div x-show="positionSummary && positionSummary.entry_orders_filled > 0"
-                 class="bg-slate-50 dark:bg-slate-900/50 rounded p-2">
-              <div class="stat-label mb-1">持仓摘要</div>
-              <div class="grid grid-cols-3 gap-2 font-mono tabular-nums">
-                <div>
-                  <span class="text-slate-500">方向</span>
-                  <span class="ml-1 font-bold"
-                        x-text="positionSummary.direction"></span>
-                </div>
-                <div>
-                  <span class="text-slate-500">BTC 数量</span>
-                  <span class="ml-1"
-                        x-text="positionSummary.btc_amount?.toFixed(6) ?? '-'"></span>
-                </div>
-                <div>
-                  <span class="text-slate-500">均价</span>
-                  <span class="ml-1"
-                        x-text="positionSummary.avg_entry_price
-                                  ? '$' + positionSummary.avg_entry_price.toLocaleString()
-                                  : '-'"></span>
-                </div>
-              </div>
-            </div>
-            <!-- 待触发挂单 -->
-            <div>
-              <div class="stat-label mb-1"
-                   x-text="'待触发挂单(' + (ordersPending.items || []).length + ')'"></div>
-              <table class="w-full text-[11px] font-mono tabular-nums">
+              <table x-show="ordersPending.active_thesis_id" class="w-full text-[11px] font-mono tabular-nums">
                 <thead class="text-slate-500 border-b border-slate-200 dark:border-slate-800">
                   <tr><th class="text-left">类型</th><th class="text-right">价格</th>
                       <th class="text-right">仓位</th><th class="text-right">距当前</th></tr>
                 </thead>
                 <tbody>
-                  <template x-for="o in (ordersPending.items || [])"
-                            :key="o.order_id">
+                  <template x-for="o in (ordersPending.items || [])" :key="o.order_id">
                     <tr>
                       <td x-text="o.order_type"></td>
                       <td class="text-right" x-text="'$' + Number(o.price).toLocaleString()"></td>
-                      <td class="text-right"
-                          x-text="(o.size_pct ?? 0).toFixed(1) + '%'"></td>
-                      <td class="text-right"
-                          x-text="distanceFromLive(o.price)"></td>
+                      <td class="text-right" x-text="(o.size_pct ?? 0).toFixed(1) + '%'"></td>
+                      <td class="text-right" x-text="distanceFromLive(o.price)"></td>
                     </tr>
                   </template>
                   <tr x-show="(ordersPending.items || []).length === 0">
-                    <td colspan="4" class="text-slate-500 italic py-1">
-                      无待触发挂单
-                    </td>
+                    <td colspan="4" class="text-slate-500 italic py-1">无待触发挂单</td>
                   </tr>
                 </tbody>
               </table>
             </div>
-          </div>
-        </template>
-      </div>
-    </section>
-    <!-- ============================================================ -->
-    <!-- 🔬 五层分析(1.8.2-C):L1-L5 + master 6 张卡,密度 C 默认折叠  -->
-    <!-- ============================================================ -->
-    <section id="region-layer-cards" class="audit-card"
-             x-show="(state.layer_cards || []).length > 0">
-      <header class="px-4 py-2.5 border-b border-slate-200 dark:border-slate-800">
-        <h2 class="text-base font-semibold flex items-center gap-2">
-          <span>🔬</span><span>五层分析</span>
-          <span class="text-[11px] font-normal text-slate-500 ml-1">L1-L5 + 主裁</span>
-        </h2>
-        <p class="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-          每层 AI 独立分析,综合判断;点"查看详细"展开关键观察 / 完整分析 / 矛盾信号
-        </p>
-      </header>
-      <div class="p-3 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-        <template x-for="(card, idx) in (state.layer_cards || [])" :key="card.layer">
-          <article class="border border-slate-200 dark:border-slate-800 rounded p-3
-                          space-y-2 min-w-0">
-            <!-- 标题 -->
-            <header class="flex items-baseline justify-between gap-2">
-              <h3 class="text-[12px] font-semibold text-slate-600 dark:text-slate-400"
-                  x-text="card.title"></h3>
-            </header>
-            <!-- 大字标签 -->
-            <div class="text-[13px] font-bold leading-snug" x-text="card.label || '-'"></div>
-            <!-- 次要标签 -->
-            <div class="flex flex-wrap gap-1" x-show="(card.secondary_labels || []).length > 0">
-              <template x-for="sl in (card.secondary_labels || [])" :key="sl">
-                <span class="px-1.5 py-0.5 rounded text-[10px]
-                             bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400"
-                      x-text="sl"></span>
-              </template>
-            </div>
-            <!-- 摘要(默认看)-->
-            <p class="text-[12px] leading-snug text-slate-700 dark:text-slate-300"
-               x-text="card.summary || '-'"></p>
-            <!-- 查看详细按钮 -->
-            <button @click="toggleLayerCard(card.layer)"
-                    class="text-[11px] text-blue-600 dark:text-cyan-400 hover:underline">
-              <span x-show="!layerCardOpen(card.layer)">查看详细 ▼</span>
-              <span x-show="layerCardOpen(card.layer)">收起 ▲</span>
-            </button>
-            <!-- 详细区(展开后)-->
-            <div x-show="layerCardOpen(card.layer)" x-cloak
-                 class="space-y-2.5 pt-2 border-t border-slate-100 dark:border-slate-800">
-              <!-- 关键观察 -->
-              <div x-show="(card.key_observations || []).length > 0">
-                <h4 class="text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
-                  关键观察
-                </h4>
-                <ul class="space-y-0.5 text-[11.5px] leading-snug">
-                  <template x-for="obs in (card.key_observations || [])" :key="obs">
-                    <li class="flex items-start gap-1.5">
-                      <span class="text-slate-400 shrink-0">•</span>
-                      <span x-text="obs"></span>
-                    </li>
-                  </template>
-                </ul>
-              </div>
-              <!-- 完整分析 -->
-              <div x-show="card.narrative">
-                <h4 class="text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
-                  完整分析
-                </h4>
-                <p class="text-[11.5px] leading-snug text-slate-700 dark:text-slate-300"
-                   x-text="card.narrative"></p>
-              </div>
-              <!-- 矛盾信号 -->
-              <div x-show="(card.contradicting_signals || []).length > 0">
-                <h4 class="text-[11px] font-semibold text-amber-600 dark:text-amber-400 mb-1">
-                  ⚠️ 矛盾信号
-                </h4>
-                <ul class="space-y-0.5 text-[11.5px] leading-snug">
-                  <template x-for="cs in (card.contradicting_signals || [])" :key="cs">
-                    <li class="flex items-start gap-1.5">
-                      <span class="text-amber-500 shrink-0">•</span>
-                      <span x-text="cs"></span>
-                    </li>
-                  </template>
-                </ul>
-              </div>
-            </div>
-          </article>
-        </template>
-      </div>
-    </section>
 
-    <!-- Sprint 1.5o:整块删除「五层证据推导细节」区(用户反馈无价值,
-         健康信号已在顶部「🩺 系统自检」面板里展示)。 -->
-    <!-- ============================================================ -->
-    <!-- 📅 模块 4:thesis 历史时间线(Sprint 1.10-I §9.2.4)         -->
-    <!-- 位置:五层分析 ↓                                              -->
-    <!-- ============================================================ -->
-    <section id="region-thesis-timeline" class="audit-card">
-      <header class="px-4 py-2.5 border-b border-slate-200 dark:border-slate-800">
-        <h2 class="text-base font-semibold flex items-center gap-2">
-          <span>📅</span><span>thesis 历史时间线</span>
-        </h2>
-      </header>
-      <div class="p-3 text-[12px]">
-        <template x-if="(thesesHistory || []).length === 0">
-          <div class="text-slate-500 dark:text-slate-400 italic">
-            暂无 thesis 历史(冷启动)
-          </div>
-        </template>
-        <template x-if="(thesesHistory || []).length > 0">
-          <table class="w-full text-[11px] font-mono tabular-nums">
-            <thead class="text-slate-500 border-b border-slate-200 dark:border-slate-800">
-              <tr>
-                <th class="text-left py-1">thesis_id</th>
-                <th class="text-left">方向</th>
-                <th class="text-right">置信度</th>
-                <th class="text-left">状态</th>
-                <th class="text-right">持续</th>
-                <th class="text-right">PnL%</th>
-                <th class="text-left">通道</th>
-              </tr>
-            </thead>
-            <tbody>
-              <template x-for="t in (thesesHistory || [])" :key="t.thesis_id">
-                <tr class="border-b border-slate-100 dark:border-slate-900">
-                  <td class="py-0.5 truncate" x-text="t.thesis_id"></td>
-                  <td>
-                    <span class="px-1 rounded text-[10px] font-bold"
-                          :class="t.direction === 'long'
-                                    ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400'
-                                    : 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-400'"
-                          x-text="t.direction"></span>
-                  </td>
-                  <td class="text-right" x-text="t.confidence_score ?? '-'"></td>
-                  <td>
-                    <span :class="thesisStatusColor(t.status)"
-                          x-text="t.status"></span>
-                  </td>
-                  <td class="text-right"
-                      x-text="thesisDurationDays(t)"></td>
-                  <td class="text-right"
-                      :class="(t.final_realized_pnl_pct ?? 0) >= 0
-                                ? 'text-emerald-600 dark:text-emerald-400'
-                                : 'text-rose-600 dark:text-rose-400'"
-                      x-text="t.final_realized_pnl_pct != null
-                                ? (t.final_realized_pnl_pct >= 0 ? '+' : '') +
-                                  t.final_realized_pnl_pct.toFixed(2) + '%'
-                                : '-'"></td>
-                  <td x-text="t.close_channel || '-'"></td>
-                </tr>
+            <div id="region-thesis-timeline" class="rounded border border-slate-200 dark:border-slate-800 p-3 text-[12px]">
+              <div class="stat-label mb-1">thesis 历史时间线</div>
+              <template x-if="(thesesHistory || []).length === 0">
+                <div class="text-slate-500 dark:text-slate-400 italic">暂无 thesis 历史(冷启动)</div>
               </template>
-            </tbody>
-          </table>
-        </template>
-      </div>
-    </section>
+              <template x-if="(thesesHistory || []).length > 0">
+                <table class="w-full text-[11px] font-mono tabular-nums">
+                  <thead class="text-slate-500 border-b border-slate-200 dark:border-slate-800">
+                    <tr><th class="text-left py-1">thesis_id</th><th class="text-left">方向</th>
+                        <th class="text-right">置信度</th><th class="text-left">状态</th>
+                        <th class="text-right">持续</th><th class="text-right">PnL%</th><th class="text-left">通道</th></tr>
+                  </thead>
+                  <tbody>
+                    <template x-for="t in (thesesHistory || [])" :key="t.thesis_id">
+                      <tr class="border-b border-slate-100 dark:border-slate-900">
+                        <td class="py-0.5 truncate" x-text="t.thesis_id"></td>
+                        <td x-text="t.direction"></td>
+                        <td class="text-right" x-text="t.confidence_score ?? '-'"></td>
+                        <td><span :class="thesisStatusColor(t.status)" x-text="t.status"></span></td>
+                        <td class="text-right" x-text="thesisDurationDays(t)"></td>
+                        <td class="text-right"
+                            :class="(t.final_realized_pnl_pct ?? 0) >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'"
+                            x-text="t.final_realized_pnl_pct != null ? (t.final_realized_pnl_pct >= 0 ? '+' : '') + t.final_realized_pnl_pct.toFixed(2) + '%' : '-'"></td>
+                        <td x-text="t.close_channel || '-'"></td>
+                      </tr>
+                    </template>
+                  </tbody>
+                </table>
+              </template>
+            </div>
+          </div>
+        </section>
+
+        <!-- 2. AI 主裁结论 -->
+        <section id="region-1" class="rounded border border-slate-200 dark:border-slate-800">
+          <header class="px-3 py-2 border-b border-slate-200 dark:border-slate-800">
+            <h3 class="text-[13px] font-semibold flex items-center gap-2">
+              <span>🎯</span><span>AI 主裁结论</span>
+              <span class="ml-auto text-[10px] text-slate-500"
+                    x-show="state.meta?.generated_at_bjt || state.summary_card?.decision_time"
+                    x-text="'AI 输出于 ' + (state.meta?.generated_at_bjt || state.summary_card?.decision_time || '-') +
+                            ((state.meta?.ai_model_actual || state.ai_model_actual)
+                             ? ' · ' + simplifyAiModel(state.meta?.ai_model_actual || state.ai_model_actual)
+                             : '')"></span>
+            </h3>
+          </header>
+          <div class="p-3 space-y-3 text-[12px]">
+            <div class="rounded border border-slate-200 dark:border-slate-800 p-3 space-y-2">
+              <div>
+                <div class="stat-label">结论</div>
+                <div class="text-[13px] font-bold" x-text="swingTraderConclusion()"></div>
+              </div>
+              <div>
+                <div class="stat-label">理由</div>
+                <p class="leading-snug text-slate-700 dark:text-slate-300" x-text="swingTraderReason()"></p>
+              </div>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <div class="stat-label">执行计划</div>
+                  <p class="leading-snug" x-text="swingExecutionPlan()"></p>
+                </div>
+                <div>
+                  <div class="stat-label">失效条件</div>
+                  <p class="leading-snug" x-text="swingInvalidationPlan()"></p>
+                </div>
+              </div>
+              <button @click="toggleLayerCard('swing_master_detail')"
+                      class="text-[11px] text-blue-600 dark:text-cyan-400 hover:underline">
+                <span x-show="!layerCardOpen('swing_master_detail')">查看详细 ▼</span>
+                <span x-show="layerCardOpen('swing_master_detail')">收起 ▲</span>
+              </button>
+            </div>
+
+            <div x-show="layerCardOpen('swing_master_detail')" x-cloak
+                 class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-x-8 gap-y-6 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <div><div class="stat-label">方向</div><div class="text-[13px] font-bold" x-text="state.summary_card?.stance_label || '-'"></div></div>
+              <div><div class="stat-label">状态</div><div class="text-[13px] font-bold" x-text="state.summary_card?.action_state_label || '-'"></div></div>
+              <div><div class="stat-label">机会等级</div><div class="text-[13px] font-bold" x-text="cardOpportunityGrade()"></div></div>
+              <div><div class="stat-label">信心指数</div><div class="text-[13px] font-bold" x-text="cardConfidence()"></div></div>
+              <div><div class="stat-label">入场区间</div><div class="text-[13px] font-bold font-mono" x-text="cardEntryZones()"></div></div>
+              <div><div class="stat-label">止损价</div><div class="text-[13px] font-bold font-mono" x-text="cardStopLoss()"></div></div>
+              <div><div class="stat-label">止盈分批</div><div class="text-[13px] font-bold font-mono" x-text="cardTakeProfits()"></div></div>
+              <div><div class="stat-label">仓位上限</div><div class="text-[13px] font-bold" x-text="cardPositionCap()"></div></div>
+              <div><div class="stat-label">当前浮盈</div><div class="text-[13px] font-bold" x-text="cardCurrentPnl()"></div></div>
+              <div><div class="stat-label">距离止损</div><div class="text-[13px] font-bold font-mono" x-text="cardDistanceToStop()"></div></div>
+              <div><div class="stat-label">持仓时长</div><div class="text-[13px] font-bold" x-text="cardHoldingDuration()"></div></div>
+              <div>
+                <div class="stat-label">分级失效位</div>
+                <template x-if="cardHardInvalidationsEmpty()"><div class="text-[13px] placeholder-dash">-</div></template>
+                <template x-if="!cardHardInvalidationsEmpty()">
+                  <div class="text-[12px] font-mono space-y-0.5">
+                    <template x-for="lv in cardHardInvalidations()" :key="(lv.type || '') + '_' + lv.price">
+                      <div class="leading-tight whitespace-nowrap">
+                        <span :class="severityClass(lv.severity_rank)" x-text="lv.severity_label"></span>
+                        <span class="text-slate-500 dark:text-slate-400 mx-1" x-text="lv.type_label"></span>
+                        <span class="font-bold text-slate-900 dark:text-slate-100" x-text="': $' + Number(lv.price).toLocaleString()"></span>
+                      </div>
+                    </template>
+                  </div>
+                </template>
+              </div>
+            </div>
+
+            <div x-show="aiFailureStatus()"
+                 class="rounded border border-amber-300 dark:border-amber-800 bg-amber-50/30 dark:bg-amber-950/20 px-3 py-2.5">
+              <div class="flex items-start gap-2">
+                <span class="text-base shrink-0">⚠️</span>
+                <div class="space-y-0.5">
+                  <div class="font-bold text-amber-700 dark:text-amber-400" x-text="aiFailureStatus()"></div>
+                  <div x-show="aiFailureDetail()" class="text-[11px] text-slate-600 dark:text-slate-400 font-mono" x-text="aiFailureDetail()"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 3. 五层分析 -->
+        <section id="region-layer-cards" class="rounded border border-slate-200 dark:border-slate-800"
+                 x-show="(state.layer_cards || []).length > 0">
+          <header class="px-3 py-2 border-b border-slate-200 dark:border-slate-800">
+            <h3 class="text-[13px] font-semibold flex items-center gap-2">
+              <span>🔬</span><span>五层分析</span>
+              <span class="text-[11px] font-normal text-slate-500 ml-1">L1-L5 + 主裁</span>
+            </h3>
+            <p class="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+              每层 AI 独立分析,综合判断;点"查看详细"展开关键观察 / 完整分析 / 矛盾信号
+            </p>
+          </header>
+          <div class="p-3 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            <template x-for="(card, idx) in (state.layer_cards || [])" :key="card.layer">
+              <article class="border border-slate-200 dark:border-slate-800 rounded p-3 space-y-2 min-w-0">
+                <header class="flex items-baseline justify-between gap-2">
+                  <h4 class="text-[12px] font-semibold text-slate-600 dark:text-slate-400" x-text="card.title"></h4>
+                </header>
+                <div class="text-[13px] font-bold leading-snug" x-text="card.label || '-'"></div>
+                <p class="text-[12px] leading-snug text-slate-700 dark:text-slate-300" x-text="card.summary || '-'"></p>
+                <button @click="toggleLayerCard(card.layer)" class="text-[11px] text-blue-600 dark:text-cyan-400 hover:underline">
+                  <span x-show="!layerCardOpen(card.layer)">查看详细 ▼</span>
+                  <span x-show="layerCardOpen(card.layer)">收起 ▲</span>
+                </button>
+                <div x-show="layerCardOpen(card.layer)" x-cloak
+                     class="space-y-2.5 pt-2 border-t border-slate-100 dark:border-slate-800">
+                  <div x-show="(card.key_observations || []).length > 0">
+                    <h5 class="text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">关键观察</h5>
+                    <ul class="space-y-0.5 text-[11.5px] leading-snug">
+                      <template x-for="obs in (card.key_observations || [])" :key="obs">
+                        <li class="flex items-start gap-1.5"><span class="text-slate-400 shrink-0">•</span><span x-text="obs"></span></li>
+                      </template>
+                    </ul>
+                  </div>
+                  <div x-show="card.narrative">
+                    <h5 class="text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">完整分析</h5>
+                    <p class="text-[11.5px] leading-snug text-slate-700 dark:text-slate-300" x-text="card.narrative"></p>
+                  </div>
+                  <div x-show="(card.contradicting_signals || []).length > 0">
+                    <h5 class="text-[11px] font-semibold text-amber-600 dark:text-amber-400 mb-1">⚠️ 矛盾信号</h5>
+                    <ul class="space-y-0.5 text-[11.5px] leading-snug">
+                      <template x-for="cs in (card.contradicting_signals || [])" :key="cs">
+                        <li class="flex items-start gap-1.5"><span class="text-amber-500 shrink-0">•</span><span x-text="cs"></span></li>
+                      </template>
+                    </ul>
+                  </div>
+                </div>
+              </article>
+            </template>
+          </div>
+        </section>
       </div>
     </section>
 

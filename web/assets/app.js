@@ -496,6 +496,77 @@ function app() {
             const sc = (this.state && this.state.summary_card) || {};
             return sc.decision_time || '-';
         },
+        swingCurrentStatus() {
+            if (this.activeThesis && this.activeThesis.lifecycle_stage) {
+                return this.activeThesis.lifecycle_stage;
+            }
+            if (this.ordersPending && this.ordersPending.active_thesis_id) {
+                return 'planned';
+            }
+            return 'no thesis';
+        },
+        swingDirection() {
+            if (this.activeThesis && this.activeThesis.direction) {
+                return this.activeThesis.direction;
+            }
+            if (this.positionSummary && this.positionSummary.direction) {
+                return this.positionSummary.direction;
+            }
+            return 'none';
+        },
+        swingMasterAction() {
+            return (this.state && this.state.summary_card
+                    && this.state.summary_card.action_state_label)
+                || (this.state && this.state.main_strategy
+                    && this.state.main_strategy.lifecycle_phase)
+                || '-';
+        },
+        swingConfidenceScore() {
+            const score = this.tp().confidence_score;
+            if (score != null) return score + ' / 100';
+            if (this.activeThesis && this.activeThesis.confidence_score != null) {
+                return this.activeThesis.confidence_score + ' / 100';
+            }
+            return '-';
+        },
+        masterLayerCard() {
+            const cards = (this.state && this.state.layer_cards) || [];
+            return cards.find(c => c && (c.layer === 'master' || c.layer === 'adjudicator')) || {};
+        },
+        swingTraderConclusion() {
+            const sc = (this.state && this.state.summary_card) || {};
+            if (sc.headline) return sc.headline;
+            return `${this.swingMasterAction()} · ${this.cardOpportunityGrade()} · ${this.swingDirection()}`;
+        },
+        swingTraderReason() {
+            const card = this.masterLayerCard();
+            return this.compactSpotText(
+                card.summary || (this.activeThesis && this.activeThesis.core_logic)
+                || '暂无主裁摘要',
+                140,
+            );
+        },
+        swingExecutionPlan() {
+            const parts = [];
+            const entry = this.cardEntryZones();
+            const cap = this.cardPositionCap();
+            const tps = this.cardTakeProfits();
+            if (entry !== '-') parts.push('入场 ' + entry);
+            if (cap !== '-') parts.push('仓位上限 ' + cap);
+            if (tps !== '-') parts.push('止盈 ' + tps);
+            return parts.length ? parts.join('；') : '暂无执行计划';
+        },
+        swingInvalidationPlan() {
+            const parts = [];
+            const stop = this.cardStopLoss();
+            if (stop !== '-') parts.push('止损 ' + stop);
+            const breaks = (this.activeThesis && this.activeThesis.break_conditions) || [];
+            if (breaks.length > 0) parts.push('失效条件 ' + breaks.slice(0, 2).join('；'));
+            if (parts.length === 0 && !this.cardHardInvalidationsEmpty()) {
+                parts.push('参考分级失效位');
+            }
+            return this.compactSpotText(parts.join('；') || '暂无失效条件', 150);
+        },
         layerAHealthItems() {
             const spot = this.spotStrategy();
             const validator = spot && spot.validator ? spot.validator : {};

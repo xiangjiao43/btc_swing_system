@@ -54,11 +54,12 @@ def test_module_4_alpine_binds_theses_history(html):
 
 
 def test_module_4_position_after_layers(html):
-    """模块 4 必须在 region-layer-cards 之后,region-4(原始因子)之前。"""
+    """thesis 时间线归入账户与执行,仍在原始因子前保留。"""
+    pos_account = html.find('id="region-swing-account-execution"')
     pos_layers = html.find('id="region-layer-cards"')
     pos_timeline = html.find('id="region-thesis-timeline"')
     pos_region_4 = html.find('id="region-4"')
-    assert pos_layers < pos_timeline < pos_region_4
+    assert pos_account < pos_timeline < pos_layers < pos_region_4
 
 
 def test_raw_factor_module_reuses_existing_region_for_layer_a_factors(html, js):
@@ -387,7 +388,7 @@ def test_rp_health_fetch_in_modules_refresh(js):
 
 def test_failure_status_section_exists(html):
     """AI 失败状态 section + show 条件 aiFailureStatus()。"""
-    assert "AI 失败状态显示" in html
+    assert "AI 主裁结论" in html
     assert "aiFailureStatus()" in html
     assert "aiFailureDetail()" in html
     assert "⚠️" in html
@@ -486,8 +487,11 @@ def test_js_no_new_dependencies(js):
 # ============================================================
 
 def test_audit_card_style_consistency(html):
-    """新模块 4+5 + RP banner 都用 audit-card / 现有色系。"""
+    """周复盘仍用 audit-card;thesis 时间线已归入波段策略内部。"""
     assert re.search(
+        r'id="region-layer-b-swing"\s+class="audit-card"', html,
+    )
+    assert not re.search(
         r'id="region-thesis-timeline"\s+class="audit-card"', html,
     )
     assert re.search(

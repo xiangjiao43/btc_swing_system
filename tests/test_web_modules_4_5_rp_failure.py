@@ -69,6 +69,8 @@ def test_raw_factor_module_reuses_existing_region_for_layer_a_factors(html, js):
     assert "layerAFactorCards()" in js
     assert "layerAFactorCardSpecs()" in js
     assert "layerAFactorContextValue" in js
+    assert "spot.input_context_snapshot" in js
+    assert "spot.spot_cycle_context" in js
     assert "layerAFactorUnavailableStatus" in js
     assert "layerAFactorUnavailableLabel" in js
     assert "layerAFactorCoverageSummary" in js
@@ -144,7 +146,7 @@ def test_layer_a_raw_factor_cards_have_plain_readings_and_no_status_placeholder(
         "当前联邦基金利率",
         "当前美国 10 年期实际利率",
         "当前 CPI",
-        "当前核心 CPI",
+        "当前 Core CPI",
         "当前 M2",
         "当前美联储资产负债表",
     ):

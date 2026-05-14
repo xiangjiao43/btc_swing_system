@@ -91,6 +91,14 @@ _UNAVAILABLE_MODEL_FACTORS = {
 
 _CRITICAL_MODEL_FACTORS: set[str] = set()
 
+# FRED 的 CPI / Core CPI 是月度宏观数据。它们的“最新一期”天然不会每天更新，
+# 不能因为 fred_macro 这类源级 freshness 短暂过期就把已有数值判成不可用。
+_MONTHLY_FRED_FACTORS = {"cpi", "core_cpi"}
+_MACRO_METRIC_ALIASES = {
+    "cpi": ("cpi", "cpiaucsl", "CPIAUCSL"),
+    "core_cpi": ("core_cpi", "cpilfesl", "CPILFESL"),
+}
+
 
 def _series_latest(series: Any) -> tuple[Optional[float], Optional[str]]:
     if series is None:
@@ -178,6 +186,9 @@ def _factor(
     source_key = source or _FACTOR_SOURCE.get(name)
     status = "available" if value is not None else "missing"
     is_stale = bool(stale_map.get(source_key)) if source_key and stale_map else False
+    is_monthly_fred = source_key == "fred_macro" and name in _MONTHLY_FRED_FACTORS
+    if status == "available" and is_monthly_fred:
+        is_stale = False
     if status == "available" and is_stale:
         status = "stale"
     out = {
@@ -191,6 +202,9 @@ def _factor(
             ),
         },
     }
+    if is_monthly_fred:
+        out["freshness"]["frequency"] = "monthly"
+        out["freshness"]["monthly_latest_ok"] = status == "available"
     if timestamp:
         out["as_of"] = timestamp
     if extra:
@@ -297,10 +311,17 @@ class SpotCycleContextBuilder:
             return _factor(name, value, timestamp=ts, stale_map=stale_map, hours_map=hours_map)
 
         def mmetric(name: str) -> dict[str, Any]:
-            value, ts = _series_latest(macro.get(name) if isinstance(macro, dict) else None)
+            keys = _MACRO_METRIC_ALIASES.get(name, (name,))
+            matched_key = next(
+                (k for k in keys if isinstance(macro, dict) and k in macro),
+                name,
+            )
+            value, ts = _series_latest(
+                macro.get(matched_key) if isinstance(macro, dict) else None
+            )
             return _factor(
                 name, value, timestamp=ts, stale_map=stale_map, hours_map=hours_map,
-                extra=metric_meta(MacroDAO, name),
+                extra=metric_meta(MacroDAO, matched_key),
             )
 
         profit_value, profit_ts = _series_latest(

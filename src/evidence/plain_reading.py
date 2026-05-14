@@ -255,9 +255,9 @@ def plain_reading_layer_a_raw_factor(
         )
         return f"📊 当前美国 10 年期实际利率 {shown}，{state} 🔍 实际利率上升通常压制 BTC 等风险资产估值。"
     if factor_key == "cpi":
-        return f"📊 当前 CPI {shown}，反映整体通胀水平 🔍 通胀偏高会影响降息预期和风险资产估值。"
+        return f"📊 当前 CPI 为 {shown}，反映整体通胀水平 🔍 通胀偏高可能限制流动性宽松。"
     if factor_key == "core_cpi":
-        return f"📊 当前核心 CPI {shown}，反映更稳定的基础通胀压力 🔍 粘性通胀偏高会延后流动性宽松。"
+        return f"📊 当前 Core CPI 为 {shown}，剔除食品和能源后的核心通胀 🔍 核心通胀偏高通常压制降息预期。"
     if factor_key == "m2":
         return f"📊 当前 M2 为 {shown}，反映美元流动性规模 🔍 扩张偏利好风险资产，收缩偏压制。"
     if factor_key == "fed_balance_sheet":

@@ -1251,12 +1251,19 @@ function app() {
             ];
         },
         layerAFactorContextValue(spec) {
-            const snapshot = this.spotStrategy()?.input_context_snapshot || {};
-            const factors = snapshot.available_factors || {};
-            for (const path of (spec.paths || [])) {
-                let cur = factors;
-                for (const part of path) cur = cur && cur[part];
-                if (cur && typeof cur === 'object') return cur;
+            const spot = this.spotStrategy() || {};
+            const snapshots = [
+                spot.input_context_snapshot,
+                spot.spot_cycle_context,
+                spot.context,
+            ].filter(Boolean);
+            for (const snapshot of snapshots) {
+                const factors = snapshot.available_factors || {};
+                for (const path of (spec.paths || [])) {
+                    let cur = factors;
+                    for (const part of path) cur = cur && cur[part];
+                    if (cur && typeof cur === 'object') return cur;
+                }
             }
             return null;
         },
@@ -1435,10 +1442,10 @@ function app() {
                 return `📊 当前美国 10 年期实际利率 ${shown}，${state} 🔍 实际利率上升通常压制 BTC 等风险资产估值。`;
             }
             if (spec.key === 'cpi') {
-                return `📊 当前 CPI ${shown}，反映整体通胀水平 🔍 通胀偏高会影响降息预期和风险资产估值。`;
+                return `📊 当前 CPI 为 ${shown}，反映整体通胀水平 🔍 通胀偏高可能限制流动性宽松。`;
             }
             if (spec.key === 'core_cpi') {
-                return `📊 当前核心 CPI ${shown}，反映更稳定的基础通胀压力 🔍 粘性通胀偏高会延后流动性宽松。`;
+                return `📊 当前 Core CPI 为 ${shown}，剔除食品和能源后的核心通胀 🔍 核心通胀偏高通常压制降息预期。`;
             }
             if (spec.key === 'm2') {
                 return `📊 当前 M2 为 ${shown}，反映美元流动性规模 🔍 扩张偏利好风险资产，收缩偏压制。`;

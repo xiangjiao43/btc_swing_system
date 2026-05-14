@@ -162,6 +162,7 @@ def test_spot_cycle_context_builder_exposes_layer_a_factor_fetch_timestamps():
     us2y = ctx["available_factors"]["macro_liquidity"]["us2y"]
     real_yield = ctx["available_factors"]["macro_inflation_rates"]["real_yield"]
     cpi = ctx["available_factors"]["macro_inflation_rates"]["cpi"]
+    core_cpi = ctx["available_factors"]["macro_inflation_rates"]["core_cpi"]
     assert profit["status"] == "available"
     assert profit["fetched_at_utc"] == "2026-05-12T14:06:23Z"
     assert profit["fetched_at_bjt"] == "2026-05-12 22:06:23 (BJT)"
@@ -186,3 +187,90 @@ def test_spot_cycle_context_builder_exposes_layer_a_factor_fetch_timestamps():
     assert real_yield["actual_value"] == 1.95
     assert cpi["status"] == "available"
     assert cpi["actual_value"] == 332.407
+    assert cpi["freshness"]["frequency"] == "monthly"
+    assert cpi["freshness"]["monthly_latest_ok"] is True
+    assert core_cpi["status"] == "available"
+    assert core_cpi["actual_value"] == 335.423
+    assert core_cpi["freshness"]["frequency"] == "monthly"
+    assert core_cpi["freshness"]["monthly_latest_ok"] is True
+
+
+def test_cpi_core_cpi_monthly_freshness_does_not_hide_existing_values():
+    db_path = Path(tempfile.mkdtemp()) / "layer_a_cpi_monthly.db"
+    init_db(db_path=db_path, verbose=False)
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        MacroDAO.upsert_batch(conn, [
+            MacroMetric(
+                timestamp="2026-04-01T00:00:00Z",
+                metric_name="cpi",
+                metric_value=332.407,
+                source="fred",
+                fetched_at="2026-05-12T14:07:32Z",
+            ),
+            MacroMetric(
+                timestamp="2026-04-01T00:00:00Z",
+                metric_name="core_cpi",
+                metric_value=335.423,
+                source="fred",
+                fetched_at="2026-05-12T14:07:33Z",
+            ),
+        ])
+        conn.commit()
+
+        ctx = SpotCycleContextBuilder(conn).build_spot_cycle_context(
+            existing_context={
+                "_source_stale_map": {"fred_macro": True},
+                "_source_hours_map": {"fred_macro": 72.0},
+            },
+        )
+    finally:
+        conn.close()
+
+    inflation = ctx["available_factors"]["macro_inflation_rates"]
+    assert inflation["cpi"]["status"] == "available"
+    assert inflation["cpi"]["actual_value"] == 332.407
+    assert inflation["cpi"]["freshness"]["is_stale"] is False
+    assert inflation["cpi"]["freshness"]["frequency"] == "monthly"
+    assert inflation["core_cpi"]["status"] == "available"
+    assert inflation["core_cpi"]["actual_value"] == 335.423
+    assert inflation["core_cpi"]["freshness"]["is_stale"] is False
+    assert ctx["factor_coverage"]["stale_factor_count"] == 0
+
+
+def test_cpi_core_cpi_support_legacy_fred_series_id_metric_names():
+    db_path = Path(tempfile.mkdtemp()) / "layer_a_cpi_alias.db"
+    init_db(db_path=db_path, verbose=False)
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        MacroDAO.upsert_batch(conn, [
+            MacroMetric(
+                timestamp="2026-04-01T00:00:00Z",
+                metric_name="CPIAUCSL",
+                metric_value=332.407,
+                source="fred",
+                fetched_at="2026-05-12T14:07:32Z",
+            ),
+            MacroMetric(
+                timestamp="2026-04-01T00:00:00Z",
+                metric_name="CPILFESL",
+                metric_value=335.423,
+                source="fred",
+                fetched_at="2026-05-12T14:07:33Z",
+            ),
+        ])
+        conn.commit()
+
+        ctx = SpotCycleContextBuilder(conn).build_spot_cycle_context()
+    finally:
+        conn.close()
+
+    inflation = ctx["available_factors"]["macro_inflation_rates"]
+    assert inflation["cpi"]["status"] == "available"
+    assert inflation["cpi"]["actual_value"] == 332.407
+    assert inflation["cpi"]["fetched_at_utc"] == "2026-05-12T14:07:32Z"
+    assert inflation["core_cpi"]["status"] == "available"
+    assert inflation["core_cpi"]["actual_value"] == 335.423
+    assert inflation["core_cpi"]["fetched_at_utc"] == "2026-05-12T14:07:33Z"

@@ -308,6 +308,19 @@ def test_layer_a_raw_factor_unavailable_text_hides_internal_errors():
     assert "uncertain_rate_limited" not in limited
 
 
+def test_layer_a_raw_factor_cpi_core_cpi_plain_readings_are_monthly_macro_readable():
+    cpi = plain_reading_layer_a_raw_factor(
+        "cpi", {"actual_value": 332.407, "status": "available"}
+    )
+    core = plain_reading_layer_a_raw_factor(
+        "core_cpi", {"actual_value": 335.423, "status": "available"}
+    )
+    assert "当前 CPI 为" in cpi
+    assert "整体通胀水平" in cpi
+    assert "当前 Core CPI 为" in core
+    assert "剔除食品和能源" in core
+
+
 def test_layer_a_raw_factor_plain_reading_has_no_ai_call_dependency():
     src = inspect.getsource(plain_reading_layer_a_raw_factor)
     forbidden = ("ai_client", "call_ai", "run_agent", "BaseAgent", "prompt")

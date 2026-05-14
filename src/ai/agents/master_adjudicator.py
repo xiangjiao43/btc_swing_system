@@ -153,7 +153,7 @@ class MasterAdjudicator(BaseAgent):
             "what_would_change_mind": [
                 "主裁 AI 恢复正常",
                 "5 层证据齐备且健康",
-                "L3 grade ∈ {A, B, C}",
+                "L3 grade ∈ {A, B}",
             ],
             "evidence_ref": [],
             "notes": ["fallback_master_ai_failed"],
@@ -183,7 +183,7 @@ class MasterAdjudicator(BaseAgent):
             "what_would_change_mind": [
                 "主裁 AI 恢复正常",
                 "5 层证据齐备且健康",
-                "L3 grade ∈ {A, B, C}",
+                "L3 grade ∈ {A, B}",
             ],
             "evidence_ref": [],
             "notes": ["fallback_master_ai_failed"],

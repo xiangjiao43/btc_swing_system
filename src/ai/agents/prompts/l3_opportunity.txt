@@ -97,7 +97,9 @@ C — 低质量机会:
 方向有,但多重减分。例如:
 - L1 transition_* + L2 stance_confidence_tier=medium
 - 风险预览给中等信号(funding_z 偏高 + events_count_72h ≥ 2)
-仍可观察但不应主动开仓,permission 通常 watch。
+仍可观察但不应主动开仓,permission 通常 watch。C 级是观察型 /
+低质量波段机会,可以写入分析说明、未来关注条件和 no_open rationale,
+但默认不创建 swing thesis、不进入虚拟账户、不触发订单。
 
 none — 无机会:
 任一硬条件触发(列于第十二段防偏见硬约束)。例如:

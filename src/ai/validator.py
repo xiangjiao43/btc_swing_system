@@ -216,7 +216,7 @@ def validator_4_protection_blocked(
 _GRADE_PERMISSION_LEGAL = {
     "A": {"can_open", "cautious_open"},
     "B": {"cautious_open", "ambush_only"},
-    "C": {"ambush_only"},          # C 级强制 ambush_only(继承 v1.3)
+    "C": set(),                    # C 级为观察型机会,不创建 thesis
     "none": set(),                  # none 不允许创建 thesis
 }
 
@@ -229,8 +229,8 @@ def validator_5_grade_permission_lock(
     - grade=none → 不允许创建 thesis(强制 silent_cooldown)
     - grade=A → permission ∈ {can_open, cautious_open}
     - grade=B → permission ∈ {cautious_open, ambush_only}
-    - grade=C → permission = ambush_only
-    失败:覆盖 permission(C 强制 ambush_only),或强制 silent。
+    - grade=C → 观察型机会,不允许创建 thesis(强制 silent_cooldown)
+    失败:覆盖 permission,或强制 silent。
     """
     out = dict(master_output)
     activations = {"validator_5_grade_permission_lock": False}
@@ -238,14 +238,14 @@ def validator_5_grade_permission_lock(
         return out, activations
     grade = (context.get("l3_grade") or "none").upper() if isinstance(
         context.get("l3_grade"), str) else "none"
-    if grade.lower() == "none":
+    if grade in ("C",) or grade.lower() == "none":
         # 强制 silent
         out["mode"] = "silent_cooldown"
-        out["silent_reason"] = "L3 grade=none 不允许创建 thesis(Validator 5)"
+        out["silent_reason"] = f"L3 grade={grade} 不允许创建 thesis(Validator 5)"
         out.pop("new_thesis", None)
         activations["validator_5_grade_permission_lock"] = True
         notes = list(out.get("notes") or [])
-        notes.append("permission_overridden_for_grade_none")
+        notes.append(f"permission_overridden_for_grade_{grade}")
         out["notes"] = notes
         return out, activations
     legal = _GRADE_PERMISSION_LEGAL.get(grade, set())
@@ -255,8 +255,7 @@ def validator_5_grade_permission_lock(
     perm = new_thesis.get("execution_permission")
     if perm not in legal:
         new_thesis = dict(new_thesis)
-        # C 级强制 ambush_only;其他取 legal 中第一个
-        target = "ambush_only" if grade == "C" else sorted(legal)[0]
+        target = sorted(legal)[0]
         new_thesis["execution_permission"] = target
         out["new_thesis"] = new_thesis
         activations["validator_5_grade_permission_lock"] = True
@@ -463,8 +462,8 @@ def validator_10_grade_lock(
     if score is None:
         return out, activations
     score = int(score)
-    # v1.4 §3.3.6:A→80-100, B→60-80, C→40-60, none→不创建
-    expected_ranges = {"A": (80, 100), "B": (60, 80), "C": (40, 60)}
+    # v1.4 §3.3.6:A→80-100, B→60-80, C/none→不创建
+    expected_ranges = {"A": (80, 100), "B": (60, 80)}
     rng = expected_ranges.get(grade)
     if rng and not (rng[0] <= score <= rng[1]):
         # 覆盖到 grade 中位
@@ -883,7 +882,7 @@ def validator_21_soft_resistance(
     - active_thesis is None
     - cooldown_state.in_cooldown=False
     - fuse_state.in_14d_fuse=False
-    - L3 grade ∈ {A, B, C}
+    - L3 grade ∈ {A, B}
     - master 输出 mode='silent_cooldown'(应该出 new_thesis)
 
     **D4=a 决策**:本 sprint 只识别(标 activations),重试机制留 1.10-F。
@@ -901,7 +900,7 @@ def validator_21_soft_resistance(
     if fs.get("in_14d_fuse") or fs.get("in_thesis_cycle_fuse"):
         return out, activations
     grade = context.get("l3_grade")
-    if not isinstance(grade, str) or grade.upper() not in ("A", "B", "C"):
+    if not isinstance(grade, str) or grade.upper() not in ("A", "B"):
         return out, activations
     # 满足创建条件但 silent → 软抗拒
     activations["validator_21_soft_resistance"] = True
@@ -909,7 +908,7 @@ def validator_21_soft_resistance(
     # D3=b:retry hint 文本(orchestrator 第二次调 master 时塞 prompt)
     activations["validator_21_retry_hint"] = (
         f"V21 软抗拒检测:active_thesis=None + cooldown=False + 14d_fuse=False + "
-        f"L3 grade={grade} ∈ {{A,B,C}},应该出 new_thesis 而非 silent_cooldown。"
+        f"L3 grade={grade} ∈ {{A,B}},应该出 new_thesis 而非 silent_cooldown。"
         f"请重新评估,若证据齐备且 risk_breakdown 在阈值内,务必输出 mode=new_thesis。"
     )
     notes = list(out.get("notes") or [])

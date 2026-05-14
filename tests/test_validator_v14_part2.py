@@ -318,6 +318,20 @@ def test_v21_grade_none_skip():
     assert not act["validator_21_soft_resistance"]
 
 
+def test_v21_grade_c_skip():
+    """grade=C 是观察型机会,silent 是正确的不算软抗拒。"""
+    out, act = validator_21_soft_resistance(
+        {"mode": "silent_cooldown"},
+        {
+            "active_thesis": None,
+            "cooldown_state": {"in_cooldown": False},
+            "fuse_state": {"in_14d_fuse": False},
+            "l3_grade": "C",
+        },
+    )
+    assert not act["validator_21_soft_resistance"]
+
+
 def test_v21_master_outputs_new_thesis_skip():
     """master 出 new_thesis → 不是 silent → 不触发。"""
     out, act = validator_21_soft_resistance(

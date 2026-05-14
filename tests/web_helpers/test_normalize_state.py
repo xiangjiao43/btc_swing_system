@@ -134,9 +134,10 @@ def test_v13_summary_card_stance_translated():
 
 
 def test_v13_summary_headline_for_flat_grade_c():
-    """FLAT + grade=C → 'C 级机会一般' 类 headline。"""
+    """FLAT + grade=C → 观察型机会,不暗示已计划开仓。"""
     out = normalize_state(_v13_state_full(), run_mode="ai_orchestrator")
-    assert "C" in out["summary_card"]["headline"] or "一般" in out["summary_card"]["headline"]
+    assert "C 级观察型机会" in out["summary_card"]["headline"]
+    assert "不创建 thesis" in out["summary_card"]["headline"]
     assert "保持空仓" in out["summary_card"]["headline"]
 
 

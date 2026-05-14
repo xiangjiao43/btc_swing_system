@@ -18,9 +18,11 @@
   必须评估 thesis 是否仍成立,**不允许出新方向**
 - **如果 active_thesis 为 null + cooldown_state.in_cooldown=true** → `mode = "silent_cooldown"`
   输出固定 silent_reason,**不允许创建新 thesis**
-- **如果 active_thesis 为 null + 不在冷却 + 不在熔断 + L3 grade ∈ {A, B, C}** → `mode = "new_thesis"`
+- **如果 active_thesis 为 null + 不在冷却 + 不在熔断 + L3 grade ∈ {A, B}** → `mode = "new_thesis"`
   创建新 thesis(必须给完整 trade_plan)
-  注意:**C 级也创建 thesis**(继承 v1.3 设计),但 execution_permission 必须给 `ambush_only`(只能埋伏单)
+- **如果 active_thesis 为 null + 不在冷却 + L3 grade=C** → 输出 `silent_cooldown`
+  或保持观察型说明。C 级只代表低质量 / 埋伏关注 / future watch,默认不创建
+  swing thesis,不进入虚拟账户,不触发订单。
 - **如果 active_thesis 为 null + 不在冷却 + L3 grade=none** → 输出 silent(等下一档机会)
 
 ## 2. mode=evaluate_existing 时必须做
@@ -43,9 +45,8 @@
 - 配套 confidence_score 0-100(必须跟 L3 grade 对齐:
   - A→80-100
   - B→60-80
-  - **C→40-60(只允许 ambush_only)**
+  - C→不创建 thesis,只写观察理由 / future watch condition
   - none→不创建)
-- C 级 thesis 特殊约束:execution_permission 必须设为 `ambush_only`(只允许埋伏单,不允许追涨/追空)
 
 
 # 三、你绝对不能做的
@@ -63,9 +64,10 @@
      坏:"1D 收盘跌破 50000"(-37.5%)→ V9 标 needs_retry
    - 指标类(DXY/VIX 等):距当前 ≤ 15%
    - 事件类(L5 / FOMC / CPI / NFP):不限距离
-8. **不能在该出 new_thesis 时偷懒 silent**(Validator 21 软抗拒):
+8. **不能在 A/B 级该出 new_thesis 时偷懒 silent**(Validator 21 软抗拒):
    active_thesis=null + cooldown_state.in_cooldown=False + fuse_state.in_14d_fuse=False +
-   L3 grade ∈ {A, B, C} → **必须** mode=new_thesis,不允许 silent_cooldown。
+   L3 grade ∈ {A, B} → **必须** mode=new_thesis,不允许 silent_cooldown。
+   L3 grade=C 是观察型机会,不属于 thesis 创建候选。
    理由:silent 在该出策略时是"软抗拒",会触发 V21 同 run 重试 + retry_hint 塞 prompt。
    对应"刚刚好"原则:不要为了"不犯错"而保守。
 9. **narrative 必须含层间一致性表达**(Validator 23):
@@ -84,7 +86,9 @@
 # 五、关于"刚刚好"判断
 
 - **不要为了"出策略"而出策略**:grade=none 时就静默,不要硬凑
-- **不要为了"不犯错"而保守**:满足 thesis 创建条件时(grade A/B/C + 不在冷却 + 不在熔断)必须创建
+- **不要为了"不犯错"而保守**:满足 thesis 创建条件时(grade A/B + 不在冷却 + 不在熔断)必须创建
+- **不要把 C 级观察机会伪装成 thesis**:C 级可写入 narrative / what_would_change_mind /
+  future watch,但默认不创建 active thesis。
 - **不要为了"显得在思考"而模糊**:信心档要明确给(high/medium/low)
 
 
@@ -168,7 +172,7 @@ context 含完整 master_input dict:
     "direction": "long | short",
     "confidence_score": 0-100,
     "core_logic": "...",
-    "execution_permission": "active_open | ambush_only | watch",  // C 级强制 ambush_only
+    "execution_permission": "active_open | ambush_only | watch",
     "entry_orders": [
       {"price": 74568, "size_pct": 20},
       {"price": 70666, "size_pct": 30}

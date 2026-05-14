@@ -197,13 +197,13 @@ def test_validate_v18_fuse_blocks_new_thesis():
 
 
 def test_validate_v1_v2_v5_combined_overrides():
-    """new_thesis + 多约束触发(stop_loss + position_cap + grade=C 但 permission=can_open)。"""
+    """new_thesis + 多约束触发(stop_loss + position_cap + grade=B 但 permission=can_open)。"""
     output, activations = validate_master_output(
         {"mode": "new_thesis",
          "new_thesis": {
              "direction": "long",
-             "confidence_score": 50,                     # C 级范围 40-60 ✓
-             "execution_permission": "can_open",          # C 级必须 ambush_only
+             "confidence_score": 70,                     # B 级范围 60-80 ✓
+             "execution_permission": "can_open",          # B 级只允许 cautious_open / ambush_only
              "entry_orders": [{"price": 74000, "size_pct": 60}],  # 单笔 0.60 > cap 0.40
              "stop_loss": {"price": 65000, "size_pct": 100},      # 不在 [70000, 67000]
          },
@@ -215,7 +215,7 @@ def test_validate_v1_v2_v5_combined_overrides():
         {"active_thesis": None,
          "cooldown_state": {"in_cooldown": False},
          "fuse_state": {"in_14d_fuse": False},
-         "l3_grade": "C",
+         "l3_grade": "B",
          "l4_hard_invalidation_levels": [70000.0, 67000.0],
          "l4_position_cap_base": 0.40,
          "current_btc_price": 76000.0},
@@ -225,9 +225,38 @@ def test_validate_v1_v2_v5_combined_overrides():
     assert output["new_thesis"]["stop_loss"]["price"] == 70000.0
     # V2 position_capped(60% > cap 40%)
     assert activations["validator_2_position_capped"] is True
-    # V5 grade_permission_lock(C 级强制 ambush_only)
+    # V5 grade_permission_lock(B 级不允许 can_open)
     assert activations["validator_5_grade_permission_lock"] is True
-    assert output["new_thesis"]["execution_permission"] == "ambush_only"
+    assert output["new_thesis"]["execution_permission"] in {"ambush_only", "cautious_open"}
+
+
+def test_validate_grade_c_blocks_new_thesis():
+    """C 级是观察型机会,validator 保守改为 silent,与 persistence 不创建 thesis 对齐。"""
+    output, activations = validate_master_output(
+        {"mode": "new_thesis",
+         "new_thesis": {
+             "direction": "long",
+             "confidence_score": 50,
+             "execution_permission": "ambush_only",
+             "entry_orders": [{"price": 74000, "size_pct": 20}],
+             "stop_loss": {"price": 70000, "size_pct": 100},
+         },
+         "narrative": "C 级观察机会,层间仍有分歧",
+         "counter_arguments": ["机会质量偏低"],
+         "what_would_change_mind": ["1D 收盘突破 78000",
+                                      "L3 升级到 B",
+                                      "funding 回落"]},
+        {"active_thesis": None,
+         "cooldown_state": {"in_cooldown": False},
+         "fuse_state": {"in_14d_fuse": False},
+         "l3_grade": "C",
+         "l4_hard_invalidation_levels": [70000.0],
+         "l4_position_cap_base": 0.40,
+         "current_btc_price": 76000.0},
+    )
+    assert output["mode"] == "silent_cooldown"
+    assert "new_thesis" not in output
+    assert activations["validator_5_grade_permission_lock"] is True
 
 
 def test_validate_dict_28_field_complete():

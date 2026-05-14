@@ -151,15 +151,16 @@ def test_v5_grade_a_legal_permission():
     assert not act["validator_5_grade_permission_lock"]
 
 
-def test_v5_grade_c_must_be_ambush_only():
-    """C 级 permission=can_open → 强制 ambush_only。"""
+def test_v5_grade_c_forces_silent_no_thesis():
+    """C 级是观察型机会,不允许创建 thesis。"""
     out, act = validator_5_grade_permission_lock(
         {"mode": "new_thesis",
          "new_thesis": {"execution_permission": "can_open"}},
         {"l3_grade": "C"},
     )
     assert act["validator_5_grade_permission_lock"]
-    assert out["new_thesis"]["execution_permission"] == "ambush_only"
+    assert out["mode"] == "silent_cooldown"
+    assert "new_thesis" not in out
 
 
 def test_v5_grade_none_forces_silent():
@@ -357,14 +358,14 @@ def test_v10_grade_a_score_50_overridden():
     assert out["new_thesis"]["confidence_score"] == 90
 
 
-def test_v10_grade_c_score_70_overridden():
-    """C 级期望 40-60,master 给 70 → 覆盖到 50。"""
+def test_v10_grade_c_score_ignored_because_c_has_no_thesis_range():
+    """C 级不再是 thesis 创建候选,V10 不再维护 C 级建仓分数区间。"""
     out, act = validator_10_grade_lock(
         {"mode": "new_thesis", "new_thesis": {"confidence_score": 70}},
         {"l3_grade": "C"},
     )
-    assert act["validator_10_grade_lock"]
-    assert out["new_thesis"]["confidence_score"] == 50
+    assert not act["validator_10_grade_lock"]
+    assert out["new_thesis"]["confidence_score"] == 70
 
 
 # ============================================================

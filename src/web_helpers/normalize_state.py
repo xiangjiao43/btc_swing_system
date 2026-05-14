@@ -868,7 +868,7 @@ def _build_headline(
     if grade == "B":
         return "可考虑开仓(中级别机会)"
     if grade == "C":
-        return "保持空仓观察(机会一般)"
+        return "保持空仓观察(C 级观察型机会,不创建 thesis)"
     if grade in ("none", "None", None):
         return "保持空仓观察(暂无机会)"
     return "空仓观察"

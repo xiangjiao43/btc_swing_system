@@ -107,7 +107,7 @@ def _ensure_schema_minimums(
 
     conds = list(out.get("what_would_change_mind") or [])
     while len(conds) < 3:
-        conds.append("5 层证据全部 health_status=healthy + L3 grade ∈ {A, B, C}")
+        conds.append("5 层证据全部 health_status=healthy + L3 grade ∈ {A, B}")
     out["what_would_change_mind"] = conds[:5]
 
     return out
@@ -627,7 +627,7 @@ def _build_change_conditions(
             deduped.append(c)
     # 最少 3 条
     while len(deduped) < 3:
-        deduped.append("5 层证据全部 health_status=healthy + L3 grade ∈ {A, B, C}")
+        deduped.append("5 层证据全部 health_status=healthy + L3 grade ∈ {A, B}")
     return deduped[:5]
 
 

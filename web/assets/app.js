@@ -808,8 +808,91 @@ function app() {
             const st = this.state?.main_strategy?.action_state;
             return ['LONG_OPEN', 'LONG_HOLD', 'LONG_TRIM', 'SHORT_OPEN', 'SHORT_HOLD', 'SHORT_TRIM'].includes(st);
         },
+        positionHasFilledEntry() {
+            return !!(this.positionSummary && Number(this.positionSummary.entry_orders_filled || 0) > 0);
+        },
+        positionDirectionLabel() {
+            if (!this.positionHasFilledEntry()) return 'none';
+            return this.positionSummary.direction || 'none';
+        },
+        positionDirectionClass() {
+            const d = this.positionDirectionLabel();
+            if (d === 'long') return 'text-emerald-600 dark:text-emerald-400';
+            if (d === 'short') return 'text-rose-600 dark:text-rose-400';
+            return 'text-slate-500 dark:text-slate-400';
+        },
+        positionSizeLabel() {
+            if (!this.positionHasFilledEntry()) return 'none';
+            const btc = Number(this.positionSummary.btc_amount || 0);
+            if (!btc) return 'none';
+            const pct = this.positionSummary.size_pct ?? this.positionSummary.position_size_pct;
+            const btcText = btc.toFixed(6).replace(/0+$/, '').replace(/\.$/, '');
+            return pct != null ? `${btcText} BTC / ${Number(pct).toFixed(1)}%` : `${btcText} BTC / -`;
+        },
+        positionEntryPriceLabel() {
+            if (!this.positionHasFilledEntry()) return '-';
+            const price = Number(this.positionSummary.avg_entry_price || 0);
+            return price ? '$' + price.toLocaleString() : '-';
+        },
+        positionCurrentPriceLabel() {
+            const price = this.livePrice();
+            return price ? this.formatPrice(price) : '-';
+        },
+        positionPnlParts() {
+            if (!this.positionHasFilledEntry()) return null;
+            const direction = this.positionSummary.direction;
+            const btc = Number(this.positionSummary.btc_amount || 0);
+            const entry = Number(this.positionSummary.avg_entry_price || 0);
+            const live = Number(this.livePrice() || 0);
+            if (!direction || !btc || !entry || !live) return null;
+            const raw = direction === 'short' ? (entry - live) : (live - entry);
+            const pct = (raw / entry) * 100;
+            const usdt = raw * btc;
+            return { pct, usdt };
+        },
+        positionPnlLabel() {
+            const p = this.positionPnlParts();
+            if (!p) return '-';
+            return `${this.formatPct(p.pct, true)} / ${p.usdt >= 0 ? '+' : ''}${p.usdt.toFixed(0)} USDT`;
+        },
+        positionPnlClass() {
+            const p = this.positionPnlParts();
+            if (!p) return 'text-slate-500 dark:text-slate-400';
+            return p.usdt >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400';
+        },
+        positionStopLossLabel() {
+            return this.positionHasFilledEntry() ? this.cardStopLoss() : '-';
+        },
+        positionTargetsLabel() {
+            if (!this.positionHasFilledEntry()) return '-';
+            const tps = this.tp().take_profit_plan || [];
+            if (tps.length === 0) return '-';
+            return tps.map(t => t.price != null ? '$' + Number(t.price).toLocaleString() : '-').join(' / ');
+        },
+        positionHoldingDurationLabel() {
+            if (!this.positionHasFilledEntry()) return '-';
+            const openedAt = this.positionSummary.opened_at_utc
+                || this.positionSummary.first_entry_filled_at_utc
+                || this.activeThesis?.created_at_utc;
+            if (!openedAt) return '-';
+            try {
+                const dt = new Date(String(openedAt).replace('Z', '+00:00'));
+                if (isNaN(dt.getTime())) return '-';
+                const diffMs = Date.now() - dt.getTime();
+                if (diffMs < 0) return '-';
+                const hours = Math.floor(diffMs / 3600000);
+                const days = Math.floor(hours / 24);
+                const remHours = hours % 24;
+                if (days > 0) return `${days} 天 ${remHours} 小时`;
+                return `${remHours} 小时`;
+            } catch (e) { return '-'; }
+        },
+        positionStatusLabel() {
+            if (!this.positionHasFilledEntry()) return '等待入场信号';
+            return this.activeThesis?.lifecycle_stage || 'active';
+        },
         cardCurrentPnl() {
-            return '-';
+            return this.positionPnlLabel();
         },
         cardDistanceToStop() { return '-'; },
         cardHoldingDuration() { return '-'; },

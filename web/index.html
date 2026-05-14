@@ -581,32 +581,48 @@
 
               <article id="region-position-summary" class="rounded border border-slate-200 dark:border-slate-800 p-3 space-y-2">
                 <h4 class="text-[12px] font-semibold text-slate-600 dark:text-slate-400">当前持仓</h4>
-                <template x-if="!positionSummary || !(positionSummary.entry_orders_filled > 0)">
-                  <div class="text-slate-500 dark:text-slate-400 italic text-[12px]">
-                    当前无持仓 / 等待入场信号
+                <div class="grid grid-cols-2 gap-2 text-[12px]">
+                  <div>
+                    <div class="stat-label">方向</div>
+                    <div class="font-bold"
+                         :class="positionDirectionClass()"
+                         x-text="positionDirectionLabel()"></div>
                   </div>
-                </template>
-                <template x-if="positionSummary && positionSummary.entry_orders_filled > 0">
-                  <div class="grid grid-cols-2 gap-2 text-[12px]">
-                    <div>
-                      <div class="stat-label">方向</div>
-                      <div class="font-bold" x-text="positionSummary.direction || '-'"></div>
-                    </div>
-                    <div>
-                      <div class="stat-label">BTC 数量</div>
-                      <div class="font-mono tabular-nums" x-text="positionSummary.btc_amount?.toFixed(6) ?? '-'"></div>
-                    </div>
-                    <div>
-                      <div class="stat-label">入场价</div>
-                      <div class="font-mono tabular-nums"
-                           x-text="positionSummary.avg_entry_price ? '$' + positionSummary.avg_entry_price.toLocaleString() : '-'"></div>
-                    </div>
-                    <div>
-                      <div class="stat-label">浮盈亏</div>
-                      <div class="font-mono tabular-nums" x-text="cardCurrentPnl()"></div>
-                    </div>
+                  <div>
+                    <div class="stat-label">仓位</div>
+                    <div class="font-mono tabular-nums" x-text="positionSizeLabel()"></div>
                   </div>
-                </template>
+                  <div>
+                    <div class="stat-label">入场均价</div>
+                    <div class="font-mono tabular-nums" x-text="positionEntryPriceLabel()"></div>
+                  </div>
+                  <div>
+                    <div class="stat-label">当前价格</div>
+                    <div class="font-mono tabular-nums" x-text="positionCurrentPriceLabel()"></div>
+                  </div>
+                  <div class="col-span-2">
+                    <div class="stat-label">浮盈</div>
+                    <div class="font-mono tabular-nums"
+                         :class="positionPnlClass()"
+                         x-text="positionPnlLabel()"></div>
+                  </div>
+                  <div>
+                    <div class="stat-label">止损</div>
+                    <div class="font-mono tabular-nums" x-text="positionStopLossLabel()"></div>
+                  </div>
+                  <div>
+                    <div class="stat-label">目标</div>
+                    <div class="font-mono tabular-nums" x-text="positionTargetsLabel()"></div>
+                  </div>
+                  <div>
+                    <div class="stat-label">持仓时长</div>
+                    <div class="font-mono tabular-nums" x-text="positionHoldingDurationLabel()"></div>
+                  </div>
+                  <div>
+                    <div class="stat-label">状态</div>
+                    <div class="font-mono tabular-nums" x-text="positionStatusLabel()"></div>
+                  </div>
+                </div>
               </article>
 
               <article id="region-active-thesis" class="rounded border border-slate-200 dark:border-slate-800 p-3 space-y-2">

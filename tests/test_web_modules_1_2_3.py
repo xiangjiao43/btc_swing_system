@@ -151,14 +151,37 @@ def test_module_3_orders_position_section_exists(html):
 
 
 def test_module_3_displays_position_summary(html):
-    """当前持仓:方向 / BTC 数量 / 入场价 / 浮盈亏。"""
-    assert "当前持仓" in html
-    assert "BTC 数量" in html
-    assert "入场价" in html
-    assert "浮盈亏" in html
-    assert "positionSummary.direction" in html
-    assert "positionSummary.btc_amount" in html
-    assert "positionSummary.avg_entry_price" in html
+    """当前持仓固定展示 9 个持仓快照字段。"""
+    start = html.find('id="region-position-summary"')
+    end = html.find('id="region-active-thesis"')
+    card = html[start:end]
+    for label in (
+        "方向",
+        "仓位",
+        "入场均价",
+        "当前价格",
+        "浮盈",
+        "止损",
+        "目标",
+        "持仓时长",
+        "状态",
+    ):
+        assert label in card
+    assert "当前无持仓 / 等待入场信号" not in card
+    for helper in (
+        "positionDirectionLabel()",
+        "positionSizeLabel()",
+        "positionEntryPriceLabel()",
+        "positionCurrentPriceLabel()",
+        "positionPnlLabel()",
+        "positionStopLossLabel()",
+        "positionTargetsLabel()",
+        "positionHoldingDurationLabel()",
+        "positionStatusLabel()",
+    ):
+        assert helper in card
+    for virtual_label in ("权益", "现金", "历史收益率", "初始资金"):
+        assert virtual_label not in card
 
 
 def test_module_3_displays_pending_orders_table(html):
@@ -320,7 +343,7 @@ def test_swing_account_execution_contains_required_blocks(html):
     pos_orders = html.find('id="region-orders-position"')
     pos_layers = html.find('id="region-layer-cards"')
     assert pos_account < pos_va < pos_position < pos_thesis < pos_orders < pos_layers
-    for label in ("虚拟账户", "当前持仓", "挂单 / thesis", "当前无持仓 / 等待入场信号"):
+    for label in ("虚拟账户", "当前持仓", "挂单 / thesis"):
         assert label in html
     assert "账户与执行" in html
 
@@ -372,6 +395,32 @@ def test_swing_strategy_js_helpers_declared(js):
     assert "Layer A validator 有 warning / violation" in js
 
 
+def test_current_position_js_helpers_declared(js):
+    """当前持仓卡片只读现有数据,并提供 no-position fallback。"""
+    for helper in (
+        "positionHasFilledEntry()",
+        "positionDirectionLabel()",
+        "positionDirectionClass()",
+        "positionSizeLabel()",
+        "positionEntryPriceLabel()",
+        "positionCurrentPriceLabel()",
+        "positionPnlParts()",
+        "positionPnlLabel()",
+        "positionPnlClass()",
+        "positionStopLossLabel()",
+        "positionTargetsLabel()",
+        "positionHoldingDurationLabel()",
+        "positionStatusLabel()",
+    ):
+        assert helper in js
+    assert "return 'none';" in js
+    assert "return '等待入场信号';" in js
+    assert "d === 'long'" in js
+    assert "d === 'short'" in js
+    assert "text-emerald-600 dark:text-emerald-400" in js
+    assert "text-rose-600 dark:text-rose-400" in js
+
+
 def test_module_position_legacy_expectation_removed(html):
     """旧的一级分散顺序不再成立;Layer B 模块统一收纳到波段策略仪表盘。"""
     pos_swing = html.find('id="region-layer-b-swing"')
@@ -389,7 +438,7 @@ def test_redundant_ai_adjudicator_block_removed(html, js):
     assert 'id="region-1"' not in html
     assert "AI 主裁结论" not in html
     assert "swing_master_detail" not in html
-    for label in ("信心指数", "入场区间", "止损价", "止盈分批", "仓位上限", "当前浮盈", "距离止损", "持仓时长", "分级失效位"):
+    for label in ("信心指数", "入场区间", "止损价", "止盈分批", "仓位上限", "当前浮盈", "距离止损", "分级失效位"):
         assert label not in html
     assert "swingTraderConclusion()" not in js
     assert "swingTraderReason()" not in js

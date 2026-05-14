@@ -489,6 +489,43 @@ function app() {
             if (h === 'degraded') return 'text-amber-600 dark:text-amber-400';
             return 'text-rose-600 dark:text-rose-400 font-medium';
         },
+        swingStrategyUpdatedAt() {
+            const m = (this.state && this.state.meta) || {};
+            if (m.generated_at_bjt) return m.generated_at_bjt;
+            if (m.generated_at_utc) return this.formatBJT(m.generated_at_utc);
+            const sc = (this.state && this.state.summary_card) || {};
+            return sc.decision_time || '-';
+        },
+        layerAHealthItems() {
+            const spot = this.spotStrategy();
+            const validator = spot && spot.validator ? spot.validator : {};
+            const hasViolation = Array.isArray(validator.violations)
+                && validator.violations.length > 0;
+            const validatorFailed = validator.passed === false || hasViolation;
+            const specs = [
+                ['A1', '大周期阶段', 'a1_cycle_stage'],
+                ['A2', '链上与宏观', 'a2_onchain_macro'],
+                ['A3', '现货策略机会', 'a3_spot_opportunity'],
+                ['A4', '现货风险', 'a4_spot_risk'],
+                ['A5', '大周期主裁', 'a5_spot_adjudicator'],
+            ];
+            return specs.map(([layer_id, name, key]) => {
+                const obj = spot && spot[key] && Object.keys(spot[key]).length
+                    ? spot[key]
+                    : null;
+                const health = !obj ? 'missing' : (validatorFailed ? 'degraded' : 'healthy');
+                const reasons = !obj
+                    ? ['暂无 Layer A 输出']
+                    : (validatorFailed ? ['Layer A validator 有 warning / violation'] : []);
+                return {
+                    layer_id,
+                    name,
+                    health,
+                    pillars_summary: obj ? 'Layer A 最新输出可用' : '暂无 Layer A 输出',
+                    missing_reasons: reasons,
+                };
+            });
+        },
         // Sprint B:fetch_attempts 真实状态 helper(替代老的 inserted_at_utc 推断)
         // status ∈ {success, failure, no_data}
         sourceStatusGlyph(status) {

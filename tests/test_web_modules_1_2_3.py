@@ -185,21 +185,95 @@ def test_modules_use_font_mono_for_numbers(html):
 
 def test_existing_12_cards_not_removed(html):
     """§X:不删现有 12 卡 + 五层分析 6 卡 — 验证现有 region 仍在。"""
-    # region-1(AI 策略建议) / Layer A / region-layer-cards(五层分析) / region-4 / region-5
-    for region in ("region-1", "region-layer-a-spot", "region-layer-cards", "region-4", "region-5"):
+    # region-1(AI 策略建议) / Layer A / Layer B 波段策略 / region-layer-cards(五层分析) / region-4 / region-5
+    for region in (
+        "region-1",
+        "region-layer-a-spot",
+        "region-layer-b-swing",
+        "region-layer-cards",
+        "region-4",
+        "region-5",
+    ):
         assert f'id="{region}"' in html, f"现有 {region} 被误删!"
 
 
 def test_module_position_between_strategy_and_layers(html):
-    """v1.4 §9.2:Layer A + 模块 1+2+3 必须在 region-1 和五层分析之间。"""
+    """波段策略内部顺序:当前 thesis → AI 策略建议 → 虚拟账户 → 挂单 + 持仓 → 五层分析。"""
+    pos_layer_a = html.find('id="region-layer-a-spot"')
+    pos_swing = html.find('id="region-layer-b-swing"')
+    pos_thesis = html.find('id="region-active-thesis"')
     pos_strategy = html.find('id="region-1"')
+    pos_va = html.find('id="region-virtual-account"')
+    pos_orders = html.find('id="region-orders-position"')
+    pos_layers = html.find('id="region-layer-cards"')
+    pos_raw = html.find('id="region-4"')
+    assert pos_layer_a < pos_swing < pos_raw, (
+        "模块顺序错:必须大周期策略 → 波段策略 → 原始数据因子"
+    )
+    assert pos_swing < pos_thesis < pos_strategy < pos_va < pos_orders < pos_layers < pos_raw, (
+        "波段策略内部顺序错:必须 当前 thesis → AI 策略建议 → 虚拟账户 → 挂单 + 持仓 → 五层分析"
+    )
+
+
+def test_swing_strategy_wrapper_static_contract(html):
+    """Layer B 波段模块作为统一大模块展示,不重复拆成多个一级入口。"""
+    assert html.count('id="region-layer-b-swing"') == 1
+    assert "波段策略" in html
+    assert "Layer B · 波段仓" in html
+    assert "波段策略更新时间" in html
+    assert "判断 BTC 中长线波段;可做多、可做空;创建 thesis、管理虚拟账户和挂单持仓" in html
+    assert html.count('id="region-active-thesis"') == 1
+    assert html.count('id="region-virtual-account"') == 1
+    assert html.count('id="region-orders-position"') == 1
+    assert html.count('id="region-layer-cards"') == 1
+
+
+def test_system_health_three_column_layer_order(html):
+    """系统自检内部固定为 Layer A 五层 → Layer B 五层 → 数据源。"""
+    pos_layer_a = html.find("Layer A 五层")
+    pos_layer_b = html.find("Layer B 五层")
+    pos_sources = html.find('class="subheading mb-1.5">数据源')
+    assert pos_layer_a != -1
+    assert pos_layer_b != -1
+    assert pos_sources != -1
+    assert pos_layer_a < pos_layer_b < pos_sources
+    assert "layerAHealthItems()" in html
+    assert "dataSourcesFreshness" in html
+
+
+def test_system_health_layer_b_and_badge_kept(html):
+    """Layer B 自检名称和系统自检 badge 仍保留,只是在前面新增 Layer A 列。"""
+    assert "系统自检" in html
+    assert "selfCheckBadgeClass()" in html
+    assert "selfCheckBadgeLabel()" in html
+    assert "systemHealth?.evidence_layers" in html
+    assert "layerHealthGlyph(layer.health)" in html
+
+
+def test_swing_strategy_js_helpers_declared(js):
+    assert "swingStrategyUpdatedAt()" in js
+    assert "layerAHealthItems()" in js
+    for label in ("A1", "A2", "A3", "A4", "A5"):
+        assert label in js
+    for label in (
+        "大周期阶段",
+        "链上与宏观",
+        "现货策略机会",
+        "现货风险",
+        "大周期主裁",
+    ):
+        assert label in js
+    assert "暂无 Layer A 输出" in js
+    assert "Layer A validator 有 warning / violation" in js
+
+
+def test_module_position_legacy_expectation_removed(html):
+    """旧的一级分散顺序不再成立;Layer B 模块统一收纳到波段策略容器。"""
     pos_layer_a = html.find('id="region-layer-a-spot"')
     pos_va = html.find('id="region-virtual-account"')
     pos_thesis = html.find('id="region-active-thesis"')
-    pos_orders = html.find('id="region-orders-position"')
-    pos_layers = html.find('id="region-layer-cards"')
-    assert pos_strategy < pos_layer_a < pos_va < pos_thesis < pos_orders < pos_layers, (
-        "模块顺序错:必须 region-1 → 大周期策略 → 模块 1+2+3 → region-layer-cards"
+    assert not (html.find('id="region-1"') < pos_layer_a < pos_va < pos_thesis), (
+        "旧顺序不应继续存在:当前 thesis / 虚拟账户已经归入波段策略内部"
     )
 
 
@@ -209,7 +283,7 @@ def test_layer_a_spot_module_static_contract(html):
     assert "大周期策略更新时间" in html
     assert "spotLayerCards()" in html
     assert "暂无大周期策略，本 run 尚未记录 Layer A 输出。" in html
-    assert 'src="/assets/app.js?v=layer-a-ui-c-grade-cleanup-20260514"' in html
+    assert 'src="/assets/app.js?v=layer-b-swing-health-layout-20260514"' in html
 
 
 # ============================================================

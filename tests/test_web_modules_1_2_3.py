@@ -270,8 +270,13 @@ def test_swing_strategy_wrapper_static_contract(html):
     assert "判断 BTC 中长线波段;可做多、可做空;创建 thesis、管理虚拟账户和挂单持仓" in html
     assert html.count('id="region-swing-summary"') == 1
     assert html.count('id="region-swing-account-execution"') == 1
-    for label in ("当前状态", "方向", "机会等级", "主裁动作", "置信度"):
+    for label in ("当前状态", "方向"):
         assert label in html
+    summary_start = html.find('id="region-swing-summary"')
+    summary_end = html.find('id="region-swing-account-execution"')
+    summary = html[summary_start:summary_end]
+    for label in ("机会等级", "主裁动作", "置信度"):
+        assert label not in summary
     for label in ("虚拟账户", "当前持仓", "挂单 / thesis", "交易员结论"):
         assert label in html
     assert "账户与执行" not in html
@@ -402,6 +407,19 @@ def test_swing_strategy_inner_cards_are_unframed(html):
         assert "dark:bg-slate-900" not in snippet
     assert "xl:grid-cols-6" in html
     assert 'id="region-layer-b-swing" class="audit-card"' in html
+
+
+def test_swing_summary_status_direction_single_bar(html):
+    """波段策略顶部摘要只保留 当前状态 + 方向 一条横向信息条。"""
+    start = html.find('id="region-swing-summary"')
+    end = html.find('id="region-swing-account-execution"')
+    summary = html[start:end]
+    assert "当前状态" in summary
+    assert "方向" in summary
+    assert "机会等级" not in summary
+    assert "主裁动作" not in summary
+    assert "置信度" not in summary
+    assert "border-l border-slate-100" in summary
 
 
 def test_layer_a_spot_module_static_contract(html):

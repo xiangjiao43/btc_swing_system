@@ -480,27 +480,15 @@
       </header>
 
       <div class="p-3 space-y-4">
-        <!-- 摘要区:只做展示归纳,不改 Layer B 数据来源 -->
-        <section id="region-swing-summary" class="grid grid-cols-2 md:grid-cols-5 gap-3 text-[12px]">
-          <div class="p-2">
+        <section id="region-swing-summary"
+                 class="flex flex-wrap items-center gap-x-6 gap-y-2 text-[12px] border-b border-slate-100 dark:border-slate-800 pb-3">
+          <div>
             <div class="stat-label">当前状态</div>
             <div class="text-[13px] font-bold" x-text="swingCurrentStatus()"></div>
           </div>
-          <div class="p-2">
+          <div class="pl-4 border-l border-slate-100 dark:border-slate-800">
             <div class="stat-label">方向</div>
             <div class="text-[13px] font-bold" x-text="swingDirection()"></div>
-          </div>
-          <div class="p-2">
-            <div class="stat-label">机会等级</div>
-            <div class="text-[13px] font-bold" x-text="cardOpportunityGrade()"></div>
-          </div>
-          <div class="p-2">
-            <div class="stat-label">主裁动作</div>
-            <div class="text-[13px] font-bold" x-text="swingMasterAction()"></div>
-          </div>
-          <div class="p-2">
-            <div class="stat-label">置信度</div>
-            <div class="text-[13px] font-bold font-mono tabular-nums" x-text="swingConfidenceScore()"></div>
           </div>
         </section>
 

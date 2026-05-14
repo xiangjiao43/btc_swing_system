@@ -160,6 +160,16 @@ def test_layer_a_raw_factor_cards_have_plain_readings_and_no_status_placeholder(
         assert unavailable_phrase in js
 
 
+def test_layer_a_raw_factor_cards_keep_existing_status_style(js, html):
+    """新增因子复用原始因子卡片:数值、说明、状态、抓取时间都走旧结构。"""
+    assert "plain_interpretation: interpretation" in js
+    assert "linked_layer: 'Layer A'" in js
+    assert "factorStatusLine(c)" in html
+    assert "fetchedAtPrimary(c) || '-'" in html
+    assert "Layer A context" not in js
+    assert "proxy_endpoint_404" not in html
+
+
 # ============================================================
 # 2. 模块 5:周复盘报告
 # ============================================================

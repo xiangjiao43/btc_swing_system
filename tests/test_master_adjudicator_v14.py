@@ -305,7 +305,7 @@ def test_analyze_with_mock_returns_silent_cooldown():
         "narrative": "上次 thesis 关闭,在 24h 冷却中",
         "one_line_summary": "冷却中,不出新方向",
         "counter_arguments": ["市场短期有反弹信号"],
-        "what_would_change_mind": ["冷却期结束", "L3 升 B/C", "无 active thesis"],
+        "what_would_change_mind": ["冷却期结束", "L3 升 B", "无 active thesis"],
         "evidence_ref": [],
     }
     client = _make_mock_client_returning_json(fake_response)

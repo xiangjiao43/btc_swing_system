@@ -371,8 +371,8 @@ def _gen_post_protection(
         "持仓只能持有 / 减仓 / 离场。"
     )
     conclusion = (
-        "重评期 4H 周期满 + 5 层证据齐备且健康 + 机会层重新出现 A/B/C 级 → "
-        "状态机自动迁移到无持仓状态,可重新规划机会。"
+        "重评期 4H 周期满 + 5 层证据齐备且健康 + 机会层重新出现 A/B 级 → "
+        "状态机自动迁移到无持仓状态,可重新规划 thesis 候选;C 级只作为观察。"
     )
 
     drivers = _factors_to_drivers(picked, top_k=3)

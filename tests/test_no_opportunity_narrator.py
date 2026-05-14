@@ -210,3 +210,15 @@ class TestSchemaCompat:
         # 应包含通用兜底文案的特征字符串(任一)
         joined = " ".join(changes)
         assert "信心" in joined or "趋势" in joined or "波段" in joined
+
+    def test_post_protection_does_not_treat_c_as_thesis_candidate(self):
+        out = generate_no_opportunity_narrative(
+            {"state_machine_current": "POST_PROTECTION_REASSESS"}, {}
+        )
+        joined = " ".join([
+            out["narrative"],
+            *out["what_would_change_mind"],
+        ])
+        assert "A/B/C 级" not in joined
+        assert "A/B 级" in joined
+        assert "C 级只作为观察" in joined

@@ -1015,6 +1015,35 @@ function app() {
                 critical: '极端',
             })[v] || '偏高';
         },
+        compactSpotText(v, maxLen = 96) {
+            const s = String(v || '').replace(/\s+/g, ' ').trim();
+            if (!s) return '-';
+            if (s.length <= maxLen) return s;
+            const punctuation = ['。', '；', ';', '.', '！', '!', '？', '?'];
+            let cut = -1;
+            for (const p of punctuation) {
+                const idx = s.lastIndexOf(p, maxLen);
+                if (idx > cut && idx >= 28) cut = idx + 1;
+            }
+            if (cut >= 28) return s.slice(0, cut);
+            return s.slice(0, Math.max(24, maxLen - 1)).trimEnd() + '…';
+        },
+        spotFinalAdvice() {
+            const s = this.spotStrategy() || {};
+            const a5 = s.a5_spot_adjudicator || {};
+            const action = this.spotActionLabel(a5.spot_action);
+            const stage = this.spotCycleStageLabel(a5.cycle_stage || (s.a1_cycle_stage || {}).cycle_stage);
+            const headline = a5.headline || '大周期策略保持观察';
+            return this.compactSpotText(`交易员结论:${action} · ${stage}。${headline}`, 88);
+        },
+        spotFinalSummary() {
+            const a5 = (this.spotStrategy() || {}).a5_spot_adjudicator || {};
+            return this.compactSpotText(a5.human_summary || '-', 118);
+        },
+        spotCardSummary(card) {
+            const prefix = card && card.key === 'layer_a_a5' ? '最终建议:' : '';
+            return this.compactSpotText(prefix + ((card && card.summary) || '-'), 96);
+        },
         spotLayerCards() {
             const s = this.spotStrategy();
             if (!s) return [];

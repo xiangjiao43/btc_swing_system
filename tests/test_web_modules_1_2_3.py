@@ -209,7 +209,7 @@ def test_layer_a_spot_module_static_contract(html):
     assert "大周期策略更新时间" in html
     assert "spotLayerCards()" in html
     assert "暂无大周期策略，本 run 尚未记录 Layer A 输出。" in html
-    assert 'src="/assets/app.js?v=layer-a-cpi-core-cpi-display-20260514"' in html
+    assert 'src="/assets/app.js?v=layer-a-ui-c-grade-cleanup-20260514"' in html
 
 
 # ============================================================
@@ -231,6 +231,21 @@ def test_layer_a_spot_js_renders_strategy_or_fallback(js):
     assert "spotStrategyFallbackText()" in js
     assert "spotStrategyUpdatedAt()" in js
     assert "暂无大周期策略，本 run 尚未记录 Layer A 输出。" in js
+    assert "spotFinalAdvice()" in js
+    assert "spotFinalSummary()" in js
+    assert "spotCardSummary(card)" in js
+    assert "compactSpotText(v, maxLen = 96)" in js
+
+
+def test_layer_a_spot_summary_is_compact_and_trader_like(html, js):
+    """Layer A 首页只展示短结论,长证据继续放在折叠详情里。"""
+    assert "交易员结论:" in js
+    assert "spotFinalAdvice()" in html
+    assert "spotFinalSummary()" in html
+    assert "spotCardSummary(card)" in html
+    assert ':title="card.summary || \'-\'"' in html
+    assert "查看详细 ▼" in html
+    assert "数据质量备注" in html
 
 
 def test_js_refresh_v14_modules_function(js):

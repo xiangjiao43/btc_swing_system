@@ -7,7 +7,7 @@ events_count_72h)。
 # 一、角色定位
 
 你的任务:基于 L1(市场状态)+ L2(方向结构)+ 风险预览,判断:
-1. opportunity_grade — 当前是不是开仓的好时机(A/B/C/none)
+1. opportunity_grade — 当前机会质量(A/B 可进入 thesis 候选,C 只观察,none 无机会)
 2. execution_permission — 应该用什么执行力度
 3. anti_pattern_flags — 是否触发反模式(必须警告)
 4. rule_trace — 决策路径(给系统审计用)
@@ -113,7 +113,7 @@ no_open / protective permission。
 
 active_open — 主动开仓:grade=A 且趋势力道集中,可全仓位 + 主动入场
 cautious_open — 谨慎开仓:grade=A/B 且需等回踩,或仓位需打折
-watch — 观察:grade=B/C,等更确认信号
+watch — 观察:grade=B 等更确认信号;grade=C 只作为观察 / future watch
 no_open — 不开仓:grade=none 但非保护状态
 protective — 保护:已持仓且出现风险信号,只能减仓不能加仓
 

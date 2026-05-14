@@ -272,8 +272,9 @@ def test_swing_strategy_wrapper_static_contract(html):
     assert html.count('id="region-swing-account-execution"') == 1
     for label in ("当前状态", "方向", "机会等级", "主裁动作", "置信度"):
         assert label in html
-    for label in ("账户与执行", "交易员结论"):
+    for label in ("虚拟账户", "当前持仓", "挂单 / thesis", "交易员结论"):
         assert label in html
+    assert "账户与执行" not in html
     assert "AI 主裁结论" not in html
     assert "五层分析" not in html
     assert "L1-L5 + 主裁" not in html
@@ -295,6 +296,7 @@ def test_swing_account_execution_contains_required_blocks(html):
     assert pos_account < pos_va < pos_position < pos_thesis < pos_orders < pos_layers
     for label in ("虚拟账户", "当前持仓", "挂单 / thesis", "当前无持仓 / 等待入场信号"):
         assert label in html
+    assert "账户与执行" not in html
 
 
 def test_system_health_three_column_layer_order(html):
@@ -379,6 +381,24 @@ def test_layer_b_five_layer_header_replaced_by_adjudicator_summary(html, js):
     assert "每层 AI 独立分析" not in html
     assert "交易员结论：主裁 AI 降级，系统使用 fallback。" in js
     assert "swingAdjudicatorCard()" in js
+
+
+def test_swing_strategy_inner_cards_are_unframed(html):
+    """波段策略内部小模块改为浅底无边框,只保留外层波段策略大卡边框。"""
+    for region in (
+        "region-swing-summary",
+        "region-swing-account-execution",
+        "region-virtual-account",
+        "region-position-summary",
+        "region-active-thesis",
+        "region-swing-adjudicator-summary",
+        "region-layer-cards",
+    ):
+        pos = html.find(f'id="{region}"')
+        assert pos != -1, f"{region} 缺失"
+        snippet = html[pos:pos + 180]
+        assert "border border-slate-200" not in snippet
+    assert "xl:grid-cols-6" in html
 
 
 def test_layer_a_spot_module_static_contract(html):

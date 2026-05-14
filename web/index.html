@@ -482,23 +482,23 @@
       <div class="p-3 space-y-4">
         <!-- 摘要区:只做展示归纳,不改 Layer B 数据来源 -->
         <section id="region-swing-summary" class="grid grid-cols-2 md:grid-cols-5 gap-3 text-[12px]">
-          <div class="rounded bg-slate-50 dark:bg-slate-900/45 p-2">
+          <div class="p-2">
             <div class="stat-label">当前状态</div>
             <div class="text-[13px] font-bold" x-text="swingCurrentStatus()"></div>
           </div>
-          <div class="rounded bg-slate-50 dark:bg-slate-900/45 p-2">
+          <div class="p-2">
             <div class="stat-label">方向</div>
             <div class="text-[13px] font-bold" x-text="swingDirection()"></div>
           </div>
-          <div class="rounded bg-slate-50 dark:bg-slate-900/45 p-2">
+          <div class="p-2">
             <div class="stat-label">机会等级</div>
             <div class="text-[13px] font-bold" x-text="cardOpportunityGrade()"></div>
           </div>
-          <div class="rounded bg-slate-50 dark:bg-slate-900/45 p-2">
+          <div class="p-2">
             <div class="stat-label">主裁动作</div>
             <div class="text-[13px] font-bold" x-text="swingMasterAction()"></div>
           </div>
-          <div class="rounded bg-slate-50 dark:bg-slate-900/45 p-2">
+          <div class="p-2">
             <div class="stat-label">置信度</div>
             <div class="text-[13px] font-bold font-mono tabular-nums" x-text="swingConfidenceScore()"></div>
           </div>
@@ -506,7 +506,7 @@
 
         <section id="region-swing-account-execution" class="space-y-3">
             <div class="grid grid-cols-1 lg:grid-cols-3 gap-3">
-              <article id="region-virtual-account" class="rounded bg-slate-50 dark:bg-slate-900/45 p-3 space-y-2">
+              <article id="region-virtual-account" class="p-3 space-y-2">
                 <h4 class="text-[12px] font-semibold text-slate-600 dark:text-slate-400">虚拟账户</h4>
                 <template x-if="!virtualAccount">
                   <div class="text-slate-500 dark:text-slate-400 italic text-[12px]">
@@ -548,7 +548,7 @@
                 </div>
               </article>
 
-              <article id="region-position-summary" class="rounded bg-slate-50 dark:bg-slate-900/45 p-3 space-y-2">
+              <article id="region-position-summary" class="p-3 space-y-2">
                 <h4 class="text-[12px] font-semibold text-slate-600 dark:text-slate-400">当前持仓</h4>
                 <template x-if="!positionSummary || !(positionSummary.entry_orders_filled > 0)">
                   <div class="text-slate-500 dark:text-slate-400 italic text-[12px]">
@@ -578,7 +578,7 @@
                 </template>
               </article>
 
-              <article id="region-active-thesis" class="rounded bg-slate-50 dark:bg-slate-900/45 p-3 space-y-2">
+              <article id="region-active-thesis" class="p-3 space-y-2">
                 <h4 class="text-[12px] font-semibold text-slate-600 dark:text-slate-400">挂单 / thesis</h4>
                 <template x-if="!activeThesis || Object.keys(activeThesis || {}).length === 0">
                   <div class="text-slate-500 dark:text-slate-400 italic text-[12px]">
@@ -617,7 +617,7 @@
               </article>
             </div>
 
-            <div id="region-thesis-timeline" class="rounded bg-slate-50 dark:bg-slate-900/45 p-3 text-[12px]">
+            <div id="region-thesis-timeline" class="border-t border-slate-100 dark:border-slate-800 pt-3 text-[12px]">
               <div class="stat-label mb-1">thesis 历史时间线</div>
               <template x-if="(thesesHistory || []).length === 0">
                 <div class="text-slate-500 dark:text-slate-400 italic">暂无 thesis 历史(冷启动)</div>
@@ -667,7 +667,7 @@
           <div class="p-3 space-y-3">
             <div id="region-swing-adjudicator-summary"
                  aria-label="交易员结论"
-                 class="rounded bg-slate-50 dark:bg-slate-900/45 p-3">
+                 class="border-t border-slate-100 dark:border-slate-800 pt-3">
               <div class="text-[13px] font-bold leading-snug"
                    x-text="swingAdjudicatorAdvice()"></div>
               <p class="mt-1 text-[12px] leading-snug text-slate-700 dark:text-slate-300"
@@ -676,7 +676,7 @@
 
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
               <template x-for="(card, idx) in (state.layer_cards || [])" :key="card.layer">
-                <article class="rounded bg-slate-50 dark:bg-slate-900/45 p-3 space-y-2 min-w-0">
+                <article class="p-2 space-y-2 min-w-0">
                   <header class="flex items-baseline justify-between gap-2">
                     <h4 class="text-[12px] font-semibold text-slate-600 dark:text-slate-400" x-text="card.title"></h4>
                   </header>

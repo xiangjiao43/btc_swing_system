@@ -384,7 +384,7 @@ def test_layer_b_five_layer_header_replaced_by_adjudicator_summary(html, js):
 
 
 def test_swing_strategy_inner_cards_are_unframed(html):
-    """波段策略内部小模块改为浅底无边框,只保留外层波段策略大卡边框。"""
+    """波段策略内部小模块无强边框、无新增底色,只保留外层波段策略大卡边框。"""
     for region in (
         "region-swing-summary",
         "region-swing-account-execution",
@@ -398,7 +398,10 @@ def test_swing_strategy_inner_cards_are_unframed(html):
         assert pos != -1, f"{region} 缺失"
         snippet = html[pos:pos + 180]
         assert "border border-slate-200" not in snippet
+        assert "bg-slate-50" not in snippet
+        assert "dark:bg-slate-900" not in snippet
     assert "xl:grid-cols-6" in html
+    assert 'id="region-layer-b-swing" class="audit-card"' in html
 
 
 def test_layer_a_spot_module_static_contract(html):

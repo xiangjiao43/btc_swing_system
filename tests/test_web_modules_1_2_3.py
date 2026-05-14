@@ -54,6 +54,16 @@ def test_module_1_alpine_binds_virtual_account(html):
 
 def test_module_1_displays_returns(html):
     assert 'accountReturns.total_pct' in html
+    for label in ("日收益", "月收益", "年收益"):
+        assert label in html
+    for field in (
+        "accountReturns.daily_pct",
+        "accountReturns.monthly_pct",
+        "accountReturns.yearly_pct",
+    ):
+        assert field in html
+    assert "text-emerald-600 dark:text-emerald-400" in html
+    assert "text-rose-600 dark:text-rose-400" in html
 
 
 def test_module_1_sparkline_svg(html):

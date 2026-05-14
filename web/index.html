@@ -542,6 +542,26 @@
                       <div class="stat-label">初始资金</div>
                       <div class="font-mono tabular-nums" x-text="formatUsd(virtualAccount.initial_capital)"></div>
                     </div>
+                    <div class="col-span-2 grid grid-cols-3 gap-2 pt-1 border-t border-slate-100 dark:border-slate-800">
+                      <div>
+                        <div class="stat-label">日收益</div>
+                        <div class="font-mono tabular-nums"
+                             :class="(accountReturns.daily_pct ?? 0) >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'"
+                             x-text="formatPct(accountReturns.daily_pct, true)"></div>
+                      </div>
+                      <div>
+                        <div class="stat-label">月收益</div>
+                        <div class="font-mono tabular-nums"
+                             :class="(accountReturns.monthly_pct ?? 0) >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'"
+                             x-text="formatPct(accountReturns.monthly_pct, true)"></div>
+                      </div>
+                      <div>
+                        <div class="stat-label">年收益</div>
+                        <div class="font-mono tabular-nums"
+                             :class="(accountReturns.yearly_pct ?? 0) >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'"
+                             x-text="formatPct(accountReturns.yearly_pct, true)"></div>
+                      </div>
+                    </div>
                   </div>
                 </template>
                 <div x-show="accountHistory.length >= 2">

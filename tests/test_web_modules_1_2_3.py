@@ -86,12 +86,15 @@ def test_module_2_active_thesis_section_exists(html):
 
 
 def test_module_2_displays_thesis_fields(html):
-    """挂单 / thesis 小卡恢复完整字段。"""
+    """挂单 / thesis 小卡只保留失效条件和精简挂单表。"""
     start = html.find('id="region-active-thesis"')
     end = html.find('id="region-thesis-timeline"')
     card = html[start:end]
-    for label in ("thesis_id", "阶段", "等待入场区", "失效条件"):
-        assert label in card
+    assert "失效条件" in card
+    assert "待触发挂单" in card
+    assert "等待入场区" not in card
+    assert "thesis_id" not in card
+    assert "阶段" not in card
 
 
 def test_module_2_no_active_placeholder(html):
@@ -109,9 +112,9 @@ def test_module_2_alpine_binds_active_thesis(html):
     end = html.find('id="region-thesis-timeline"')
     card = html[start:end]
     assert "swingInvalidationPlan()" in card
-    assert "activeThesis.thesis_id" in card
-    assert "activeThesis.lifecycle_stage" in card
-    assert "cardEntryZones()" in card
+    assert "activeThesis.thesis_id" not in card
+    assert "activeThesis.lifecycle_stage" not in card
+    assert "cardEntryZones()" not in card
 
 
 # ============================================================
@@ -121,7 +124,7 @@ def test_module_2_alpine_binds_active_thesis(html):
 def test_module_3_orders_position_section_exists(html):
     assert 'id="region-orders-position"' in html
     assert "待触发挂单" in html
-    start = html.find('id="region-orders-position"')
+    start = html.find('id="region-active-thesis"')
     end = html.find('id="region-thesis-timeline"')
     card = html[start:end]
     assert 'id="region-orders-position"' in card
@@ -139,8 +142,8 @@ def test_module_3_displays_position_summary(html):
 
 
 def test_module_3_displays_pending_orders_table(html):
-    """待触发挂单表恢复完整列:类型 / 价格 / 仓位 / 距当前。"""
-    start = html.find('id="region-orders-position"')
+    """挂单 / thesis 内部待触发挂单表:类型 / 价格 / 仓位。"""
+    start = html.find('id="region-active-thesis"')
     end = html.find('id="region-thesis-timeline"')
     card = html[start:end]
     assert "待触发挂单" in card
@@ -148,13 +151,12 @@ def test_module_3_displays_pending_orders_table(html):
     assert "o.order_type" in card
     assert "o.price" in card
     assert "o.size_pct" in card
-    assert "距当前" in card
-    assert "distanceFromLive(o.price)" in card
-    assert len(re.findall(r"<th\b", card)) == 4
+    assert "距当前" not in card
+    assert "distanceFromLive(o.price)" not in card
+    assert len(re.findall(r"<th\b", card)) == 3
 
 
 def test_module_3_no_active_placeholder(html):
-    assert "当前无 active thesis,无挂单" in html
     assert "无待触发挂单" in html
 
 
@@ -490,7 +492,7 @@ def test_js_sparkline_helper_pure_svg(js):
 def test_js_format_helpers(js):
     """formatUsd helper。"""
     assert "formatUsd" in js
-    assert "distanceFromLive" in js
+    assert "distanceFromLive" not in js
 
 
 def test_js_no_new_dependencies(js):

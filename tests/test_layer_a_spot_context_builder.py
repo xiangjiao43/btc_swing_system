@@ -325,7 +325,7 @@ def test_a1_lightweight_context_contains_only_stage_essentials():
 
     ctx["previous_layer_a_state"] = {
         "generated_at_bjt": "2026-05-14 10:00:00 BJT",
-        "cycle_stage_model_version": "layer_a_five_stage_v1",
+        "cycle_stage_model_version": "layer_a_seven_stage_v1",
         "a1_cycle_stage": {
             "official_cycle_stage": "accumulation",
             "raw_stage_assessment": "accumulation",
@@ -340,6 +340,15 @@ def test_a1_lightweight_context_contains_only_stage_essentials():
         "stage_model", "cycle_evidence_summary", "recent_stage_history", "instructions",
     }
     assert light["stage_model"]["previous_official_stage"] == "accumulation"
+    assert light["stage_model"]["allowed_stages"] == [
+        "bear_bottom",
+        "accumulation",
+        "bull_bear_transition",
+        "early_bull",
+        "mid_bull",
+        "late_bull",
+        "overheated_top",
+    ]
     assert light["recent_stage_history"][0]["official_stage"] == "accumulation"
     assert "mvrv_z_score" in light["cycle_evidence_summary"]["valuation"]
     assert "rhodl_ratio" in light["cycle_evidence_summary"]["valuation"]

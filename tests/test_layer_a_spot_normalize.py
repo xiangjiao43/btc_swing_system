@@ -29,16 +29,16 @@ def test_normalize_invalid_cycle_stage_falls_back_to_unclear():
             "what_would_change_mind": ["x"],
         },
     })
-    assert out["a1_cycle_stage"]["cycle_stage"] == "trend_hold"
-    assert out["a5_spot_adjudicator"]["cycle_stage"] == "trend_hold"
-    assert "a1_invalid_cycle_stage_normalized_to_trend_hold" in out["validator"]["warnings"]
+    assert out["a1_cycle_stage"]["cycle_stage"] == "bull_bear_transition"
+    assert out["a5_spot_adjudicator"]["cycle_stage"] == "bull_bear_transition"
+    assert "a1_invalid_cycle_stage_normalized_to_bull_bear_transition" in out["validator"]["warnings"]
 
 
 def test_fallback_output_is_displayable_hold_low_confidence():
     out = fallback_layer_a_output("AI failed")
     assert out["enabled"] is True
     assert out["a5_spot_adjudicator"]["spot_action"] == "hold"
-    assert out["a1_cycle_stage"]["official_cycle_stage"] == "trend_hold"
+    assert out["a1_cycle_stage"]["official_cycle_stage"] == "mid_bull"
     assert out["a5_spot_adjudicator"]["confidence"] == "low"
     assert out["a5_spot_adjudicator"]["human_summary"]
 
@@ -139,7 +139,7 @@ def test_confidence_cap_downgrades_when_integrated_factor_stale_count_is_high():
     out = normalize_layer_a_output({
         "a5_spot_adjudicator": {
             "spot_action": "hold",
-            "cycle_stage": "trend_hold",
+            "cycle_stage": "mid_bull",
             "confidence": "high",
             "human_summary": "保持观察",
             "what_would_change_mind": ["关键因子恢复"],
@@ -192,33 +192,50 @@ def test_legacy_layer_a_actions_are_normalized_to_five_action_names():
         },
     })
     assert out["a3_spot_opportunity"]["preferred_action_candidate"] == "scale_sell"
-    assert out["a5_spot_adjudicator"]["cycle_stage"] == "distribution"
+    assert out["a5_spot_adjudicator"]["cycle_stage"] == "late_bull"
     assert out["a5_spot_adjudicator"]["spot_action"] == "scale_sell"
 
 
-def test_accumulation_to_trend_hold_is_pending_on_first_confirmation():
+def test_seven_cycle_stages_are_normalized():
+    for stage in (
+        "bear_bottom", "accumulation", "bull_bear_transition", "early_bull",
+        "mid_bull", "late_bull", "overheated_top",
+    ):
+        out = normalize_layer_a_output({
+            "a1_cycle_stage": {"cycle_stage": stage, "human_summary": stage},
+            "a5_spot_adjudicator": {
+                "spot_action": "hold",
+                "cycle_stage": stage,
+                "human_summary": stage,
+                "what_would_change_mind": ["证据变化"],
+            },
+        })
+        assert out["a1_cycle_stage"]["cycle_stage"] == stage
+
+
+def test_accumulation_to_bull_bear_transition_is_pending_on_first_confirmation():
     out = normalize_layer_a_output({
         "previous_layer_a_state": {
-            "cycle_stage_model_version": "layer_a_five_stage_v1",
+            "cycle_stage_model_version": "layer_a_seven_stage_v1",
             "a1_cycle_stage": {"official_cycle_stage": "accumulation"},
         },
         "a1_cycle_stage": {
-            "raw_stage_assessment": "trend_hold",
-            "cycle_stage": "trend_hold",
+            "raw_stage_assessment": "bull_bear_transition",
+            "cycle_stage": "bull_bear_transition",
             "confidence": "high",
-            "human_summary": "趋势持有特征初现",
+            "human_summary": "牛熊过渡特征初现",
         },
         "a4_spot_risk": {"spot_risk_level": "moderate", "human_summary": "风险中等"},
         "a5_spot_adjudicator": {
             "spot_action": "hold",
-            "cycle_stage": "trend_hold",
+            "cycle_stage": "bull_bear_transition",
             "confidence": "high",
             "human_summary": "持有",
             "what_would_change_mind": ["证据恶化"],
         },
         "factor_coverage": {"coverage_ratio": 0.9, "stale_factor_count": 0},
     })
-    assert out["a1_cycle_stage"]["raw_stage_assessment"] == "trend_hold"
+    assert out["a1_cycle_stage"]["raw_stage_assessment"] == "bull_bear_transition"
     assert out["a1_cycle_stage"]["official_cycle_stage"] == "accumulation"
     assert out["a1_cycle_stage"]["transition_status"] == "pending"
     assert out["a1_cycle_stage"]["confirmation_count"] == 1
@@ -230,32 +247,32 @@ def test_accumulation_to_trend_hold_is_pending_on_first_confirmation():
 def test_adjacent_stage_confirms_after_second_confirmation():
     out = normalize_layer_a_output({
         "previous_layer_a_state": {
-            "cycle_stage_model_version": "layer_a_five_stage_v1",
+            "cycle_stage_model_version": "layer_a_seven_stage_v1",
             "a1_cycle_stage": {"official_cycle_stage": "accumulation"},
             "stage_transition": {
                 "transition_status": "pending",
-                "raw_stage_assessment": "trend_hold",
+                "raw_stage_assessment": "bull_bear_transition",
                 "previous_official_stage": "accumulation",
                 "confirmation_count": 1,
             },
         },
         "a1_cycle_stage": {
-            "raw_stage_assessment": "trend_hold",
-            "cycle_stage": "trend_hold",
+            "raw_stage_assessment": "bull_bear_transition",
+            "cycle_stage": "bull_bear_transition",
             "confidence": "medium",
-            "human_summary": "趋势持有特征连续出现",
+            "human_summary": "牛熊过渡特征连续出现",
         },
         "a4_spot_risk": {"spot_risk_level": "moderate", "human_summary": "风险中等"},
         "a5_spot_adjudicator": {
             "spot_action": "hold",
-            "cycle_stage": "trend_hold",
+            "cycle_stage": "bull_bear_transition",
             "confidence": "medium",
             "human_summary": "持有",
             "what_would_change_mind": ["证据恶化"],
         },
         "factor_coverage": {"coverage_ratio": 0.9, "stale_factor_count": 0},
     })
-    assert out["a1_cycle_stage"]["official_cycle_stage"] == "trend_hold"
+    assert out["a1_cycle_stage"]["official_cycle_stage"] == "bull_bear_transition"
     assert out["a1_cycle_stage"]["transition_status"] == "confirmed"
     assert out["a1_cycle_stage"]["confirmation_count"] == 2
 
@@ -263,26 +280,26 @@ def test_adjacent_stage_confirms_after_second_confirmation():
 def test_cross_stage_jump_requires_three_confirmations():
     out = normalize_layer_a_output({
         "previous_layer_a_state": {
-            "cycle_stage_model_version": "layer_a_five_stage_v1",
-            "a1_cycle_stage": {"official_cycle_stage": "deep_value"},
+            "cycle_stage_model_version": "layer_a_seven_stage_v1",
+            "a1_cycle_stage": {"official_cycle_stage": "bear_bottom"},
         },
         "a1_cycle_stage": {
-            "raw_stage_assessment": "trend_hold",
-            "cycle_stage": "trend_hold",
+            "raw_stage_assessment": "early_bull",
+            "cycle_stage": "early_bull",
             "confidence": "medium",
             "human_summary": "跨级特征出现",
         },
         "a4_spot_risk": {"spot_risk_level": "moderate", "human_summary": "风险中等"},
         "a5_spot_adjudicator": {
             "spot_action": "hold",
-            "cycle_stage": "trend_hold",
+            "cycle_stage": "early_bull",
             "confidence": "medium",
             "human_summary": "持有",
             "what_would_change_mind": ["证据恶化"],
         },
         "factor_coverage": {"coverage_ratio": 0.9, "stale_factor_count": 0},
     })
-    assert out["a1_cycle_stage"]["official_cycle_stage"] == "deep_value"
+    assert out["a1_cycle_stage"]["official_cycle_stage"] == "bear_bottom"
     assert out["a1_cycle_stage"]["transition_status"] == "pending"
     assert out["a1_cycle_stage"]["confirmation_required"] == 3
 
@@ -290,25 +307,25 @@ def test_cross_stage_jump_requires_three_confirmations():
 def test_stale_factors_block_stage_upgrade_confirmation():
     out = normalize_layer_a_output({
         "previous_layer_a_state": {
-            "cycle_stage_model_version": "layer_a_five_stage_v1",
+            "cycle_stage_model_version": "layer_a_seven_stage_v1",
             "a1_cycle_stage": {"official_cycle_stage": "accumulation"},
             "stage_transition": {
                 "transition_status": "pending",
-                "raw_stage_assessment": "trend_hold",
+                "raw_stage_assessment": "bull_bear_transition",
                 "previous_official_stage": "accumulation",
                 "confirmation_count": 1,
             },
         },
         "a1_cycle_stage": {
-            "raw_stage_assessment": "trend_hold",
-            "cycle_stage": "trend_hold",
+            "raw_stage_assessment": "bull_bear_transition",
+            "cycle_stage": "bull_bear_transition",
             "confidence": "high",
-            "human_summary": "趋势持有特征连续出现",
+            "human_summary": "牛熊过渡特征连续出现",
         },
         "a4_spot_risk": {"spot_risk_level": "moderate", "human_summary": "风险中等"},
         "a5_spot_adjudicator": {
             "spot_action": "hold",
-            "cycle_stage": "trend_hold",
+            "cycle_stage": "bull_bear_transition",
             "confidence": "high",
             "human_summary": "持有",
             "what_would_change_mind": ["证据恶化"],
@@ -318,3 +335,63 @@ def test_stale_factors_block_stage_upgrade_confirmation():
     assert out["a1_cycle_stage"]["official_cycle_stage"] == "accumulation"
     assert out["a1_cycle_stage"]["transition_status"] == "pending"
     assert "过期" in out["a1_cycle_stage"]["confidence_cap_reason"]
+
+
+def test_seven_stage_default_action_mapping_is_exposed_to_a5():
+    expected = {
+        "bear_bottom": "strong_buy",
+        "accumulation": "dca_buy",
+        "bull_bear_transition": "hold",
+        "early_bull": "dca_buy",
+        "mid_bull": "hold",
+        "late_bull": "scale_sell",
+        "overheated_top": "strong_sell",
+    }
+    for stage, action in expected.items():
+        out = normalize_layer_a_output({
+            "a1_cycle_stage": {
+                "cycle_stage": stage,
+                "raw_stage_assessment": stage,
+                "human_summary": stage,
+            },
+            "a4_spot_risk": {"spot_risk_level": "moderate", "human_summary": "风险中等"},
+            "a5_spot_adjudicator": {
+                "spot_action": action,
+                "cycle_stage": stage,
+                "confidence": "medium",
+                "human_summary": stage,
+                "what_would_change_mind": ["证据变化"],
+            },
+        })
+        assert out["a5_spot_adjudicator"]["official_stage_default_action"] == action
+
+
+def test_mid_bull_to_overheated_top_cross_jump_cannot_confirm_directly():
+    out = normalize_layer_a_output({
+        "previous_layer_a_state": {
+            "cycle_stage_model_version": "layer_a_seven_stage_v1",
+            "a1_cycle_stage": {"official_cycle_stage": "mid_bull"},
+        },
+        "a1_cycle_stage": {
+            "raw_stage_assessment": "overheated_top",
+            "cycle_stage": "overheated_top",
+            "confidence": "medium",
+            "human_summary": "顶部过热特征出现",
+        },
+        "a4_spot_risk": {"spot_risk_level": "moderate", "human_summary": "风险中等"},
+        "a5_spot_adjudicator": {
+            "spot_action": "strong_sell",
+            "cycle_stage": "overheated_top",
+            "confidence": "medium",
+            "human_summary": "强力卖出",
+            "supporting_evidence": ["多项过热"],
+            "opposing_evidence": ["趋势仍在"],
+            "what_would_change_mind": ["过热解除"],
+        },
+        "factor_coverage": {"coverage_ratio": 0.9, "stale_factor_count": 0},
+    })
+    assert out["a1_cycle_stage"]["official_cycle_stage"] == "mid_bull"
+    assert out["a1_cycle_stage"]["transition_status"] == "pending"
+    assert out["a1_cycle_stage"]["confirmation_required"] == 3
+    assert out["a5_spot_adjudicator"]["cycle_stage"] == "mid_bull"
+    assert out["a5_spot_adjudicator"]["spot_action"] == "strong_sell"

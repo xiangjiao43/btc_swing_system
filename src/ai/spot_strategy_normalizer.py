@@ -12,6 +12,7 @@ import re
 from typing import Any
 
 from .spot_cycle_stage_state import (
+    CURRENT_STAGE_MODEL_VERSION,
     OFFICIAL_CYCLE_STAGES,
     STAGE_DEFAULT_ACTION,
     conservative_action_for_official_stage,
@@ -208,9 +209,9 @@ def fallback_layer_a_output(reason: str = "Layer A AI 输出失败或证据不�
         {
             "enabled": True,
             "a1_cycle_stage": {
-                "cycle_stage": "trend_hold",
-                "raw_stage_assessment": "trend_hold",
-                "official_cycle_stage": "trend_hold",
+                "cycle_stage": "mid_bull",
+                "raw_stage_assessment": "mid_bull",
+                "official_cycle_stage": "mid_bull",
                 "confidence": "low",
                 "headline": "暂无大周期阶段判断",
                 "human_summary": reason,
@@ -238,7 +239,7 @@ def fallback_layer_a_output(reason: str = "Layer A AI 输出失败或证据不�
             },
             "a5_spot_adjudicator": {
                 "spot_action": "hold",
-                "cycle_stage": "trend_hold",
+                "cycle_stage": "mid_bull",
                 "confidence": "low",
                 "headline": "暂无大周期策略",
                 "human_summary": reason,
@@ -260,9 +261,9 @@ def fallback_layer_a_output(reason: str = "Layer A AI 输出失败或证据不�
 def normalize_a1(raw: Any, warnings: list[str]) -> dict[str, Any]:
     d = _as_dict(raw)
     stage_raw = d.get("official_cycle_stage") or d.get("cycle_stage")
-    stage = normalize_stage(stage_raw, default="trend_hold")
+    stage = normalize_stage(stage_raw, default="bull_bear_transition")
     if stage_raw and not is_known_stage(stage_raw):
-        warnings.append("a1_invalid_cycle_stage_normalized_to_trend_hold")
+        warnings.append("a1_invalid_cycle_stage_normalized_to_bull_bear_transition")
     raw_stage = normalize_stage(
         d.get("raw_stage_assessment") or d.get("cycle_stage"),
         default=stage,
@@ -348,9 +349,9 @@ def normalize_a5(raw: Any, violations: list[str], warnings: list[str]) -> dict[s
     if action_raw and action == "hold" and str(action_raw).strip().lower() not in ("hold",):
         violations.append("a5_invalid_spot_action_normalized_to_hold")
     stage_raw = d.get("cycle_stage")
-    stage = normalize_stage(stage_raw, default="trend_hold")
+    stage = normalize_stage(stage_raw, default="bull_bear_transition")
     if stage_raw and not is_known_stage(stage_raw):
-        warnings.append("a5_invalid_cycle_stage_normalized_to_trend_hold")
+        warnings.append("a5_invalid_cycle_stage_normalized_to_bull_bear_transition")
     return {
         "spot_action": action,
         "cycle_stage": stage,
@@ -392,7 +393,7 @@ def normalize_layer_a_output(raw: Any) -> dict[str, Any]:
         "input_context_snapshot": _as_dict(d.get("input_context_snapshot")),
         "model_notes": _as_list(d.get("model_notes")),
         "previous_layer_a_state": _as_dict(d.get("previous_layer_a_state")),
-        "cycle_stage_model_version": "layer_a_five_stage_v1",
+        "cycle_stage_model_version": CURRENT_STAGE_MODEL_VERSION,
     }
     transition = evaluate_stage_transition(
         raw_stage=out["a1_cycle_stage"].get("raw_stage_assessment")

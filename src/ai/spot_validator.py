@@ -137,13 +137,13 @@ def validate_spot_strategy_output(
 
     if action == "strong_buy" and risk in ("high", "critical"):
         warnings.append("strong_buy_with_high_or_critical_risk")
-    if action == "strong_sell" and stage in ("deep_value", "accumulation"):
+    if action == "strong_sell" and stage in ("bear_bottom", "accumulation"):
         warnings.append("strong_sell_in_value_or_accumulation_stage")
     if action == "dca_buy" and risk == "critical":
         warnings.append("dca_buy_with_critical_risk")
     if action == "scale_sell":
         combined = _blob(a4.get("overheat_signals")) + _blob(a5.get("supporting_evidence"))
-        if not any(k in combined for k in ("过热", "派发", "宏观", "overheat", "distribution", "risk")):
+        if not any(k in combined for k in ("过热", "派发", "牛市后期", "宏观", "overheat", "late_bull", "risk")):
             warnings.append("scale_sell_without_overheat_distribution_or_macro_evidence")
     if not _as_list(a5.get("opposing_evidence")):
         warnings.append("missing_opposing_evidence")

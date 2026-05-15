@@ -53,8 +53,8 @@ class A1SpotCycleAnalyst(BaseAgent):
 
     def _fallback_output(self) -> dict[str, Any]:
         return normalize_a1({
-            "raw_stage_assessment": "trend_hold",
-            "cycle_stage": "trend_hold",
+            "raw_stage_assessment": "mid_bull",
+            "cycle_stage": "mid_bull",
             "confidence": "low",
             "headline": "大周期阶段不明确",
             "human_summary": "A1 AI 失败或数据不足，暂不判断大周期阶段。",
@@ -122,7 +122,7 @@ class A5SpotAdjudicator(BaseAgent):
     def _fallback_output(self) -> dict[str, Any]:
         return normalize_a5({
             "spot_action": "hold",
-            "cycle_stage": "trend_hold",
+            "cycle_stage": "mid_bull",
             "confidence": "low",
             "headline": "暂无大周期策略",
             "human_summary": "A5 AI 失败或证据不足，默认现货策略为持有/观察。",

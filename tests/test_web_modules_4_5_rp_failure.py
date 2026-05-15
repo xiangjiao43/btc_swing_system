@@ -556,6 +556,9 @@ def test_layer_a_spot_js_helpers_exist(js):
     assert "dca_buy: '分批买入'" in js
     assert "aggressive_buy: '强势买入'" in js
     assert "aggressive_sell: '强力卖出'" in js
+    for label in ("熊市底部", "底部吸筹", "牛熊过渡", "牛市初段", "牛市中期", "牛市后期", "顶部过热"):
+        assert label in js
+    assert "趋势持有区" not in js
 
 
 # ============================================================

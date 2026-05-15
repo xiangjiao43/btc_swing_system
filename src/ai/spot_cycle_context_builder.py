@@ -26,6 +26,7 @@ from .context_builder import (
 )
 from .spot_cycle_stage_state import (
     OFFICIAL_CYCLE_STAGES,
+    normalize_stage,
     previous_official_stage,
 )
 from ..data.storage.dao import (
@@ -215,13 +216,15 @@ def _compact_stage_history(previous: dict[str, Any]) -> list[dict[str, Any]]:
     a1 = previous.get("a1_cycle_stage") if isinstance(previous.get("a1_cycle_stage"), dict) else {}
     a5 = previous.get("a5_spot_adjudicator") if isinstance(previous.get("a5_spot_adjudicator"), dict) else {}
     transition = previous.get("stage_transition") if isinstance(previous.get("stage_transition"), dict) else {}
+    official_stage = (
+        a1.get("official_cycle_stage") or a1.get("cycle_stage")
+        or a5.get("cycle_stage")
+    )
+    raw_stage = a1.get("raw_stage_assessment") or a1.get("cycle_stage")
     item = {
         "generated_at": previous.get("generated_at_bjt") or previous.get("generated_at_utc"),
-        "official_stage": (
-            a1.get("official_cycle_stage") or a1.get("cycle_stage")
-            or a5.get("cycle_stage")
-        ),
-        "raw_stage": a1.get("raw_stage_assessment") or a1.get("cycle_stage"),
+        "official_stage": normalize_stage(official_stage, default="bull_bear_transition"),
+        "raw_stage": normalize_stage(raw_stage, default="bull_bear_transition"),
         "transition_status": transition.get("transition_status")
         or a1.get("transition_status"),
         "confirmation_count": transition.get("confirmation_count")

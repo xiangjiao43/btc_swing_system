@@ -1,4 +1,4 @@
-"""Layer A five-stage cycle state helper.
+"""Layer A seven-stage cycle state helper.
 
 This helper keeps Layer A as a slow spot-cycle model.  AI may describe the
 current raw features, but the official stage changes only after confirmation.
@@ -11,33 +11,41 @@ from typing import Any
 
 
 OFFICIAL_CYCLE_STAGES = (
-    "deep_value",
+    "bear_bottom",
     "accumulation",
-    "trend_hold",
-    "distribution",
-    "overheated_exit",
+    "bull_bear_transition",
+    "early_bull",
+    "mid_bull",
+    "late_bull",
+    "overheated_top",
 )
 
+CURRENT_STAGE_MODEL_VERSION = "layer_a_seven_stage_v1"
+
 STAGE_DEFAULT_ACTION = {
-    "deep_value": "strong_buy",
+    "bear_bottom": "strong_buy",
     "accumulation": "dca_buy",
-    "trend_hold": "hold",
-    "distribution": "scale_sell",
-    "overheated_exit": "strong_sell",
+    "bull_bear_transition": "hold",
+    "early_bull": "dca_buy",
+    "mid_bull": "hold",
+    "late_bull": "scale_sell",
+    "overheated_top": "strong_sell",
 }
 
 LEGACY_STAGE_MAP = {
-    "deep_value": "deep_value",
-    "bear_bottom": "deep_value",
-    "deep_bear": "deep_value",
+    "deep_value": "bear_bottom",
+    "bear_bottom": "bear_bottom",
+    "deep_bear": "bear_bottom",
     "accumulation": "accumulation",
-    "early_bull": "accumulation",
-    "trend_hold": "trend_hold",
-    "mid_bull": "trend_hold",
-    "late_bull": "distribution",
-    "distribution": "distribution",
-    "bear_transition": "distribution",
-    "overheated_exit": "overheated_exit",
+    "bull_bear_transition": "bull_bear_transition",
+    "bear_transition": "bull_bear_transition",
+    "early_bull": "early_bull",
+    "trend_hold": "mid_bull",
+    "mid_bull": "mid_bull",
+    "late_bull": "late_bull",
+    "distribution": "late_bull",
+    "overheated_exit": "overheated_top",
+    "overheated_top": "overheated_top",
 }
 
 ACTION_ALIASES = {
@@ -67,7 +75,7 @@ def as_list(v: Any) -> list[Any]:
     return [v]
 
 
-def normalize_stage(v: Any, default: str = "trend_hold") -> str:
+def normalize_stage(v: Any, default: str = "bull_bear_transition") -> str:
     key = str(v or "").strip().lower()
     return LEGACY_STAGE_MAP.get(key, default)
 
@@ -130,10 +138,10 @@ def has_current_model(previous: dict[str, Any] | None) -> bool:
     previous = as_dict(previous)
     if not previous:
         return False
-    if previous.get("cycle_stage_model_version") == "layer_a_five_stage_v1":
+    if previous.get("cycle_stage_model_version") == CURRENT_STAGE_MODEL_VERSION:
         return True
     a1 = as_dict(previous.get("a1_cycle_stage"))
-    return a1.get("cycle_stage_model_version") == "layer_a_five_stage_v1"
+    return a1.get("cycle_stage_model_version") == CURRENT_STAGE_MODEL_VERSION
 
 
 def data_quality_blocks_confirmation(
@@ -191,7 +199,7 @@ def evaluate_stage_transition(
             "transition_direction": "unchanged",
             "confirmation_count": 1,
             "confirmation_required": 1,
-            "stage_change_reason": "首次 Layer A 五阶段输出，直接作为正式阶段。",
+            "stage_change_reason": "首次 Layer A 七阶段输出，直接作为正式阶段。",
             "evidence_for_change": [],
             "evidence_against_change": [],
             "confidence_cap_reason": block_reason,
@@ -233,7 +241,7 @@ def evaluate_stage_transition(
     if not has_current_model(previous_layer_a):
         status = "recalibration"
         official = previous
-        reason = "上一轮不是五阶段模型输出，本轮视为模型重校准，先不确认阶段跳变。"
+        reason = "上一轮不是七阶段模型输出，本轮视为模型重校准，先不确认阶段跳变。"
     elif blocks_confirmation:
         status = "pending"
         official = previous
@@ -275,14 +283,18 @@ def conservative_action_for_official_stage(
 
     if risk in {"high", "critical"} and proposed in {"strong_buy", "dca_buy"}:
         return "hold"
-    if official == "deep_value" and proposed == "strong_buy":
+    if official == "bear_bottom" and proposed == "strong_buy":
         return proposed
     if official == "accumulation" and proposed == "strong_buy":
         return "dca_buy"
-    if official == "trend_hold" and proposed in {"strong_buy", "dca_buy"}:
+    if official == "bull_bear_transition" and proposed == "strong_buy":
+        return "dca_buy"
+    if official == "early_bull" and proposed == "strong_buy":
+        return "dca_buy"
+    if official == "mid_bull" and proposed in {"strong_buy", "dca_buy"}:
         return "hold"
-    if official == "distribution" and proposed == "strong_sell":
+    if official == "late_bull" and proposed == "strong_sell":
         return "scale_sell"
-    if official == "overheated_exit" and proposed in {"strong_buy", "dca_buy", "hold"}:
+    if official == "overheated_top" and proposed in {"strong_buy", "dca_buy", "hold"}:
         return default
     return proposed

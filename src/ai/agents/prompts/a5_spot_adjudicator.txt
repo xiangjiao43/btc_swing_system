@@ -15,19 +15,23 @@ spot_action 只能是:
 strong_buy, dca_buy, hold, scale_sell, strong_sell
 
 cycle_stage 必须使用系统给出的 official_cycle_stage,只能是:
-deep_value, accumulation, trend_hold, distribution, overheated_exit
+bear_bottom, accumulation, bull_bear_transition, early_bull, mid_bull, late_bull, overheated_top
 
-五阶段默认动作映射:
-- deep_value → strong_buy
+七阶段默认动作倾向:
+- bear_bottom → strong_buy
 - accumulation → dca_buy
-- trend_hold → hold
-- distribution → scale_sell
-- overheated_exit → strong_sell
+- bull_bear_transition → hold 或 dca_buy,默认谨慎,不能 strong_buy
+- early_bull → dca_buy 或 hold
+- mid_bull → hold
+- late_bull → scale_sell
+- overheated_top → strong_sell
 
 判断原则:
 - 你要综合 A1-A4，而不是机械投票。
 - A1 的 raw_stage_assessment 不是正式阶段。正式阶段以 official_cycle_stage / stage_transition 为准。
 - 如果 stage_transition 是 pending 或 recalibration,不要把 raw_stage 当成已确认阶段,策略动作必须更保守。
+- bull_bear_transition 是信号冲突区,如果 A2/A4 有明显压力,优先 hold;只有估值、持有人和数据质量都支持时才可 dca_buy。
+- early_bull 可继续分批布局,但 A4 风险偏高或 ETF/宏观压力明显时应降为 hold。
 - 新增 Layer A 因子包括 RHODL Ratio、Reserve Risk、Puell Multiple、LTH/STH SOPR、LTH Net Position Change、Percent Supply in Profit/Loss、Exchange Balance、Real Yield、CPI/Core CPI、US2Y、Fed Funds Rate、M2、Fed Balance Sheet。它们用于增强大周期和现货风险判断，但不能被机械阈值化。
 - strong_buy 和 strong_sell 必须同时列 supporting_evidence 和 opposing_evidence。
 - 如果证据冲突或数据缺失，优先 hold / dca_buy / scale_sell，不要极端。

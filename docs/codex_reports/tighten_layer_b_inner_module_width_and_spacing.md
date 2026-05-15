@@ -122,7 +122,7 @@ http://124.222.89.86/
 | 步骤 | 状态 |
 |---|---|
 | 本地 pytest 通过 | ✅ |
-| GitHub push | 待执行 |
+| GitHub push | ✅（commit hash: `23b60b0`） |
 | 服务器 git pull | 待用户执行 |
 | 服务器 systemctl restart | 待用户执行 |
 | 生产 DB 迁移 / 清污 | N/A |

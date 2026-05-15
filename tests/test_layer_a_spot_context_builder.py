@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import sqlite3
 import tempfile
+import json
 from pathlib import Path
 
-from src.ai.spot_cycle_context_builder import SpotCycleContextBuilder
+from src.ai.spot_cycle_context_builder import (
+    SpotCycleContextBuilder,
+    build_a1_cycle_stage_context,
+)
 from src.data.storage.connection import init_db
 from src.data.storage.dao import MacroDAO, MacroMetric, OnchainDAO, OnchainMetric
 
@@ -283,3 +287,66 @@ def test_cpi_core_cpi_support_legacy_fred_series_id_metric_names():
     assert inflation["core_cpi"]["status"] == "available"
     assert inflation["core_cpi"]["actual_value"] == 335.423
     assert inflation["core_cpi"]["fetched_at_utc"] == "2026-05-12T14:07:33Z"
+
+
+def test_a1_lightweight_context_contains_only_stage_essentials():
+    db_path = Path(tempfile.mkdtemp()) / "layer_a_a1_light.db"
+    init_db(db_path=db_path, verbose=False)
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        OnchainDAO.upsert_batch(conn, [
+            OnchainMetric(
+                timestamp="2026-05-12T00:00:00Z",
+                metric_name="mvrv_z_score",
+                metric_value=1.8,
+                source="glassnode_primary",
+                fetched_at="2026-05-12T14:06:20Z",
+            ),
+            OnchainMetric(
+                timestamp="2026-05-12T00:00:00Z",
+                metric_name="rhodl_ratio",
+                metric_value=1200.0,
+                source="glassnode_layer_a",
+                fetched_at="2026-05-12T14:06:21Z",
+            ),
+            OnchainMetric(
+                timestamp="2026-05-12T00:00:00Z",
+                metric_name="lth_sopr",
+                metric_value=1.02,
+                source="glassnode_layer_a",
+                fetched_at="2026-05-12T14:06:22Z",
+            ),
+        ])
+        conn.commit()
+        ctx = SpotCycleContextBuilder(conn).build_spot_cycle_context()
+    finally:
+        conn.close()
+
+    ctx["previous_layer_a_state"] = {
+        "generated_at_bjt": "2026-05-14 10:00:00 BJT",
+        "cycle_stage_model_version": "layer_a_five_stage_v1",
+        "a1_cycle_stage": {
+            "official_cycle_stage": "accumulation",
+            "raw_stage_assessment": "accumulation",
+            "transition_status": "confirmed",
+        },
+        "a5_spot_adjudicator": {"spot_action": "dca_buy"},
+    }
+    light = build_a1_cycle_stage_context({"spot_cycle_context": ctx})
+    payload = json.dumps(light, ensure_ascii=False, default=str)
+
+    assert set(light.keys()) == {
+        "stage_model", "cycle_evidence_summary", "recent_stage_history", "instructions",
+    }
+    assert light["stage_model"]["previous_official_stage"] == "accumulation"
+    assert light["recent_stage_history"][0]["official_stage"] == "accumulation"
+    assert "mvrv_z_score" in light["cycle_evidence_summary"]["valuation"]
+    assert "rhodl_ratio" in light["cycle_evidence_summary"]["valuation"]
+    assert "lth_sopr" in light["cycle_evidence_summary"]["holder_behavior"]
+    assert "funding_rate" not in payload
+    assert "open_interest" not in payload
+    assert "factor_role_classification" not in payload
+    assert "series_samples" not in payload
+    assert "available_factors" not in light
+    assert len(payload) < 12000

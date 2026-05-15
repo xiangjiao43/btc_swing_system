@@ -24,6 +24,10 @@ from .context_builder import (
     compute_price_features,
     compute_tf_alignment,
 )
+from .spot_cycle_stage_state import (
+    OFFICIAL_CYCLE_STAGES,
+    previous_official_stage,
+)
 from ..data.storage.dao import (
     BTCKlinesDAO,
     DerivativesDAO,
@@ -183,6 +187,162 @@ def _round(v: Any, digits: int = 4) -> Any:
     if isinstance(v, float) and math.isfinite(v):
         return round(v, digits)
     return v
+
+
+def _compact_factor(v: Any) -> dict[str, Any]:
+    """Return only the fields A1 needs for stage classification."""
+    if not isinstance(v, dict):
+        return {"value": v}
+    out = {
+        "value": v.get("actual_value"),
+        "status": v.get("status"),
+    }
+    freshness = v.get("freshness") if isinstance(v.get("freshness"), dict) else {}
+    if freshness:
+        out["is_stale"] = bool(freshness.get("is_stale"))
+        hours = freshness.get("hours_since_last_success")
+        if hours is not None:
+            out["hours_since_last_success"] = hours
+    for key in ("as_of", "captured_at_utc", "fetched_at_utc"):
+        if v.get(key):
+            out[key] = v.get(key)
+    return {k: val for k, val in out.items() if val is not None}
+
+
+def _compact_stage_history(previous: dict[str, Any]) -> list[dict[str, Any]]:
+    if not previous:
+        return []
+    a1 = previous.get("a1_cycle_stage") if isinstance(previous.get("a1_cycle_stage"), dict) else {}
+    a5 = previous.get("a5_spot_adjudicator") if isinstance(previous.get("a5_spot_adjudicator"), dict) else {}
+    transition = previous.get("stage_transition") if isinstance(previous.get("stage_transition"), dict) else {}
+    item = {
+        "generated_at": previous.get("generated_at_bjt") or previous.get("generated_at_utc"),
+        "official_stage": (
+            a1.get("official_cycle_stage") or a1.get("cycle_stage")
+            or a5.get("cycle_stage")
+        ),
+        "raw_stage": a1.get("raw_stage_assessment") or a1.get("cycle_stage"),
+        "transition_status": transition.get("transition_status")
+        or a1.get("transition_status"),
+        "confirmation_count": transition.get("confirmation_count")
+        or a1.get("confirmation_count"),
+        "confirmation_required": transition.get("confirmation_required")
+        or a1.get("confirmation_required"),
+        "action": a5.get("spot_action"),
+    }
+    return [{k: v for k, v in item.items() if v not in (None, "", [])}]
+
+
+def build_a1_cycle_stage_context(context: dict[str, Any]) -> dict[str, Any]:
+    """Build the tiny context used only by A1.
+
+    A2/A4/A5 can still inspect the full Layer A context.  A1 only needs slow
+    cycle evidence and previous-stage state; giving it the full factor tree has
+    caused provider timeouts.
+    """
+    spot_ctx = context.get("spot_cycle_context") if isinstance(context, dict) else None
+    if not isinstance(spot_ctx, dict):
+        spot_ctx = context if isinstance(context, dict) else {}
+    available = spot_ctx.get("available_factors") if isinstance(spot_ctx.get("available_factors"), dict) else {}
+    previous = spot_ctx.get("previous_layer_a_state") if isinstance(spot_ctx.get("previous_layer_a_state"), dict) else {}
+    coverage = spot_ctx.get("factor_coverage") if isinstance(spot_ctx.get("factor_coverage"), dict) else {}
+    unavailable = spot_ctx.get("unavailable_factors") if isinstance(spot_ctx.get("unavailable_factors"), list) else []
+
+    ps = available.get("price_structure") if isinstance(available.get("price_structure"), dict) else {}
+    ov = available.get("onchain_valuation") if isinstance(available.get("onchain_valuation"), dict) else {}
+    hb = available.get("holder_behavior") if isinstance(available.get("holder_behavior"), dict) else {}
+    ohb = available.get("onchain_holder_behavior") if isinstance(available.get("onchain_holder_behavior"), dict) else {}
+    flows = available.get("exchange_and_flows") if isinstance(available.get("exchange_and_flows"), dict) else {}
+    macro = available.get("macro") if isinstance(available.get("macro"), dict) else {}
+    liquidity = available.get("macro_liquidity") if isinstance(available.get("macro_liquidity"), dict) else {}
+    inflation = available.get("macro_inflation_rates") if isinstance(available.get("macro_inflation_rates"), dict) else {}
+
+    return {
+        "stage_model": {
+            "allowed_stages": list(OFFICIAL_CYCLE_STAGES),
+            "previous_official_stage": previous_official_stage(previous),
+            "transition_rules_summary": (
+                "相邻阶段需连续2次确认;跨2级以上需连续3次确认;数据质量异常时只 pending。"
+            ),
+        },
+        "cycle_evidence_summary": {
+            "price_position": {
+                "btc_price": _compact_factor(ps.get("current_close")),
+                "ath_drawdown_pct": _compact_factor(ps.get("ath_drawdown_pct")),
+                "ma_200d": _compact_factor(ps.get("ma_200d")),
+                "ma_200w": _compact_factor(ps.get("ma_200w")),
+                "weekly_structure": ps.get("weekly_structure") if isinstance(ps.get("weekly_structure"), dict) else {},
+                "realized_price": _compact_factor(ov.get("realized_price")),
+                "sth_realized_price": _compact_factor(ov.get("sth_realized_price")),
+                "lth_realized_price": _compact_factor(ov.get("lth_realized_price")),
+            },
+            "valuation": {
+                "mvrv_z_score": _compact_factor(ov.get("mvrv_z_score")),
+                "mvrv": _compact_factor(ov.get("mvrv")),
+                "nupl": _compact_factor(ov.get("nupl")),
+                "rhodl_ratio": _compact_factor(ov.get("rhodl_ratio")),
+                "reserve_risk": _compact_factor(ov.get("reserve_risk")),
+                "puell_multiple": _compact_factor(ov.get("puell_multiple")),
+                "percent_supply_in_profit": _compact_factor(ov.get("percent_supply_in_profit")),
+            },
+            "holder_behavior": {
+                "lth_sopr": _compact_factor(ohb.get("lth_sopr")),
+                "sth_sopr": _compact_factor(ohb.get("sth_sopr")),
+                "lth_supply": _compact_factor(hb.get("lth_supply")),
+                "sth_supply": _compact_factor(hb.get("sth_supply")),
+                "lth_supply_90d_pct_change": _compact_factor(hb.get("lth_supply_90d_pct_change")),
+                "sth_supply_90d_pct_change": _compact_factor(hb.get("sth_supply_90d_pct_change")),
+                "lth_net_position_change": _compact_factor(ohb.get("lth_net_position_change")),
+                "percent_supply_in_profit": _compact_factor(ohb.get("percent_supply_in_profit")),
+                "percent_supply_in_loss": _compact_factor(ohb.get("percent_supply_in_loss")),
+                "hodl_waves": _compact_factor(hb.get("hodl_waves")),
+                "cdd": _compact_factor(hb.get("cdd")),
+            },
+            "flows": {
+                "exchange_balance": _compact_factor(ohb.get("exchange_balance") or flows.get("exchange_balance")),
+                "exchange_net_position_change": _compact_factor(ohb.get("exchange_net_position_change")),
+                "exchange_net_flow_30d_sum": _compact_factor(flows.get("exchange_net_flow_30d_sum")),
+                "etf_flow_7d_sum_usd": _compact_factor(flows.get("etf_flow_7d_sum_usd")),
+                "etf_flow_30d_sum_usd": _compact_factor(flows.get("etf_flow_30d_sum_usd")),
+            },
+            "macro": {
+                "real_yield": _compact_factor(inflation.get("real_yield") or liquidity.get("real_yield")),
+                "fed_funds_rate": _compact_factor(liquidity.get("fed_funds_rate")),
+                "us2y": _compact_factor(liquidity.get("us2y") or macro.get("us2y")),
+                "dxy": _compact_factor(macro.get("dxy")),
+                "vix": _compact_factor(macro.get("vix")),
+                "nasdaq": _compact_factor(macro.get("nasdaq")),
+                "m2": _compact_factor(liquidity.get("m2")),
+                "fed_balance_sheet": _compact_factor(liquidity.get("fed_balance_sheet")),
+                "cpi": _compact_factor(inflation.get("cpi")),
+                "core_cpi": _compact_factor(inflation.get("core_cpi")),
+            },
+            "data_quality": {
+                "confidence_cap": coverage.get("confidence_cap"),
+                "confidence_cap_reason": coverage.get("confidence_cap_reason"),
+                "critical_unavailable_count": coverage.get("critical_unavailable_count"),
+                "stale_factor_count": coverage.get("stale_factor_count"),
+                "missing_integrated_factor_count": coverage.get("missing_integrated_factor_count"),
+                "coverage_ratio": coverage.get("coverage_ratio"),
+                "coverage_notes": (coverage.get("coverage_notes") or [])[:6],
+                "data_quality_notes": (spot_ctx.get("data_quality_notes") or [])[:6],
+                "unavailable_factors": [
+                    {
+                        "factor": item.get("factor"),
+                        "project_status": item.get("project_status"),
+                    }
+                    for item in unavailable[:12]
+                    if isinstance(item, dict)
+                ],
+            },
+        },
+        "recent_stage_history": _compact_stage_history(previous),
+        "instructions": {
+            "do_not_output_trade_execution": True,
+            "do_not_use_short_term_derivatives_as_stage_driver": True,
+            "do_not_repeat_all_metrics": True,
+        },
+    }
 
 
 def _utc_iso_to_bjt_pretty(value: Optional[str]) -> Optional[str]:

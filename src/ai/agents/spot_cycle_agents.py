@@ -6,6 +6,7 @@ import json
 from typing import Any
 
 from ._base import BaseAgent
+from ..spot_cycle_context_builder import build_a1_cycle_stage_context
 from ..spot_strategy_normalizer import (
     normalize_a1,
     normalize_a2,
@@ -13,10 +14,20 @@ from ..spot_strategy_normalizer import (
     normalize_a4,
     normalize_a5,
 )
+from ...utils.pipeline_progress import record_instant_stage
 
 
 def _prompt_payload(context: dict[str, Any]) -> str:
     return json.dumps(context or {}, ensure_ascii=False, indent=2, default=str)
+
+
+def _compact_prompt_payload(context: dict[str, Any]) -> str:
+    return json.dumps(
+        context or {},
+        ensure_ascii=False,
+        separators=(",", ":"),
+        default=str,
+    )
 
 
 class A1SpotCycleAnalyst(BaseAgent):
@@ -24,7 +35,21 @@ class A1SpotCycleAnalyst(BaseAgent):
     PROMPT_FILE = "a1_spot_cycle.txt"
 
     def _build_user_prompt(self, context: dict[str, Any]) -> str:
-        return "===== Layer A A1 输入 =====\n" + _prompt_payload(context)
+        a1_context = build_a1_cycle_stage_context(context)
+        payload = _compact_prompt_payload(a1_context)
+        diagnostics = {
+            "a1_prompt_context_chars": len(payload),
+            "a1_estimated_context_tokens": max(1, len(payload) // 4),
+            "a1_context_top_keys": list(a1_context.keys()),
+            "a1_history_count": len(a1_context.get("recent_stage_history") or []),
+            "timeout_sec": 120,
+        }
+        record_instant_stage(
+            "Layer A A1 input size",
+            status="success",
+            message=diagnostics,
+        )
+        return "===== Layer A A1 精简输入 =====\n" + payload
 
     def _fallback_output(self) -> dict[str, Any]:
         return normalize_a1({

@@ -171,6 +171,23 @@ def test_layer_a_raw_factor_cards_keep_existing_status_style(js, html):
     assert "proxy_endpoint_404" not in html
 
 
+def test_raw_factor_cards_use_plain_border_without_green_left_rail(html):
+    """原始数据因子卡片统一为普通浅灰边框,不再显示绿色左侧竖线。"""
+    start = html.find('id="region-4"')
+    end = html.find('id="region-weekly-review"')
+    raw_section = html[start:end]
+    assert start != -1
+    assert end != -1
+    assert "border border-slate-200 dark:border-slate-800 rounded px-2.5 py-2" in raw_section
+    assert "border-l-emerald" not in raw_section
+    assert "border-l-2 border-l" not in raw_section
+    assert "左绿边" not in raw_section
+    assert "freshnessColor(c.data_fresh ? 'green' : 'red')" in raw_section
+    assert "factorStatusLine(c)" in raw_section
+    assert "formatFactorValue(c.current_value)" in raw_section
+    assert "fetchedAtPrimary(c) || '-'" in raw_section
+
+
 # ============================================================
 # 2. 模块 5:周复盘报告
 # ============================================================

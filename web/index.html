@@ -786,19 +786,18 @@
                 <span x-text="group.icon"></span>
                 <span x-text="group.label"></span>
                 <span class="text-[10px] font-normal text-slate-500"
-                      x-text="'主要 ' + group.primary.length + ' / 次要 ' + group.secondary.length + ' · 左绿边=主要'"></span>
+                      x-text="'主要 ' + group.primary.length + ' / 次要 ' + group.secondary.length"></span>
               </h3>
               <span class="text-[10px] text-slate-500" x-text="group.source"></span>
             </header>
 
             <!-- Sprint 2.3 R3:2 列 → 3 列,每卡更紧凑。
-                 主要因子在前(左绿边),次要因子在后(无边)。
+                 主要因子在前,次要因子在后。
                  奇数补虚线占位,明确"本组到此为止"。-->
             <div class="grid grid-cols-1 md:grid-cols-3 gap-2">
               <template x-for="c in group.allOrdered" :key="c.card_id">
                 <article class="border border-slate-200 dark:border-slate-800 rounded px-2.5 py-2
                                 space-y-1 min-w-0"
-                         :class="c.is_primary ? 'border-l-2 border-l-emerald-500 dark:border-l-emerald-400' : ''"
                          :id="'card-' + c.card_id">
                   <header class="flex items-center gap-1.5">
                     <h4 class="text-[11px] font-medium flex-1 truncate"

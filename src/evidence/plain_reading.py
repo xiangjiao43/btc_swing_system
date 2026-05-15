@@ -95,6 +95,18 @@ _LAYER_A_RAW_FACTOR_LABELS: dict[str, dict[str, str]] = {
         "name": "美联储资产负债表",
         "purpose": "美联储资产负债表用于观察基础流动性环境",
     },
+    "monthly_ohlc_structure": {
+        "name": "月线结构",
+        "purpose": "月线结构用于观察 BTC 高周期价格是否脱离底部或进入趋势确认",
+    },
+    "major_support_resistance_zones": {
+        "name": "长期支撑 / 阻力区",
+        "purpose": "长期支撑 / 阻力区用于判断高周期位置和趋势确认难度",
+    },
+    "hodl_waves_1y_plus_aggregate": {
+        "name": "HODL Waves 1Y+",
+        "purpose": "HODL Waves 1Y+ 用于观察长期持有筹码锁仓或派发状态",
+    },
 }
 
 _LAYER_A_RAW_FACTOR_STATUS_LABELS: dict[str, str] = {
@@ -160,6 +172,23 @@ def plain_reading_layer_a_raw_factor(
         return f"📊 {info['purpose']}；{unavailable}。"
 
     shown = _fmt_raw_factor_value(value, value_unit or factor.get("value_unit"))
+    if factor_key == "monthly_ohlc_structure":
+        trend = factor.get("monthly_trend") or value
+        label = {
+            "recovering": "修复中",
+            "up": "上行",
+            "sideways": "震荡",
+            "down": "下行",
+        }.get(str(trend), shown)
+        return (
+            f"📊 当前月线结构显示为{label}，反映 BTC 高周期价格位置。"
+            " 🔍 连续月线收盘站稳关键阻力，趋势确认度会提高。"
+        )
+    if factor_key == "major_support_resistance_zones":
+        return (
+            f"📊 当前长期结构为 {shown}，用于观察价格在主要支撑和阻力之间的位置。"
+            " 🔍 该结构辅助判断牛熊过渡或趋势确认，不单独决定买卖。"
+        )
     try:
         v = float(value)
     except (TypeError, ValueError):
@@ -262,6 +291,16 @@ def plain_reading_layer_a_raw_factor(
         return f"📊 当前 M2 为 {shown}，反映美元流动性规模 🔍 扩张偏利好风险资产，收缩偏压制。"
     if factor_key == "fed_balance_sheet":
         return f"📊 当前美联储资产负债表 {shown}，反映基础流动性环境 🔍 扩表偏宽松，缩表偏紧缩。"
+    if factor_key == "hodl_waves_1y_plus_aggregate":
+        state = (
+            "长期筹码锁仓占比较高，偏筹码沉淀" if v >= 60
+            else "长期筹码锁仓占比处于中性区" if v >= 45
+            else "长期筹码锁仓占比较低，需观察派发或短期筹码占比上升"
+        )
+        return (
+            f"📊 当前 1Y+ 长期持有筹码占比为 {shown}，{state} "
+            "🔍 占比上升偏吸筹，下降需警惕派发。"
+        )
     return f"📊 当前 {info['name']} {shown}，用于 Layer A 大周期判断。"
 
 

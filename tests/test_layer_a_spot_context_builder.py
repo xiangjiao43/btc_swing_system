@@ -3,6 +3,7 @@ from __future__ import annotations
 import sqlite3
 import tempfile
 import json
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from src.ai.spot_cycle_context_builder import (
@@ -10,7 +11,14 @@ from src.ai.spot_cycle_context_builder import (
     build_a1_cycle_stage_context,
 )
 from src.data.storage.connection import init_db
-from src.data.storage.dao import MacroDAO, MacroMetric, OnchainDAO, OnchainMetric
+from src.data.storage.dao import (
+    BTCKlinesDAO,
+    KlineRow,
+    MacroDAO,
+    MacroMetric,
+    OnchainDAO,
+    OnchainMetric,
+)
 
 
 def test_spot_cycle_context_builder_empty_db_does_not_crash():
@@ -359,3 +367,87 @@ def test_a1_lightweight_context_contains_only_stage_essentials():
     assert "series_samples" not in payload
     assert "available_factors" not in light
     assert len(payload) < 12000
+
+
+def test_layer_a_p0_cycle_factors_are_derived_and_enter_a1_context():
+    db_path = Path(tempfile.mkdtemp()) / "layer_a_p0_factors.db"
+    init_db(db_path=db_path, verbose=False)
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        klines: list[KlineRow] = []
+        base = 40000.0
+        start = datetime(2025, 1, 1, tzinfo=timezone.utc)
+        for i in range(240):
+            price = base + i * 180
+            day = (start + timedelta(days=i)).strftime("%Y-%m-%dT00:00:00Z")
+            klines.append(KlineRow(
+                timeframe="1d",
+                timestamp=day,
+                open=price - 80,
+                high=price + 600,
+                low=price - 700,
+                close=price,
+                volume_btc=1000 + i,
+                fetched_at="2026-05-12T14:00:00Z",
+            ))
+        weekly: list[KlineRow] = []
+        wstart = datetime(2024, 1, 7, tzinfo=timezone.utc)
+        for i in range(80):
+            price = 50000 + i * 350
+            weekly.append(KlineRow(
+                timeframe="1w",
+                timestamp=(wstart + timedelta(weeks=i)).strftime("%Y-%m-%dT00:00:00Z"),
+                open=price - 200,
+                high=price + (2500 if i % 9 == 0 else 900),
+                low=price - (2500 if i % 7 == 0 else 900),
+                close=price,
+                volume_btc=5000,
+                fetched_at="2026-05-12T14:05:00Z",
+            ))
+        BTCKlinesDAO.upsert_klines(conn, klines + weekly)
+        OnchainDAO.upsert_batch(conn, [
+            OnchainMetric(
+                timestamp="2026-05-12T00:00:00Z",
+                metric_name=bucket,
+                metric_value=value,
+                source="glassnode_primary",
+                fetched_at="2026-05-12T14:06:00Z",
+            )
+            for bucket, value in {
+                "hodl_waves_1y_2y": 0.22,
+                "hodl_waves_2y_3y": 0.13,
+                "hodl_waves_3y_5y": 0.11,
+                "hodl_waves_5y_7y": 0.07,
+                "hodl_waves_7y_10y": 0.03,
+                "hodl_waves_more_10y": 0.02,
+            }.items()
+        ])
+        conn.commit()
+        ctx = SpotCycleContextBuilder(conn).build_spot_cycle_context()
+    finally:
+        conn.close()
+
+    price_structure = ctx["available_factors"]["price_structure"]
+    holder = ctx["available_factors"]["holder_behavior"]
+    monthly = price_structure["monthly_ohlc_structure"]
+    levels = price_structure["major_support_resistance_zones"]
+    hodl = holder["hodl_waves_1y_plus_aggregate"]
+
+    assert monthly["status"] == "available"
+    assert monthly["actual_value"] in {"recovering", "up", "sideways", "down"}
+    assert monthly["fetched_at_bjt"] == "2026-05-12 22:00:00 (BJT)"
+    assert levels["status"] == "available"
+    assert "支撑" in levels["actual_value"]
+    assert "阻力" in levels["actual_value"]
+    assert hodl["status"] == "available"
+    assert hodl["actual_value"] == 58.0
+    assert hodl["value_unit"] == "%"
+
+    light = build_a1_cycle_stage_context({"spot_cycle_context": ctx})
+    price_summary = light["cycle_evidence_summary"]["price_position"]
+    holder_summary = light["cycle_evidence_summary"]["holder_behavior"]
+    assert "monthly_ohlc_structure" in price_summary
+    assert "major_support_resistance_zones" in price_summary
+    assert "hodl_waves_1y_plus_aggregate" in holder_summary
+    assert "buckets" not in json.dumps(light, ensure_ascii=False, default=str)

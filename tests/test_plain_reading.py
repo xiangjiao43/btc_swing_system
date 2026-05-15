@@ -282,6 +282,9 @@ def test_layer_a_raw_factor_plain_readings_cover_new_factors():
         "core_cpi",
         "m2",
         "fed_balance_sheet",
+        "monthly_ohlc_structure",
+        "major_support_resistance_zones",
+        "hodl_waves_1y_plus_aggregate",
     )
     for key in keys:
         text = plain_reading_layer_a_raw_factor(
@@ -319,6 +322,33 @@ def test_layer_a_raw_factor_cpi_core_cpi_plain_readings_are_monthly_macro_readab
     assert "整体通胀水平" in cpi
     assert "当前 Core CPI 为" in core
     assert "剔除食品和能源" in core
+
+
+def test_layer_a_p0_raw_factor_plain_readings_are_deterministic_and_readable():
+    monthly = plain_reading_layer_a_raw_factor(
+        "monthly_ohlc_structure",
+        {
+            "actual_value": "recovering",
+            "status": "available",
+            "monthly_trend": "recovering",
+        },
+    )
+    levels = plain_reading_layer_a_raw_factor(
+        "major_support_resistance_zones",
+        {"actual_value": "支撑 74,800 / 阻力 85,000", "status": "available"},
+    )
+    hodl = plain_reading_layer_a_raw_factor(
+        "hodl_waves_1y_plus_aggregate",
+        {"actual_value": 62.3, "status": "available", "value_unit": "%"},
+    )
+
+    assert "当前月线结构显示为修复中" in monthly
+    assert "当前长期结构为 支撑 74,800 / 阻力 85,000" in levels
+    assert "当前 1Y+ 长期持有筹码占比为 62.3%" in hodl
+    for text in (monthly, levels, hodl):
+        assert "Layer A context" not in text
+        assert "endpoint" not in text
+        assert "exception" not in text
 
 
 def test_layer_a_raw_factor_plain_reading_has_no_ai_call_dependency():

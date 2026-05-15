@@ -97,6 +97,9 @@ def test_layer_a_new_factor_names_are_available_to_raw_factor_cards(js):
         "percent_supply_in_loss",
         "exchange_balance",
         "exchange_net_position_change",
+        "monthly_ohlc_structure",
+        "major_support_resistance_zones",
+        "hodl_waves_1y_plus_aggregate",
         "us2y",
         "real_yield",
         "fed_funds_rate",
@@ -143,6 +146,9 @@ def test_layer_a_raw_factor_cards_have_plain_readings_and_no_status_placeholder(
         "当前亏损供给占比",
         "当前交易所余额",
         "当前交易所净头寸变化",
+        "当前月线结构显示为",
+        "当前长期结构为",
+        "当前 1Y+ 长期持有筹码占比",
         "当前美国 2 年期收益率",
         "当前联邦基金利率",
         "当前美国 10 年期实际利率",
@@ -157,8 +163,32 @@ def test_layer_a_raw_factor_cards_have_plain_readings_and_no_status_placeholder(
         "数据受限",
         "LTH SOPR 用于观察长期持有人",
         "交易所净头寸变化用于观察资金流入或流出交易所",
+        "月线结构用于观察 BTC 高周期价格",
+        "长期支撑 / 阻力区用于判断高周期位置",
+        "HODL Waves 1Y+ 用于观察长期持有筹码",
     ):
         assert unavailable_phrase in js
+
+
+def test_layer_a_p0_factors_are_rendered_in_existing_raw_factor_module(js, html):
+    """A1 P0 因子只能作为原始数据因子卡片出现,说明走 deterministic 模板。"""
+    assert html.count("原始数据因子") == 1
+    assert "月线结构" in js
+    assert "长期支撑 / 阻力区" in js
+    assert "HODL Waves 1Y+" in js
+    assert "Monthly OHLC Structure" in js
+    assert "Major Support / Resistance" in js
+    assert "HODL Waves 1Y+" in js
+    assert "['price_structure', 'monthly_ohlc_structure']" in js
+    assert "['price_structure', 'major_support_resistance_zones']" in js
+    assert "['holder_behavior', 'hodl_waves_1y_plus_aggregate']" in js
+    helper_start = js.index("layerAFactorPlainReading")
+    helper_end = js.index("layerAFactorCards()", helper_start)
+    helper_src = js[helper_start:helper_end]
+    assert "human_summary" not in helper_src
+    assert "run_agent" not in helper_src
+    assert "rawValue" in helper_src
+    assert "Number.isFinite" in helper_src
 
 
 def test_layer_a_raw_factor_cards_keep_existing_status_style(js, html):

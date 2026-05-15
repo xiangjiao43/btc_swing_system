@@ -1531,6 +1531,31 @@ function app() {
                     paths: [['onchain_holder_behavior', 'exchange_net_position_change']],
                 },
                 {
+                    key: 'monthly_ohlc_structure',
+                    name: '月线结构',
+                    name_en: 'Monthly OHLC Structure',
+                    group: 'price_technical',
+                    source: 'CoinGlass klines',
+                    paths: [['price_structure', 'monthly_ohlc_structure']],
+                },
+                {
+                    key: 'major_support_resistance_zones',
+                    name: '长期支撑 / 阻力区',
+                    name_en: 'Major Support / Resistance',
+                    group: 'price_technical',
+                    source: 'CoinGlass klines',
+                    paths: [['price_structure', 'major_support_resistance_zones']],
+                },
+                {
+                    key: 'hodl_waves_1y_plus_aggregate',
+                    name: 'HODL Waves 1Y+',
+                    name_en: 'HODL Waves 1Y+',
+                    group: 'onchain',
+                    source: 'Glassnode',
+                    value_unit: '%',
+                    paths: [['holder_behavior', 'hodl_waves_1y_plus_aggregate']],
+                },
+                {
                     key: 'us2y',
                     name: '美国 2 年期收益率',
                     name_en: 'US2Y',
@@ -1689,7 +1714,9 @@ function app() {
             return unit ? `${base}${unit}` : base;
         },
         layerAFactorPlainReading(spec, factor, statusLabel, hasValue) {
-            const value = hasValue ? Number(factor.actual_value) : null;
+            const rawValue = hasValue ? factor.actual_value : null;
+            const numericValue = Number(rawValue);
+            const value = Number.isFinite(numericValue) ? numericValue : rawValue;
             const shown = hasValue ? this.layerAFactorValueText(value, spec.value_unit || '') : null;
             const statusText = statusLabel || '不可用';
             const unavailable = statusText === '当前缺值'
@@ -1708,6 +1735,9 @@ function app() {
                     percent_supply_in_loss: '亏损供给比例用于判断市场是否仍有恐慌或承压筹码',
                     exchange_balance: '交易所余额用于观察可交易供给压力',
                     exchange_net_position_change: '交易所净头寸变化用于观察资金流入或流出交易所',
+                    monthly_ohlc_structure: '月线结构用于观察 BTC 高周期价格是否脱离底部或进入趋势确认',
+                    major_support_resistance_zones: '长期支撑 / 阻力区用于判断高周期位置和趋势确认难度',
+                    hodl_waves_1y_plus_aggregate: 'HODL Waves 1Y+ 用于观察长期持有筹码锁仓或派发状态',
                     us2y: '美国 2 年期收益率用于观察短端利率压力',
                     fed_funds_rate: '联邦基金利率用于观察政策利率环境',
                     real_yield: '美国 10 年期实际利率用于观察通胀调整后的利率压力',
@@ -1719,6 +1749,19 @@ function app() {
                 return unavailableLine(purpose);
             }
 
+            if (spec.key === 'monthly_ohlc_structure') {
+                const trend = factor.monthly_trend || rawValue;
+                const label = {
+                    recovering: '修复中',
+                    up: '上行',
+                    sideways: '震荡',
+                    down: '下行',
+                }[trend] || shown;
+                return `📊 当前月线结构显示为${label}，反映 BTC 高周期价格位置 🔍 连续月线收盘站稳关键阻力，趋势确认度会提高。`;
+            }
+            if (spec.key === 'major_support_resistance_zones') {
+                return `📊 当前长期结构为 ${shown}，用于观察价格在主要支撑和阻力之间的位置 🔍 该结构辅助判断牛熊过渡或趋势确认，不单独决定买卖。`;
+            }
             if (spec.key === 'lth_sopr') {
                 const state = value > 1.03 ? '长期持有人获利卖出压力较明显'
                     : value >= 1 ? '长期持有人整体处于轻微盈利卖出状态'
@@ -1805,6 +1848,12 @@ function app() {
             }
             if (spec.key === 'fed_balance_sheet') {
                 return `📊 当前美联储资产负债表 ${shown}，反映基础流动性环境 🔍 扩表偏宽松，缩表偏紧缩。`;
+            }
+            if (spec.key === 'hodl_waves_1y_plus_aggregate') {
+                const state = value >= 60 ? '长期筹码锁仓占比较高，偏筹码沉淀'
+                    : value >= 45 ? '长期筹码锁仓占比处于中性区'
+                    : '长期筹码锁仓占比较低，需观察派发或短期筹码占比上升';
+                return `📊 当前 1Y+ 长期持有筹码占比为 ${shown}，${state} 🔍 占比上升偏吸筹，下降需警惕派发。`;
             }
             return `📊 当前 ${spec.name} ${shown}，用于 Layer A 大周期判断。`;
         },

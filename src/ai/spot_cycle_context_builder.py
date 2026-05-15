@@ -80,14 +80,15 @@ _FACTOR_SOURCE = {
     "fed_balance_sheet": "fred_macro",
     "vix": "fred_macro",
     "nasdaq": "fred_macro",
+    "monthly_ohlc_structure": "coinglass_derivatives_derived",
+    "major_support_resistance_zones": "coinglass_derivatives_derived",
+    "hodl_waves_1y_plus_aggregate": "glassnode_onchain_derived",
 }
 
 _UNAVAILABLE_MODEL_FACTORS = {
     "market_cap_realized_cap": "not_found",
     "liveliness": "config_only",
     "stablecoin_supply_liquidity": "not_found",
-    "monthly_structure_1m": "not_found",
-    "major_support_resistance": "ai_derived_not_precomputed_for_layer_a",
     "unemployment": "deprecated_candidate",
     "futures_basis_premium": "deprecated_candidate",
     "options_iv_skew": "not_found",
@@ -100,8 +101,9 @@ _A1_CORE_FACTORS = {
     "mvrv_z_score", "mvrv", "nupl", "rhodl_ratio", "reserve_risk",
     "puell_multiple", "lth_sopr", "sth_sopr", "lth_supply",
     "sth_supply", "lth_net_position_change", "percent_supply_in_profit",
-    "percent_supply_in_loss", "hodl_waves", "cdd", "exchange_balance",
-    "exchange_net_position_change",
+    "percent_supply_in_loss", "hodl_waves", "hodl_waves_1y_plus_aggregate",
+    "cdd", "exchange_balance", "exchange_net_position_change",
+    "monthly_ohlc_structure", "major_support_resistance_zones",
 }
 _A2_A4_BACKGROUND_FACTORS = {
     "etf_flow", "exchange_net_flow", "exchange_net_flow_30d_sum",
@@ -118,7 +120,8 @@ _LAYER_B_CONTEXT_FACTORS = {
 _CRITICAL_MODEL_FACTORS = {
     "mvrv_z_score", "mvrv", "nupl", "rhodl_ratio", "reserve_risk",
     "puell_multiple", "lth_sopr", "sth_sopr", "lth_net_position_change",
-    "hodl_waves", "cdd", "exchange_balance",
+    "hodl_waves_1y_plus_aggregate", "cdd", "exchange_balance",
+    "monthly_ohlc_structure", "major_support_resistance_zones",
 }
 
 # FRED 的 CPI / Core CPI 是月度宏观数据。它们的“最新一期”天然不会每天更新，
@@ -172,6 +175,21 @@ def _series_latest_delta(series: Any, periods: int = 1) -> tuple[Optional[float]
         return None, None
 
 
+def _latest_series_timestamp(*series_items: Any) -> Optional[str]:
+    latest: Optional[pd.Timestamp] = None
+    for series in series_items:
+        try:
+            s = series.dropna()
+            if len(s) == 0:
+                continue
+            ts = pd.to_datetime(s.index[-1], utc=True)
+            if latest is None or ts > latest:
+                latest = ts
+        except Exception:
+            continue
+    return latest.isoformat() if latest is not None else None
+
+
 def _tail(series: Any, n: int = 30) -> list[dict[str, Any]]:
     try:
         s = series.dropna().astype(float).iloc[-n:]
@@ -208,6 +226,147 @@ def _compact_factor(v: Any) -> dict[str, Any]:
         if v.get(key):
             out[key] = v.get(key)
     return {k: val for k, val in out.items() if val is not None}
+
+
+def _build_monthly_ohlc_structure(klines_1d: Any) -> tuple[Optional[str], Optional[str], dict[str, Any]]:
+    """Derive a compact monthly structure from existing daily candles.
+
+    This is deterministic and only feeds Layer A / raw factor display.  It does
+    not create a trading signal by itself.
+    """
+    if klines_1d is None or getattr(klines_1d, "empty", True):
+        return None, None, {"reason": "insufficient_daily_klines"}
+    required = {"open", "high", "low", "close"}
+    if not required.issubset(set(klines_1d.columns)):
+        return None, None, {"reason": "missing_ohlc_columns"}
+    try:
+        daily = klines_1d[list(required)].dropna().astype(float)
+        if len(daily) < 180:
+            return None, None, {
+                "reason": "insufficient_monthly_history",
+                "daily_bars_available": int(len(daily)),
+            }
+        monthly = daily.resample("ME").agg({
+            "open": "first",
+            "high": "max",
+            "low": "min",
+            "close": "last",
+        }).dropna()
+        if len(monthly) < 6:
+            return None, None, {
+                "reason": "insufficient_monthly_history",
+                "months_available": int(len(monthly)),
+            }
+        close_m = monthly["close"]
+        latest_close = float(close_m.iloc[-1])
+        change_3m = _pct_change(close_m, 3)
+        change_6m = _pct_change(close_m, 6)
+        ma_6m = float(close_m.rolling(6).mean().iloc[-1])
+        recent_high_12m = float(monthly["high"].iloc[-12:].max())
+        recent_low_12m = float(monthly["low"].iloc[-12:].min())
+
+        if change_3m is not None and change_6m is not None and change_3m > 8 and change_6m > 12:
+            trend = "up"
+            label = "上行"
+        elif (
+            (change_3m is not None and change_3m > 3)
+            or (change_6m is not None and change_6m > 8)
+            or latest_close > ma_6m
+        ):
+            trend = "recovering"
+            label = "修复中"
+        elif change_3m is not None and change_6m is not None and change_3m < -8 and change_6m < -12:
+            trend = "down"
+            label = "下行"
+        else:
+            trend = "sideways"
+            label = "震荡"
+
+        if latest_close >= recent_high_12m * 0.97:
+            location = "near_12m_high"
+        elif latest_close <= recent_low_12m * 1.08:
+            location = "near_12m_low"
+        else:
+            location = "between_major_range"
+
+        return trend, close_m.index[-1].isoformat(), {
+            "monthly_trend": trend,
+            "price_location": location,
+            "display_value": label,
+            "latest_month_close": _round(latest_close, 2),
+            "three_month_change_pct": _round(change_3m, 2),
+            "six_month_change_pct": _round(change_6m, 2),
+            "months_available": int(len(monthly)),
+        }
+    except Exception as exc:
+        return None, None, {"reason": f"derive_error:{type(exc).__name__}"}
+
+
+def _build_major_support_resistance(
+    klines_1w: Any,
+    klines_1d: Any,
+    current_close: Any,
+) -> tuple[Optional[str], Optional[str], dict[str, Any]]:
+    if current_close is None:
+        return None, None, {"reason": "missing_current_close"}
+    try:
+        price = float(current_close)
+    except (TypeError, ValueError):
+        return None, None, {"reason": "invalid_current_close"}
+
+    source_df = klines_1w if klines_1w is not None and not getattr(klines_1w, "empty", True) else klines_1d
+    source_name = "1w" if source_df is klines_1w else "1d"
+    if source_df is None or getattr(source_df, "empty", True):
+        return None, None, {"reason": "missing_price_structure"}
+    if not {"high", "low"}.issubset(set(source_df.columns)):
+        return None, None, {"reason": "missing_high_low_columns"}
+    try:
+        df = source_df[["high", "low", "close"]].dropna().astype(float).iloc[-156:]
+        if len(df) < 26:
+            return None, None, {
+                "reason": "insufficient_support_resistance_history",
+                "bars_available": int(len(df)),
+            }
+        highs = df["high"]
+        lows = df["low"]
+        swing_high = highs[(highs.shift(1) < highs) & (highs.shift(-1) < highs)]
+        swing_low = lows[(lows.shift(1) > lows) & (lows.shift(-1) > lows)]
+        support_candidates = swing_low[swing_low < price]
+        resistance_candidates = swing_high[swing_high > price]
+        nearest_support = (
+            float(support_candidates.max())
+            if len(support_candidates) else float(lows.iloc[-52:].min())
+        )
+        nearest_resistance = (
+            float(resistance_candidates.min())
+            if len(resistance_candidates) else float(highs.iloc[-52:].max())
+        )
+        if nearest_support >= price:
+            nearest_support = None
+        if nearest_resistance <= price:
+            nearest_resistance = None
+        if nearest_support is None and nearest_resistance is None:
+            return None, None, {
+                "reason": "no_major_levels_detected",
+                "bars_available": int(len(df)),
+            }
+
+        support_text = f"{nearest_support:,.0f}" if nearest_support is not None else "-"
+        resistance_text = f"{nearest_resistance:,.0f}" if nearest_resistance is not None else "-"
+        value = f"支撑 {support_text} / 阻力 {resistance_text}"
+        ts = df.index[-1].isoformat() if hasattr(df.index[-1], "isoformat") else str(df.index[-1])
+        return value, ts, {
+            "nearest_major_support": _round(nearest_support, 2),
+            "nearest_major_resistance": _round(nearest_resistance, 2),
+            "support_distance_pct": _round((price / nearest_support - 1.0) * 100.0, 2)
+            if nearest_support else None,
+            "resistance_distance_pct": _round((nearest_resistance / price - 1.0) * 100.0, 2)
+            if nearest_resistance else None,
+            "source_timeframe": source_name,
+            "bars_available": int(len(df)),
+        }
+    except Exception as exc:
+        return None, None, {"reason": f"derive_error:{type(exc).__name__}"}
 
 
 def _compact_stage_history(previous: dict[str, Any]) -> list[dict[str, Any]]:
@@ -275,6 +434,8 @@ def build_a1_cycle_stage_context(context: dict[str, Any]) -> dict[str, Any]:
                 "ma_200d": _compact_factor(ps.get("ma_200d")),
                 "ma_200w": _compact_factor(ps.get("ma_200w")),
                 "weekly_structure": ps.get("weekly_structure") if isinstance(ps.get("weekly_structure"), dict) else {},
+                "monthly_ohlc_structure": _compact_factor(ps.get("monthly_ohlc_structure")),
+                "major_support_resistance_zones": _compact_factor(ps.get("major_support_resistance_zones")),
                 "realized_price": _compact_factor(ov.get("realized_price")),
                 "sth_realized_price": _compact_factor(ov.get("sth_realized_price")),
                 "lth_realized_price": _compact_factor(ov.get("lth_realized_price")),
@@ -298,7 +459,7 @@ def build_a1_cycle_stage_context(context: dict[str, Any]) -> dict[str, Any]:
                 "lth_net_position_change": _compact_factor(ohb.get("lth_net_position_change")),
                 "percent_supply_in_profit": _compact_factor(ohb.get("percent_supply_in_profit")),
                 "percent_supply_in_loss": _compact_factor(ohb.get("percent_supply_in_loss")),
-                "hodl_waves": _compact_factor(hb.get("hodl_waves")),
+                "hodl_waves_1y_plus_aggregate": _compact_factor(hb.get("hodl_waves_1y_plus_aggregate")),
                 "cdd": _compact_factor(hb.get("cdd")),
             },
             "flows": {
@@ -472,6 +633,21 @@ class SpotCycleContextBuilder:
                 "close_52w_change_pct": _pct_change(wclose, 52),
                 "bars_available": int(len(wclose)),
             }
+        latest_kline_inserted = BTCKlinesDAO.get_latest_inserted_at_by_timeframe(self.conn)
+        daily_kline_meta = {
+            "fetched_at_utc": latest_kline_inserted.get("1d"),
+            "fetched_at_bjt": _utc_iso_to_bjt_pretty(latest_kline_inserted.get("1d")),
+        } if latest_kline_inserted.get("1d") else {}
+        weekly_kline_meta = {
+            "fetched_at_utc": latest_kline_inserted.get("1w"),
+            "fetched_at_bjt": _utc_iso_to_bjt_pretty(latest_kline_inserted.get("1w")),
+        } if latest_kline_inserted.get("1w") else {}
+        monthly_structure_value, monthly_structure_ts, monthly_structure_extra = (
+            _build_monthly_ohlc_structure(klines_1d)
+        )
+        sr_value, sr_ts, sr_extra = _build_major_support_resistance(
+            klines_1w, klines_1d, current_close,
+        )
 
         def metric_meta(dao: type[OnchainDAO] | type[MacroDAO], name: str) -> dict[str, Any]:
             row = dao.get_latest(self.conn, name)
@@ -523,6 +699,29 @@ class SpotCycleContextBuilder:
         exchange_balance_delta, exchange_balance_delta_ts = _series_latest_delta(
             onchain.get("exchange_balance") if isinstance(onchain, dict) else None
         )
+        hodl_long_buckets = (
+            "hodl_waves_1y_2y", "hodl_waves_2y_3y", "hodl_waves_3y_5y",
+            "hodl_waves_5y_7y", "hodl_waves_7y_10y", "hodl_waves_more_10y",
+        )
+        hodl_long_value = 0.0
+        hodl_long_have_any = False
+        hodl_long_series = []
+        hodl_latest_meta: dict[str, Any] = {}
+        for bucket in hodl_long_buckets:
+            series = onchain.get(bucket) if isinstance(onchain, dict) else None
+            value, _ = _series_latest(series)
+            if value is not None:
+                hodl_long_value += float(value)
+                hodl_long_have_any = True
+                hodl_long_series.append(series)
+                meta = metric_meta(OnchainDAO, bucket)
+                if meta.get("fetched_at_utc") and (
+                    not hodl_latest_meta.get("fetched_at_utc")
+                    or meta["fetched_at_utc"] > hodl_latest_meta["fetched_at_utc"]
+                ):
+                    hodl_latest_meta = meta
+        hodl_long_ts = _latest_series_timestamp(*hodl_long_series)
+        hodl_long_pct = (hodl_long_value * 100.0) if hodl_long_have_any else None
 
         available = {
             "price_structure": {
@@ -531,6 +730,24 @@ class SpotCycleContextBuilder:
                 "ma_200d": _factor("ma_200d", ma_200d, source="coinglass_derivatives", stale_map=stale_map, hours_map=hours_map),
                 "ma_200w": _factor("ma_200w", ma_200w, source="coinglass_derivatives", stale_map=stale_map, hours_map=hours_map),
                 "weekly_structure": weekly_structure,
+                "monthly_ohlc_structure": _factor(
+                    "monthly_ohlc_structure",
+                    monthly_structure_value,
+                    timestamp=monthly_structure_ts,
+                    source="coinglass_derivatives_derived",
+                    stale_map=stale_map,
+                    hours_map=hours_map,
+                    extra={**monthly_structure_extra, **daily_kline_meta},
+                ),
+                "major_support_resistance_zones": _factor(
+                    "major_support_resistance_zones",
+                    sr_value,
+                    timestamp=sr_ts,
+                    source="coinglass_derivatives_derived",
+                    stale_map=stale_map,
+                    hours_map=hours_map,
+                    extra={**sr_extra, **(weekly_kline_meta or daily_kline_meta)},
+                ),
                 "tf_alignment": tf_alignment,
             },
             "onchain_valuation": {
@@ -554,6 +771,20 @@ class SpotCycleContextBuilder:
                 "sth_supply_90d_pct_change": _factor("sth_supply", lth_sth.get("sth_supply_90d_pct_change"), stale_map=stale_map, hours_map=hours_map),
                 "sopr_adjusted": metric("sopr_adjusted"),
                 "hodl_waves": metric("hodl_waves"),
+                "hodl_waves_1y_plus_aggregate": _factor(
+                    "hodl_waves_1y_plus_aggregate",
+                    hodl_long_pct,
+                    timestamp=hodl_long_ts,
+                    source="glassnode_onchain_derived",
+                    stale_map=stale_map,
+                    hours_map=hours_map,
+                    extra={
+                        **hodl_latest_meta,
+                        "value_unit": "%",
+                        "buckets": list(hodl_long_buckets),
+                        "buckets_used": int(len(hodl_long_series)),
+                    },
+                ),
                 "cdd": metric("cdd"),
                 "ssr": metric("ssr"),
             },

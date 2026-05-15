@@ -481,25 +481,36 @@ def test_layer_b_five_layer_header_replaced_by_adjudicator_summary(html, js):
     assert "swingAdjudicatorCard()" in js
 
 
-def test_swing_strategy_inner_cards_restore_original_borders(html):
-    """波段策略内部小模块恢复截图状态的边框卡片。"""
-    for region in (
-        "region-swing-summary",
-        "region-swing-account-execution",
+def test_swing_strategy_middle_borders_removed_but_content_cards_kept(html):
+    """只移除波段策略中间层外框,保留最小内容卡片边框。"""
+    def region_class(region_id: str) -> str:
+        match = re.search(rf'id="{region_id}"[^>]*class="([^"]*)"', html)
+        assert match, f"{region_id} 缺失 class"
+        return match.group(1)
+
+    assert 'id="region-layer-b-swing" class="audit-card"' in html
+
+    for middle_region in ("region-swing-account-execution", "region-layer-cards"):
+        class_name = region_class(middle_region)
+        assert "border border-slate-200" not in class_name
+        assert "dark:border-slate-800" not in class_name
+
+    for card_region in (
         "region-virtual-account",
         "region-position-summary",
         "region-active-thesis",
+        "region-thesis-timeline",
         "region-swing-adjudicator-summary",
-        "region-layer-cards",
     ):
-        pos = html.find(f'id="{region}"')
-        assert pos != -1, f"{region} 缺失"
-        snippet = html[pos:pos + 220]
-        assert "border border-slate-200" in snippet
-        assert "bg-slate-50" not in snippet
-        assert "dark:bg-slate-900" not in snippet
+        class_name = region_class(card_region)
+        assert "border border-slate-200" in class_name
+        assert "dark:border-slate-800" in class_name
+        assert "bg-slate-50" not in class_name
+        assert "dark:bg-slate-900" not in class_name
+
     assert "lg:grid-cols-3" in html
-    assert 'id="region-layer-b-swing" class="audit-card"' in html
+    assert 'x-for="(card, idx) in (state.layer_cards || [])"' in html
+    assert 'class="border border-slate-200 dark:border-slate-800 rounded p-3 space-y-2 min-w-0"' in html
 
 
 def test_swing_summary_restores_full_five_cards(html):

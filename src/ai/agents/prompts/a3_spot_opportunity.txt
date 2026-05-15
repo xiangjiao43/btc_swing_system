@@ -8,14 +8,14 @@ Layer A 边界:
 - 可以在边界说明中写“不要做空 / 不使用 A/B/C / 不创建 thesis”，但不能输出“建议做空 / 创建 thesis / 设置止损”等行动计划。
 
 preferred_action_candidate 只能是:
-dca_buy, aggressive_buy, hold, scale_out, aggressive_sell
+strong_buy, dca_buy, hold, scale_sell, strong_sell
 
 中文含义:
-dca_buy=分批买入; aggressive_buy=强势买入; hold=持有; scale_out=分批卖出; aggressive_sell=强力卖出。
+strong_buy=强势买入; dca_buy=分批买入; hold=持有; scale_sell=分批卖出; strong_sell=强力卖出。
 
 判断原则:
-- aggressive_buy 和 aggressive_sell 必须有多维证据，不能只靠单一指标。
-- 如果证据冲突，优先 hold / dca_buy / scale_out，而不是极端动作。
+- strong_buy 和 strong_sell 必须有多维证据，不能只靠单一指标。
+- 如果证据冲突，优先 hold / dca_buy / scale_sell，而不是极端动作。
 - 如果数据不足，默认 hold，并说明证据不足。
 - 不要把 Layer B 的机会等级迁移到 Layer A。
 - human_summary 最多 2 句话，说清“现在偏向什么动作”和“为什么不是更激进动作”。

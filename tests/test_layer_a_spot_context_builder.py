@@ -42,6 +42,15 @@ def test_spot_cycle_context_builder_empty_db_does_not_crash():
         assert name not in unavailable_names
     assert ctx["factor_coverage"]["critical_unavailable_count"] == 0
     assert ctx["factor_coverage"]["confidence_cap"] == "low"
+    roles = ctx["factor_role_classification"]
+    a1_core = {x["factor_name"] for x in roles["a1_core"]}
+    a2_background = {x["factor_name"] for x in roles["a2_a4_background"]}
+    layer_b_context = {x["factor_name"] for x in roles["layer_b_context"]}
+    assert "mvrv_z_score" in a1_core
+    assert "rhodl_ratio" in a1_core
+    assert "cpi" in a2_background
+    assert "m2" in a2_background
+    assert "funding_rate" in layer_b_context
     assert ctx["data_quality_notes"]
 
 

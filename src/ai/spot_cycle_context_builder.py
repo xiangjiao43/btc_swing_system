@@ -89,7 +89,32 @@ _UNAVAILABLE_MODEL_FACTORS = {
     "liquidation_heatmap_levels": "not_found",
 }
 
-_CRITICAL_MODEL_FACTORS: set[str] = set()
+_A1_CORE_FACTORS = {
+    "current_close", "ath_drawdown_pct", "ma_200d", "ma_200w",
+    "realized_price", "sth_realized_price", "lth_realized_price",
+    "mvrv_z_score", "mvrv", "nupl", "rhodl_ratio", "reserve_risk",
+    "puell_multiple", "lth_sopr", "sth_sopr", "lth_supply",
+    "sth_supply", "lth_net_position_change", "percent_supply_in_profit",
+    "percent_supply_in_loss", "hodl_waves", "cdd", "exchange_balance",
+    "exchange_net_position_change",
+}
+_A2_A4_BACKGROUND_FACTORS = {
+    "etf_flow", "exchange_net_flow", "exchange_net_flow_30d_sum",
+    "etf_flow_7d_sum_usd", "etf_flow_30d_sum_usd", "real_yield",
+    "fed_funds_rate", "us2y", "dxy", "vix", "nasdaq",
+    "btc_nasdaq_corr_60d", "cpi", "core_cpi", "m2",
+    "fed_balance_sheet", "events_count",
+}
+_LAYER_B_CONTEXT_FACTORS = {
+    "funding_rate", "funding_rate_z_score_90d", "open_interest",
+    "open_interest_z_score_90d", "long_short_ratio", "liquidation_total",
+    "btc_dominance",
+}
+_CRITICAL_MODEL_FACTORS = {
+    "mvrv_z_score", "mvrv", "nupl", "rhodl_ratio", "reserve_risk",
+    "puell_multiple", "lth_sopr", "sth_sopr", "lth_net_position_change",
+    "hodl_waves", "cdd", "exchange_balance",
+}
 
 # FRED 的 CPI / Core CPI 是月度宏观数据。它们的“最新一期”天然不会每天更新，
 # 不能因为 fred_macro 这类源级 freshness 短暂过期就把已有数值判成不可用。
@@ -462,6 +487,9 @@ class SpotCycleContextBuilder:
                 "no_layer_b_grade": True,
             },
             "available_factors": available,
+            "factor_role_classification": self._build_factor_role_classification(
+                available, unavailable,
+            ),
             "unavailable_factors": unavailable,
             "factor_coverage": factor_coverage,
             "data_quality_notes": missing_notes,
@@ -472,6 +500,63 @@ class SpotCycleContextBuilder:
                 "btc_close_1d_tail": _tail(close, 12),
             },
         }
+
+    @staticmethod
+    def _build_factor_role_classification(
+        available: dict[str, Any],
+        unavailable: list[dict[str, str]],
+    ) -> dict[str, list[dict[str, str]]]:
+        rows: dict[str, list[dict[str, str]]] = {
+            "a1_core": [],
+            "a2_a4_background": [],
+            "layer_b_context": [],
+            "not_suitable_or_unavailable": [],
+        }
+
+        def add(role: str, name: str, group: str, status: str, reason: str) -> None:
+            rows[role].append({
+                "factor_name": name,
+                "current_source": _FACTOR_SOURCE.get(name, "derived"),
+                "current_status": status,
+                "currently_enters": group,
+                "recommended_class": {
+                    "a1_core": "A",
+                    "a2_a4_background": "B",
+                    "layer_b_context": "C",
+                    "not_suitable_or_unavailable": "D",
+                }[role],
+                "keep": "yes" if role != "not_suitable_or_unavailable" else "no_or_defer",
+                "reason": reason,
+            })
+
+        def walk(group: str, obj: Any) -> None:
+            if isinstance(obj, dict) and "status" in obj and "actual_value" in obj:
+                name = str(obj.get("factor") or group.rsplit(".", 1)[-1])
+                status = str(obj.get("status") or "missing")
+                if name in _A1_CORE_FACTORS:
+                    add("a1_core", name, group, status, "低频、长周期、估值或持有人结构核心因子")
+                elif name in _A2_A4_BACKGROUND_FACTORS:
+                    add("a2_a4_background", name, group, status, "背景/风险因子，可影响置信度，不单独决定阶段")
+                elif name in _LAYER_B_CONTEXT_FACTORS:
+                    add("layer_b_context", name, group, status, "短线或衍生品因子，更适合 Layer B 波段判断")
+                else:
+                    add("not_suitable_or_unavailable", name, group, status, "重复、噪音较高或暂不作为 A1 主因子")
+                return
+            if isinstance(obj, dict):
+                for k, v in obj.items():
+                    walk(f"{group}.{k}" if group else k, v)
+
+        walk("", available)
+        for item in unavailable:
+            name = item.get("factor") or "unknown"
+            add(
+                "not_suitable_or_unavailable",
+                name,
+                "unavailable_factors",
+                item.get("project_status") or "unavailable",
+                "模型预留但本项目未稳定接入，不能伪装成 A1 可用数据",
+            )
+        return rows
 
     @staticmethod
     def _build_data_quality_notes(
@@ -534,6 +619,12 @@ class SpotCycleContextBuilder:
         if coverage_ratio < 0.5:
             confidence_cap = "low"
             cap_reason = "Layer A 已接入因子可用率低于 50%"
+        elif counts["stale"] >= 5:
+            confidence_cap = "medium"
+            cap_reason = "5 个以上已接入 Layer A 因子过期"
+        elif counts["missing"] >= 5:
+            confidence_cap = "medium"
+            cap_reason = "5 个以上已接入 Layer A 因子当前缺值"
         elif critical_count >= 10:
             confidence_cap = "medium"
             cap_reason = "10 个以上关键 Layer A 因子未稳定接入"

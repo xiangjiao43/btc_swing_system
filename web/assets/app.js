@@ -1284,27 +1284,41 @@ function app() {
         },
         spotActionLabel(v) {
             const m = {
+                strong_buy: '强势买入',
                 dca_buy: '分批买入',
                 aggressive_buy: '强势买入',
                 hold: '持有',
+                scale_sell: '分批卖出',
                 scale_out: '分批卖出',
+                strong_sell: '强力卖出',
                 aggressive_sell: '强力卖出',
             };
             return m[v] || '持有';
         },
         spotCycleStageLabel(v) {
             const m = {
+                deep_value: '深度低估区',
                 bear_bottom: '熊市底部',
                 accumulation: '底部吸筹',
+                trend_hold: '趋势持有区',
                 early_bull: '牛市早期',
                 mid_bull: '牛市中段',
                 late_bull: '牛市末期',
                 distribution: '顶部派发',
+                overheated_exit: '顶部退出区',
                 bear_transition: '转熊阶段',
                 deep_bear: '深度熊市',
                 unclear: '不明确',
             };
             return m[v] || '不明确';
+        },
+        spotTransitionLabel(v) {
+            return ({
+                confirmed: '已确认',
+                pending: '待确认',
+                rejected: '已拒绝',
+                recalibration: '重校准',
+            })[v] || '已确认';
         },
         spotConfidenceLabel(v) {
             return ({ low: '低', medium: '中', high: '高' })[v] || '低';
@@ -1335,7 +1349,10 @@ function app() {
             const s = this.spotStrategy() || {};
             const a5 = s.a5_spot_adjudicator || {};
             const action = this.spotActionLabel(a5.spot_action);
-            const stage = this.spotCycleStageLabel(a5.cycle_stage || (s.a1_cycle_stage || {}).cycle_stage);
+            const a1 = s.a1_cycle_stage || {};
+            const stage = this.spotCycleStageLabel(
+                a1.official_cycle_stage || a5.cycle_stage || a1.cycle_stage,
+            );
             const headline = a5.headline || '大周期策略保持观察';
             return this.compactSpotText(`交易员结论:${action} · ${stage}。${headline}`, 88);
         },
@@ -1360,7 +1377,7 @@ function app() {
                     key: 'layer_a_a1',
                     title: 'A1 大周期阶段',
                     badge: this.spotConfidenceLabel(a1.confidence),
-                    label: this.spotCycleStageLabel(a1.cycle_stage),
+                    label: this.spotCycleStageLabel(a1.official_cycle_stage || a1.cycle_stage),
                     summary: a1.human_summary,
                     supporting: a1.bullish_evidence || [],
                     opposing: [...(a1.bearish_evidence || []), ...(a1.conflicting_evidence || [])],

@@ -77,6 +77,10 @@ class LayerASpotStrategyRunner:
         status = "success"
 
         try:
+            previous_layer_a = None
+            if not validate_stages:
+                latest = LatestLayerASpotStrategyDAO.get_latest(self.conn)
+                previous_layer_a = (latest or {}).get("layer_a") if latest else None
             with pipeline_stage("build data context"):
                 context = ContextBuilder(
                     self.conn,
@@ -91,6 +95,19 @@ class LayerASpotStrategyRunner:
                     SpotCycleContextBuilder(self.conn)
                     .build_spot_cycle_context(existing_context=context)
                 )
+                if previous_layer_a:
+                    context["layer_a_spot_context"]["previous_layer_a_state"] = {
+                        "run_id": previous_layer_a.get("run_id"),
+                        "generated_at_bjt": previous_layer_a.get("generated_at_bjt"),
+                        "cycle_stage_model_version": previous_layer_a.get(
+                            "cycle_stage_model_version"
+                        ),
+                        "a1_cycle_stage": previous_layer_a.get("a1_cycle_stage") or {},
+                        "a5_spot_adjudicator": previous_layer_a.get(
+                            "a5_spot_adjudicator"
+                        ) or {},
+                        "stage_transition": previous_layer_a.get("stage_transition") or {},
+                    }
 
             if validate_stages:
                 for name in (

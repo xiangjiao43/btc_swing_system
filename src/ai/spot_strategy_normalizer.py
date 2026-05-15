@@ -11,12 +11,18 @@ import json
 import re
 from typing import Any
 
-
-SPOT_ACTIONS = ("dca_buy", "aggressive_buy", "hold", "scale_out", "aggressive_sell")
-CYCLE_STAGES = (
-    "bear_bottom", "accumulation", "early_bull", "mid_bull", "late_bull",
-    "distribution", "bear_transition", "deep_bear", "unclear",
+from .spot_cycle_stage_state import (
+    OFFICIAL_CYCLE_STAGES,
+    STAGE_DEFAULT_ACTION,
+    conservative_action_for_official_stage,
+    evaluate_stage_transition,
+    is_known_stage,
+    normalize_action,
+    normalize_stage,
 )
+
+SPOT_ACTIONS = ("strong_buy", "dca_buy", "hold", "scale_sell", "strong_sell")
+CYCLE_STAGES = (*OFFICIAL_CYCLE_STAGES, "unclear")
 CONFIDENCE_LEVELS = ("low", "medium", "high")
 ONCHAIN_MACRO_STANCES = (
     "strongly_bullish", "bullish", "neutral", "cautious", "bearish", "unclear",
@@ -24,7 +30,11 @@ ONCHAIN_MACRO_STANCES = (
 SPOT_RISK_LEVELS = ("low", "moderate", "elevated", "high", "critical")
 
 _CONFIDENCE_RANK = {"low": 0, "medium": 1, "high": 2}
-_CRITICAL_COVERAGE_FACTORS: set[str] = set()
+_CRITICAL_COVERAGE_FACTORS: set[str] = {
+    "mvrv_z_score", "mvrv", "nupl", "rhodl_ratio", "reserve_risk",
+    "puell_multiple", "lth_sopr", "sth_sopr", "lth_net_position_change",
+    "hodl_waves", "cdd", "exchange_balance",
+}
 
 
 def _as_dict(v: Any) -> dict[str, Any]:
@@ -114,9 +124,24 @@ def _build_factor_coverage(d: dict[str, Any]) -> dict[str, Any]:
         coverage_ratio = float(coverage_ratio_raw)
     except (TypeError, ValueError):
         coverage_ratio = None
+    try:
+        stale_count = int(supplied.get("stale_factor_count") or 0)
+    except (TypeError, ValueError):
+        stale_count = 0
+    try:
+        missing_count = int(supplied.get("missing_integrated_factor_count") or 0)
+    except (TypeError, ValueError):
+        missing_count = 0
+
     if coverage_ratio is not None and coverage_ratio < 0.5:
         confidence_cap = "low"
         cap_reason = "Layer A 已接入因子可用率低于 50%"
+    elif stale_count >= 5:
+        confidence_cap = "medium"
+        cap_reason = "5 个以上已接入 Layer A 因子过期"
+    elif missing_count >= 5:
+        confidence_cap = "medium"
+        cap_reason = "5 个以上已接入 Layer A 因子当前缺值"
     elif critical_count >= 10:
         confidence_cap = "medium"
         cap_reason = "10 个以上关键 Layer A 因子未稳定接入"
@@ -133,11 +158,11 @@ def _build_factor_coverage(d: dict[str, Any]) -> dict[str, Any]:
         "critical_unavailable_factors": critical_missing,
         "confidence_cap": confidence_cap,
         "confidence_cap_reason": cap_reason,
+        "missing_integrated_factor_count": missing_count,
+        "stale_factor_count": stale_count,
     }
     for key in (
         "available_factor_count",
-        "missing_integrated_factor_count",
-        "stale_factor_count",
         "coverage_ratio",
         "coverage_notes",
     ):
@@ -183,7 +208,9 @@ def fallback_layer_a_output(reason: str = "Layer A AI 输出失败或证据不�
         {
             "enabled": True,
             "a1_cycle_stage": {
-                "cycle_stage": "unclear",
+                "cycle_stage": "trend_hold",
+                "raw_stage_assessment": "trend_hold",
+                "official_cycle_stage": "trend_hold",
                 "confidence": "low",
                 "headline": "暂无大周期阶段判断",
                 "human_summary": reason,
@@ -211,7 +238,7 @@ def fallback_layer_a_output(reason: str = "Layer A AI 输出失败或证据不�
             },
             "a5_spot_adjudicator": {
                 "spot_action": "hold",
-                "cycle_stage": "unclear",
+                "cycle_stage": "trend_hold",
                 "confidence": "low",
                 "headline": "暂无大周期策略",
                 "human_summary": reason,
@@ -232,11 +259,26 @@ def fallback_layer_a_output(reason: str = "Layer A AI 输出失败或证据不�
 
 def normalize_a1(raw: Any, warnings: list[str]) -> dict[str, Any]:
     d = _as_dict(raw)
-    stage = _enum(d.get("cycle_stage"), CYCLE_STAGES, "unclear")
-    if d.get("cycle_stage") and stage == "unclear" and d.get("cycle_stage") != "unclear":
-        warnings.append("a1_invalid_cycle_stage_normalized_to_unclear")
+    stage_raw = d.get("official_cycle_stage") or d.get("cycle_stage")
+    stage = normalize_stage(stage_raw, default="trend_hold")
+    if stage_raw and not is_known_stage(stage_raw):
+        warnings.append("a1_invalid_cycle_stage_normalized_to_trend_hold")
+    raw_stage = normalize_stage(
+        d.get("raw_stage_assessment") or d.get("cycle_stage"),
+        default=stage,
+    )
+    transition = _as_dict(d.get("stage_transition"))
     return {
         "cycle_stage": stage,
+        "raw_stage_assessment": raw_stage,
+        "official_cycle_stage": stage,
+        "previous_official_stage": _as_str(d.get("previous_official_stage")),
+        "transition_status": _as_str(d.get("transition_status"), "confirmed"),
+        "transition_direction": _as_str(d.get("transition_direction"), "unchanged"),
+        "confirmation_count": d.get("confirmation_count") or 1,
+        "confirmation_required": d.get("confirmation_required") or 1,
+        "stage_change_reason": _as_str(d.get("stage_change_reason")),
+        "stage_transition": transition,
         "confidence": _enum(d.get("confidence"), CONFIDENCE_LEVELS, "low"),
         "headline": _as_str(d.get("headline"), "大周期阶段不明确"),
         "human_summary": _as_str(d.get("human_summary"), "证据不足，暂不做阶段定性。"),
@@ -267,8 +309,8 @@ def normalize_a2(raw: Any) -> dict[str, Any]:
 
 def normalize_a3(raw: Any, violations: list[str]) -> dict[str, Any]:
     d = _as_dict(raw)
-    action = _enum(d.get("preferred_action_candidate"), SPOT_ACTIONS, "hold")
-    if d.get("preferred_action_candidate") and action == "hold" and d.get("preferred_action_candidate") != "hold":
+    action = normalize_action(d.get("preferred_action_candidate"), default="hold")
+    if d.get("preferred_action_candidate") and action == "hold" and str(d.get("preferred_action_candidate")).strip().lower() not in ("hold",):
         violations.append("a3_invalid_preferred_action_candidate_normalized_to_hold")
     why = d.get("why_not_other_actions")
     return {
@@ -302,13 +344,13 @@ def normalize_a4(raw: Any) -> dict[str, Any]:
 def normalize_a5(raw: Any, violations: list[str], warnings: list[str]) -> dict[str, Any]:
     d = _as_dict(raw)
     action_raw = d.get("spot_action")
-    action = _enum(action_raw, SPOT_ACTIONS, "hold")
-    if action_raw and action == "hold" and action_raw != "hold":
+    action = normalize_action(action_raw, default="hold")
+    if action_raw and action == "hold" and str(action_raw).strip().lower() not in ("hold",):
         violations.append("a5_invalid_spot_action_normalized_to_hold")
     stage_raw = d.get("cycle_stage")
-    stage = _enum(stage_raw, CYCLE_STAGES, "unclear")
-    if stage_raw and stage == "unclear" and stage_raw != "unclear":
-        warnings.append("a5_invalid_cycle_stage_normalized_to_unclear")
+    stage = normalize_stage(stage_raw, default="trend_hold")
+    if stage_raw and not is_known_stage(stage_raw):
+        warnings.append("a5_invalid_cycle_stage_normalized_to_trend_hold")
     return {
         "spot_action": action,
         "cycle_stage": stage,
@@ -349,7 +391,56 @@ def normalize_layer_a_output(raw: Any) -> dict[str, Any]:
         "confidence_adjustments": _as_list(d.get("confidence_adjustments")),
         "input_context_snapshot": _as_dict(d.get("input_context_snapshot")),
         "model_notes": _as_list(d.get("model_notes")),
+        "previous_layer_a_state": _as_dict(d.get("previous_layer_a_state")),
+        "cycle_stage_model_version": "layer_a_five_stage_v1",
     }
+    transition = evaluate_stage_transition(
+        raw_stage=out["a1_cycle_stage"].get("raw_stage_assessment")
+        or out["a1_cycle_stage"].get("cycle_stage"),
+        previous_layer_a=out.get("previous_layer_a_state"),
+        factor_coverage=out.get("factor_coverage"),
+        risk_level=out["a4_spot_risk"].get("spot_risk_level"),
+        validator=out.get("validator"),
+    )
+    official = transition["official_cycle_stage"]
+    out["stage_transition"] = transition
+    out["a1_cycle_stage"].update(transition)
+    out["a1_cycle_stage"]["cycle_stage"] = official
+    out["a5_spot_adjudicator"]["cycle_stage"] = official
+    out["a5_spot_adjudicator"]["official_stage_default_action"] = (
+        STAGE_DEFAULT_ACTION.get(official, "hold")
+    )
+    before_action = out["a5_spot_adjudicator"].get("spot_action")
+    after_action = conservative_action_for_official_stage(
+        official_stage=official,
+        proposed_action=before_action,
+        risk_level=out["a4_spot_risk"].get("spot_risk_level"),
+    )
+    if after_action != before_action:
+        out["a5_spot_adjudicator"]["spot_action"] = after_action
+        out["confidence_adjustments"].append({
+            "section": "a5_spot_adjudicator",
+            "from": str(before_action),
+            "to": after_action,
+            "reason": "A5 动作按 official_cycle_stage 和风险做保守归一",
+        })
+        out["validator"]["warnings"].append("spot_action_aligned_to_official_stage")
+    if transition.get("transition_status") in {"pending", "recalibration"}:
+        for section in ("a1_cycle_stage", "a5_spot_adjudicator"):
+            obj = _as_dict(out.get(section))
+            before = _enum(obj.get("confidence"), CONFIDENCE_LEVELS, "low")
+            after = _min_confidence(before, "medium")
+            if after != before:
+                obj["confidence"] = after
+                out["confidence_adjustments"].append({
+                    "section": section,
+                    "from": before,
+                    "to": after,
+                    "reason": "阶段变化未确认，置信度最高 medium",
+                })
+        out["validator"]["warnings"].append(
+            f"cycle_stage_transition_{transition.get('transition_status')}"
+        )
     _apply_confidence_cap(out)
     # Cheap structural warning for obviously forbidden vocabulary.  The
     # dedicated validator performs the full check after all A1-A5 are merged.

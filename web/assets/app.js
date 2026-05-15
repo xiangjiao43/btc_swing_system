@@ -628,16 +628,20 @@ function app() {
         // status ∈ {success, failure, no_data}
         sourceStatusGlyph(status) {
             if (status === 'success') return '●';
+            if (status === 'partial') return '●';
             if (status === 'failure') return '●';
             return '○';  // no_data
         },
         sourceStatusGlyphClass(status) {
             if (status === 'success') return 'text-emerald-500';
+            if (status === 'partial') return 'text-amber-500 font-bold';
             if (status === 'failure') return 'text-rose-500 font-bold';
             return 'text-slate-400';
         },
         sourceTextClass(status) {
             if (status === 'success') return 'text-slate-700 dark:text-slate-300';
+            if (status === 'partial')
+                return 'text-amber-700 dark:text-amber-300 font-medium';
             if (status === 'failure')
                 return 'text-rose-600 dark:text-rose-400 font-medium';
             return 'text-slate-400 dark:text-slate-500';
@@ -657,6 +661,7 @@ function app() {
             if (m < 60) timeStr = `${m} 分钟前`;
             else if (m < 1440) timeStr = `${(m/60).toFixed(1)} 小时前`;
             else timeStr = `${(m/1440).toFixed(1)} 天前`;
+            if (src.status === 'partial') return `${timeStr}部分异常`;
             if (src.status === 'failure') return `${timeStr}抓取失败`;
             return timeStr;
         },
@@ -684,7 +689,9 @@ function app() {
             } catch (e) { return bjtStr; }
         },
         // failure_reason 中文徽章 class
-        sourceReasonBadgeClass(reason) {
+        sourceReasonBadgeClass(reason, status = null) {
+            if (status === 'partial')
+                return 'bg-amber-200 text-amber-900 dark:bg-amber-700 dark:text-amber-100';
             if (reason === 'quota_exceeded')
                 return 'bg-rose-500 text-white';
             if (reason === 'network_error' || reason === 'api_error'

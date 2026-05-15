@@ -76,6 +76,7 @@ _FALLBACK_QUERIES: dict[str, str] = {
 
 
 _FAILURE_REASON_LABELS: dict[str, str] = {
+    "partial_failure": "部分异常",
     "quota_exceeded": "配额用尽",
     "auth_error": "API key 无效 / 未授权",
     "permission_denied": "套餐不支持 / 权限不足",
@@ -107,7 +108,7 @@ LAYER_SOURCE_DEPS: dict[int, tuple[str, ...]] = {
 class SourceFreshness:
     source: str
     display_name: str
-    status: str                          # 'success' | 'failure' | 'no_data'
+    status: str                          # 'success' | 'partial' | 'failure' | 'no_data'
     last_attempt_at_utc: Optional[str]
     last_success_at_utc: Optional[str]
     minutes_since_last_attempt: Optional[int]
@@ -170,6 +171,28 @@ def _query_data_table_max(conn: Any, source: str) -> Optional[str]:
         return None
 
 
+def _latest_success_candidate(
+    fetch_success_iso: Optional[str],
+    data_table_iso: Optional[str],
+) -> tuple[Optional[str], Optional[str]]:
+    """Pick the freshest success signal from fetch_attempts and real data table."""
+    best_iso: Optional[str] = None
+    best_dt: Optional[datetime] = None
+    best_source: Optional[str] = None
+    for value, source in (
+        (fetch_success_iso, "fetch_attempts"),
+        (data_table_iso, "data_table"),
+    ):
+        dt = _parse_iso(value)
+        if dt is None:
+            continue
+        if best_dt is None or dt > best_dt:
+            best_iso = value
+            best_dt = dt
+            best_source = source
+    return best_iso, best_source
+
+
 # ============================================================
 # Public API
 # ============================================================
@@ -221,15 +244,9 @@ def compute_source_freshness(
         if last_attempt_dt is not None else None
     )
 
-    failure_reason = latest["failure_reason"] if status == "failure" else None
-    failure_reason_label = (
-        _FAILURE_REASON_LABELS.get(failure_reason, _FAILURE_REASON_LABELS["unknown"])
-        if failure_reason else None
-    )
-
     # 算 last_success_at_utc:
     #   - status=success → 自己
-    #   - status=failure → 历史 fetch_attempts success(若有);否则 data_table fallback
+    #   - status=failure → 历史 fetch_attempts success / 数据表 fallback 取更新者
     last_success_at_utc: Optional[str]
     last_success_source: Optional[str]
     if status == "success":
@@ -237,13 +254,10 @@ def compute_source_freshness(
         last_success_source = "fetch_attempts"
     else:
         succ = _query_latest_success(conn, source)
-        if succ:
-            last_success_at_utc = succ
-            last_success_source = "fetch_attempts"
-        else:
-            fallback_iso = _query_data_table_max(conn, source)
-            last_success_at_utc = fallback_iso
-            last_success_source = "data_table" if fallback_iso else None
+        fallback_iso = _query_data_table_max(conn, source)
+        last_success_at_utc, last_success_source = _latest_success_candidate(
+            succ, fallback_iso
+        )
 
     last_success_dt = _parse_iso(last_success_at_utc)
     hours_since_last_success = (
@@ -258,9 +272,37 @@ def compute_source_freshness(
     if hours_since_last_success is None:
         is_stale = True
 
+    rows_upserted = latest["rows_upserted"]
+    effective_status = status
+    if status == "failure" and not is_stale:
+        # 同一轮 Glassnode 已经写入数据,说明是"部分 endpoint 失败",
+        # 不应让一个单点失败把整个 Glassnode 源显示成全源失败/配额用尽。
+        if rows_upserted and rows_upserted > 0:
+            effective_status = "partial"
+        else:
+            last_success_dt_for_cmp = _parse_iso(last_success_at_utc)
+            if (
+                last_success_dt_for_cmp is not None
+                and last_attempt_dt is not None
+                and last_success_dt_for_cmp > last_attempt_dt
+            ):
+                effective_status = "success"
+
+    failure_reason = (
+        latest["failure_reason"]
+        if effective_status in {"failure", "partial"} else None
+    )
+    if effective_status == "partial":
+        failure_reason_label = _FAILURE_REASON_LABELS["partial_failure"]
+    else:
+        failure_reason_label = (
+            _FAILURE_REASON_LABELS.get(failure_reason, _FAILURE_REASON_LABELS["unknown"])
+            if failure_reason else None
+        )
+
     return SourceFreshness(
         source=source, display_name=display_name,
-        status=status,
+        status=effective_status,
         last_attempt_at_utc=last_attempt_at_utc,
         last_success_at_utc=last_success_at_utc,
         minutes_since_last_attempt=minutes_since_attempt,
@@ -269,9 +311,9 @@ def compute_source_freshness(
         failure_reason=failure_reason,
         failure_reason_label=failure_reason_label,
         error_message=(
-            latest["error_message"] if status == "failure" else None
+            latest["error_message"] if effective_status in {"failure", "partial"} else None
         ),
-        rows_upserted=latest["rows_upserted"],
+        rows_upserted=rows_upserted,
         duration_ms=latest["duration_ms"],
         last_success_source=last_success_source,
     )

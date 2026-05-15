@@ -329,6 +329,8 @@ def _onchain_today_complete(conn: Any) -> bool:
         (source IN _ONCHAIN_FIRST_HAND_SOURCES,排除 'computed' 派生)
     (b) 今天 fetch_attempts 表有 source='glassnode_onchain' status='failure'
         failure_reason='quota_exceeded' 的行(撞配额墙别再抓)
+        且 rows_upserted=0。若同轮已写入部分 Glassnode 数据,说明只是
+        endpoint-level 部分失败,不能阻止后续重试。
 
     非 quota 失败(network/api/parse)继续返 False → 后续档重试。
     """
@@ -360,6 +362,7 @@ def _onchain_today_complete(conn: Any) -> bool:
             "WHERE source = 'glassnode_onchain' "
             "  AND status = 'failure' "
             "  AND failure_reason = 'quota_exceeded' "
+            "  AND COALESCE(rows_upserted, 0) = 0 "
             "  AND attempted_at_utc LIKE ? "
             "LIMIT 1",
             (f"{today}%",),

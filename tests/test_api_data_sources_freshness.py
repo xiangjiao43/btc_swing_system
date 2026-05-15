@@ -173,6 +173,58 @@ def test_freshness_all_5_failure_reasons_have_chinese_labels(client, db_path):
     assert bk["failure_reason_label"] == "未知错误"
 
 
+def test_freshness_new_failure_labels_are_granular(client, db_path):
+    """403/404/timeout 等不能再统一显示成配额用尽。"""
+    now = datetime.now(timezone.utc)
+    cases = [
+        ("glassnode_onchain", "permission_denied", "套餐不支持 / 权限不足"),
+        ("coinglass_derivatives", "endpoint_not_found", "接口不存在 / 配置错误"),
+        ("fred_macro", "timeout", "请求超时"),
+    ]
+    for source, reason, _label in cases:
+        _seed(
+            db_path, source=source, status="failure",
+            failure_reason=reason, error_message=f"{reason} stub",
+            attempted_at_utc=_iso(now),
+        )
+    body = {r["source"]: r for r in client.get("/api/data_sources/freshness").json()}
+    for source, reason, label in cases:
+        assert body[source]["failure_reason"] == reason
+        assert body[source]["failure_reason_label"] == label
+        assert body[source]["failure_reason_label"] != "配额用尽"
+
+
+def test_freshness_partial_failure_label_when_rows_were_upserted(client, db_path):
+    """部分成功的 Glassnode 采集显示部分异常,不再把整源打成配额用尽。"""
+    now = datetime.now(timezone.utc)
+    fresh_iso = _iso(now - timedelta(minutes=3))
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            "INSERT INTO onchain_metrics "
+            "(metric_name, captured_at_utc, value, source, inserted_at_utc) "
+            "VALUES (?, ?, ?, ?, ?)",
+            ("mvrv", fresh_iso, 1.5, "glassnode_primary", fresh_iso),
+        )
+        FetchAttemptsDAO.record_attempt(
+            conn, source="glassnode_onchain", status="failure",
+            failure_reason="quota_exceeded",
+            error_message="HTTP 429 on puell_multiple",
+            rows_upserted=869,
+            attempted_at_utc=_iso(now - timedelta(minutes=1)),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    body = client.get("/api/data_sources/freshness").json()
+    row = next(r for r in body if r["source"] == "glassnode_onchain")
+    assert row["status"] == "partial"
+    assert row["failure_reason"] == "quota_exceeded"
+    assert row["failure_reason_label"] == "部分异常"
+    assert row["rows_upserted"] == 869
+
+
 # ============================================================
 # 5. 失败时 last_success_at 回填
 # ============================================================

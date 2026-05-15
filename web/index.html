@@ -332,9 +332,9 @@
                   <span class="flex-1 flex items-center gap-1.5"
                         :class="sourceTextClass(src.status)">
                     <span x-text="src.display_name"></span>
-                    <span x-show="src.status === 'failure' && src.failure_reason_label"
+                    <span x-show="(src.status === 'failure' || src.status === 'partial') && src.failure_reason_label"
                           class="px-1.5 py-px rounded text-[10px] font-semibold leading-none"
-                          :class="sourceReasonBadgeClass(src.failure_reason)"
+                          :class="sourceReasonBadgeClass(src.failure_reason, src.status)"
                           x-text="src.failure_reason_label"></span>
                   </span>
                   <span class="font-mono tabular-nums shrink-0 text-[11px]"

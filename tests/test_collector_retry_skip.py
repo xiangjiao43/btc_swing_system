@@ -294,6 +294,26 @@ def test_onchain_skip_when_today_quota_exceeded(db_path):
     assert gn_cls.call_count == 0
 
 
+def test_onchain_no_skip_when_today_quota_failure_wrote_rows(db_path):
+    """部分成功的 Glassnode quota 失败不能阻止后续重试。"""
+    from src.data.storage.dao import FetchAttemptsDAO
+    from src.scheduler.jobs import _onchain_today_complete
+    today_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    conn = _conn(db_path)
+    try:
+        FetchAttemptsDAO.record_attempt(
+            conn, source="glassnode_onchain", status="failure",
+            failure_reason="quota_exceeded",
+            error_message="HTTP 429 on one endpoint",
+            rows_upserted=869,
+            attempted_at_utc=today_iso,
+        )
+        conn.commit()
+        assert _onchain_today_complete(conn) is False
+    finally:
+        conn.close()
+
+
 def test_onchain_no_skip_when_today_only_has_non_quota_failure(db_path):
     """Sprint C 关键反退化:network_error / api_error / parse_error 等非 quota
     失败不能短路 → 后续档应继续重试。"""

@@ -118,7 +118,7 @@ class HealthDetailResponse(BaseModel):
 class DataSourceFreshness(BaseModel):
     source: str                         # binance_kline / coinglass_derivatives / glassnode_onchain / fred_macro
     display_name: str                   # 中文展示名(网页直接显示)
-    status: str                         # 'success' | 'failure' | 'no_data'
+    status: str                         # 'success' | 'partial' | 'failure' | 'no_data'
     last_attempt_at_utc: str | None = None
     last_attempt_at_bjt: str | None = None
     minutes_ago: int | None = None      # 距最近一次 attempt 的分钟数

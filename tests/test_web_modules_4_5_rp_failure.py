@@ -171,9 +171,12 @@ def test_layer_a_raw_factor_cards_keep_existing_status_style(js, html):
     assert "proxy_endpoint_404" not in html
 
 
-def test_data_source_failure_reason_badges_support_granular_glassnode_errors(js):
+def test_data_source_failure_reason_badges_support_granular_glassnode_errors(js, html):
     """Glassnode 403/404/timeout 等不应统一显示成配额用尽。"""
     assert "reason === 'quota_exceeded'" in js
+    assert "status === 'partial'" in js
+    assert "部分异常" in js or "partial" in js
+    assert "src.status === 'partial'" in html
     for reason in (
         "auth_error",
         "permission_denied",

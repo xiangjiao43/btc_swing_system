@@ -91,6 +91,69 @@ def test_freshness_fallback_to_data_table_when_no_success_row(db_path):
     assert f.is_stale is False
 
 
+def test_freshness_partial_when_failure_upserted_rows_and_data_is_fresh(db_path):
+    """Glassnode 单个 endpoint 失败但同轮已写入数据 → source 显示部分异常。"""
+    now = datetime.now(timezone.utc)
+    fresh_iso = _iso(now - timedelta(minutes=2))
+    conn = _conn(db_path)
+    try:
+        conn.execute(
+            "INSERT INTO onchain_metrics "
+            "(metric_name, captured_at_utc, value, source, inserted_at_utc) "
+            "VALUES (?, ?, ?, ?, ?)",
+            ("mvrv", fresh_iso, 1.5, "glassnode_primary", fresh_iso),
+        )
+        FetchAttemptsDAO.record_attempt(
+            conn, source="glassnode_onchain", status="failure",
+            failure_reason="quota_exceeded",
+            error_message="HTTP 429 on /v1/metrics/indicators/puell_multiple",
+            rows_upserted=869,
+            attempted_at_utc=_iso(now - timedelta(minutes=1)),
+        )
+        conn.commit()
+        f = compute_source_freshness(conn, "glassnode_onchain", now=now)
+    finally:
+        conn.close()
+
+    assert f.status == "partial"
+    assert f.failure_reason == "quota_exceeded"
+    assert f.failure_reason_label == "部分异常"
+    assert f.rows_upserted == 869
+    assert f.is_stale is False
+
+
+def test_freshness_newer_success_data_overrides_old_failure_without_rows(db_path):
+    """旧失败后已有更新一手数据 → 不让旧失败继续污染当前健康状态。"""
+    now = datetime.now(timezone.utc)
+    failure_iso = _iso(now - timedelta(hours=2))
+    newer_data_iso = _iso(now - timedelta(minutes=5))
+    conn = _conn(db_path)
+    try:
+        FetchAttemptsDAO.record_attempt(
+            conn, source="glassnode_onchain", status="failure",
+            failure_reason="quota_exceeded",
+            error_message="old quota failure",
+            rows_upserted=0,
+            attempted_at_utc=failure_iso,
+        )
+        conn.execute(
+            "INSERT INTO onchain_metrics "
+            "(metric_name, captured_at_utc, value, source, inserted_at_utc) "
+            "VALUES (?, ?, ?, ?, ?)",
+            ("mvrv", newer_data_iso, 1.5, "glassnode_primary", newer_data_iso),
+        )
+        conn.commit()
+        f = compute_source_freshness(conn, "glassnode_onchain", now=now)
+    finally:
+        conn.close()
+
+    assert f.status == "success"
+    assert f.failure_reason is None
+    assert f.failure_reason_label is None
+    assert f.last_success_at_utc == newer_data_iso
+    assert f.last_success_source == "data_table"
+
+
 def test_freshness_excludes_computed_source_in_glassnode_fallback(db_path):
     """关键反退化:glassnode_onchain 的 fallback 必须排除 source='computed' 派生
     数据 — 否则 derived MVRV 写行会让网页假装"今天有数据"。"""

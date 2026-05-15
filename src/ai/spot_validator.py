@@ -128,6 +128,7 @@ def validate_spot_strategy_output(
     unavailable = _as_list((context or {}).get("unavailable_factors"))
     dq_notes = []
     for section in (
+        "cycle_adjudicator",
         "a1_cycle_stage", "a2_onchain_macro", "a3_spot_opportunity",
         "a4_spot_risk", "a5_spot_adjudicator",
     ):

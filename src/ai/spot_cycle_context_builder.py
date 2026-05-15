@@ -509,6 +509,238 @@ def build_a1_cycle_stage_context(context: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _compact_packet_metric(v: Any) -> Any:
+    if not isinstance(v, dict):
+        return v
+    out = _compact_factor(v)
+    if v.get("value_unit"):
+        out["value_unit"] = v.get("value_unit")
+    for key in (
+        "monthly_trend", "price_location", "nearest_major_support",
+        "nearest_major_resistance", "support_distance_pct",
+        "resistance_distance_pct", "source_timeframe", "bars_available",
+        "buckets_used",
+    ):
+        if v.get(key) is not None:
+            out[key] = v.get(key)
+    return out
+
+
+def _packet_status(metrics: dict[str, Any], data_quality: dict[str, Any] | None = None) -> str:
+    statuses: list[str] = []
+    for value in metrics.values():
+        if isinstance(value, dict) and "status" in value:
+            statuses.append(str(value.get("status") or "missing"))
+        elif value not in (None, "", {}, []):
+            statuses.append("available")
+    if not statuses:
+        return "unavailable"
+    if any(s == "available" for s in statuses) and any(s in {"missing", "stale", "unavailable"} for s in statuses):
+        return "partial"
+    if all(s == "available" for s in statuses):
+        cap = str((data_quality or {}).get("confidence_cap") or "high")
+        return "partial" if cap == "low" else "available"
+    if any(s == "stale" for s in statuses):
+        return "partial"
+    return "unavailable"
+
+
+def _packet_summary(packet_id: str, metrics: dict[str, Any]) -> str:
+    def val(name: str) -> Any:
+        item = metrics.get(name)
+        return item.get("value") if isinstance(item, dict) else item
+
+    if packet_id == "technical_packet":
+        price = val("btc_price")
+        drawdown = val("ath_drawdown_pct")
+        monthly = val("monthly_ohlc_structure")
+        if price is not None:
+            return f"BTC 当前约 {price}，ATH 回撤 {drawdown if drawdown is not None else '-'}%，月线结构 {monthly or '暂无'}。"
+        return "价格周期结构数据不足，需等待 K 线和长期结构恢复。"
+    if packet_id == "onchain_packet":
+        mvrv = val("mvrv")
+        nupl = val("nupl")
+        rhodl = val("rhodl_ratio")
+        return f"链上估值摘要：MVRV {mvrv if mvrv is not None else '-'}，NUPL {nupl if nupl is not None else '-'}，RHODL {rhodl if rhodl is not None else '-'}。"
+    if packet_id == "liquidity_macro_packet":
+        real_yield = val("real_yield")
+        fed = val("fed_funds_rate")
+        m2 = val("m2")
+        return f"宏观流动性摘要：实际利率 {real_yield if real_yield is not None else '-'}，联邦基金利率 {fed if fed is not None else '-'}，M2 {m2 if m2 is not None else '-'}。"
+    if packet_id == "risk_packet":
+        cap = val("confidence_cap")
+        missing = val("missing_integrated_factor_count")
+        stale = val("stale_factor_count")
+        return f"风险摘要：置信度上限 {cap or '-'}，缺值因子 {missing if missing is not None else 0}，过期因子 {stale if stale is not None else 0}。"
+    return "数据包摘要不足。"
+
+
+def _packet(
+    packet_id: str,
+    title: str,
+    metrics: dict[str, Any],
+    *,
+    data_quality: dict[str, Any] | None = None,
+    notes: list[Any] | None = None,
+) -> dict[str, Any]:
+    compact_metrics = {
+        key: _compact_packet_metric(value)
+        for key, value in metrics.items()
+        if value not in (None, "", [])
+    }
+    return {
+        "packet_id": packet_id,
+        "title": title,
+        "status": _packet_status(compact_metrics, data_quality=data_quality),
+        "summary": _packet_summary(packet_id, compact_metrics),
+        "key_metrics": compact_metrics,
+        "data_quality": {
+            "confidence_cap": (data_quality or {}).get("confidence_cap"),
+            "confidence_cap_reason": (data_quality or {}).get("confidence_cap_reason"),
+            "coverage_ratio": (data_quality or {}).get("coverage_ratio"),
+            "stale_factor_count": (data_quality or {}).get("stale_factor_count"),
+            "missing_integrated_factor_count": (
+                (data_quality or {}).get("missing_integrated_factor_count")
+            ),
+            "notes": (notes or [])[:5],
+        },
+    }
+
+
+def build_layer_a_cycle_adjudicator_context(context: dict[str, Any]) -> dict[str, Any]:
+    """Build the official Layer A single-adjudicator input.
+
+    Four packets are deterministic summaries.  They deliberately exclude Layer B
+    L1-L5, thesis, virtual account, holdings, orders, raw factor cards, and full
+    debug JSON.  The AI gets one compact decision brief, then the deterministic
+    state machine/validator decides the official stage and final guardrails.
+    """
+    spot_ctx = context.get("spot_cycle_context") if isinstance(context, dict) else None
+    if not isinstance(spot_ctx, dict):
+        spot_ctx = context if isinstance(context, dict) else {}
+    a1_ctx = build_a1_cycle_stage_context({"spot_cycle_context": spot_ctx})
+    evidence = a1_ctx.get("cycle_evidence_summary") or {}
+    price = evidence.get("price_position") if isinstance(evidence.get("price_position"), dict) else {}
+    valuation = evidence.get("valuation") if isinstance(evidence.get("valuation"), dict) else {}
+    holder = evidence.get("holder_behavior") if isinstance(evidence.get("holder_behavior"), dict) else {}
+    flows = evidence.get("flows") if isinstance(evidence.get("flows"), dict) else {}
+    macro = evidence.get("macro") if isinstance(evidence.get("macro"), dict) else {}
+    data_quality = evidence.get("data_quality") if isinstance(evidence.get("data_quality"), dict) else {}
+
+    technical_packet = _packet(
+        "technical_packet",
+        "技术指标数据包",
+        {
+            "btc_price": price.get("btc_price"),
+            "ath_drawdown_pct": price.get("ath_drawdown_pct"),
+            "ma_200d": price.get("ma_200d"),
+            "ma_200w": price.get("ma_200w"),
+            "weekly_structure": price.get("weekly_structure"),
+            "monthly_ohlc_structure": price.get("monthly_ohlc_structure"),
+            "major_support_resistance_zones": price.get("major_support_resistance_zones"),
+            "realized_price": price.get("realized_price"),
+            "sth_realized_price": price.get("sth_realized_price"),
+            "lth_realized_price": price.get("lth_realized_price"),
+        },
+        data_quality=data_quality,
+        notes=data_quality.get("data_quality_notes") or [],
+    )
+    onchain_packet = _packet(
+        "onchain_packet",
+        "链上数据包",
+        {
+            **valuation,
+            "lth_sopr": holder.get("lth_sopr"),
+            "sth_sopr": holder.get("sth_sopr"),
+            "lth_supply": holder.get("lth_supply"),
+            "sth_supply": holder.get("sth_supply"),
+            "lth_supply_90d_pct_change": holder.get("lth_supply_90d_pct_change"),
+            "sth_supply_90d_pct_change": holder.get("sth_supply_90d_pct_change"),
+            "lth_net_position_change": holder.get("lth_net_position_change"),
+            "percent_supply_in_loss": holder.get("percent_supply_in_loss"),
+            "hodl_waves_1y_plus_aggregate": holder.get("hodl_waves_1y_plus_aggregate"),
+            "cdd": holder.get("cdd"),
+            "exchange_balance": flows.get("exchange_balance"),
+            "exchange_net_position_change": flows.get("exchange_net_position_change"),
+        },
+        data_quality=data_quality,
+        notes=data_quality.get("data_quality_notes") or [],
+    )
+    liquidity_macro_packet = _packet(
+        "liquidity_macro_packet",
+        "流动性 / 宏观背景数据包",
+        {
+            "etf_flow_7d_sum_usd": flows.get("etf_flow_7d_sum_usd"),
+            "etf_flow_30d_sum_usd": flows.get("etf_flow_30d_sum_usd"),
+            "exchange_net_flow_30d_sum": flows.get("exchange_net_flow_30d_sum"),
+            **macro,
+        },
+        data_quality=data_quality,
+        notes=data_quality.get("data_quality_notes") or [],
+    )
+    risk_packet = _packet(
+        "risk_packet",
+        "风险评估数据包",
+        {
+            "confidence_cap": data_quality.get("confidence_cap"),
+            "confidence_cap_reason": data_quality.get("confidence_cap_reason"),
+            "critical_unavailable_count": data_quality.get("critical_unavailable_count"),
+            "stale_factor_count": data_quality.get("stale_factor_count"),
+            "missing_integrated_factor_count": data_quality.get("missing_integrated_factor_count"),
+            "coverage_ratio": data_quality.get("coverage_ratio"),
+            "unavailable_factors": data_quality.get("unavailable_factors"),
+            "near_long_term_resistance": price.get("major_support_resistance_zones"),
+            "etf_flow_7d_sum_usd": flows.get("etf_flow_7d_sum_usd"),
+            "real_yield": macro.get("real_yield"),
+            "fed_funds_rate": macro.get("fed_funds_rate"),
+        },
+        data_quality=data_quality,
+        notes=[
+            *(data_quality.get("coverage_notes") or []),
+            *(data_quality.get("data_quality_notes") or []),
+        ],
+    )
+    packets = {
+        "technical_packet": technical_packet,
+        "onchain_packet": onchain_packet,
+        "liquidity_macro_packet": liquidity_macro_packet,
+        "risk_packet": risk_packet,
+    }
+    return {
+        "schema_version": "layer_a_single_cycle_adjudicator_v1",
+        "stage_model": a1_ctx.get("stage_model") or {},
+        "previous_official_stage": (a1_ctx.get("stage_model") or {}).get(
+            "previous_official_stage"
+        ),
+        "recent_stage_history": a1_ctx.get("recent_stage_history") or [],
+        "allowed_stage_transitions": {
+            "allowed_stages": list(OFFICIAL_CYCLE_STAGES),
+            "rules": [
+                "只能相邻阶段自然迁移;跨级变化必须 pending 并连续确认。",
+                "数据质量差、关键源异常或风险高时不能确认升级。",
+                "AI 的阶段建议必须经过 deterministic state machine 才能成为 official_stage。",
+            ],
+        },
+        "data_packets": packets,
+        "layer_a_boundaries": spot_ctx.get("layer_a_boundaries") or {
+            "spot_only": True,
+            "no_short": True,
+            "no_leverage": True,
+            "no_thesis": True,
+            "no_virtual_account": True,
+            "no_layer_b_grade": True,
+        },
+        "instructions": {
+            "one_ai_call_only": True,
+            "do_not_output_layer_b_trade_plan": True,
+            "do_not_create_thesis": True,
+            "do_not_use_virtual_account": True,
+            "do_not_repeat_all_metrics": True,
+            "use_official_stage_recommendation_as_recommendation_only": True,
+        },
+    }
+
+
 def _utc_iso_to_bjt_pretty(value: Optional[str]) -> Optional[str]:
     if not value:
         return None

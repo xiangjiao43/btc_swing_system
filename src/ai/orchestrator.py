@@ -29,6 +29,7 @@ from .agents import (
     A3SpotOpportunityAnalyst,
     A4SpotRiskAnalyst,
     A5SpotAdjudicator,
+    LayerACycleAdjudicator,
     L1RegimeAnalyst,
     L2DirectionAnalyst,
     L3OpportunityAnalyst,
@@ -41,6 +42,7 @@ from .agents.emergency_simplified_a import EmergencySimplifiedA
 from .anti_pattern_signals import compute_anti_pattern_signals
 from .circuit_breaker import CircuitBreaker
 from .client import build_anthropic_client
+from .spot_cycle_context_builder import build_layer_a_cycle_adjudicator_context
 from .spot_strategy_normalizer import fallback_layer_a_output, normalize_layer_a_output
 from .spot_validator import validate_spot_strategy_output
 from .validator import validate_master_output
@@ -204,6 +206,7 @@ class AIOrchestrator:
                 "a3": A3SpotOpportunityAnalyst(client=anthropic_client),
                 "a4": A4SpotRiskAnalyst(client=anthropic_client),
                 "a5": A5SpotAdjudicator(client=anthropic_client),
+                "layer_a_cycle": LayerACycleAdjudicator(client=anthropic_client),
                 # Sprint 1.10-G:简化 A 应急 AI(event_price 触发时走它,不跑完整 6 AI)
                 "emergency_simplified_a": EmergencySimplifiedA(
                     client=anthropic_client,
@@ -421,7 +424,7 @@ class AIOrchestrator:
         context: dict[str, Any],
         result: dict[str, Any],
     ) -> dict[str, Any]:
-        """Run Layer A A1-A5 if a spot-cycle context is provided.
+        """Run Layer A single spot-cycle adjudicator if context is provided.
 
         Existing tests and legacy callers do not pass layer_a_spot_context; in
         that case we return a displayable fallback and never call AI.  This keeps
@@ -432,80 +435,32 @@ class AIOrchestrator:
             return fallback_layer_a_output(
                 "暂无大周期策略，本 run 尚未记录 Layer A 输出。"
             )
+        adjudicator_context = build_layer_a_cycle_adjudicator_context({
+            "spot_cycle_context": spot_ctx,
+        })
+        data_packets = adjudicator_context.get("data_packets") or {}
+        spot_ctx = dict(spot_ctx)
+        spot_ctx["data_packets"] = data_packets
 
         t0 = time.time()
         try:
-            with pipeline_stage("run Layer A A1") as span:
-                a1 = self._agents.get("a1", A1SpotCycleAnalyst()).analyze(
-                    {"spot_cycle_context": spot_ctx}, client=build_anthropic_client(),
-                )
-                span.set_status(_progress_status_from_output(a1))
-        except Exception as e:
-            logger.warning("orchestrator: Layer A A1 raised: %s", e)
-            a1 = A1SpotCycleAnalyst()._fallback_output()
-        try:
-            with pipeline_stage("run Layer A A2") as span:
-                a2 = self._agents.get("a2", A2OnchainMacroAnalyst()).analyze(
-                    {"spot_cycle_context": spot_ctx, "a1_output": a1},
+            with pipeline_stage("run Layer A cycle adjudicator") as span:
+                adjudicator = self._agents.get(
+                    "layer_a_cycle",
+                    LayerACycleAdjudicator(),
+                ).analyze(
+                    {"spot_cycle_context": spot_ctx},
                     client=build_anthropic_client(),
                 )
-                span.set_status(_progress_status_from_output(a2))
+                span.set_status(_progress_status_from_output(adjudicator))
         except Exception as e:
-            logger.warning("orchestrator: Layer A A2 raised: %s", e)
-            a2 = A2OnchainMacroAnalyst()._fallback_output()
-        try:
-            with pipeline_stage("run Layer A A3") as span:
-                a3 = self._agents.get("a3", A3SpotOpportunityAnalyst()).analyze(
-                    {
-                        "spot_cycle_context": spot_ctx,
-                        "a1_output": a1,
-                        "a2_output": a2,
-                    },
-                    client=build_anthropic_client(),
-                )
-                span.set_status(_progress_status_from_output(a3))
-        except Exception as e:
-            logger.warning("orchestrator: Layer A A3 raised: %s", e)
-            a3 = A3SpotOpportunityAnalyst()._fallback_output()
-        try:
-            with pipeline_stage("run Layer A A4") as span:
-                a4 = self._agents.get("a4", A4SpotRiskAnalyst()).analyze(
-                    {
-                        "spot_cycle_context": spot_ctx,
-                        "a1_output": a1,
-                        "a2_output": a2,
-                        "a3_output": a3,
-                    },
-                    client=build_anthropic_client(),
-                )
-                span.set_status(_progress_status_from_output(a4))
-        except Exception as e:
-            logger.warning("orchestrator: Layer A A4 raised: %s", e)
-            a4 = A4SpotRiskAnalyst()._fallback_output()
-        try:
-            with pipeline_stage("run Layer A A5") as span:
-                a5 = self._agents.get("a5", A5SpotAdjudicator()).analyze(
-                    {
-                        "spot_cycle_context": spot_ctx,
-                        "a1_output": a1,
-                        "a2_output": a2,
-                        "a3_output": a3,
-                        "a4_output": a4,
-                    },
-                    client=build_anthropic_client(),
-                )
-                span.set_status(_progress_status_from_output(a5))
-        except Exception as e:
-            logger.warning("orchestrator: Layer A A5 raised: %s", e)
-            a5 = A5SpotAdjudicator()._fallback_output()
+            logger.warning("orchestrator: Layer A cycle adjudicator raised: %s", e)
+            adjudicator = LayerACycleAdjudicator()._fallback_output()
 
         merged = normalize_layer_a_output({
             "enabled": True,
-            "a1_cycle_stage": a1,
-            "a2_onchain_macro": a2,
-            "a3_spot_opportunity": a3,
-            "a4_spot_risk": a4,
-            "a5_spot_adjudicator": a5,
+            "cycle_adjudicator": adjudicator,
+            "data_packets": data_packets,
             "unavailable_factors": spot_ctx.get("unavailable_factors") or [],
             "factor_coverage": spot_ctx.get("factor_coverage") or {},
             "previous_layer_a_state": spot_ctx.get("previous_layer_a_state") or {},
@@ -518,14 +473,18 @@ class AIOrchestrator:
                 "factor_role_classification": spot_ctx.get(
                     "factor_role_classification"
                 ) or {},
+                "data_packets": spot_ctx.get("data_packets") or {},
                 "unavailable_factors": spot_ctx.get("unavailable_factors") or [],
                 "previous_layer_a_state": spot_ctx.get("previous_layer_a_state") or {},
                 "series_samples": spot_ctx.get("series_samples") or {},
             },
             "model_notes": [
+                "Layer A 单一大周期裁决:四个 deterministic 数据包 + 一次 AI 调用。",
                 "Layer A 独立于 Layer B:不创建 thesis,不进入虚拟账户,不影响开平仓。"
             ],
         })
+        merged["ai_call_count"] = 1
+        merged["legacy_a1_a5_flow"] = False
         guard = validate_spot_strategy_output(merged, context=spot_ctx)
         existing_validator = merged.get("validator") or {}
         guard["violations"] = list(existing_validator.get("violations") or []) + list(
@@ -541,7 +500,7 @@ class AIOrchestrator:
         return merged
 
     def run_layer_a_spot_only(self, context: dict[str, Any]) -> dict[str, Any]:
-        """Run only Layer A A1-A5.
+        """Run only the Layer A single spot-cycle adjudicator.
 
         This public wrapper is used by the standalone 10:00 Layer A job.  It
         does not run Layer B L1-L5 / Master / Validator, does not create thesis,

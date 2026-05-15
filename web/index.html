@@ -262,9 +262,9 @@
       </header>
 
       <div class="p-3 grid grid-cols-1 md:grid-cols-3 gap-4 text-[12px]">
-        <!-- 第一列:Layer A 五层健康 -->
+        <!-- 第一列:Layer A 数据包 / 裁决健康 -->
         <div>
-          <h3 class="subheading mb-1.5">Layer A 五层</h3>
+          <h3 class="subheading mb-1.5">Layer A 数据包</h3>
           <ul class="space-y-1">
             <template x-for="layer in layerAHealthItems()"
                       :key="layer.layer_id">
@@ -424,7 +424,7 @@
                  x-text="spotFinalSummary()"></p>
             </div>
 
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3">
               <template x-for="card in spotLayerCards()" :key="card.key">
                 <article class="border border-slate-200 dark:border-slate-800 rounded p-3 space-y-2 min-w-0">
                   <header class="flex items-baseline justify-between gap-2">

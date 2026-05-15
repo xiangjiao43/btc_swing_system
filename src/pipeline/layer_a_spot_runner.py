@@ -1,8 +1,8 @@
 """Standalone Layer A spot-cycle runner.
 
-This module runs only the Layer A A1-A5 spot strategy track. It does not run
-Layer B L1-L5 / Master / Validator, does not create thesis, and does not touch
-virtual account state.
+This module runs only the Layer A single spot-cycle adjudicator track. It does
+not run Layer B L1-L5 / Master / Validator, does not create thesis, and does
+not touch virtual account state.
 """
 
 from __future__ import annotations
@@ -112,11 +112,7 @@ class LayerASpotStrategyRunner:
             if validate_stages:
                 for name in (
                     "run Layer A spot strategy",
-                    "run Layer A A1",
-                    "run Layer A A2",
-                    "run Layer A A3",
-                    "run Layer A A4",
-                    "run Layer A A5",
+                    "run Layer A cycle adjudicator",
                     "spot validator",
                     "persist Layer A",
                 ):

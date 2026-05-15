@@ -372,8 +372,8 @@ def test_swing_account_execution_contains_required_blocks(html):
 
 
 def test_system_health_three_column_layer_order(html):
-    """系统自检内部固定为 Layer A 五层 → Layer B 五层 → 数据源。"""
-    pos_layer_a = html.find("Layer A 五层")
+    """系统自检内部固定为 Layer A 数据包 → Layer B 五层 → 数据源。"""
+    pos_layer_a = html.find("Layer A 数据包")
     pos_layer_b = html.find("Layer B 五层")
     pos_sources = html.find('class="subheading mb-1.5">数据源')
     assert pos_layer_a != -1
@@ -404,17 +404,17 @@ def test_swing_strategy_js_helpers_declared(js):
     assert "swingAdjudicatorCard()" in js
     assert "swingInvalidationPlan()" in js
     assert "layerAHealthItems()" in js
-    for label in ("A1", "A2", "A3", "A4", "A5"):
+    for label in ("P1", "P2", "P3", "P4", "AI"):
         assert label in js
     for label in (
-        "大周期阶段",
-        "链上与宏观",
-        "现货策略机会",
-        "现货风险",
-        "大周期主裁",
+        "技术指标包",
+        "链上数据包",
+        "流动性 / 宏观包",
+        "风险评估包",
+        "大周期裁决",
     ):
         assert label in js
-    assert "暂无 Layer A 输出" in js
+    assert "暂无 Layer A 数据包 / 裁决输出" in js
     assert "Layer A validator 有 warning / violation" in js
 
 
@@ -595,6 +595,16 @@ def test_layer_a_spot_js_renders_strategy_or_fallback(js):
     assert "spotFinalSummary()" in js
     assert "spotCardSummary(card)" in js
     assert "compactSpotText(v, maxLen = 96)" in js
+    assert "technical_packet" in js
+    assert "onchain_packet" in js
+    assert "liquidity_macro_packet" in js
+    assert "risk_packet" in js
+    assert "layer_a_cycle_adjudicator" in js
+    for legacy_title in (
+        "A1 大周期阶段", "A2 链上与宏观", "A3 现货策略机会",
+        "A4 现货风险", "A5 大周期主裁",
+    ):
+        assert legacy_title not in js
 
 
 def test_layer_a_spot_summary_is_compact_and_trader_like(html, js):

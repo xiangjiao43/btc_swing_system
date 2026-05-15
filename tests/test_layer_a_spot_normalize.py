@@ -38,7 +38,7 @@ def test_fallback_output_is_displayable_hold_low_confidence():
     out = fallback_layer_a_output("AI failed")
     assert out["enabled"] is True
     assert out["a5_spot_adjudicator"]["spot_action"] == "hold"
-    assert out["a1_cycle_stage"]["official_cycle_stage"] == "mid_bull"
+    assert out["a1_cycle_stage"]["official_cycle_stage"] == "bull_bear_transition"
     assert out["a5_spot_adjudicator"]["confidence"] == "low"
     assert out["a5_spot_adjudicator"]["human_summary"]
 
@@ -395,3 +395,34 @@ def test_mid_bull_to_overheated_top_cross_jump_cannot_confirm_directly():
     assert out["a1_cycle_stage"]["confirmation_required"] == 3
     assert out["a5_spot_adjudicator"]["cycle_stage"] == "mid_bull"
     assert out["a5_spot_adjudicator"]["spot_action"] == "strong_sell"
+
+
+def test_single_cycle_adjudicator_normalizes_to_compatibility_sections():
+    out = normalize_layer_a_output({
+        "cycle_adjudicator": {
+            "raw_stage_assessment": "early_bull",
+            "official_stage_recommendation": "early_bull",
+            "cycle_stage_confidence": "medium",
+            "spot_action_recommendation": "dca_buy",
+            "risk_level": "moderate",
+            "headline": "回调可布局",
+            "trader_summary": "趋势初步确认，但仍需看回踩质量。",
+            "supporting_evidence": ["月线修复", "链上估值未过热"],
+            "opposing_evidence": ["宏观仍有压力"],
+            "what_would_confirm_next_stage": ["站稳长期阻力"],
+            "what_would_invalidate_current_stage": ["跌回关键支撑"],
+        },
+        "data_packets": {
+            "technical_packet": {"status": "available", "summary": "ok"},
+            "onchain_packet": {"status": "available", "summary": "ok"},
+            "liquidity_macro_packet": {"status": "partial", "summary": "ok"},
+            "risk_packet": {"status": "available", "summary": "ok"},
+        },
+        "factor_coverage": {"coverage_ratio": 0.9, "stale_factor_count": 0},
+    })
+    assert out["architecture"] == "single_cycle_adjudicator"
+    assert out["cycle_adjudicator"]["raw_stage_assessment"] == "early_bull"
+    assert out["a1_cycle_stage"]["raw_stage_assessment"] == "early_bull"
+    assert out["a5_spot_adjudicator"]["spot_action"] == "dca_buy"
+    assert out["a5_spot_adjudicator"]["human_summary"] == "趋势初步确认，但仍需看回踩质量。"
+    assert "technical_packet" in out["data_packets"]

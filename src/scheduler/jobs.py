@@ -197,7 +197,8 @@ def job_layer_a_spot_strategy(
 ) -> dict[str, Any]:
     """每日 10:00 BJT 独立运行 Layer A 大周期现货策略。
 
-    只运行 A1-A5 + Spot Validator + latest_layer_a_spot_strategy 持久化。
+    只运行四个 deterministic 数据包 + 单一大周期裁决 + Spot Validator
+    + latest_layer_a_spot_strategy 持久化。
     不运行 Layer B,不创建 thesis,不触碰虚拟账户。
     """
     from ..data.storage.connection import get_connection

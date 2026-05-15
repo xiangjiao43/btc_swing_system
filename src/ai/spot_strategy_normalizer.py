@@ -179,6 +179,7 @@ def _apply_confidence_cap(out: dict[str, Any]) -> None:
         return
     adjusted: list[dict[str, str]] = []
     for section in (
+        "cycle_adjudicator",
         "a1_cycle_stage",
         "a2_onchain_macro",
         "a3_spot_opportunity",
@@ -187,9 +188,14 @@ def _apply_confidence_cap(out: dict[str, Any]) -> None:
     ):
         obj = _as_dict(out.get(section))
         before = _enum(obj.get("confidence"), CONFIDENCE_LEVELS, "low")
+        if section == "cycle_adjudicator":
+            before = _enum(obj.get("cycle_stage_confidence"), CONFIDENCE_LEVELS, "low")
         after = _min_confidence(before, cap)
         if after != before:
-            obj["confidence"] = after
+            if section == "cycle_adjudicator":
+                obj["cycle_stage_confidence"] = after
+            else:
+                obj["confidence"] = after
             adjusted.append({
                 "section": section,
                 "from": before,
@@ -250,6 +256,19 @@ def fallback_layer_a_output(reason: str = "Layer A AI 输出失败或证据不�
                 "data_quality_notes": [reason],
             },
             "model_notes": [reason],
+            "cycle_adjudicator": {
+                "raw_stage_assessment": "bull_bear_transition",
+                "official_stage_recommendation": "bull_bear_transition",
+                "cycle_stage_confidence": "low",
+                "spot_action_recommendation": "hold",
+                "risk_level": "elevated",
+                "trader_summary": reason,
+                "opposing_evidence": [reason],
+                "data_quality_notes": [reason],
+                "what_would_confirm_next_stage": ["恢复有效 Layer A 单一裁决"],
+                "what_would_invalidate_current_stage": ["关键数据继续缺失"],
+            },
+            "data_packets": {},
             "factor_coverage": {
                 "confidence_cap": "low",
                 "confidence_cap_reason": reason,
@@ -368,19 +387,141 @@ def normalize_a5(raw: Any, violations: list[str], warnings: list[str]) -> dict[s
     }
 
 
+def normalize_cycle_adjudicator(raw: Any) -> dict[str, Any]:
+    d = _as_dict(raw)
+    raw_stage = normalize_stage(
+        d.get("raw_stage_assessment")
+        or d.get("official_stage_recommendation")
+        or d.get("cycle_stage"),
+        default="bull_bear_transition",
+    )
+    official_recommendation = normalize_stage(
+        d.get("official_stage_recommendation") or raw_stage,
+        default=raw_stage,
+    )
+    action = normalize_action(
+        d.get("spot_action_recommendation") or d.get("spot_action"),
+        default="hold",
+    )
+    risk = _enum(d.get("risk_level"), SPOT_RISK_LEVELS, "elevated")
+    summary = _as_str(
+        d.get("trader_summary") or d.get("human_summary"),
+        "大周期裁决证据不足，默认持有观察。",
+    )
+    return {
+        "raw_stage_assessment": raw_stage,
+        "official_stage_recommendation": official_recommendation,
+        "transition_status_recommendation": _as_str(
+            d.get("transition_status_recommendation"),
+            "pending",
+        ),
+        "cycle_stage_confidence": _enum(
+            d.get("cycle_stage_confidence") or d.get("confidence"),
+            CONFIDENCE_LEVELS,
+            "low",
+        ),
+        "spot_action_recommendation": action,
+        "risk_level": risk,
+        "headline": _as_str(d.get("headline"), "大周期策略保持观察"),
+        "trader_summary": summary,
+        "supporting_evidence": _as_list(d.get("supporting_evidence")),
+        "opposing_evidence": _as_list(d.get("opposing_evidence")),
+        "data_quality_notes": _as_list(d.get("data_quality_notes")),
+        "stage_change_reason": _as_str(d.get("stage_change_reason")),
+        "what_would_confirm_next_stage": _as_list(d.get("what_would_confirm_next_stage")),
+        "what_would_invalidate_current_stage": _as_list(
+            d.get("what_would_invalidate_current_stage")
+        ),
+        "status": _as_str(d.get("status"), "success"),
+        "model_used": d.get("model_used"),
+        "model_requested": d.get("model_requested"),
+        "fallback_model_used": bool(d.get("fallback_model_used", False)),
+        "tokens_in": d.get("tokens_in"),
+        "tokens_out": d.get("tokens_out"),
+        "latency_ms": d.get("latency_ms"),
+        "error": d.get("error"),
+        "error_type": d.get("error_type"),
+    }
+
+
 def normalize_layer_a_output(raw: Any) -> dict[str, Any]:
     d = _as_dict(raw)
     violations = list(_as_list((_as_dict(d.get("validator")).get("violations"))))
     warnings = list(_as_list((_as_dict(d.get("validator")).get("warnings"))))
+    cycle_adjudicator = normalize_cycle_adjudicator(d.get("cycle_adjudicator"))
+    if d.get("cycle_adjudicator"):
+        compat_a1 = {
+            "raw_stage_assessment": cycle_adjudicator["raw_stage_assessment"],
+            "official_cycle_stage": cycle_adjudicator["official_stage_recommendation"],
+            "cycle_stage": cycle_adjudicator["official_stage_recommendation"],
+            "confidence": cycle_adjudicator["cycle_stage_confidence"],
+            "headline": cycle_adjudicator["headline"],
+            "human_summary": cycle_adjudicator["trader_summary"],
+            "bullish_evidence": cycle_adjudicator["supporting_evidence"],
+            "bearish_evidence": cycle_adjudicator["opposing_evidence"],
+            "data_quality_notes": cycle_adjudicator["data_quality_notes"],
+            "stage_change_reason": cycle_adjudicator["stage_change_reason"],
+        }
+        compat_a2 = {
+            "onchain_macro_stance": "unclear",
+            "confidence": cycle_adjudicator["cycle_stage_confidence"],
+            "human_summary": "链上与宏观已并入单一大周期裁决。",
+            "supporting_evidence": cycle_adjudicator["supporting_evidence"],
+            "opposing_evidence": cycle_adjudicator["opposing_evidence"],
+            "data_quality_notes": cycle_adjudicator["data_quality_notes"],
+        }
+        compat_a3 = {
+            "preferred_action_candidate": cycle_adjudicator["spot_action_recommendation"],
+            "confidence": cycle_adjudicator["cycle_stage_confidence"],
+            "human_summary": "现货策略机会已并入单一大周期裁决。",
+            "suggested_plan": [cycle_adjudicator["trader_summary"]],
+            "do_not_do": ["不做空", "不创建 thesis", "不进入虚拟账户"],
+            "data_quality_notes": cycle_adjudicator["data_quality_notes"],
+        }
+        compat_a4 = {
+            "spot_risk_level": cycle_adjudicator["risk_level"],
+            "confidence": cycle_adjudicator["cycle_stage_confidence"],
+            "human_summary": "风险评估已由 deterministic risk_packet 与单一裁决共同生成。",
+            "main_risks": cycle_adjudicator["opposing_evidence"],
+            "risk_controls": cycle_adjudicator["what_would_invalidate_current_stage"],
+            "data_quality_notes": cycle_adjudicator["data_quality_notes"],
+        }
+        compat_a5 = {
+            "spot_action": cycle_adjudicator["spot_action_recommendation"],
+            "cycle_stage": cycle_adjudicator["official_stage_recommendation"],
+            "confidence": cycle_adjudicator["cycle_stage_confidence"],
+            "headline": cycle_adjudicator["headline"],
+            "human_summary": cycle_adjudicator["trader_summary"],
+            "supporting_evidence": cycle_adjudicator["supporting_evidence"],
+            "opposing_evidence": cycle_adjudicator["opposing_evidence"],
+            "suggested_plan": cycle_adjudicator["what_would_confirm_next_stage"],
+            "do_not_do": ["不做空", "不创建 thesis", "不进入虚拟账户"],
+            "what_would_change_mind": (
+                cycle_adjudicator["what_would_confirm_next_stage"]
+                or cycle_adjudicator["what_would_invalidate_current_stage"]
+                or ["关键大周期证据发生变化"]
+            ),
+            "next_review_focus": cycle_adjudicator["what_would_confirm_next_stage"],
+            "data_quality_notes": cycle_adjudicator["data_quality_notes"],
+        }
+    else:
+        compat_a1 = d.get("a1_cycle_stage")
+        compat_a2 = d.get("a2_onchain_macro")
+        compat_a3 = d.get("a3_spot_opportunity")
+        compat_a4 = d.get("a4_spot_risk")
+        compat_a5 = d.get("a5_spot_adjudicator")
 
     out = {
         "enabled": bool(d.get("enabled", True)),
-        "a1_cycle_stage": normalize_a1(d.get("a1_cycle_stage"), warnings),
-        "a2_onchain_macro": normalize_a2(d.get("a2_onchain_macro")),
-        "a3_spot_opportunity": normalize_a3(d.get("a3_spot_opportunity"), violations),
-        "a4_spot_risk": normalize_a4(d.get("a4_spot_risk")),
+        "architecture": "single_cycle_adjudicator" if d.get("cycle_adjudicator") else "legacy_a1_a5",
+        "cycle_adjudicator": cycle_adjudicator,
+        "data_packets": _as_dict(d.get("data_packets")),
+        "a1_cycle_stage": normalize_a1(compat_a1, warnings),
+        "a2_onchain_macro": normalize_a2(compat_a2),
+        "a3_spot_opportunity": normalize_a3(compat_a3, violations),
+        "a4_spot_risk": normalize_a4(compat_a4),
         "a5_spot_adjudicator": normalize_a5(
-            d.get("a5_spot_adjudicator"), violations, warnings,
+            compat_a5, violations, warnings,
         ),
         "validator": {
             "passed": True,
@@ -407,6 +548,10 @@ def normalize_layer_a_output(raw: Any) -> dict[str, Any]:
     out["stage_transition"] = transition
     out["a1_cycle_stage"].update(transition)
     out["a1_cycle_stage"]["cycle_stage"] = official
+    out["cycle_adjudicator"]["official_cycle_stage"] = official
+    out["cycle_adjudicator"]["transition_status"] = transition.get("transition_status")
+    out["cycle_adjudicator"]["confirmation_count"] = transition.get("confirmation_count")
+    out["cycle_adjudicator"]["confirmation_required"] = transition.get("confirmation_required")
     out["a5_spot_adjudicator"]["cycle_stage"] = official
     out["a5_spot_adjudicator"]["official_stage_default_action"] = (
         STAGE_DEFAULT_ACTION.get(official, "hold")
@@ -419,6 +564,7 @@ def normalize_layer_a_output(raw: Any) -> dict[str, Any]:
     )
     if after_action != before_action:
         out["a5_spot_adjudicator"]["spot_action"] = after_action
+        out["cycle_adjudicator"]["final_spot_action"] = after_action
         out["confidence_adjustments"].append({
             "section": "a5_spot_adjudicator",
             "from": str(before_action),
@@ -426,6 +572,8 @@ def normalize_layer_a_output(raw: Any) -> dict[str, Any]:
             "reason": "A5 动作按 official_cycle_stage 和风险做保守归一",
         })
         out["validator"]["warnings"].append("spot_action_aligned_to_official_stage")
+    else:
+        out["cycle_adjudicator"]["final_spot_action"] = before_action
     if transition.get("transition_status") in {"pending", "recalibration"}:
         for section in ("a1_cycle_stage", "a5_spot_adjudicator"):
             obj = _as_dict(out.get(section))
@@ -444,7 +592,8 @@ def normalize_layer_a_output(raw: Any) -> dict[str, Any]:
         )
     _apply_confidence_cap(out)
     # Cheap structural warning for obviously forbidden vocabulary.  The
-    # dedicated validator performs the full check after all A1-A5 are merged.
+    # dedicated validator performs the full check after the single adjudicator
+    # output is normalized into compatibility sections.
     if _contains_forbidden_text(d):
         out["validator"]["warnings"].append("layer_a_output_contains_layer_b_like_terms")
     out["validator"]["passed"] = len(out["validator"]["violations"]) == 0

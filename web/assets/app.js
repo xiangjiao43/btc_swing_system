@@ -601,25 +601,26 @@ function app() {
                 && validator.violations.length > 0;
             const validatorFailed = validator.passed === false || hasViolation;
             const specs = [
-                ['A1', '大周期阶段', 'a1_cycle_stage'],
-                ['A2', '链上与宏观', 'a2_onchain_macro'],
-                ['A3', '现货策略机会', 'a3_spot_opportunity'],
-                ['A4', '现货风险', 'a4_spot_risk'],
-                ['A5', '大周期主裁', 'a5_spot_adjudicator'],
+                ['P1', '技术指标包', 'technical_packet'],
+                ['P2', '链上数据包', 'onchain_packet'],
+                ['P3', '流动性 / 宏观包', 'liquidity_macro_packet'],
+                ['P4', '风险评估包', 'risk_packet'],
+                ['AI', '大周期裁决', 'cycle_adjudicator'],
             ];
             return specs.map(([layer_id, name, key]) => {
-                const obj = spot && spot[key] && Object.keys(spot[key]).length
-                    ? spot[key]
-                    : null;
+                const packets = spot && spot.data_packets ? spot.data_packets : {};
+                const obj = key === 'cycle_adjudicator'
+                    ? (spot && spot.cycle_adjudicator && Object.keys(spot.cycle_adjudicator).length ? spot.cycle_adjudicator : null)
+                    : (packets && packets[key] && Object.keys(packets[key]).length ? packets[key] : null);
                 const health = !obj ? 'missing' : (validatorFailed ? 'degraded' : 'healthy');
                 const reasons = !obj
-                    ? ['暂无 Layer A 输出']
+                    ? ['暂无 Layer A 数据包 / 裁决输出']
                     : (validatorFailed ? ['Layer A validator 有 warning / violation'] : []);
                 return {
                     layer_id,
                     name,
                     health,
-                    pillars_summary: obj ? 'Layer A 最新输出可用' : '暂无 Layer A 输出',
+                    pillars_summary: obj ? 'Layer A 最新数据包 / 裁决可用' : '暂无 Layer A 输出',
                     missing_reasons: reasons,
                 };
             });
@@ -1352,17 +1353,20 @@ function app() {
         spotFinalAdvice() {
             const s = this.spotStrategy() || {};
             const a5 = s.a5_spot_adjudicator || {};
+            const adj = s.cycle_adjudicator || {};
             const action = this.spotActionLabel(a5.spot_action);
             const a1 = s.a1_cycle_stage || {};
             const stage = this.spotCycleStageLabel(
                 a1.official_cycle_stage || a5.cycle_stage || a1.cycle_stage,
             );
-            const headline = a5.headline || '大周期策略保持观察';
+            const headline = adj.headline || a5.headline || '大周期策略保持观察';
             return this.compactSpotText(`交易员结论:${action} · ${stage}。${headline}`, 88);
         },
         spotFinalSummary() {
-            const a5 = (this.spotStrategy() || {}).a5_spot_adjudicator || {};
-            return this.compactSpotText(a5.human_summary || '-', 118);
+            const s = this.spotStrategy() || {};
+            const adj = s.cycle_adjudicator || {};
+            const a5 = s.a5_spot_adjudicator || {};
+            return this.compactSpotText(adj.trader_summary || a5.human_summary || '-', 118);
         },
         spotCardSummary(card) {
             const prefix = card && card.key === 'layer_a_a5' ? '最终建议:' : '';
@@ -1371,61 +1375,55 @@ function app() {
         spotLayerCards() {
             const s = this.spotStrategy();
             if (!s) return [];
-            const a1 = s.a1_cycle_stage || {};
-            const a2 = s.a2_onchain_macro || {};
-            const a3 = s.a3_spot_opportunity || {};
-            const a4 = s.a4_spot_risk || {};
-            const a5 = s.a5_spot_adjudicator || {};
+            const packets = s.data_packets || {};
+            const adj = s.cycle_adjudicator || {};
+            const packetCards = [
+                ['technical_packet', '技术指标', '技术'],
+                ['onchain_packet', '链上数据', '链上'],
+                ['liquidity_macro_packet', '流动性 / 宏观', '宏观'],
+                ['risk_packet', '风险评估', '风险'],
+            ].map(([key, title, fallbackLabel]) => {
+                const pkt = packets[key] || {};
+                const dq = pkt.data_quality || {};
+                return {
+                    key: 'layer_a_' + key,
+                    title,
+                    badge: pkt.status || 'missing',
+                    label: fallbackLabel,
+                    summary: pkt.summary || '暂无数据包摘要',
+                    supporting: Object.entries(pkt.key_metrics || {}).slice(0, 5).map(([name, value]) => {
+                        const shown = value && typeof value === 'object'
+                            ? (value.value ?? value.status ?? '-')
+                            : value;
+                        return `${name}: ${shown}`;
+                    }),
+                    opposing: [],
+                    dataQuality: [
+                        ...(dq.notes || []),
+                        dq.confidence_cap_reason,
+                    ].filter(Boolean),
+                };
+            });
             return [
+                ...packetCards,
                 {
-                    key: 'layer_a_a1',
-                    title: 'A1 大周期阶段',
-                    badge: this.spotConfidenceLabel(a1.confidence),
-                    label: this.spotCycleStageLabel(a1.official_cycle_stage || a1.cycle_stage),
-                    summary: a1.human_summary,
-                    supporting: a1.bullish_evidence || [],
-                    opposing: [...(a1.bearish_evidence || []), ...(a1.conflicting_evidence || [])],
-                    dataQuality: a1.data_quality_notes || [],
-                },
-                {
-                    key: 'layer_a_a2',
-                    title: 'A2 链上与宏观',
-                    badge: this.spotConfidenceLabel(a2.confidence),
-                    label: a2.onchain_macro_stance || 'unclear',
-                    summary: a2.human_summary,
-                    supporting: a2.supporting_evidence || [],
-                    opposing: a2.opposing_evidence || [],
-                    dataQuality: a2.data_quality_notes || [],
-                },
-                {
-                    key: 'layer_a_a3',
-                    title: 'A3 现货策略机会',
-                    badge: this.spotConfidenceLabel(a3.confidence),
-                    label: this.spotActionLabel(a3.preferred_action_candidate),
-                    summary: a3.human_summary,
-                    supporting: [a3.buy_logic, ...(a3.suggested_plan || [])].filter(Boolean),
-                    opposing: [a3.sell_logic, ...(a3.do_not_do || [])].filter(Boolean),
-                    dataQuality: a3.data_quality_notes || [],
-                },
-                {
-                    key: 'layer_a_a4',
-                    title: 'A4 现货风险',
-                    badge: this.spotConfidenceLabel(a4.confidence),
-                    label: this.spotRiskLabel(a4.spot_risk_level),
-                    summary: a4.human_summary,
-                    supporting: [...(a4.risk_controls || []), ...(a4.overheat_signals || [])],
-                    opposing: [...(a4.main_risks || []), ...(a4.downside_risks || []), ...(a4.invalidation_watch || [])],
-                    dataQuality: a4.data_quality_notes || [],
-                },
-                {
-                    key: 'layer_a_a5',
-                    title: 'A5 大周期主裁',
-                    badge: this.spotConfidenceLabel(a5.confidence),
-                    label: this.spotActionLabel(a5.spot_action),
-                    summary: a5.human_summary,
-                    supporting: [...(a5.supporting_evidence || []), ...(a5.suggested_plan || [])],
-                    opposing: [...(a5.opposing_evidence || []), ...(a5.do_not_do || [])],
-                    dataQuality: [...(a5.data_quality_notes || []), ...((s.validator && s.validator.warnings) || [])],
+                    key: 'layer_a_cycle_adjudicator',
+                    title: '大周期裁决',
+                    badge: this.spotConfidenceLabel(adj.cycle_stage_confidence || s.a5_spot_adjudicator?.confidence),
+                    label: this.spotActionLabel(adj.final_spot_action || s.a5_spot_adjudicator?.spot_action),
+                    summary: adj.trader_summary || s.a5_spot_adjudicator?.human_summary,
+                    supporting: [
+                        ...(adj.supporting_evidence || []),
+                        ...(adj.what_would_confirm_next_stage || []),
+                    ],
+                    opposing: [
+                        ...(adj.opposing_evidence || []),
+                        ...(adj.what_would_invalidate_current_stage || []),
+                    ],
+                    dataQuality: [
+                        ...(adj.data_quality_notes || []),
+                        ...((s.validator && s.validator.warnings) || []),
+                    ],
                 },
             ];
         },

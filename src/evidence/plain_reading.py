@@ -157,7 +157,7 @@ def plain_reading_layer_a_raw_factor(
     """Layer A 原始因子卡片说明。
 
     这是规则化模板,不调 AI,用于把新增 Layer A 原始因子的数值翻成网页
-    能直接审计的人话说明。AI 仍只负责 A1-A5 大周期策略综合判断。
+    能直接审计的人话说明。AI 仍只负责 Layer A 单一大周期裁决。
     """
     info = _LAYER_A_RAW_FACTOR_LABELS.get(
         factor_key,

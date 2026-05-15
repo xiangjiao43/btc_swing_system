@@ -9,6 +9,7 @@ from pathlib import Path
 from src.ai.spot_cycle_context_builder import (
     SpotCycleContextBuilder,
     build_a1_cycle_stage_context,
+    build_layer_a_cycle_adjudicator_context,
 )
 from src.data.storage.connection import init_db
 from src.data.storage.dao import (
@@ -451,3 +452,72 @@ def test_layer_a_p0_cycle_factors_are_derived_and_enter_a1_context():
     assert "major_support_resistance_zones" in price_summary
     assert "hodl_waves_1y_plus_aggregate" in holder_summary
     assert "buckets" not in json.dumps(light, ensure_ascii=False, default=str)
+
+
+def test_layer_a_single_adjudicator_context_builds_four_deterministic_packets():
+    ctx = {
+        "available_factors": {
+            "price_structure": {
+                "current_close": {"actual_value": 100000, "status": "available"},
+                "ath_drawdown_pct": {"actual_value": -12.5, "status": "available"},
+                "monthly_ohlc_structure": {"actual_value": "recovering", "status": "available"},
+                "major_support_resistance_zones": {
+                    "actual_value": "支撑 90000 / 阻力 110000",
+                    "status": "available",
+                },
+            },
+            "onchain_valuation": {
+                "mvrv": {"actual_value": 2.1, "status": "available"},
+                "rhodl_ratio": {"actual_value": 1600, "status": "available"},
+            },
+            "holder_behavior": {
+                "hodl_waves_1y_plus_aggregate": {
+                    "actual_value": 61.2,
+                    "status": "available",
+                    "buckets": ["should_not_enter_ai_packet"],
+                },
+            },
+            "onchain_holder_behavior": {
+                "lth_sopr": {"actual_value": 1.02, "status": "available"},
+                "exchange_balance": {"actual_value": 3000000, "status": "available"},
+            },
+            "exchange_and_flows": {
+                "etf_flow_7d_sum_usd": {"actual_value": -120000000, "status": "available"},
+            },
+            "macro_liquidity": {
+                "real_yield": {"actual_value": 1.9, "status": "available"},
+                "m2": {"actual_value": 22600, "status": "available"},
+            },
+            "macro_inflation_rates": {
+                "cpi": {"actual_value": 332.4, "status": "available"},
+            },
+            "market_context": {
+                "funding_rate": {"actual_value": 0.01, "status": "available"},
+                "open_interest": {"actual_value": 123, "status": "available"},
+            },
+        },
+        "factor_coverage": {"coverage_ratio": 0.9, "confidence_cap": "high"},
+        "previous_layer_a_state": {
+            "cycle_stage_model_version": "layer_a_seven_stage_v1",
+            "a1_cycle_stage": {"official_cycle_stage": "accumulation"},
+        },
+    }
+    out = build_layer_a_cycle_adjudicator_context({"spot_cycle_context": ctx})
+    packets = out["data_packets"]
+    assert set(packets) == {
+        "technical_packet", "onchain_packet", "liquidity_macro_packet", "risk_packet",
+    }
+    assert out["previous_official_stage"] == "accumulation"
+    assert packets["technical_packet"]["status"] == "available"
+    assert "btc_price" in packets["technical_packet"]["key_metrics"]
+    assert "lth_sopr" in packets["onchain_packet"]["key_metrics"]
+    assert "real_yield" in packets["liquidity_macro_packet"]["key_metrics"]
+    payload = json.dumps(out, ensure_ascii=False, default=str)
+    assert "funding_rate" not in payload
+    assert "open_interest" not in payload
+    assert "active_thesis" not in payload
+    assert "thesis_id" not in payload
+    assert "virtual_account_state" not in payload
+    assert "account_equity" not in payload
+    assert "should_not_enter_ai_packet" not in payload
+    assert len(payload) < 12000

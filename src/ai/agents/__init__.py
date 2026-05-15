@@ -28,6 +28,7 @@ from .spot_cycle_agents import (
     A3SpotOpportunityAnalyst,
     A4SpotRiskAnalyst,
     A5SpotAdjudicator,
+    LayerACycleAdjudicator,
 )
 
 __all__ = [
@@ -43,4 +44,5 @@ __all__ = [
     "A3SpotOpportunityAnalyst",
     "A4SpotRiskAnalyst",
     "A5SpotAdjudicator",
+    "LayerACycleAdjudicator",
 ]

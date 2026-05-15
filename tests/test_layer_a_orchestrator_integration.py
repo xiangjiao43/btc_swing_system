@@ -33,15 +33,27 @@ def test_layer_a_ai_failure_does_not_change_layer_b_master():
             "data_completeness_pct": 90,
         },
     )
-    agents["a1"] = _agent({"cycle_stage": "early_bull", "human_summary": "x"})
-    agents["a2"] = _agent({"onchain_macro_stance": "bullish", "human_summary": "x"})
-    agents["a3"] = _agent({"preferred_action_candidate": "hold", "human_summary": "x"})
-    agents["a4"] = _agent({"spot_risk_level": "moderate", "human_summary": "x"})
+    agents["a1"] = _agent({"cycle_stage": "early_bull", "human_summary": "legacy"})
+    agents["a2"] = _agent({"onchain_macro_stance": "bullish", "human_summary": "legacy"})
+    agents["a3"] = _agent({"preferred_action_candidate": "hold", "human_summary": "legacy"})
+    agents["a4"] = _agent({"spot_risk_level": "moderate", "human_summary": "legacy"})
     agents["a5"] = _agent({
         "spot_action": "trend_short",
         "cycle_stage": "early_bull",
-        "human_summary": "bad output",
+        "human_summary": "legacy",
         "what_would_change_mind": ["x"],
+    })
+    agents["layer_a_cycle"] = _agent({
+        "raw_stage_assessment": "early_bull",
+        "official_stage_recommendation": "early_bull",
+        "cycle_stage_confidence": "medium",
+        "spot_action_recommendation": "hold",
+        "risk_level": "moderate",
+        "trader_summary": "建议做空",
+        "supporting_evidence": ["链上温和"],
+        "opposing_evidence": ["宏观压力"],
+        "what_would_confirm_next_stage": ["继续确认"],
+        "what_would_invalidate_current_stage": ["关键支撑跌破"],
     })
 
     ctx = _build_context()
@@ -57,3 +69,6 @@ def test_layer_a_ai_failure_does_not_change_layer_b_master():
     assert result["layer_a_spot_strategy"]["validator"]["passed"] is False
     assert "virtual_account" not in result["layer_a_spot_strategy"]
     assert "thesis" not in result["layer_a_spot_strategy"]
+    assert agents["layer_a_cycle"].analyze.call_count == 1
+    for key in ("a1", "a2", "a3", "a4", "a5"):
+        assert agents[key].analyze.call_count == 0

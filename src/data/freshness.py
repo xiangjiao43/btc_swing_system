@@ -77,6 +77,11 @@ _FALLBACK_QUERIES: dict[str, str] = {
 
 _FAILURE_REASON_LABELS: dict[str, str] = {
     "quota_exceeded": "配额用尽",
+    "auth_error": "API key 无效 / 未授权",
+    "permission_denied": "套餐不支持 / 权限不足",
+    "endpoint_not_found": "接口不存在 / 配置错误",
+    "provider_error": "服务异常",
+    "timeout": "请求超时",
     "network_error": "网络错误",
     "api_error": "API 错误",
     "parse_error": "数据格式错误",

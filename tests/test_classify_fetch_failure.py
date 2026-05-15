@@ -9,14 +9,29 @@ import requests
 from src.data.collectors._classify_failure import classify_fetch_failure
 
 
-# ---------------- quota_exceeded ----------------
+# ---------------- 精确 HTTP 分类 ----------------
 
-def test_http_403_classified_as_quota():
+def test_http_401_classified_as_auth_error():
+    exc = RuntimeError("HTTP 401 unauthorized on /v1/metrics/x: invalid key")
+    reason, msg = classify_fetch_failure(exc)
+    assert reason == "auth_error"
+    assert "HTTP 401" in msg
+
+
+def test_http_403_classified_as_permission_denied():
     exc = RuntimeError("HTTP 403 (non-retry) on /v1/metrics/x: body")
     reason, msg = classify_fetch_failure(exc)
-    assert reason == "quota_exceeded"
+    assert reason == "permission_denied"
     assert "HTTP 403" in msg
 
+
+def test_http_404_classified_as_endpoint_not_found():
+    exc = RuntimeError("HTTP 404 not found on /v1/metrics/missing")
+    reason, _ = classify_fetch_failure(exc)
+    assert reason == "endpoint_not_found"
+
+
+# ---------------- quota_exceeded ----------------
 
 def test_http_429_classified_as_quota():
     exc = RuntimeError("HTTP 429 too many requests on /api/v3/foo")
@@ -49,24 +64,18 @@ def test_connection_error_classified_as_network():
     assert "DNS" in msg
 
 
-def test_timeout_classified_as_network():
+def test_timeout_classified_as_timeout():
     exc = requests.exceptions.Timeout("Request timed out")
     reason, _ = classify_fetch_failure(exc)
-    assert reason == "network_error"
+    assert reason == "timeout"
 
 
 # ---------------- api_error ----------------
 
-def test_http_500_classified_as_api_error():
+def test_http_500_classified_as_provider_error():
     exc = RuntimeError("HTTP 500 internal server error on /api/foo")
     reason, _ = classify_fetch_failure(exc)
-    assert reason == "api_error"
-
-
-def test_http_404_classified_as_api_error():
-    exc = RuntimeError("HTTP 404 not found on /v1/metrics/missing")
-    reason, _ = classify_fetch_failure(exc)
-    assert reason == "api_error"
+    assert reason == "provider_error"
 
 
 # ---------------- parse_error ----------------
@@ -99,10 +108,10 @@ def test_arbitrary_exception_classified_as_unknown():
 
 def test_message_redacts_api_key_token():
     exc = RuntimeError(
-        "HTTP 403 on /v1/data: api_key=sk-secret-token-1234567890abcdef"
+        "HTTP 403 on /v1/data: api_key=test-secret-value"
     )
     _, msg = classify_fetch_failure(exc)
-    assert "sk-secret-token-1234567890abcdef" not in msg
+    assert "test-secret-value" not in msg
     assert "<redacted>" in msg
 
 

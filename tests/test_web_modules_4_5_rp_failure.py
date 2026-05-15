@@ -171,6 +171,19 @@ def test_layer_a_raw_factor_cards_keep_existing_status_style(js, html):
     assert "proxy_endpoint_404" not in html
 
 
+def test_data_source_failure_reason_badges_support_granular_glassnode_errors(js):
+    """Glassnode 403/404/timeout 等不应统一显示成配额用尽。"""
+    assert "reason === 'quota_exceeded'" in js
+    for reason in (
+        "auth_error",
+        "permission_denied",
+        "endpoint_not_found",
+        "provider_error",
+        "timeout",
+    ):
+        assert reason in js
+
+
 def test_raw_factor_cards_use_plain_border_without_green_left_rail(html):
     """原始数据因子卡片统一为普通浅灰边框,不再显示绿色左侧竖线。"""
     start = html.find('id="region-4"')

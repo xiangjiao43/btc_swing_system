@@ -688,7 +688,9 @@ function app() {
             if (reason === 'quota_exceeded')
                 return 'bg-rose-500 text-white';
             if (reason === 'network_error' || reason === 'api_error'
-                || reason === 'parse_error')
+                || reason === 'parse_error' || reason === 'auth_error'
+                || reason === 'permission_denied' || reason === 'endpoint_not_found'
+                || reason === 'provider_error' || reason === 'timeout')
                 return 'bg-amber-200 text-amber-900 dark:bg-amber-700 dark:text-amber-100';
             return 'bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300';
         },

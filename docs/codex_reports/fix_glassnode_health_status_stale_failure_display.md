@@ -241,9 +241,8 @@ http://124.222.89.86/
 | 步骤 | 状态 |
 |---|---|
 | 本地 pytest 通过 | ✅ |
-| GitHub push(commit hash) | 待提交后填写 |
+| GitHub push(commit hash: `4c7badd`) | ✅ |
 | 服务器 git pull | 待用户执行 |
 | 服务器 systemctl restart | 待用户执行 |
 | 生产 DB 迁移 / 清污 | N/A |
 | 生产健康检查 `/api/system/health` | 待用户执行 |
-

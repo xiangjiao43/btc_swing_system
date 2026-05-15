@@ -559,6 +559,19 @@ def test_layer_a_spot_module_static_contract(html):
     assert 'src="/assets/app.js?v=layer-b-swing-dashboard-20260514"' in html
 
 
+def test_layer_a_summary_metrics_use_card_style(html):
+    """大周期策略顶部四项摘要复用波段策略摘要的小卡片样式。"""
+    start = html.find('id="region-layer-a-summary"')
+    end = html.find('x-text="spotFinalAdvice()"')
+    summary = html[start:end]
+    assert start != -1
+    assert end != -1
+    for label in ("大周期阶段", "策略", "置信度", "风险"):
+        assert label in summary
+    assert "md:grid-cols-4" in summary
+    assert summary.count("rounded border border-slate-200 dark:border-slate-800 p-2") >= 4
+
+
 # ============================================================
 # 5. app.js Alpine state + helpers
 # ============================================================

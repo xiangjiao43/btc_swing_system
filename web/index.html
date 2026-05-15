@@ -379,23 +379,23 @@
         </template>
         <template x-if="spotStrategy()">
           <div class="space-y-3">
-            <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-[12px]">
-              <div>
+            <div id="region-layer-a-summary" class="grid grid-cols-2 md:grid-cols-4 gap-3 text-[12px]">
+              <div class="rounded border border-slate-200 dark:border-slate-800 p-2">
                 <div class="stat-label">大周期阶段</div>
                 <div class="text-[13px] font-bold"
                      x-text="spotCycleStageLabel(spotStrategy()?.a5_spot_adjudicator?.cycle_stage || spotStrategy()?.a1_cycle_stage?.cycle_stage)"></div>
               </div>
-              <div>
+              <div class="rounded border border-slate-200 dark:border-slate-800 p-2">
                 <div class="stat-label">策略</div>
                 <div class="text-[13px] font-bold"
                      x-text="spotActionLabel(spotStrategy()?.a5_spot_adjudicator?.spot_action)"></div>
               </div>
-              <div>
+              <div class="rounded border border-slate-200 dark:border-slate-800 p-2">
                 <div class="stat-label">置信度</div>
                 <div class="text-[13px] font-bold"
                      x-text="spotConfidenceLabel(spotStrategy()?.a5_spot_adjudicator?.confidence)"></div>
               </div>
-              <div>
+              <div class="rounded border border-slate-200 dark:border-slate-800 p-2">
                 <div class="stat-label">风险</div>
                 <div class="text-[13px] font-bold"
                      x-text="spotRiskLabel(spotStrategy()?.a4_spot_risk?.spot_risk_level)"></div>

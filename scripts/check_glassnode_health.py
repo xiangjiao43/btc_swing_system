@@ -39,7 +39,14 @@ CHECKS = [
         "endpoint": "/v1/metrics/indicators/reserve_risk",
         "note": "Layer A cycle valuation endpoint",
     },
+    {
+        "metric": "puell_multiple",
+        "endpoint": "/v1/metrics/indicators/puell_multiple",
+        "note": "recently failed endpoint recovery check",
+    },
 ]
+
+HEALTH_CACHE_PATH = Path.home() / "pipeline_logs" / "glassnode_health_check_latest.json"
 
 
 def _host_only(url: str) -> str:
@@ -157,11 +164,20 @@ def main() -> int:
         "base_url_host": _host_only(base_url),
         "api_key": "exists, hidden" if api_key else "missing",
         "timeout_seconds": timeout,
+        "generated_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "checks": [
             _check_one(session, base_url, item, timeout=timeout, since_unix=since)
             for item in CHECKS
         ],
     }
+    try:
+        HEALTH_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        HEALTH_CACHE_PATH.write_text(
+            json.dumps(out, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except Exception as exc:
+        out["cache_write_error"] = type(exc).__name__
     print(json.dumps(out, ensure_ascii=False, indent=2))
     return 0
 

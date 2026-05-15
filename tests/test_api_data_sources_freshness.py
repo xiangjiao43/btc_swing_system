@@ -222,7 +222,66 @@ def test_freshness_partial_failure_label_when_rows_were_upserted(client, db_path
     assert row["status"] == "partial"
     assert row["failure_reason"] == "quota_exceeded"
     assert row["failure_reason_label"] == "部分异常"
+    assert row["display_label"] == "部分异常：Puell Multiple 429"
+    assert row["main_failure_metric"] == "puell_multiple"
+    assert row["main_failure_endpoint"] == "/v1/metrics/indicators/puell_multiple"
+    assert row["main_failure_http_status"] == 429
     assert row["rows_upserted"] == 869
+
+
+def test_glassnode_recovered_endpoint_returns_success_with_detail(
+    monkeypatch, client, db_path,
+):
+    """health check 缓存显示失败 endpoint 已 ok → source 恢复 success。"""
+    now = datetime.now(timezone.utc)
+    fresh_iso = _iso(now - timedelta(minutes=3))
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            "INSERT INTO onchain_metrics "
+            "(metric_name, captured_at_utc, value, source, inserted_at_utc) "
+            "VALUES (?, ?, ?, ?, ?)",
+            ("mvrv", fresh_iso, 1.5, "glassnode_primary", fresh_iso),
+        )
+        FetchAttemptsDAO.record_attempt(
+            conn, source="glassnode_onchain", status="failure",
+            failure_reason="quota_exceeded",
+            error_message=(
+                "Glassnode request failed: /v1/metrics/indicators/puell_multiple "
+                "last error: HTTP 429"
+            ),
+            rows_upserted=869,
+            attempted_at_utc=_iso(now - timedelta(minutes=10)),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    from src.data import freshness as freshness_mod
+
+    monkeypatch.setattr(
+        freshness_mod,
+        "_read_glassnode_health_cache",
+        lambda: {
+            "generated_at_utc": _iso(now - timedelta(minutes=1)),
+            "checks": [
+                {
+                    "metric": "puell_multiple",
+                    "endpoint": "/v1/metrics/indicators/puell_multiple",
+                    "status": "ok",
+                    "latest_value_present": True,
+                }
+            ],
+        },
+    )
+
+    body = client.get("/api/data_sources/freshness").json()
+    row = next(r for r in body if r["source"] == "glassnode_onchain")
+    assert row["status"] == "success"
+    assert row["recovered"] is True
+    assert row["latest_success_after_failure"] is True
+    assert row["display_label"] is None
+    assert row["main_failure_metric"] == "puell_multiple"
 
 
 # ============================================================

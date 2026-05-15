@@ -177,6 +177,9 @@ def test_data_source_failure_reason_badges_support_granular_glassnode_errors(js,
     assert "status === 'partial'" in js
     assert "部分异常" in js or "partial" in js
     assert "src.status === 'partial'" in html
+    assert "src.display_label || src.failure_reason_label" in html
+    assert "main_failure_endpoint" in js
+    assert "main_failure_http_status" in js
     for reason in (
         "auth_error",
         "permission_denied",

@@ -118,6 +118,10 @@ def test_freshness_partial_when_failure_upserted_rows_and_data_is_fresh(db_path)
     assert f.status == "partial"
     assert f.failure_reason == "quota_exceeded"
     assert f.failure_reason_label == "部分异常"
+    assert f.display_label == "部分异常：Puell Multiple 429"
+    assert f.main_failure_metric == "puell_multiple"
+    assert f.main_failure_endpoint == "/v1/metrics/indicators/puell_multiple"
+    assert f.main_failure_http_status == 429
     assert f.rows_upserted == 869
     assert f.is_stale is False
 

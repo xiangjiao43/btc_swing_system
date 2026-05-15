@@ -129,3 +129,11 @@ class DataSourceFreshness(BaseModel):
     error_message: str | None = None
     rows_upserted: int | None = None
     duration_ms: int | None = None
+    display_label: str | None = None
+    main_failure_metric: str | None = None
+    main_failure_metric_label: str | None = None
+    main_failure_endpoint: str | None = None
+    main_failure_http_status: int | None = None
+    main_failure_age_label: str | None = None
+    latest_success_after_failure: bool = False
+    recovered: bool = False

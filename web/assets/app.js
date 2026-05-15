@@ -716,6 +716,24 @@ function app() {
             if (src.rows_upserted != null) {
                 parts.push(`入库行数: ${src.rows_upserted}`);
             }
+            if (src.display_label) {
+                parts.push(`状态: ${src.display_label}`);
+            }
+            if (src.main_failure_metric_label || src.main_failure_metric) {
+                parts.push(`异常指标: ${src.main_failure_metric_label || src.main_failure_metric}`);
+            }
+            if (src.main_failure_endpoint) {
+                parts.push(`endpoint: ${src.main_failure_endpoint}`);
+            }
+            if (src.main_failure_http_status) {
+                parts.push(`HTTP: ${src.main_failure_http_status}`);
+            }
+            if (src.main_failure_age_label) {
+                parts.push(`失败时间: ${src.main_failure_age_label}`);
+            }
+            if (src.recovered) {
+                parts.push('该 endpoint 后续检查已恢复');
+            }
             if (src.error_message) {
                 parts.push(`错误: ${src.error_message}`);
             }

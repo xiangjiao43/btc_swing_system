@@ -60,6 +60,14 @@ def get_data_sources_freshness(request: Request) -> list[DataSourceFreshness]:
                 error_message=f.error_message,
                 rows_upserted=f.rows_upserted,
                 duration_ms=f.duration_ms,
+                display_label=f.display_label,
+                main_failure_metric=f.main_failure_metric,
+                main_failure_metric_label=f.main_failure_metric_label,
+                main_failure_endpoint=f.main_failure_endpoint,
+                main_failure_http_status=f.main_failure_http_status,
+                main_failure_age_label=f.main_failure_age_label,
+                latest_success_after_failure=f.latest_success_after_failure,
+                recovered=f.recovered,
             ))
         return out
     finally:

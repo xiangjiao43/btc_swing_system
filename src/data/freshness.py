@@ -19,10 +19,13 @@ Stale 阈值(每源不同):
 
 from __future__ import annotations
 
+import json
 import logging
+import re
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any, Optional
 
 
@@ -89,6 +92,32 @@ _FAILURE_REASON_LABELS: dict[str, str] = {
     "unknown": "未知错误",
 }
 
+_GLASSNODE_HEALTH_CACHE_PATH = (
+    Path.home() / "pipeline_logs" / "glassnode_health_check_latest.json"
+)
+
+_HTTP_PATTERN = re.compile(r"\bHTTP\s+(\d{3})\b", re.IGNORECASE)
+_ENDPOINT_PATTERN = re.compile(r"(/v1/metrics/[^\s'\";}]+)")
+_METRIC_ON_PATTERN = re.compile(r"\bon\s+([a-z][a-z0-9_]+)\b", re.IGNORECASE)
+
+_METRIC_DISPLAY_NAMES: dict[str, str] = {
+    "puell_multiple": "Puell Multiple",
+    "mvrv": "MVRV",
+    "lth_sopr": "LTH SOPR",
+    "sth_sopr": "STH SOPR",
+    "reserve_risk": "Reserve Risk",
+    "rhodl_ratio": "RHODL Ratio",
+}
+
+_METRIC_ENDPOINTS: dict[str, str] = {
+    "puell_multiple": "/v1/metrics/indicators/puell_multiple",
+    "mvrv": "/v1/metrics/market/mvrv",
+    "lth_sopr": "/v1/metrics/indicators/sopr_more_155",
+    "sth_sopr": "/v1/metrics/indicators/sopr_less_155",
+    "reserve_risk": "/v1/metrics/indicators/reserve_risk",
+    "rhodl_ratio": "/v1/metrics/indicators/rhodl_ratio",
+}
+
 
 # 哪些 evidence 层依赖哪些 source(显示侧 stale 覆盖用)
 LAYER_SOURCE_DEPS: dict[int, tuple[str, ...]] = {
@@ -120,6 +149,14 @@ class SourceFreshness:
     rows_upserted: Optional[int]
     duration_ms: Optional[int]
     last_success_source: Optional[str]   # 'fetch_attempts' | 'data_table' | None
+    display_label: Optional[str] = None
+    main_failure_metric: Optional[str] = None
+    main_failure_metric_label: Optional[str] = None
+    main_failure_endpoint: Optional[str] = None
+    main_failure_http_status: Optional[int] = None
+    main_failure_age_label: Optional[str] = None
+    latest_success_after_failure: bool = False
+    recovered: bool = False
 
 
 # ============================================================
@@ -193,6 +230,96 @@ def _latest_success_candidate(
     return best_iso, best_source
 
 
+def _metric_label(metric: Optional[str]) -> Optional[str]:
+    if not metric:
+        return None
+    return _METRIC_DISPLAY_NAMES.get(
+        metric, metric.replace("_", " ").title()
+    )
+
+
+def _age_label(minutes: Optional[int]) -> Optional[str]:
+    if minutes is None:
+        return None
+    if minutes < 60:
+        return f"{minutes} 分钟前"
+    if minutes < 1440:
+        return f"{minutes / 60:.1f} 小时前"
+    return f"{minutes / 1440:.1f} 天前"
+
+
+def _extract_failure_detail(error_message: Optional[str]) -> dict[str, Any]:
+    text = error_message or ""
+    http_match = _HTTP_PATTERN.search(text)
+    endpoint_match = _ENDPOINT_PATTERN.search(text)
+    endpoint = endpoint_match.group(1) if endpoint_match else None
+    metric = endpoint.rsplit("/", 1)[-1] if endpoint else None
+    if metric is None:
+        metric_match = _METRIC_ON_PATTERN.search(text)
+        metric = metric_match.group(1) if metric_match else None
+    if endpoint is None and metric:
+        endpoint = _METRIC_ENDPOINTS.get(metric)
+    http_status = int(http_match.group(1)) if http_match else None
+    return {
+        "metric": metric,
+        "metric_label": _metric_label(metric),
+        "endpoint": endpoint,
+        "http_status": http_status,
+    }
+
+
+def _query_metric_latest_inserted(conn: Any, metric: Optional[str]) -> Optional[str]:
+    if not metric:
+        return None
+    try:
+        row = conn.execute(
+            "SELECT MAX(inserted_at_utc) FROM onchain_metrics "
+            "WHERE metric_name = ? "
+            "  AND source IN ('glassnode_primary','glassnode_display',"
+            "                 'glassnode_derived_breakdown_by_age')",
+            (metric,),
+        ).fetchone()
+        return row[0] if row and row[0] else None
+    except Exception as e:
+        logger.warning("metric recovery query for %s failed: %s", metric, e)
+        return None
+
+
+def _read_glassnode_health_cache() -> dict[str, Any]:
+    try:
+        if not _GLASSNODE_HEALTH_CACHE_PATH.exists():
+            return {}
+        return json.loads(_GLASSNODE_HEALTH_CACHE_PATH.read_text(encoding="utf-8"))
+    except Exception as e:
+        logger.warning("glassnode health cache read failed: %s", e)
+        return {}
+
+
+def _health_cache_recovered(
+    detail: dict[str, Any],
+    *,
+    failure_dt: Optional[datetime],
+) -> bool:
+    if failure_dt is None:
+        return False
+    metric = detail.get("metric")
+    endpoint = detail.get("endpoint")
+    if not metric and not endpoint:
+        return False
+    cache = _read_glassnode_health_cache()
+    generated_at = _parse_iso(cache.get("generated_at_utc"))
+    if generated_at is None or generated_at <= failure_dt:
+        return False
+    for check in cache.get("checks", []) or []:
+        if check.get("status") != "ok" or not check.get("latest_value_present"):
+            continue
+        if metric and check.get("metric") == metric:
+            return True
+        if endpoint and check.get("endpoint") == endpoint:
+            return True
+    return False
+
+
 # ============================================================
 # Public API
 # ============================================================
@@ -243,6 +370,9 @@ def compute_source_freshness(
         int(round((now - last_attempt_dt).total_seconds() / 60.0))
         if last_attempt_dt is not None else None
     )
+    detail = _extract_failure_detail(
+        latest["error_message"] if status == "failure" else None
+    )
 
     # 算 last_success_at_utc:
     #   - status=success → 自己
@@ -274,10 +404,27 @@ def compute_source_freshness(
 
     rows_upserted = latest["rows_upserted"]
     effective_status = status
+    recovered = False
+    latest_success_after_failure = False
     if status == "failure" and not is_stale:
+        metric_success_dt = _parse_iso(
+            _query_metric_latest_inserted(conn, detail.get("metric"))
+        )
+        if (
+            metric_success_dt is not None
+            and last_attempt_dt is not None
+            and metric_success_dt > last_attempt_dt
+        ):
+            latest_success_after_failure = True
+            recovered = True
+            effective_status = "success"
+        elif _health_cache_recovered(detail, failure_dt=last_attempt_dt):
+            latest_success_after_failure = True
+            recovered = True
+            effective_status = "success"
         # 同一轮 Glassnode 已经写入数据,说明是"部分 endpoint 失败",
         # 不应让一个单点失败把整个 Glassnode 源显示成全源失败/配额用尽。
-        if rows_upserted and rows_upserted > 0:
+        elif rows_upserted and rows_upserted > 0:
             effective_status = "partial"
         else:
             last_success_dt_for_cmp = _parse_iso(last_success_at_utc)
@@ -287,6 +434,8 @@ def compute_source_freshness(
                 and last_success_dt_for_cmp > last_attempt_dt
             ):
                 effective_status = "success"
+                latest_success_after_failure = True
+                recovered = True
 
     failure_reason = (
         latest["failure_reason"]
@@ -299,6 +448,12 @@ def compute_source_freshness(
             _FAILURE_REASON_LABELS.get(failure_reason, _FAILURE_REASON_LABELS["unknown"])
             if failure_reason else None
         )
+    display_label = failure_reason_label
+    if effective_status == "partial":
+        metric_label = detail.get("metric_label") or "未知指标"
+        http_status = detail.get("http_status")
+        suffix = f" {http_status}" if http_status else ""
+        display_label = f"部分异常：{metric_label}{suffix}"
 
     return SourceFreshness(
         source=source, display_name=display_name,
@@ -316,6 +471,14 @@ def compute_source_freshness(
         rows_upserted=rows_upserted,
         duration_ms=latest["duration_ms"],
         last_success_source=last_success_source,
+        display_label=display_label,
+        main_failure_metric=detail.get("metric"),
+        main_failure_metric_label=detail.get("metric_label"),
+        main_failure_endpoint=detail.get("endpoint"),
+        main_failure_http_status=detail.get("http_status"),
+        main_failure_age_label=_age_label(minutes_since_attempt),
+        latest_success_after_failure=latest_success_after_failure,
+        recovered=recovered,
     )
 
 
@@ -391,4 +554,12 @@ def freshness_to_dict(f: SourceFreshness) -> dict[str, Any]:
         "rows_upserted": f.rows_upserted,
         "duration_ms": f.duration_ms,
         "last_success_source": f.last_success_source,
+        "display_label": f.display_label,
+        "main_failure_metric": f.main_failure_metric,
+        "main_failure_metric_label": f.main_failure_metric_label,
+        "main_failure_endpoint": f.main_failure_endpoint,
+        "main_failure_http_status": f.main_failure_http_status,
+        "main_failure_age_label": f.main_failure_age_label,
+        "latest_success_after_failure": f.latest_success_after_failure,
+        "recovered": f.recovered,
     }

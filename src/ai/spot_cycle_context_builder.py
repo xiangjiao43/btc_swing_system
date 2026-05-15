@@ -85,15 +85,7 @@ _FACTOR_SOURCE = {
     "hodl_waves_1y_plus_aggregate": "glassnode_onchain_derived",
 }
 
-_UNAVAILABLE_MODEL_FACTORS = {
-    "market_cap_realized_cap": "not_found",
-    "liveliness": "config_only",
-    "stablecoin_supply_liquidity": "not_found",
-    "unemployment": "deprecated_candidate",
-    "futures_basis_premium": "deprecated_candidate",
-    "options_iv_skew": "not_found",
-    "liquidation_heatmap_levels": "not_found",
-}
+_UNAVAILABLE_MODEL_FACTORS: dict[str, str] = {}
 
 _A1_CORE_FACTORS = {
     "current_close", "ath_drawdown_pct", "ma_200d", "ma_200w",

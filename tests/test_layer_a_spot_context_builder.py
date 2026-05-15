@@ -53,6 +53,17 @@ def test_spot_cycle_context_builder_empty_db_does_not_crash():
         "cpi", "core_cpi",
     ):
         assert name not in unavailable_names
+    for name in (
+        "futures_basis_premium",
+        "liquidation_heatmap_levels",
+        "liveliness",
+        "market_cap_realized_cap",
+        "options_iv_skew",
+        "stablecoin_supply_liquidity",
+        "unemployment",
+    ):
+        assert name not in unavailable_names
+    assert ctx["factor_coverage"]["total_unavailable_factors"] == 0
     assert ctx["factor_coverage"]["critical_unavailable_count"] == 0
     assert ctx["factor_coverage"]["confidence_cap"] == "low"
     roles = ctx["factor_role_classification"]

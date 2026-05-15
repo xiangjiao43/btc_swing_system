@@ -479,8 +479,8 @@
            x-text="'波段策略更新时间：' + swingStrategyUpdatedAt()"></p>
       </header>
 
-      <div class="p-3 space-y-4">
-        <section id="region-swing-summary" class="grid grid-cols-2 md:grid-cols-5 gap-3 text-[12px]">
+      <div class="p-3 space-y-3">
+        <section id="region-swing-summary" class="w-full grid grid-cols-2 md:grid-cols-5 gap-3 text-[12px]">
           <div class="rounded border border-slate-200 dark:border-slate-800 p-2">
             <div class="stat-label">当前状态</div>
             <div class="text-[13px] font-bold" x-text="swingCurrentStatus()"></div>
@@ -503,13 +503,13 @@
           </div>
         </section>
 
-        <section id="region-swing-account-execution" class="rounded">
-          <header class="px-3 py-2">
+        <section id="region-swing-account-execution" class="w-full rounded">
+          <header class="py-1.5">
             <h3 class="text-[13px] font-semibold flex items-center gap-2">
               <span>💼</span><span>账户与执行</span>
             </h3>
           </header>
-          <div class="p-3 space-y-3">
+          <div class="space-y-2">
             <div class="grid grid-cols-1 lg:grid-cols-3 gap-3">
               <article id="region-virtual-account" class="rounded border border-slate-200 dark:border-slate-800 p-3 space-y-2">
                 <h4 class="text-[12px] font-semibold text-slate-600 dark:text-slate-400">虚拟账户</h4>
@@ -701,9 +701,9 @@
         </div>
 
         <!-- 2. Layer B evidence cards -->
-        <section id="region-layer-cards" class="rounded"
+        <section id="region-layer-cards" class="w-full rounded"
                  x-show="(state.layer_cards || []).length > 0">
-          <div class="p-3 space-y-3">
+          <div class="space-y-2">
             <div id="region-swing-adjudicator-summary"
                  aria-label="交易员结论"
                  class="rounded border border-slate-200 dark:border-slate-800 p-3">
@@ -713,7 +713,7 @@
                  x-text="swingAdjudicatorSummary()"></p>
             </div>
 
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
               <template x-for="(card, idx) in (state.layer_cards || [])" :key="card.layer">
                 <article class="border border-slate-200 dark:border-slate-800 rounded p-3 space-y-2 min-w-0">
                   <header class="flex items-baseline justify-between gap-2">

@@ -513,6 +513,32 @@ def test_swing_strategy_middle_borders_removed_but_content_cards_kept(html):
     assert 'class="border border-slate-200 dark:border-slate-800 rounded p-3 space-y-2 min-w-0"' in html
 
 
+def test_swing_strategy_inner_regions_are_full_width_and_compact(html):
+    """账户执行、交易员结论、五层区域与摘要栏同宽,并收紧纵向间距。"""
+    def region_class(region_id: str) -> str:
+        match = re.search(rf'id="{region_id}"[^>]*class="([^"]*)"', html)
+        assert match, f"{region_id} 缺失 class"
+        return match.group(1)
+
+    assert "p-3 space-y-3" in html
+    assert "w-full" in region_class("region-swing-summary")
+    assert "w-full" in region_class("region-swing-account-execution")
+    assert "w-full" in region_class("region-layer-cards")
+
+    account_start = html.find('id="region-swing-account-execution"')
+    account_end = html.find('id="region-layer-cards"')
+    account_section = html[account_start:account_end]
+    assert '<div class="space-y-2">' in account_section
+    assert '<div class="p-3 space-y-3">' not in account_section
+
+    layer_start = html.find('id="region-layer-cards"')
+    layer_end = html.find('id="region-4"')
+    layer_section = html[layer_start:layer_end]
+    assert '<div class="space-y-2">' in layer_section
+    assert "lg:grid-cols-3 gap-2" in layer_section
+    assert '<div class="p-3 space-y-3">' not in layer_section
+
+
 def test_swing_summary_restores_full_five_cards(html):
     """波段策略顶部摘要恢复 5 个摘要块。"""
     start = html.find('id="region-swing-summary"')

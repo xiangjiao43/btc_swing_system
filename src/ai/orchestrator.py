@@ -24,11 +24,6 @@ import time
 from typing import Any, Optional
 
 from .agents import (
-    A1SpotCycleAnalyst,
-    A2OnchainMacroAnalyst,
-    A3SpotOpportunityAnalyst,
-    A4SpotRiskAnalyst,
-    A5SpotAdjudicator,
     LayerACycleAdjudicator,
     L1RegimeAnalyst,
     L2DirectionAnalyst,
@@ -201,11 +196,6 @@ class AIOrchestrator:
                 "l4": L4RiskAnalyst(client=anthropic_client),
                 "l5": L5MacroAnalyst(client=anthropic_client),
                 "master": MasterAdjudicator(client=anthropic_client),
-                "a1": A1SpotCycleAnalyst(client=anthropic_client),
-                "a2": A2OnchainMacroAnalyst(client=anthropic_client),
-                "a3": A3SpotOpportunityAnalyst(client=anthropic_client),
-                "a4": A4SpotRiskAnalyst(client=anthropic_client),
-                "a5": A5SpotAdjudicator(client=anthropic_client),
                 "layer_a_cycle": LayerACycleAdjudicator(client=anthropic_client),
                 # Sprint 1.10-G:简化 A 应急 AI(event_price 触发时走它,不跑完整 6 AI)
                 "emergency_simplified_a": EmergencySimplifiedA(

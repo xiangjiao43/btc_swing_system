@@ -123,7 +123,7 @@ jobs:
     misfire_grace_time: 300
     coalesce: true
     max_instances: 1
-    description: 'Layer A 大周期现货策略(10:00 BJT 每日 1 档;只跑 A1-A5 + Spot Validator + latest Layer A 持久化)'
+    description: 'Layer A 大周期现货策略(10:00 BJT 每日 1 档;Layer A 单一大周期裁决:四个数据包 + 一次 AI 调用 + Spot Validator + latest Layer A 持久化)'
 
   # v1.4 主裁决:每日 1 档,配合 BTC_USE_ORCHESTRATOR=true 走
   # src/ai/orchestrator.py(Layer B L1-L5 + Master + Validator 24)。

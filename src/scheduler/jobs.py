@@ -275,6 +275,10 @@ _GLASSNODE_FETCHERS: tuple[str, ...] = (
     # 2026-05:reserve_risk / puell_multiple 仅作为 Layer A 只读周期因子恢复采集。
     # Sprint 1.6(建模 v1.3 §2.4):4 新链上端点
     "fetch_sth_supply", "fetch_ssr", "fetch_cdd", "fetch_hodl_waves",
+    # Sprint 82e59f9 漏注册补回:hash_rate(算力)是 Layer A bear_bottom 阶段
+    # 判断的核心因子,collect_and_save_all 已注册但 scheduler 路径漏了 → 生产
+    # 端 collect_onchain job 从未采集,DB 永远没行。
+    "fetch_hash_rate",
 )
 
 

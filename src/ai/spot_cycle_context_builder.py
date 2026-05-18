@@ -1011,7 +1011,10 @@ class SpotCycleContextBuilder:
                 "sth_supply_90d_pct_change": _factor("sth_supply", lth_sth.get("sth_supply_90d_pct_change"), stale_map=stale_map, hours_map=hours_map),
                 "sopr_adjusted": metric("sopr_adjusted"),
                 "sopr": metric("sopr_adjusted"),
-                "hodl_waves": metric("hodl_waves"),
+                # Sprint 1.6 起一直存在的命名 mismatch 修复:DB 里 hodl_waves
+                # 拆成 hodl_waves_<bucket> 12 条独立 metric,根本没有裸名行;
+                # 这行 metric("hodl_waves") 永远查不到 → missing。
+                # bucket 级 Layer A 用不上,1y+ 占比由下面的 aggregate 提供。
                 "hodl_waves_1y_plus_aggregate": _factor(
                     "hodl_waves_1y_plus_aggregate",
                     hodl_long_pct,

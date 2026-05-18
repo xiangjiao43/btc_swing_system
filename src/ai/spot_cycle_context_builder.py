@@ -206,11 +206,15 @@ def _round(v: Any, digits: int = 4) -> Any:
 
 
 def _compact_factor(v: Any) -> dict[str, Any]:
-    """Return only the fields A1 needs for stage classification."""
+    """Return only the fields A1 needs for stage classification.
+
+    Idempotent: accepts both the raw `_factor` form ({actual_value, status, ...})
+    and an already-compacted form ({value, status, ...}).
+    """
     if not isinstance(v, dict):
         return {"value": v}
     out = {
-        "value": v.get("actual_value"),
+        "value": v.get("actual_value") if "actual_value" in v else v.get("value"),
         "status": v.get("status"),
     }
     freshness = v.get("freshness") if isinstance(v.get("freshness"), dict) else {}

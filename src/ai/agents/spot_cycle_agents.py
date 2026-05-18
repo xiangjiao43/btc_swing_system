@@ -50,8 +50,8 @@ class LayerACycleAdjudicator(BaseAgent):
 
     def _fallback_output(self) -> dict[str, Any]:
         return {
-            "raw_stage_assessment": "bull_bear_transition",
-            "official_stage_recommendation": "bull_bear_transition",
+            "raw_stage_assessment": "bear_bottom",
+            "official_stage_recommendation": "bear_bottom",
             "transition_status_recommendation": "pending",
             "cycle_stage_confidence": "low",
             "spot_action_recommendation": "hold",

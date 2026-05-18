@@ -1294,24 +1294,18 @@ function app() {
                 scale_out: '分批卖出',
                 strong_sell: '强力卖出',
                 aggressive_sell: '强力卖出',
+                exit_all: '清仓离场',
             };
             return m[v] || '持有';
         },
         spotCycleStageLabel(v) {
             const m = {
                 bear_bottom: '熊市底部',
-                deep_value: '熊市底部',
-                accumulation: '底部吸筹',
-                bull_bear_transition: '牛熊过渡',
-                bear_transition: '牛熊过渡',
-                trend_hold: '牛市中期',
-                early_bull: '牛市初段',
-                mid_bull: '牛市中期',
-                late_bull: '牛市后期',
-                distribution: '牛市后期',
-                overheated_top: '顶部过热',
-                overheated_exit: '顶部过热',
-                deep_bear: '深度熊市',
+                recovery: '复苏期',
+                bull_main: '牛市主升',
+                bull_late: '牛市末期',
+                top_distribution: '顶部派发',
+                bear_decline: '熊市下跌',
                 unclear: '不明确',
             };
             return m[v] || '不明确';

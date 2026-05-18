@@ -4,7 +4,7 @@ from src.ai.spot_strategy_normalizer import normalize_layer_a_output
 from src.ai.spot_validator import validate_spot_strategy_output
 
 
-def _valid_output(action: str = "hold", stage: str = "mid_bull"):
+def _valid_output(action: str = "hold", stage: str = "bull_main"):
     return normalize_layer_a_output({
         "a1_cycle_stage": {"cycle_stage": stage, "human_summary": "趋势持有"},
         "a4_spot_risk": {"spot_risk_level": "moderate", "human_summary": "风险中等"},
@@ -91,7 +91,7 @@ def test_strong_buy_requires_two_sided_evidence():
 
 
 def test_strong_sell_requires_two_sided_evidence():
-    out = _valid_output("strong_sell", stage="overheated_top")
+    out = _valid_output("strong_sell", stage="top_distribution")
     out["a5_spot_adjudicator"]["supporting_evidence"] = []
     guard = validate_spot_strategy_output(out)
     assert "strong_sell_missing_supporting_evidence" in guard["violations"]

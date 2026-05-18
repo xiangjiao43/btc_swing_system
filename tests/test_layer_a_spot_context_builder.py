@@ -345,10 +345,10 @@ def test_a1_lightweight_context_contains_only_stage_essentials():
 
     ctx["previous_layer_a_state"] = {
         "generated_at_bjt": "2026-05-14 10:00:00 BJT",
-        "cycle_stage_model_version": "layer_a_seven_stage_v1",
+        "cycle_stage_model_version": "layer_a_six_stage_v2",
         "a1_cycle_stage": {
-            "official_cycle_stage": "accumulation",
-            "raw_stage_assessment": "accumulation",
+            "official_cycle_stage": "recovery",
+            "raw_stage_assessment": "recovery",
             "transition_status": "confirmed",
         },
         "a5_spot_adjudicator": {"spot_action": "dca_buy"},
@@ -359,17 +359,16 @@ def test_a1_lightweight_context_contains_only_stage_essentials():
     assert set(light.keys()) == {
         "stage_model", "cycle_evidence_summary", "recent_stage_history", "instructions",
     }
-    assert light["stage_model"]["previous_official_stage"] == "accumulation"
+    assert light["stage_model"]["previous_official_stage"] == "recovery"
     assert light["stage_model"]["allowed_stages"] == [
         "bear_bottom",
-        "accumulation",
-        "bull_bear_transition",
-        "early_bull",
-        "mid_bull",
-        "late_bull",
-        "overheated_top",
+        "recovery",
+        "bull_main",
+        "bull_late",
+        "top_distribution",
+        "bear_decline",
     ]
-    assert light["recent_stage_history"][0]["official_stage"] == "accumulation"
+    assert light["recent_stage_history"][0]["official_stage"] == "recovery"
     assert "mvrv_z_score" in light["cycle_evidence_summary"]["valuation"]
     assert "rhodl_ratio" in light["cycle_evidence_summary"]["valuation"]
     assert "lth_sopr" in light["cycle_evidence_summary"]["holder_behavior"]
@@ -510,7 +509,7 @@ def test_layer_a_single_adjudicator_context_builds_three_deterministic_packets()
         "factor_coverage": {"coverage_ratio": 0.9, "confidence_cap": "high"},
         "previous_layer_a_state": {
             "cycle_stage_model_version": "layer_a_seven_stage_v1",
-            "a1_cycle_stage": {"official_cycle_stage": "accumulation"},
+            "a1_cycle_stage": {"official_cycle_stage": "recovery"},
         },
     }
     out = build_layer_a_cycle_adjudicator_context({"spot_cycle_context": ctx})
@@ -518,7 +517,7 @@ def test_layer_a_single_adjudicator_context_builds_three_deterministic_packets()
     assert set(packets) == {
         "price_structure_packet", "onchain_packet", "macro_flow_packet",
     }
-    assert out["previous_official_stage"] == "accumulation"
+    assert out["previous_official_stage"] == "recovery"
     assert packets["price_structure_packet"]["status"] == "available"
     assert "btc_price" in packets["price_structure_packet"]["key_metrics"]
     assert "lth_sopr" in packets["onchain_packet"]["key_metrics"]

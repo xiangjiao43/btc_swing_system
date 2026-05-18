@@ -30,7 +30,7 @@ def _sample_layer_a(action: str = "dca_buy") -> dict:
     return {
         "enabled": True,
         "a1_cycle_stage": {
-            "cycle_stage": "accumulation",
+            "cycle_stage": "recovery",
             "confidence": "medium",
             "headline": "底部吸筹",
             "human_summary": "大周期偏吸筹。",
@@ -52,7 +52,7 @@ def _sample_layer_a(action: str = "dca_buy") -> dict:
         },
         "a5_spot_adjudicator": {
             "spot_action": action,
-            "cycle_stage": "accumulation",
+            "cycle_stage": "recovery",
             "confidence": "medium",
             "headline": "分批买入",
             "human_summary": "现货仓分批买入。",

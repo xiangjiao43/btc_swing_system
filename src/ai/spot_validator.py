@@ -119,7 +119,7 @@ def validate_spot_strategy_output(
     if not a5.get("what_would_change_mind"):
         violations.append("missing_what_would_change_mind")
 
-    if action in ("strong_buy", "strong_sell"):
+    if action in ("strong_buy", "strong_sell", "exit_all"):
         if not _as_list(a5.get("supporting_evidence")):
             violations.append(f"{action}_missing_supporting_evidence")
         if not _as_list(a5.get("opposing_evidence")):
@@ -138,14 +138,19 @@ def validate_spot_strategy_output(
 
     if action == "strong_buy" and risk in ("high", "critical"):
         warnings.append("strong_buy_with_high_or_critical_risk")
-    if action == "strong_sell" and stage in ("bear_bottom", "accumulation"):
-        warnings.append("strong_sell_in_value_or_accumulation_stage")
+    if action == "strong_sell" and stage in ("bear_bottom", "recovery"):
+        warnings.append("strong_sell_in_value_or_recovery_stage")
     if action == "dca_buy" and risk == "critical":
         warnings.append("dca_buy_with_critical_risk")
     if action == "scale_sell":
         combined = _blob(a4.get("overheat_signals")) + _blob(a5.get("supporting_evidence"))
-        if not any(k in combined for k in ("过热", "派发", "牛市后期", "宏观", "overheat", "late_bull", "risk")):
+        if not any(
+            k in combined
+            for k in ("过热", "派发", "牛市末期", "宏观", "overheat", "bull_late", "risk")
+        ):
             warnings.append("scale_sell_without_overheat_distribution_or_macro_evidence")
+    if action == "exit_all" and stage in ("bear_bottom", "recovery", "bull_main"):
+        warnings.append("exit_all_in_non_distribution_or_decline_stage")
     if not _as_list(a5.get("opposing_evidence")):
         warnings.append("missing_opposing_evidence")
 

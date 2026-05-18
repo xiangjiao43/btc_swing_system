@@ -22,7 +22,7 @@ from .spot_cycle_stage_state import (
     normalize_stage,
 )
 
-SPOT_ACTIONS = ("strong_buy", "dca_buy", "hold", "scale_sell", "strong_sell")
+SPOT_ACTIONS = ("strong_buy", "dca_buy", "hold", "scale_sell", "strong_sell", "exit_all")
 CYCLE_STAGES = (*OFFICIAL_CYCLE_STAGES, "unclear")
 CONFIDENCE_LEVELS = ("low", "medium", "high")
 ONCHAIN_MACRO_STANCES = (
@@ -215,9 +215,9 @@ def fallback_layer_a_output(reason: str = "Layer A AI 输出失败或证据不�
         {
             "enabled": True,
             "a1_cycle_stage": {
-                "cycle_stage": "mid_bull",
-                "raw_stage_assessment": "mid_bull",
-                "official_cycle_stage": "mid_bull",
+                "cycle_stage": "bear_bottom",
+                "raw_stage_assessment": "bear_bottom",
+                "official_cycle_stage": "bear_bottom",
                 "confidence": "low",
                 "headline": "暂无大周期阶段判断",
                 "human_summary": reason,
@@ -245,7 +245,7 @@ def fallback_layer_a_output(reason: str = "Layer A AI 输出失败或证据不�
             },
             "a5_spot_adjudicator": {
                 "spot_action": "hold",
-                "cycle_stage": "mid_bull",
+                "cycle_stage": "bear_bottom",
                 "confidence": "low",
                 "headline": "暂无大周期策略",
                 "human_summary": reason,
@@ -257,8 +257,8 @@ def fallback_layer_a_output(reason: str = "Layer A AI 输出失败或证据不�
             },
             "model_notes": [reason],
             "cycle_adjudicator": {
-                "raw_stage_assessment": "bull_bear_transition",
-                "official_stage_recommendation": "bull_bear_transition",
+                "raw_stage_assessment": "bear_bottom",
+                "official_stage_recommendation": "bear_bottom",
                 "cycle_stage_confidence": "low",
                 "spot_action_recommendation": "hold",
                 "risk_level": "elevated",
@@ -280,9 +280,9 @@ def fallback_layer_a_output(reason: str = "Layer A AI 输出失败或证据不�
 def normalize_a1(raw: Any, warnings: list[str]) -> dict[str, Any]:
     d = _as_dict(raw)
     stage_raw = d.get("official_cycle_stage") or d.get("cycle_stage")
-    stage = normalize_stage(stage_raw, default="bull_bear_transition")
+    stage = normalize_stage(stage_raw, default="bear_bottom")
     if stage_raw and not is_known_stage(stage_raw):
-        warnings.append("a1_invalid_cycle_stage_normalized_to_bull_bear_transition")
+        warnings.append("a1_invalid_cycle_stage_normalized_to_bear_bottom")
     raw_stage = normalize_stage(
         d.get("raw_stage_assessment") or d.get("cycle_stage"),
         default=stage,
@@ -368,9 +368,9 @@ def normalize_a5(raw: Any, violations: list[str], warnings: list[str]) -> dict[s
     if action_raw and action == "hold" and str(action_raw).strip().lower() not in ("hold",):
         violations.append("a5_invalid_spot_action_normalized_to_hold")
     stage_raw = d.get("cycle_stage")
-    stage = normalize_stage(stage_raw, default="bull_bear_transition")
+    stage = normalize_stage(stage_raw, default="bear_bottom")
     if stage_raw and not is_known_stage(stage_raw):
-        warnings.append("a5_invalid_cycle_stage_normalized_to_bull_bear_transition")
+        warnings.append("a5_invalid_cycle_stage_normalized_to_bear_bottom")
     return {
         "spot_action": action,
         "cycle_stage": stage,
@@ -393,7 +393,7 @@ def normalize_cycle_adjudicator(raw: Any) -> dict[str, Any]:
         d.get("raw_stage_assessment")
         or d.get("official_stage_recommendation")
         or d.get("cycle_stage"),
-        default="bull_bear_transition",
+        default="bear_bottom",
     )
     official_recommendation = normalize_stage(
         d.get("official_stage_recommendation") or raw_stage,

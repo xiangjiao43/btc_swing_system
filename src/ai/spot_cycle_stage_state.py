@@ -1,4 +1,4 @@
-"""Layer A seven-stage cycle state helper.
+"""Layer A six-stage cycle state helper.
 
 This helper keeps Layer A as a slow spot-cycle model.  AI may describe the
 current raw features, but the official stage changes only after confirmation.
@@ -12,40 +12,31 @@ from typing import Any
 
 OFFICIAL_CYCLE_STAGES = (
     "bear_bottom",
-    "accumulation",
-    "bull_bear_transition",
-    "early_bull",
-    "mid_bull",
-    "late_bull",
-    "overheated_top",
+    "recovery",
+    "bull_main",
+    "bull_late",
+    "top_distribution",
+    "bear_decline",
 )
 
-CURRENT_STAGE_MODEL_VERSION = "layer_a_seven_stage_v1"
+CURRENT_STAGE_MODEL_VERSION = "layer_a_six_stage_v2"
 
 STAGE_DEFAULT_ACTION = {
     "bear_bottom": "strong_buy",
-    "accumulation": "dca_buy",
-    "bull_bear_transition": "hold",
-    "early_bull": "dca_buy",
-    "mid_bull": "hold",
-    "late_bull": "scale_sell",
-    "overheated_top": "strong_sell",
+    "recovery": "dca_buy",
+    "bull_main": "hold",
+    "bull_late": "scale_sell",
+    "top_distribution": "strong_sell",
+    "bear_decline": "exit_all",
 }
 
 LEGACY_STAGE_MAP = {
-    "deep_value": "bear_bottom",
     "bear_bottom": "bear_bottom",
-    "deep_bear": "bear_bottom",
-    "accumulation": "accumulation",
-    "bull_bear_transition": "bull_bear_transition",
-    "bear_transition": "bull_bear_transition",
-    "early_bull": "early_bull",
-    "trend_hold": "mid_bull",
-    "mid_bull": "mid_bull",
-    "late_bull": "late_bull",
-    "distribution": "late_bull",
-    "overheated_exit": "overheated_top",
-    "overheated_top": "overheated_top",
+    "recovery": "recovery",
+    "bull_main": "bull_main",
+    "bull_late": "bull_late",
+    "top_distribution": "top_distribution",
+    "bear_decline": "bear_decline",
 }
 
 ACTION_ALIASES = {
@@ -60,6 +51,7 @@ ACTION_RANK = {
     "hold": 2,
     "scale_sell": 3,
     "strong_sell": 4,
+    "exit_all": 5,
 }
 
 
@@ -75,7 +67,7 @@ def as_list(v: Any) -> list[Any]:
     return [v]
 
 
-def normalize_stage(v: Any, default: str = "bull_bear_transition") -> str:
+def normalize_stage(v: Any, default: str = "bear_bottom") -> str:
     key = str(v or "").strip().lower()
     return LEGACY_STAGE_MAP.get(key, default)
 
@@ -199,7 +191,7 @@ def evaluate_stage_transition(
             "transition_direction": "unchanged",
             "confirmation_count": 1,
             "confirmation_required": 1,
-            "stage_change_reason": "首次 Layer A 七阶段输出，直接作为正式阶段。",
+            "stage_change_reason": "首次 Layer A 六阶段输出，直接作为正式阶段。",
             "evidence_for_change": [],
             "evidence_against_change": [],
             "confidence_cap_reason": block_reason,
@@ -241,7 +233,7 @@ def evaluate_stage_transition(
     if not has_current_model(previous_layer_a):
         status = "recalibration"
         official = previous
-        reason = "上一轮不是七阶段模型输出，本轮视为模型重校准，先不确认阶段跳变。"
+        reason = "上一轮不是六阶段模型输出，本轮视为模型重校准，先不确认阶段跳变。"
     elif blocks_confirmation:
         status = "pending"
         official = previous
@@ -276,25 +268,33 @@ def conservative_action_for_official_stage(
     proposed_action: str,
     risk_level: str | None = None,
 ) -> str:
+    """Conservatize the AI-proposed spot action against the official stage.
+
+    Critical rule: ``exit_all`` is EXEMPT from any conservatization downgrade.
+    Liquidation in high-risk conditions is supposed to fire — we must never
+    weaken it to ``hold`` or any other action.  The risk-driven downgrade
+    only touches buy-side actions (``strong_buy`` / ``dca_buy``).
+    """
     official = normalize_stage(official_stage)
     proposed = normalize_action(proposed_action)
     default = STAGE_DEFAULT_ACTION.get(official, "hold")
     risk = str(risk_level or "").lower()
 
+    if proposed == "exit_all":
+        return "exit_all"
+
     if risk in {"high", "critical"} and proposed in {"strong_buy", "dca_buy"}:
         return "hold"
     if official == "bear_bottom" and proposed == "strong_buy":
         return proposed
-    if official == "accumulation" and proposed == "strong_buy":
+    if official == "recovery" and proposed == "strong_buy":
         return "dca_buy"
-    if official == "bull_bear_transition" and proposed == "strong_buy":
-        return "dca_buy"
-    if official == "early_bull" and proposed == "strong_buy":
-        return "dca_buy"
-    if official == "mid_bull" and proposed in {"strong_buy", "dca_buy"}:
+    if official == "bull_main" and proposed in {"strong_buy", "dca_buy"}:
         return "hold"
-    if official == "late_bull" and proposed == "strong_sell":
+    if official == "bull_late" and proposed == "strong_sell":
         return "scale_sell"
-    if official == "overheated_top" and proposed in {"strong_buy", "dca_buy", "hold"}:
+    if official == "top_distribution" and proposed in {"strong_buy", "dca_buy", "hold"}:
+        return default
+    if official == "bear_decline" and proposed in {"strong_buy", "dca_buy", "hold", "scale_sell", "strong_sell"}:
         return default
     return proposed

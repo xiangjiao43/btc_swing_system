@@ -33,19 +33,19 @@ def test_layer_a_ai_failure_does_not_change_layer_b_master():
             "data_completeness_pct": 90,
         },
     )
-    agents["a1"] = _agent({"cycle_stage": "early_bull", "human_summary": "legacy"})
+    agents["a1"] = _agent({"cycle_stage": "recovery", "human_summary": "legacy"})
     agents["a2"] = _agent({"onchain_macro_stance": "bullish", "human_summary": "legacy"})
     agents["a3"] = _agent({"preferred_action_candidate": "hold", "human_summary": "legacy"})
     agents["a4"] = _agent({"spot_risk_level": "moderate", "human_summary": "legacy"})
     agents["a5"] = _agent({
         "spot_action": "trend_short",
-        "cycle_stage": "early_bull",
+        "cycle_stage": "recovery",
         "human_summary": "legacy",
         "what_would_change_mind": ["x"],
     })
     agents["layer_a_cycle"] = _agent({
-        "raw_stage_assessment": "early_bull",
-        "official_stage_recommendation": "early_bull",
+        "raw_stage_assessment": "recovery",
+        "official_stage_recommendation": "recovery",
         "cycle_stage_confidence": "medium",
         "spot_action_recommendation": "hold",
         "risk_level": "moderate",

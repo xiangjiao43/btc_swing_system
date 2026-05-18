@@ -957,16 +957,42 @@ class SpotCycleContextBuilder:
         hodl_long_pct = (hodl_long_value * 100.0) if hodl_long_have_any else None
 
         available = {
+            # Sprint 1.6.4 bug fix:本组派生因子全部补 extra=*_kline_meta,
+            # 否则前端 layerAFactorFetchedAt 读不到 fetched_at_bjt → 卡片右下角
+            # "抓取于 XX" 空白。current_close / ath_drawdown / ma_200d 走日 K,
+            # ma_200w / ma_200w_deviation_pct 走周 K(失败时回落日 K)。
+            # 老 monthly_ohlc_structure / major_support_resistance_zones 早已是
+            # 这个范式,本次把缺的 5 个补齐。
             "price_structure": {
-                "current_close": _factor("current_close", current_close, source="coinglass_derivatives", stale_map=stale_map, hours_map=hours_map),
-                "ath_drawdown_pct": _factor("ath_drawdown", ath_drawdown, source="coinglass_derivatives", stale_map=stale_map, hours_map=hours_map),
-                "ma_200d": _factor("ma_200d", ma_200d, source="coinglass_derivatives", stale_map=stale_map, hours_map=hours_map),
-                "ma_200w": _factor("ma_200w", ma_200w, source="coinglass_derivatives", stale_map=stale_map, hours_map=hours_map),
+                "current_close": _factor(
+                    "current_close", current_close,
+                    source="coinglass_derivatives",
+                    stale_map=stale_map, hours_map=hours_map,
+                    extra=daily_kline_meta,
+                ),
+                "ath_drawdown_pct": _factor(
+                    "ath_drawdown", ath_drawdown,
+                    source="coinglass_derivatives",
+                    stale_map=stale_map, hours_map=hours_map,
+                    extra=daily_kline_meta,
+                ),
+                "ma_200d": _factor(
+                    "ma_200d", ma_200d,
+                    source="coinglass_derivatives",
+                    stale_map=stale_map, hours_map=hours_map,
+                    extra=daily_kline_meta,
+                ),
+                "ma_200w": _factor(
+                    "ma_200w", ma_200w,
+                    source="coinglass_derivatives",
+                    stale_map=stale_map, hours_map=hours_map,
+                    extra=weekly_kline_meta or daily_kline_meta,
+                ),
                 "ma_200w_deviation_pct": _factor(
                     "ma_200w_deviation_pct", ma_200w_deviation_pct,
                     source="coinglass_derivatives_derived",
                     stale_map=stale_map, hours_map=hours_map,
-                    extra={"value_unit": "%"},
+                    extra={"value_unit": "%", **(weekly_kline_meta or daily_kline_meta)},
                 ),
                 "weekly_structure": weekly_structure,
                 "monthly_ohlc_structure": _factor(

@@ -315,52 +315,86 @@ def _has_today_inserted_in_metric_table(
     return cur.fetchone() is not None
 
 
-# Sprint C(2026-05-08):onchain "今日完整性"门简化 — 任一一手 Glassnode 行
-# 今天写过就算完成。老的 _ONCHAIN_EXPECTED_METRICS_TODAY 13-metric 全集合检查 +
-# _ONCHAIN_HODL_WAVES_PREFIX 已删除(13 个 fetcher 共用一个 fetch_attempts
-# bucket,所以"全部 13 metric 今天都写过"和"任一一手 source 今天有行"在 quota
-# 分流后语义等价)。
-_ONCHAIN_FIRST_HAND_SOURCES: tuple[str, ...] = (
-    "glassnode_primary",
-    "glassnode_display",
-    "glassnode_derived_breakdown_by_age",
-)
+# Sprint 1.6.2(2026-05-17)重新引入细粒度"今日完整性"门 —
+# 推翻 Sprint C(2026-05-08)的"任一一手 source 今天有行 → skip"假设。
+#
+# 旧设计致命缺陷:22 个 fetcher 独立 try/except,puell 单独失败时
+# 其他 21 个仍写入 source='glassnode_primary' 行,Sprint C 的 (a) 分支
+# 误判"全 complete",09:35/10:35 cron 全部短路 skip,puell 当天没有第二次
+# 重试机会 → 持续从 5/15、5/16 之后 stuck(根因详见
+# docs/cc_reports/sprint_layer_a_puell_root_cause.md)。
+#
+# 新设计:每个 fetcher 独立检查"它代表的 metric 今天有无行";只要任一
+# fetcher 缺失,后续 cron slot 会重抓那个 fetcher(其他成功的 fetcher
+# 自动 skip,不浪费 HTTP)。
+_FETCHER_TO_REPRESENTATIVE_METRIC: dict[str, str] = {
+    "fetch_mvrv_z_score": "mvrv_z_score",
+    "fetch_nupl": "nupl",
+    "fetch_lth_supply": "lth_supply",
+    "fetch_exchange_net_flow": "exchange_net_flow",
+    "fetch_mvrv": "mvrv",
+    "fetch_realized_price": "realized_price",
+    "fetch_lth_realized_price": "lth_realized_price",
+    "fetch_sth_realized_price": "sth_realized_price",
+    "fetch_sopr_adjusted": "sopr_adjusted",
+    "fetch_percent_supply_in_profit": "percent_supply_in_profit",
+    "fetch_exchange_balance": "exchange_balance",
+    "fetch_lth_sopr": "lth_sopr",
+    "fetch_sth_sopr": "sth_sopr",
+    "fetch_rhodl_ratio": "rhodl_ratio",
+    "fetch_reserve_risk": "reserve_risk",
+    "fetch_puell_multiple": "puell_multiple",
+    "fetch_lth_net_position_change": "lth_net_position_change",
+    "fetch_sth_supply": "sth_supply",
+    "fetch_ssr": "ssr",
+    "fetch_cdd": "cdd",
+    # fetch_hodl_waves 写 12 个 hodl_waves_<bucket> 行,要么全成功要么全失败;
+    # 选 more_10y 作代表(长尾 bucket,只要 endpoint 成功就有)
+    "fetch_hodl_waves": "hodl_waves_more_10y",
+    "fetch_hash_rate": "hash_rate",
+}
 
 
-def _onchain_today_complete(conn: Any) -> bool:
-    """Sprint C(2026-05-08)重写:今天满足任一即返 True,abort 后续档。
+def _fetcher_completed_today(conn: Any, fetcher_name: str) -> bool:
+    """单 fetcher 粒度"今日完整性"检查。
 
-    (a) 今天 onchain_metrics 表有任意一手 Glassnode 数据
-        (source IN _ONCHAIN_FIRST_HAND_SOURCES,排除 'computed' 派生)
-    (b) 今天 fetch_attempts 表有 source='glassnode_onchain' status='failure'
-        failure_reason='quota_exceeded' 的行(撞配额墙别再抓)
-        且 rows_upserted=0。若同轮已写入部分 Glassnode 数据,说明只是
-        endpoint-level 部分失败,不能阻止后续重试。
+    True = 今天 onchain_metrics 表里该 fetcher 代表的 metric 已经有行,
+           本档无需再抓。
+    False = 缺失,需要(再次)抓。
 
-    非 quota 失败(network/api/parse)继续返 False → 后续档重试。
+    未在 _FETCHER_TO_REPRESENTATIVE_METRIC 注册的 fetcher 一律返 False(保守),
+    确保新加 fetcher 不会被误 skip。
+    """
+    metric_name = _FETCHER_TO_REPRESENTATIVE_METRIC.get(fetcher_name)
+    if metric_name is None:
+        return False
+    from datetime import datetime, timezone
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    try:
+        row = conn.execute(
+            "SELECT 1 FROM onchain_metrics "
+            "WHERE metric_name = ? AND captured_at_utc LIKE ? "
+            "LIMIT 1",
+            (metric_name, f"{today}%"),
+        ).fetchone()
+        return row is not None
+    except Exception as e:
+        logger.warning(
+            "_fetcher_completed_today(%s) 查询失败,保守返 False: %s",
+            fetcher_name, e,
+        )
+        return False
+
+
+def _truly_quota_exceeded_today(conn: Any) -> bool:
+    """真月度配额耗尽短路。
+
+    与 _classify_failure 拆分后的 'quota_exceeded'(真配额,文本含 quota/
+    rate limit/配额关键字)绑定;'rate_limited'(瞬时限流)不触发本短路,
+    让后续档继续重试。
     """
     from datetime import datetime, timezone
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-
-    # (a) 今天有一手 Glassnode 数据
-    placeholders = ",".join(["?"] * len(_ONCHAIN_FIRST_HAND_SOURCES))
-    try:
-        row = conn.execute(
-            f"SELECT 1 FROM onchain_metrics "
-            f"WHERE captured_at_utc LIKE ? "
-            f"  AND source IN ({placeholders}) "
-            f"LIMIT 1",
-            (f"{today}%", *_ONCHAIN_FIRST_HAND_SOURCES),
-        ).fetchone()
-        if row is not None:
-            logger.info(
-                "_onchain_today_complete: 今天已有一手 Glassnode 数据 → skip",
-            )
-            return True
-    except Exception as e:
-        logger.warning("_onchain_today_complete (a) onchain_metrics 查询失败: %s", e)
-
-    # (b) 今天撞 quota
     try:
         row = conn.execute(
             "SELECT 1 FROM fetch_attempts "
@@ -374,13 +408,26 @@ def _onchain_today_complete(conn: Any) -> bool:
         ).fetchone()
         if row is not None:
             logger.info(
-                "_onchain_today_complete: 今天 fetch_attempts 已撞 quota → skip 后续档",
+                "_truly_quota_exceeded_today: 今天 fetch_attempts 真 quota → skip 整个 job",
             )
             return True
     except Exception as e:
-        logger.warning("_onchain_today_complete (b) fetch_attempts 查询失败: %s", e)
-
+        logger.warning("_truly_quota_exceeded_today 查询失败: %s", e)
     return False
+
+
+def _onchain_today_complete(conn: Any) -> bool:
+    """Sprint 1.6.2 重写:所有 22 个 fetcher 的代表 metric 今天都有行,
+    才算 today_complete。任一缺失 → 返 False,让 cron 下一档继续 fetch。
+
+    保留旧函数名供测试 patch 入口稳定;新逻辑细粒度。
+    """
+    if _truly_quota_exceeded_today(conn):
+        return True
+    for fn_name in _GLASSNODE_FETCHERS:
+        if not _fetcher_completed_today(conn, fn_name):
+            return False
+    return True
 
 
 def _has_today_btc_dominance_or_etf_flow(conn: Any) -> bool:
@@ -849,12 +896,20 @@ def job_collect_onchain(
     已写过,直接 skipped。注意:skip 不调 _enqueue_pipeline_run(没有新数据)。
     """
     def _body(conn: Any) -> dict[str, Any]:
-        # Sprint 1.6.1 任务 B:细粒度"今日完整性"门 — 期望集合(老 12 + 1.6 新 4)
-        # 全在 onchain_metrics 今天写过才 skip;否则继续 fetch 缺的部分
+        # Sprint 1.6.2:细粒度 today_complete + per-fetcher skip。
+        # 真 quota_exceeded(_classify_failure 严格判定)→ skip 整个 job。
+        # 否则逐个 fetcher 检查"代表 metric 今天是否已有行",有则 skip 该 fetcher,
+        # 让 cron 后续档(09:30/10:30)只重抓上一档失败的 fetcher(如 puell)。
+        if _truly_quota_exceeded_today(conn):
+            logger.info(
+                "collect_onchain: 今天真 quota_exceeded → skip 整个 job",
+            )
+            return _skipped_today_payload(
+                "quota_exceeded_today", "glassnode",
+            )
         if _onchain_today_complete(conn):
             logger.info(
-                "collect_onchain: today's all expected onchain metrics "
-                "already written, skip",
+                "collect_onchain: 22 个 fetcher 今天全部已写 → skip 整个 job",
             )
             return _skipped_today_payload(
                 "already_have_today_onchain_complete", "glassnode",
@@ -864,17 +919,28 @@ def job_collect_onchain(
         gn = GlassnodeCollector()
         total = 0
         errors: dict[str, str] = {}
-        # Sprint A:13 fetcher 共用一个 source bucket,任一失败 → bucket=failure
         gn_first_exc: Optional[BaseException] = None
         gn_start = time.time()
         glassnode_rows = 0
+        fetched_count = 0
+        skipped_count = 0
 
         for fn_name in _GLASSNODE_FETCHERS:
+            # Sprint 1.6.2 per-fetcher skip:此 fetcher 今天已写过 → 跳过,
+            # 不浪费 HTTP 配额。puell 这类前档失败的 fetcher 仍会被抓。
+            if _fetcher_completed_today(conn, fn_name):
+                skipped_count += 1
+                logger.info(
+                    "collect_onchain.%s 今天已写 → skip 该 fetcher",
+                    fn_name,
+                )
+                continue
             try:
                 fn = getattr(gn, fn_name, None)
                 if fn is None:
                     continue
                 rows = fn(since_days=since_days)
+                fetched_count += 1
                 if rows:
                     metrics = [
                         OnchainMetric(
@@ -889,16 +955,20 @@ def job_collect_onchain(
                     total += n
                     glassnode_rows += n
             except Exception as e:
+                fetched_count += 1
                 if gn_first_exc is None:
                     gn_first_exc = e
                 logger.warning("collect_onchain.%s failed: %s", fn_name, e)
                 errors[fn_name] = str(e)[:200]
 
-        # Sprint A:13 fetcher 跑完写一行 fetch_attempts(rows_upserted 不含派生)
-        _record_fetch_attempt(
-            conn, source="glassnode_onchain", start_ts=gn_start,
-            rows_upserted=glassnode_rows, first_exc=gn_first_exc,
-        )
+        # Sprint A:fetcher 跑完写一行 fetch_attempts(rows_upserted 不含派生)。
+        # Sprint 1.6.2:若本档 0 个 fetcher 实际跑过(全部命中 per-fetcher skip),
+        # 不写 fetch_attempts(没有真正 fetch)— 与 _skipped_today_payload 路径一致。
+        if fetched_count > 0:
+            _record_fetch_attempt(
+                conn, source="glassnode_onchain", start_ts=gn_start,
+                rows_upserted=glassnode_rows, first_exc=gn_first_exc,
+            )
 
         conn.commit()
 
@@ -924,7 +994,9 @@ def job_collect_onchain(
         # 历史:Sprint B 曾把"任一 success 就 enqueue"修成"真 success 才 enqueue";
         # Sprint F.1 进一步删整条 enqueue 路径(gn_success 仍计算供 events_triggered
         # 字段保留语义,日志还能看出 fetch 是否真成功)。
-        gn_success = (gn_first_exc is None) and (glassnode_rows > 0)
+        gn_success = (gn_first_exc is None) and (
+            glassnode_rows > 0 or fetched_count == 0
+        )
         # NOTE:不再调 _enqueue_pipeline_run("event_onchain")。
         return {
             "by_collector": {
@@ -932,12 +1004,12 @@ def job_collect_onchain(
                 "derived_mvrv": sum(derived_stats.values()),
             },
             "total_upserted": total,
-            # Sprint F.1:enqueue 已删,events_triggered 永远为空 list。
-            # 保留 key 供下游兼容(no_opportunity_narrator / KPI collector 读)。
             "events_triggered": [],
             "errors": errors,
-            # 诊断字段(便于排查 collect_onchain fetch 真实状态)
             "glassnode_fetch_success": gn_success,
+            # Sprint 1.6.2:per-fetcher skip 诊断字段
+            "fetcher_fetched_count": fetched_count,
+            "fetcher_skipped_count": skipped_count,
         }
     return _wrap_job("collect_onchain", _body, conn_factory=conn_factory,
                      refresh_cards_on_success=True)

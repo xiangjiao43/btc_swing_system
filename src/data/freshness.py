@@ -81,6 +81,7 @@ _FALLBACK_QUERIES: dict[str, str] = {
 _FAILURE_REASON_LABELS: dict[str, str] = {
     "partial_failure": "部分异常",
     "quota_exceeded": "配额用尽",
+    "rate_limited": "瞬时限流",
     "auth_error": "API key 无效 / 未授权",
     "permission_denied": "套餐不支持 / 权限不足",
     "endpoint_not_found": "接口不存在 / 配置错误",

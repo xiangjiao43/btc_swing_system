@@ -221,9 +221,18 @@ def test_macro_runs_when_today_missing(db_path):
 # job_collect_onchain skip + run
 # ============================================================
 
-def test_onchain_skip_when_today_has_first_hand_row(db_path):
-    # Sprint C(2026-05-08):skip gate 简化为"任一一手 Glassnode 行今天写过"。
-    # 种 1 行 source='glassnode_primary' 即触发 skip。
+def test_onchain_partial_today_keeps_other_fetchers_running(db_path):
+    """Sprint 1.6.2 关键反退化:推翻旧 Sprint C "任一一手 source 有行就全 job
+    skip" 设计。新行为:每个 fetcher 独立检查代表 metric 今天有无行;只要
+    任一 fetcher 缺失 → job 继续跑,缺失的 fetcher 才被实际抓。
+
+    模拟场景:08:30 主档已写 mvrv_z_score 一行(代表 fetch_mvrv_z_score
+    今天完成),其他 21 个 fetcher 全部缺失(模拟 puell 等失败 + 别的 fetcher
+    本档还没跑到)。09:30 补救档应该:
+      - 不整 job skip(关键!)
+      - mvrv_z_score fetcher 内部 skip(per-fetcher,不浪费 HTTP)
+      - 其他 fetcher 该 fetch 还 fetch
+    """
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     today_captured = f"{today}T08:00:00Z"
     conn = _conn(db_path)
@@ -237,36 +246,93 @@ def test_onchain_skip_when_today_has_first_hand_row(db_path):
     conn.commit()
     conn.close()
 
-    gn_cls = MagicMock()
-    with patch("src.data.collectors.glassnode.GlassnodeCollector", gn_cls):
-        result = jobs_mod.job_collect_onchain(conn_factory=lambda: _conn(db_path))
-    assert result["status"] == "skipped"
-    assert "today" in result["reason"]
-    assert gn_cls.call_count == 0
-    assert result.get("events_triggered") in (None, [], )
+    # mock GlassnodeCollector,每个 fetch_xxx 返回空 list(避免真实 HTTP)
+    gn_instance = MagicMock()
+    gn_instance.fetch_mvrv_z_score = MagicMock(return_value=[])
+    for fn in jobs_mod._GLASSNODE_FETCHERS:
+        setattr(gn_instance, fn, MagicMock(return_value=[]))
+    with patch(
+        "src.data.collectors.glassnode.GlassnodeCollector",
+        return_value=gn_instance,
+    ):
+        with patch(
+            "src.data.collectors.derived_onchain.compute_and_save_derived_mvrv",
+            return_value={},
+        ):
+            result = jobs_mod.job_collect_onchain(
+                conn_factory=lambda: _conn(db_path),
+            )
+
+    # 关键:整 job 不 skip,GlassnodeCollector 被实例化
+    assert result["status"] != "skipped"
+    # mvrv_z_score 命中 per-fetcher skip,所以它的 fetch_xxx 不被调
+    assert gn_instance.fetch_mvrv_z_score.call_count == 0
+    # 其他 21 个 fetcher 都被调过(代表 metric 今天没行 → fetch)
+    fetched_count = result.get("fetcher_fetched_count", -1)
+    skipped_count = result.get("fetcher_skipped_count", -1)
+    assert skipped_count == 1, f"expected exactly mvrv_z_score skipped, got {skipped_count}"
+    assert fetched_count == len(jobs_mod._GLASSNODE_FETCHERS) - 1, \
+        f"expected 21 fetched, got {fetched_count}"
 
 
-def test_onchain_no_skip_when_today_only_has_computed_row(db_path):
-    """Sprint C 关键反退化:onchain_metrics 今天只有 source='computed'(派生)
-    的行 → skip gate 不触发,因为派生 source 不算一手数据。"""
+def test_onchain_skip_when_all_fetchers_completed_today(db_path):
+    """Sprint 1.6.2 新场景:22 个 fetcher 代表 metric 今天全部已有行 →
+    整 job skip,GlassnodeCollector 0 次实例化、0 HTTP 浪费。
+    """
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     today_captured = f"{today}T08:00:00Z"
     conn = _conn(db_path)
-    conn.execute(
-        "INSERT INTO onchain_metrics "
-        "(metric_name, captured_at_utc, value, source, inserted_at_utc) "
-        "VALUES (?, ?, ?, ?, ?)",
-        ("lth_mvrv", today_captured, 2.5, "computed", _today_iso()),
-    )
+    # 给每个 fetcher 的代表 metric 都种一行
+    for fn_name, metric_name in jobs_mod._FETCHER_TO_REPRESENTATIVE_METRIC.items():
+        conn.execute(
+            "INSERT INTO onchain_metrics "
+            "(metric_name, captured_at_utc, value, source, inserted_at_utc) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (metric_name, today_captured, 1.0, "glassnode_primary",
+             _today_iso()),
+        )
     conn.commit()
     conn.close()
 
-    # 不 mock collector,直接调 _onchain_today_complete 验证返 False。
-    from src.scheduler.jobs import _onchain_today_complete
+    gn_cls = MagicMock()
+    with patch("src.data.collectors.glassnode.GlassnodeCollector", gn_cls):
+        result = jobs_mod.job_collect_onchain(
+            conn_factory=lambda: _conn(db_path),
+        )
+    assert result["status"] == "skipped"
+    assert "today" in result["reason"]
+    assert gn_cls.call_count == 0, "GlassnodeCollector 不应被实例化 — 0 HTTP 浪费"
+    assert result.get("events_triggered") in (None, [],)
+
+
+def test_onchain_today_complete_false_when_any_fetcher_missing(db_path):
+    """Sprint 1.6.2:_onchain_today_complete 现在要求 22 个 fetcher 代表
+    metric 全部今天有行才返 True。种 21 个 → 仍 False(puell 缺)。"""
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today_captured = f"{today}T08:00:00Z"
+    conn = _conn(db_path)
+    # 种 21 个代表 metric(故意漏 puell_multiple)
+    for fn_name, metric_name in jobs_mod._FETCHER_TO_REPRESENTATIVE_METRIC.items():
+        if metric_name == "puell_multiple":
+            continue
+        conn.execute(
+            "INSERT INTO onchain_metrics "
+            "(metric_name, captured_at_utc, value, source, inserted_at_utc) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (metric_name, today_captured, 1.0, "glassnode_primary", _today_iso()),
+        )
+    conn.commit()
+    conn.close()
+
+    from src.scheduler.jobs import _onchain_today_complete, _fetcher_completed_today
     c = _conn(db_path)
     c.row_factory = sqlite3.Row
     try:
+        # puell 没行 → 整体不算 complete
         assert _onchain_today_complete(c) is False
+        # 单 fetcher 粒度验证
+        assert _fetcher_completed_today(c, "fetch_mvrv_z_score") is True
+        assert _fetcher_completed_today(c, "fetch_puell_multiple") is False
     finally:
         c.close()
 
@@ -462,10 +528,10 @@ def test_or_trigger_registers_all_cron_times():
         jobs_by_id = {j.id: j for j in sched.get_jobs()}
 
         # 4 个低频 job 都用 OrTrigger
-        # Sprint C(2026-05-08):collect_onchain 10 → 3 档(主 + 2 补救;
-        # quota fail 短路逻辑见 _onchain_today_complete)
+        # Sprint 1.6.2(2026-05-17):collect_onchain 3 → 2 档错峰
+        # (09:30 主 + 10:30 补救;per-fetcher skip 让 2 档够用)。
         expected = {
-            "collect_onchain":      3,
+            "collect_onchain":      2,
             "collect_macro":        7,
             "collect_klines_daily": 9,
             "collect_klines_weekly": 7,

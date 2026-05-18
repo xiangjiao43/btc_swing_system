@@ -124,11 +124,15 @@ def test_collect_macro_at_0600_bjt():
     assert spec.trigger_kwargs["cron_list"][0] == {"hour": 6, "minute": 0}
 
 
-def test_collect_onchain_at_0835_bjt():
+def test_collect_onchain_cron_offpeak_at_0930_1030_bjt():
+    """Sprint 1.6.2 错峰修正:旧 08:35/09:35/10:35 撞 Glassnode daily
+    refresh 高峰(00:00-01:00 UTC),alphanode 对热门 endpoint 临时 429。
+    新 09:30 主 + 10:30 补救档(= 01:30/02:30 UTC,避高峰)。"""
     out = {jc.name: jc for jc in build_job_configs(load_scheduler_config(_CONFIG_PATH))}
     spec = out["collect_onchain"]
     assert spec.trigger_kind == "cron_or"
-    assert spec.trigger_kwargs["cron_list"][0] == {"hour": 8, "minute": 35}
+    cron_list = spec.trigger_kwargs["cron_list"]
+    assert cron_list == [{"hour": 9, "minute": 30}, {"hour": 10, "minute": 30}]
 
 
 def test_pipeline_run_regular_cron_at_1135_bjt():

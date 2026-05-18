@@ -99,19 +99,19 @@ jobs:
 
   collect_onchain:
     enabled: true
-    # Sprint C(2026-05-08):10 档收敛到 3 档。Sprint A fetch_attempts +
-    # Sprint B 网页诚实显示让"撞 quota 也算今天完成"短路成为可能;
-    # _onchain_today_complete 改写后,主档撞 quota → 后续 9:35/10:35 档 skip。
-    # 配额墙的"补救档变放大器"问题(见 docs/cc_reports/glassnode_frequency_audit.md)
-    # 通过短路彻底解决。yaml hour 是 BJT(顶部 timezone: 'Asia/Shanghai')。
+    # Sprint 1.6.2(2026-05-17)错峰修正:旧 08:35/09:35/10:35(= 00:35/01:35/02:35 UTC)
+    # 撞 Glassnode 全网 daily refresh 高峰(00:00 UTC 后约 30-90 分钟,alphanode
+    # 中转站对热门 endpoint 如 puell_multiple 临时返 429)。
+    # 配合 _fetcher_completed_today per-fetcher skip,2 档错峰已足够:
+    # 主档失败的单 fetcher 在补救档自动重试,成功的不浪费 HTTP。
+    # yaml hour 是 BJT(顶部 timezone: 'Asia/Shanghai')。
     cron:
-      - {hour: 8,  minute: 35}         # BJT 08:35 主档
-      - {hour: 9,  minute: 35}         # BJT 09:35 补救一(非 quota fail 重试)
-      - {hour: 10, minute: 35}         # BJT 10:35 补救二(非 quota fail 终档)
+      - {hour: 9,  minute: 30}         # BJT 09:30 主档(= 01:30 UTC,避开高峰)
+      - {hour: 10, minute: 30}         # BJT 10:30 补救档(per-fetcher 只 retry 失败的)
     misfire_grace_time: 600
     coalesce: true
     max_instances: 1
-    description: 'Glassnode 13 个 metric(3 档:主 + 2 补救;quota fail 短路)'
+    description: 'Glassnode 22 个 metric(2 档错峰:主 + 1 补救;per-fetcher skip)'
 
   # ------------- Layer A / Layer B pipeline --------------------
 

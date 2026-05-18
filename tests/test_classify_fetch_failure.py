@@ -31,12 +31,15 @@ def test_http_404_classified_as_endpoint_not_found():
     assert reason == "endpoint_not_found"
 
 
-# ---------------- quota_exceeded ----------------
+# ---------------- quota_exceeded vs rate_limited(Sprint 1.6.2 拆分)----------------
 
-def test_http_429_classified_as_quota():
+def test_http_429_bare_classified_as_rate_limited():
+    """裸 429(无 quota 关键字)→ rate_limited(瞬时限流,可重试)。
+    Sprint 1.6.2 之前所有 429 被一刀切归 quota_exceeded,误触发 today_complete
+    全 job 短路;新逻辑只有正文含 quota/配额/rate limit 才算真 quota。"""
     exc = RuntimeError("HTTP 429 too many requests on /api/v3/foo")
     reason, _ = classify_fetch_failure(exc)
-    assert reason == "quota_exceeded"
+    assert reason == "rate_limited"
 
 
 def test_alphanode_chinese_quota_message_classified_as_quota():
@@ -50,7 +53,17 @@ def test_alphanode_chinese_quota_message_classified_as_quota():
 
 
 def test_english_rate_limit_message_classified_as_quota():
+    """正文含 'rate limit' 关键字 → quota_exceeded(虽然字面是 rate limit,
+    但行业惯例下 'rate limit exceeded' 实际指向月度配额或长期限流,
+    与瞬时滑窗限流的裸 429 不同)。"""
     exc = RuntimeError("API responded with: rate limit exceeded, retry after 60s")
+    reason, _ = classify_fetch_failure(exc)
+    assert reason == "quota_exceeded"
+
+
+def test_http_429_with_quota_keyword_in_body_classified_as_quota():
+    """429 + 正文含 quota 关键字 → 仍归 quota_exceeded(真配额,触发短路)。"""
+    exc = RuntimeError("HTTP 429: {\"error\": \"monthly quota exhausted\"}")
     reason, _ = classify_fetch_failure(exc)
     assert reason == "quota_exceeded"
 

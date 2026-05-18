@@ -643,6 +643,33 @@ def test_layer_a_spot_layer_cards_only_three_packets(js, html):
     assert "lg:grid-cols-5" not in layer_a_html
 
 
+def test_layer_a_packet_supporting_no_slice_cap(js):
+    """Sprint 1.6.3:数据包卡片 supporting 不再 .slice(0, 5),
+    显示该 packet 的全部 key_metrics(AI 真实看到的字段全集)。"""
+    # 旧的 .slice(0, 5) 已删
+    assert "key_metrics || {}).slice(0, 5)" not in js
+    # 新形态:.map(... 直接展开全部 entries
+    assert "Object.entries(pkt.key_metrics || {}).map(" in js
+
+
+def test_layer_a_factor_specs_includes_new_layer_a_factors(js):
+    """Sprint 1.6.3:layerAFactorCardSpecs() 必须包含本次新接入但前端漏的
+    6 个 Layer A 因子。建模 §7.6 永久规则:specs 是手写列表,新加因子必须
+    同步追加 spec,否则前端不显示。"""
+    for new_key in (
+        "key: 'hash_rate'",
+        "key: 'sopr'",
+        "key: 'ma_200w_deviation_pct'",
+        "key: 'ma_200w'",
+        "key: 'ma_200d'",
+        "key: 'ath_drawdown_pct'",
+    ):
+        assert new_key in js, f"layerAFactorCardSpecs 漏 {new_key}"
+    # 检查中文标签也都在
+    for label in ("算力", "整体 SOPR", "200 周线乖离率", "200 周均线", "200 日均线", "距 ATH 回撤"):
+        assert label in js, f"layerAFactorCardSpecs 漏中文标签 {label}"
+
+
 def test_js_refresh_v14_modules_function(js):
     """_refreshV14Modules 函数定义 + 5 个 fetch URL。"""
     assert "_refreshV14Modules" in js

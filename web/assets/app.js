@@ -1382,7 +1382,11 @@ function app() {
                     badge: pkt.status || 'missing',
                     label: fallbackLabel,
                     summary: pkt.summary || '暂无数据包摘要',
-                    supporting: Object.entries(pkt.key_metrics || {}).slice(0, 5).map(([name, value]) => {
+                    // Sprint 1.6.3:取消 .slice(0, 5) 上限,显示该 packet 全部
+                    // key_metrics。这才是 AI 真实看到的字段全集 — 用户审计需要
+                    // 看完整数据,不藏。缺值字段也照常显示并带 status,让用户
+                    // 知道 AI 分析时哪些项是 missing/stale。
+                    supporting: Object.entries(pkt.key_metrics || {}).map(([name, value]) => {
                         const shown = value && typeof value === 'object'
                             ? (value.value ?? value.status ?? '-')
                             : value;
@@ -1608,6 +1612,63 @@ function app() {
                         ['macro_liquidity', 'fed_balance_sheet'],
                         ['macro', 'fed_balance_sheet'],
                     ],
+                },
+                // Sprint 1.6.3:补全 Layer A 已用但 specs 漏写的 6 个因子。
+                // 建模 §7.6 永久规则:layerAFactorCardSpecs 是手写列表,今后
+                // 任何新接入因子都必须同步追加 spec,否则前端不显示。
+                {
+                    key: 'hash_rate',
+                    name: '算力',
+                    name_en: 'Hash Rate (Mean)',
+                    group: 'onchain',
+                    source: 'Glassnode',
+                    value_unit: 'H/s',
+                    paths: [['onchain_valuation', 'hash_rate']],
+                },
+                {
+                    key: 'sopr',
+                    name: '整体 SOPR',
+                    name_en: 'aSOPR',
+                    group: 'onchain',
+                    source: 'Glassnode',
+                    paths: [
+                        ['holder_behavior', 'sopr'],
+                        ['holder_behavior', 'sopr_adjusted'],
+                    ],
+                },
+                {
+                    key: 'ma_200w_deviation_pct',
+                    name: '200 周线乖离率',
+                    name_en: 'Price vs 200WMA',
+                    group: 'price_technical',
+                    source: 'CoinGlass klines',
+                    value_unit: '%',
+                    paths: [['price_structure', 'ma_200w_deviation_pct']],
+                },
+                {
+                    key: 'ma_200w',
+                    name: '200 周均线',
+                    name_en: 'MA 200W',
+                    group: 'price_technical',
+                    source: 'CoinGlass klines',
+                    paths: [['price_structure', 'ma_200w']],
+                },
+                {
+                    key: 'ma_200d',
+                    name: '200 日均线',
+                    name_en: 'MA 200D',
+                    group: 'price_technical',
+                    source: 'CoinGlass klines',
+                    paths: [['price_structure', 'ma_200d']],
+                },
+                {
+                    key: 'ath_drawdown_pct',
+                    name: '距 ATH 回撤',
+                    name_en: 'ATH Drawdown',
+                    group: 'price_technical',
+                    source: 'CoinGlass klines',
+                    value_unit: '%',
+                    paths: [['price_structure', 'ath_drawdown_pct']],
                 },
             ];
         },

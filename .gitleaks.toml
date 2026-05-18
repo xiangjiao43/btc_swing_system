@@ -1,0 +1,24 @@
+# Gitleaks config — extends default rules with project-specific allowlist.
+#
+# Background:
+#   gitleaks v8 default "generic-api-key" rule flags high-entropy alphanumeric
+#   strings (entropy ≥ ~3.7) as suspected API keys. Some Layer A factor
+#   metric names happen to match this heuristic (e.g. `ma_200w_deviation_pct`
+#   has entropy 3.78). These are public technical-analysis indicator names,
+#   not secrets — they appear in the prompt + JSON schema documentation
+#   intentionally.
+#
+# Allowlist strategy: enumerate known false-positive patterns; keep base
+# default rules active for real secret scanning.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Project metric / factor identifiers (public, non-secret)"
+regexes = [
+    # Long-form metric names with embedded numbers + multiple underscores
+    # that satisfy gitleaks generic-api-key entropy ≥ ~3.7. Add new patterns
+    # here when adding factors whose names accidentally match the rule.
+    '''ma_[0-9]+[a-z]_deviation_pct''',  # ma_200w_deviation_pct etc.
+]

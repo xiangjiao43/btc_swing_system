@@ -601,10 +601,9 @@ function app() {
                 && validator.violations.length > 0;
             const validatorFailed = validator.passed === false || hasViolation;
             const specs = [
-                ['P1', '技术指标包', 'technical_packet'],
-                ['P2', '链上数据包', 'onchain_packet'],
-                ['P3', '流动性 / 宏观包', 'liquidity_macro_packet'],
-                ['P4', '风险评估包', 'risk_packet'],
+                ['P1', '价格结构包', 'price_structure_packet'],
+                ['P2', '链上估值与持有者包', 'onchain_packet'],
+                ['P3', '资金流与宏观包', 'macro_flow_packet'],
                 ['AI', '大周期裁决', 'cycle_adjudicator'],
             ];
             return specs.map(([layer_id, name, key]) => {
@@ -1377,14 +1376,13 @@ function app() {
             if (!s) return [];
             const packets = s.data_packets || {};
             const adj = s.cycle_adjudicator || {};
+            const topDq = s.data_quality || {};
             const packetCards = [
-                ['technical_packet', '技术指标', '技术'],
-                ['onchain_packet', '链上数据', '链上'],
-                ['liquidity_macro_packet', '流动性 / 宏观', '宏观'],
-                ['risk_packet', '风险评估', '风险'],
+                ['price_structure_packet', '价格结构', '价格'],
+                ['onchain_packet', '链上估值与持有者', '链上'],
+                ['macro_flow_packet', '资金流与宏观', '宏观'],
             ].map(([key, title, fallbackLabel]) => {
                 const pkt = packets[key] || {};
-                const dq = pkt.data_quality || {};
                 return {
                     key: 'layer_a_' + key,
                     title,
@@ -1399,8 +1397,8 @@ function app() {
                     }),
                     opposing: [],
                     dataQuality: [
-                        ...(dq.notes || []),
-                        dq.confidence_cap_reason,
+                        ...(pkt.notes || []),
+                        topDq.confidence_cap_reason,
                     ].filter(Boolean),
                 };
             });

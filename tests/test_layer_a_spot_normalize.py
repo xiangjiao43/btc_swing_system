@@ -413,10 +413,9 @@ def test_single_cycle_adjudicator_normalizes_to_compatibility_sections():
             "what_would_invalidate_current_stage": ["跌回关键支撑"],
         },
         "data_packets": {
-            "technical_packet": {"status": "available", "summary": "ok"},
+            "price_structure_packet": {"status": "available", "summary": "ok"},
             "onchain_packet": {"status": "available", "summary": "ok"},
-            "liquidity_macro_packet": {"status": "partial", "summary": "ok"},
-            "risk_packet": {"status": "available", "summary": "ok"},
+            "macro_flow_packet": {"status": "partial", "summary": "ok"},
         },
         "factor_coverage": {"coverage_ratio": 0.9, "stale_factor_count": 0},
     })
@@ -425,4 +424,4 @@ def test_single_cycle_adjudicator_normalizes_to_compatibility_sections():
     assert out["a1_cycle_stage"]["raw_stage_assessment"] == "early_bull"
     assert out["a5_spot_adjudicator"]["spot_action"] == "dca_buy"
     assert out["a5_spot_adjudicator"]["human_summary"] == "趋势初步确认，但仍需看回踩质量。"
-    assert "technical_packet" in out["data_packets"]
+    assert "price_structure_packet" in out["data_packets"]

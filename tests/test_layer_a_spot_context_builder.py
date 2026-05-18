@@ -465,7 +465,7 @@ def test_layer_a_p0_cycle_factors_are_derived_and_enter_a1_context():
     assert "buckets" not in json.dumps(light, ensure_ascii=False, default=str)
 
 
-def test_layer_a_single_adjudicator_context_builds_four_deterministic_packets():
+def test_layer_a_single_adjudicator_context_builds_three_deterministic_packets():
     ctx = {
         "available_factors": {
             "price_structure": {
@@ -516,16 +516,21 @@ def test_layer_a_single_adjudicator_context_builds_four_deterministic_packets():
     out = build_layer_a_cycle_adjudicator_context({"spot_cycle_context": ctx})
     packets = out["data_packets"]
     assert set(packets) == {
-        "technical_packet", "onchain_packet", "liquidity_macro_packet", "risk_packet",
+        "price_structure_packet", "onchain_packet", "macro_flow_packet",
     }
     assert out["previous_official_stage"] == "accumulation"
-    assert packets["technical_packet"]["status"] == "available"
-    assert "btc_price" in packets["technical_packet"]["key_metrics"]
+    assert packets["price_structure_packet"]["status"] == "available"
+    assert "btc_price" in packets["price_structure_packet"]["key_metrics"]
     assert "lth_sopr" in packets["onchain_packet"]["key_metrics"]
-    assert "real_yield" in packets["liquidity_macro_packet"]["key_metrics"]
+    assert "real_yield" in packets["macro_flow_packet"]["key_metrics"]
+    assert "data_quality" in out
+    assert out["data_quality"].get("coverage_ratio") == 0.9
     payload = json.dumps(out, ensure_ascii=False, default=str)
     assert "funding_rate" not in payload
     assert "open_interest" not in payload
+    assert "risk_packet" not in payload
+    assert "liquidity_macro_packet" not in payload
+    assert "technical_packet" not in payload
     assert "active_thesis" not in payload
     assert "thesis_id" not in payload
     assert "virtual_account_state" not in payload

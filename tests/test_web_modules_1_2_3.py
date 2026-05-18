@@ -404,13 +404,12 @@ def test_swing_strategy_js_helpers_declared(js):
     assert "swingAdjudicatorCard()" in js
     assert "swingInvalidationPlan()" in js
     assert "layerAHealthItems()" in js
-    for label in ("P1", "P2", "P3", "P4", "AI"):
+    for label in ("P1", "P2", "P3", "AI"):
         assert label in js
     for label in (
-        "技术指标包",
-        "链上数据包",
-        "流动性 / 宏观包",
-        "风险评估包",
+        "价格结构包",
+        "链上估值与持有者包",
+        "资金流与宏观包",
         "大周期裁决",
     ):
         assert label in js
@@ -595,10 +594,9 @@ def test_layer_a_spot_js_renders_strategy_or_fallback(js):
     assert "spotFinalSummary()" in js
     assert "spotCardSummary(card)" in js
     assert "compactSpotText(v, maxLen = 96)" in js
-    assert "technical_packet" in js
+    assert "price_structure_packet" in js
     assert "onchain_packet" in js
-    assert "liquidity_macro_packet" in js
-    assert "risk_packet" in js
+    assert "macro_flow_packet" in js
     assert "layer_a_cycle_adjudicator" in js
     for legacy_title in (
         "A1 大周期阶段", "A2 链上与宏观", "A3 现货策略机会",

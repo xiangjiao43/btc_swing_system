@@ -481,7 +481,7 @@ def normalize_layer_a_output(raw: Any) -> dict[str, Any]:
         compat_a4 = {
             "spot_risk_level": cycle_adjudicator["risk_level"],
             "confidence": cycle_adjudicator["cycle_stage_confidence"],
-            "human_summary": "风险评估已由 deterministic risk_packet 与单一裁决共同生成。",
+            "human_summary": "风险评估已由 deterministic data_quality 元信息与单一裁决共同生成。",
             "main_risks": cycle_adjudicator["opposing_evidence"],
             "risk_controls": cycle_adjudicator["what_would_invalidate_current_stage"],
             "data_quality_notes": cycle_adjudicator["data_quality_notes"],

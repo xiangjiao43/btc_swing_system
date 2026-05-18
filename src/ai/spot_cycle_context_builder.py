@@ -57,6 +57,9 @@ _FACTOR_SOURCE = {
     "reserve_risk": "glassnode_layer_a",
     "puell_multiple": "glassnode_layer_a",
     "lth_net_position_change": "glassnode_layer_a",
+    "hash_rate": "glassnode_layer_a",
+    "sopr": "glassnode_display",
+    "ma_200w_deviation_pct": "coinglass_derivatives_derived",
     "exchange_net_flow": "glassnode_onchain",
     "sopr_adjusted": "glassnode_onchain",
     "hodl_waves": "glassnode_onchain",
@@ -89,12 +92,14 @@ _UNAVAILABLE_MODEL_FACTORS: dict[str, str] = {}
 
 _A1_CORE_FACTORS = {
     "current_close", "ath_drawdown_pct", "ma_200d", "ma_200w",
+    "ma_200w_deviation_pct",
     "realized_price", "sth_realized_price", "lth_realized_price",
     "mvrv_z_score", "mvrv", "nupl", "rhodl_ratio", "reserve_risk",
-    "puell_multiple", "lth_sopr", "sth_sopr", "lth_supply",
+    "puell_multiple", "lth_sopr", "sth_sopr", "sopr", "lth_supply",
     "sth_supply", "lth_net_position_change", "percent_supply_in_profit",
     "percent_supply_in_loss", "hodl_waves", "hodl_waves_1y_plus_aggregate",
     "cdd", "exchange_balance", "exchange_net_position_change",
+    "hash_rate",
     "monthly_ohlc_structure", "major_support_resistance_zones",
 }
 _A2_A4_BACKGROUND_FACTORS = {
@@ -425,6 +430,7 @@ def build_a1_cycle_stage_context(context: dict[str, Any]) -> dict[str, Any]:
                 "ath_drawdown_pct": _compact_factor(ps.get("ath_drawdown_pct")),
                 "ma_200d": _compact_factor(ps.get("ma_200d")),
                 "ma_200w": _compact_factor(ps.get("ma_200w")),
+                "ma_200w_deviation_pct": _compact_factor(ps.get("ma_200w_deviation_pct")),
                 "weekly_structure": ps.get("weekly_structure") if isinstance(ps.get("weekly_structure"), dict) else {},
                 "monthly_ohlc_structure": _compact_factor(ps.get("monthly_ohlc_structure")),
                 "major_support_resistance_zones": _compact_factor(ps.get("major_support_resistance_zones")),
@@ -439,9 +445,11 @@ def build_a1_cycle_stage_context(context: dict[str, Any]) -> dict[str, Any]:
                 "rhodl_ratio": _compact_factor(ov.get("rhodl_ratio")),
                 "reserve_risk": _compact_factor(ov.get("reserve_risk")),
                 "puell_multiple": _compact_factor(ov.get("puell_multiple")),
+                "hash_rate": _compact_factor(ov.get("hash_rate")),
                 "percent_supply_in_profit": _compact_factor(ov.get("percent_supply_in_profit")),
             },
             "holder_behavior": {
+                "sopr": _compact_factor(hb.get("sopr")),
                 "lth_sopr": _compact_factor(ohb.get("lth_sopr")),
                 "sth_sopr": _compact_factor(ohb.get("sth_sopr")),
                 "lth_supply": _compact_factor(hb.get("lth_supply")),
@@ -542,28 +550,28 @@ def _packet_summary(packet_id: str, metrics: dict[str, Any]) -> str:
         item = metrics.get(name)
         return item.get("value") if isinstance(item, dict) else item
 
-    if packet_id == "technical_packet":
+    if packet_id == "price_structure_packet":
         price = val("btc_price")
         drawdown = val("ath_drawdown_pct")
+        deviation = val("ma_200w_deviation_pct")
         monthly = val("monthly_ohlc_structure")
         if price is not None:
-            return f"BTC 当前约 {price}，ATH 回撤 {drawdown if drawdown is not None else '-'}%，月线结构 {monthly or '暂无'}。"
+            return (
+                f"BTC 当前约 {price}，ATH 回撤 {drawdown if drawdown is not None else '-'}%，"
+                f"200WMA 乖离 {deviation if deviation is not None else '-'}%，"
+                f"月线结构 {monthly or '暂无'}。"
+            )
         return "价格周期结构数据不足，需等待 K 线和长期结构恢复。"
     if packet_id == "onchain_packet":
         mvrv = val("mvrv")
         nupl = val("nupl")
         rhodl = val("rhodl_ratio")
         return f"链上估值摘要：MVRV {mvrv if mvrv is not None else '-'}，NUPL {nupl if nupl is not None else '-'}，RHODL {rhodl if rhodl is not None else '-'}。"
-    if packet_id == "liquidity_macro_packet":
+    if packet_id == "macro_flow_packet":
         real_yield = val("real_yield")
         fed = val("fed_funds_rate")
         m2 = val("m2")
         return f"宏观流动性摘要：实际利率 {real_yield if real_yield is not None else '-'}，联邦基金利率 {fed if fed is not None else '-'}，M2 {m2 if m2 is not None else '-'}。"
-    if packet_id == "risk_packet":
-        cap = val("confidence_cap")
-        missing = val("missing_integrated_factor_count")
-        stale = val("stale_factor_count")
-        return f"风险摘要：置信度上限 {cap or '-'}，缺值因子 {missing if missing is not None else 0}，过期因子 {stale if stale is not None else 0}。"
     return "数据包摘要不足。"
 
 
@@ -580,32 +588,34 @@ def _packet(
         for key, value in metrics.items()
         if value not in (None, "", [])
     }
-    return {
+    out: dict[str, Any] = {
         "packet_id": packet_id,
         "title": title,
         "status": _packet_status(compact_metrics, data_quality=data_quality),
         "summary": _packet_summary(packet_id, compact_metrics),
         "key_metrics": compact_metrics,
-        "data_quality": {
-            "confidence_cap": (data_quality or {}).get("confidence_cap"),
-            "confidence_cap_reason": (data_quality or {}).get("confidence_cap_reason"),
-            "coverage_ratio": (data_quality or {}).get("coverage_ratio"),
-            "stale_factor_count": (data_quality or {}).get("stale_factor_count"),
-            "missing_integrated_factor_count": (
-                (data_quality or {}).get("missing_integrated_factor_count")
-            ),
-            "notes": (notes or [])[:5],
-        },
     }
+    trimmed_notes = [n for n in (notes or []) if n][:5]
+    if trimmed_notes:
+        out["notes"] = trimmed_notes
+    return out
 
 
 def build_layer_a_cycle_adjudicator_context(context: dict[str, Any]) -> dict[str, Any]:
     """Build the official Layer A single-adjudicator input.
 
-    Four packets are deterministic summaries.  They deliberately exclude Layer B
-    L1-L5, thesis, virtual account, holdings, orders, raw factor cards, and full
-    debug JSON.  The AI gets one compact decision brief, then the deterministic
-    state machine/validator decides the official stage and final guardrails.
+    Three packets are deterministic summaries:
+      - price_structure_packet:价格结构(K 线/MA/200WMA 乖离/月线/支撑阻力)
+      - onchain_packet:链上估值 + 持有者行为 + 算力/SOPR + 已实现价格 + 交易所流
+      - macro_flow_packet:ETF/交易所净流 + 宏观流动性与利率
+
+    The packets deliberately exclude Layer B L1-L5, thesis, virtual account,
+    holdings, orders, raw factor cards, full debug JSON, and Layer B derivatives
+    (funding / OI / LSR / liquidation).  Data quality is exposed as a top-level
+    ``data_quality`` block (not mixed into any packet).
+
+    The AI gets one compact decision brief, then the deterministic state machine
+    and validator decide the official stage and final guardrails.
     """
     spot_ctx = context.get("spot_cycle_context") if isinstance(context, dict) else None
     if not isinstance(spot_ctx, dict):
@@ -619,29 +629,30 @@ def build_layer_a_cycle_adjudicator_context(context: dict[str, Any]) -> dict[str
     macro = evidence.get("macro") if isinstance(evidence.get("macro"), dict) else {}
     data_quality = evidence.get("data_quality") if isinstance(evidence.get("data_quality"), dict) else {}
 
-    technical_packet = _packet(
-        "technical_packet",
-        "技术指标数据包",
+    price_structure_packet = _packet(
+        "price_structure_packet",
+        "价格结构数据包",
         {
             "btc_price": price.get("btc_price"),
             "ath_drawdown_pct": price.get("ath_drawdown_pct"),
             "ma_200d": price.get("ma_200d"),
             "ma_200w": price.get("ma_200w"),
+            "ma_200w_deviation_pct": price.get("ma_200w_deviation_pct"),
             "weekly_structure": price.get("weekly_structure"),
             "monthly_ohlc_structure": price.get("monthly_ohlc_structure"),
             "major_support_resistance_zones": price.get("major_support_resistance_zones"),
-            "realized_price": price.get("realized_price"),
-            "sth_realized_price": price.get("sth_realized_price"),
-            "lth_realized_price": price.get("lth_realized_price"),
         },
         data_quality=data_quality,
-        notes=data_quality.get("data_quality_notes") or [],
     )
     onchain_packet = _packet(
         "onchain_packet",
-        "链上数据包",
+        "链上估值与持有者数据包",
         {
             **valuation,
+            "realized_price": price.get("realized_price"),
+            "sth_realized_price": price.get("sth_realized_price"),
+            "lth_realized_price": price.get("lth_realized_price"),
+            "sopr": holder.get("sopr"),
             "lth_sopr": holder.get("lth_sopr"),
             "sth_sopr": holder.get("sth_sopr"),
             "lth_supply": holder.get("lth_supply"),
@@ -656,11 +667,10 @@ def build_layer_a_cycle_adjudicator_context(context: dict[str, Any]) -> dict[str
             "exchange_net_position_change": flows.get("exchange_net_position_change"),
         },
         data_quality=data_quality,
-        notes=data_quality.get("data_quality_notes") or [],
     )
-    liquidity_macro_packet = _packet(
-        "liquidity_macro_packet",
-        "流动性 / 宏观背景数据包",
+    macro_flow_packet = _packet(
+        "macro_flow_packet",
+        "资金流与宏观背景数据包",
         {
             "etf_flow_7d_sum_usd": flows.get("etf_flow_7d_sum_usd"),
             "etf_flow_30d_sum_usd": flows.get("etf_flow_30d_sum_usd"),
@@ -668,38 +678,14 @@ def build_layer_a_cycle_adjudicator_context(context: dict[str, Any]) -> dict[str
             **macro,
         },
         data_quality=data_quality,
-        notes=data_quality.get("data_quality_notes") or [],
-    )
-    risk_packet = _packet(
-        "risk_packet",
-        "风险评估数据包",
-        {
-            "confidence_cap": data_quality.get("confidence_cap"),
-            "confidence_cap_reason": data_quality.get("confidence_cap_reason"),
-            "critical_unavailable_count": data_quality.get("critical_unavailable_count"),
-            "stale_factor_count": data_quality.get("stale_factor_count"),
-            "missing_integrated_factor_count": data_quality.get("missing_integrated_factor_count"),
-            "coverage_ratio": data_quality.get("coverage_ratio"),
-            "unavailable_factors": data_quality.get("unavailable_factors"),
-            "near_long_term_resistance": price.get("major_support_resistance_zones"),
-            "etf_flow_7d_sum_usd": flows.get("etf_flow_7d_sum_usd"),
-            "real_yield": macro.get("real_yield"),
-            "fed_funds_rate": macro.get("fed_funds_rate"),
-        },
-        data_quality=data_quality,
-        notes=[
-            *(data_quality.get("coverage_notes") or []),
-            *(data_quality.get("data_quality_notes") or []),
-        ],
     )
     packets = {
-        "technical_packet": technical_packet,
+        "price_structure_packet": price_structure_packet,
         "onchain_packet": onchain_packet,
-        "liquidity_macro_packet": liquidity_macro_packet,
-        "risk_packet": risk_packet,
+        "macro_flow_packet": macro_flow_packet,
     }
     return {
-        "schema_version": "layer_a_single_cycle_adjudicator_v1",
+        "schema_version": "layer_a_single_cycle_adjudicator_v2_three_packets",
         "stage_model": a1_ctx.get("stage_model") or {},
         "previous_official_stage": (a1_ctx.get("stage_model") or {}).get(
             "previous_official_stage"
@@ -714,6 +700,19 @@ def build_layer_a_cycle_adjudicator_context(context: dict[str, Any]) -> dict[str
             ],
         },
         "data_packets": packets,
+        "data_quality": {
+            "confidence_cap": data_quality.get("confidence_cap"),
+            "confidence_cap_reason": data_quality.get("confidence_cap_reason"),
+            "critical_unavailable_count": data_quality.get("critical_unavailable_count"),
+            "stale_factor_count": data_quality.get("stale_factor_count"),
+            "missing_integrated_factor_count": data_quality.get(
+                "missing_integrated_factor_count"
+            ),
+            "coverage_ratio": data_quality.get("coverage_ratio"),
+            "unavailable_factors": data_quality.get("unavailable_factors") or [],
+            "coverage_notes": (data_quality.get("coverage_notes") or [])[:6],
+            "data_quality_notes": (data_quality.get("data_quality_notes") or [])[:6],
+        },
         "layer_a_boundaries": spot_ctx.get("layer_a_boundaries") or {
             "spot_only": True,
             "no_short": True,
@@ -843,6 +842,7 @@ class SpotCycleContextBuilder:
         ath_drawdown = None
         ma_200d = ema1d.get("ema_200_current")
         ma_200w = None
+        ma_200w_deviation_pct = None
         weekly_structure = {}
         if close is not None and len(close) > 0:
             ath = float(close.max())
@@ -857,6 +857,11 @@ class SpotCycleContextBuilder:
                 "close_52w_change_pct": _pct_change(wclose, 52),
                 "bars_available": int(len(wclose)),
             }
+        if (
+            ma_200w is not None and ma_200w > 0
+            and current_close is not None
+        ):
+            ma_200w_deviation_pct = (float(current_close) / ma_200w - 1.0) * 100.0
         latest_kline_inserted = BTCKlinesDAO.get_latest_inserted_at_by_timeframe(self.conn)
         daily_kline_meta = {
             "fetched_at_utc": latest_kline_inserted.get("1d"),
@@ -953,6 +958,12 @@ class SpotCycleContextBuilder:
                 "ath_drawdown_pct": _factor("ath_drawdown", ath_drawdown, source="coinglass_derivatives", stale_map=stale_map, hours_map=hours_map),
                 "ma_200d": _factor("ma_200d", ma_200d, source="coinglass_derivatives", stale_map=stale_map, hours_map=hours_map),
                 "ma_200w": _factor("ma_200w", ma_200w, source="coinglass_derivatives", stale_map=stale_map, hours_map=hours_map),
+                "ma_200w_deviation_pct": _factor(
+                    "ma_200w_deviation_pct", ma_200w_deviation_pct,
+                    source="coinglass_derivatives_derived",
+                    stale_map=stale_map, hours_map=hours_map,
+                    extra={"value_unit": "%"},
+                ),
                 "weekly_structure": weekly_structure,
                 "monthly_ohlc_structure": _factor(
                     "monthly_ohlc_structure",
@@ -987,6 +998,7 @@ class SpotCycleContextBuilder:
                 "rhodl_ratio": metric("rhodl_ratio"),
                 "reserve_risk": metric("reserve_risk"),
                 "puell_multiple": metric("puell_multiple"),
+                "hash_rate": metric("hash_rate"),
             },
             "holder_behavior": {
                 "lth_supply": metric("lth_supply"),
@@ -994,6 +1006,7 @@ class SpotCycleContextBuilder:
                 "lth_supply_90d_pct_change": _factor("lth_supply", lth_sth.get("lth_supply_90d_pct_change"), stale_map=stale_map, hours_map=hours_map),
                 "sth_supply_90d_pct_change": _factor("sth_supply", lth_sth.get("sth_supply_90d_pct_change"), stale_map=stale_map, hours_map=hours_map),
                 "sopr_adjusted": metric("sopr_adjusted"),
+                "sopr": metric("sopr_adjusted"),
                 "hodl_waves": metric("hodl_waves"),
                 "hodl_waves_1y_plus_aggregate": _factor(
                     "hodl_waves_1y_plus_aggregate",

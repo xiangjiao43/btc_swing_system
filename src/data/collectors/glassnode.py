@@ -98,6 +98,7 @@ class GlassnodeCollector:
     _PATH_RESERVE_RISK           = f"{_BASE_PATH}/indicators/reserve_risk"
     _PATH_PUELL_MULTIPLE         = f"{_BASE_PATH}/indicators/puell_multiple"
     _PATH_LTH_NET_CHANGE         = f"{_BASE_PATH}/supply/lth_net_change"
+    _PATH_HASH_RATE              = f"{_BASE_PATH}/mining/hash_rate_mean"
 
     # 155 天切分(行业惯例 LTH/STH 阈值)。
     # 3m_6m 桶包含 90-180 天,桶中点 135 天 < 155 天 → 归 STH(简化处理)
@@ -722,6 +723,16 @@ class GlassnodeCollector:
             source="glassnode_layer_a",
         )
 
+    def fetch_hash_rate(
+        self, interval: str = "24h", since_days: int = 180,
+    ) -> list[dict[str, Any]]:
+        """Hash Rate(网络算力均值):矿工算力投降信号,大周期 cycle bottom 关键指标。"""
+        return self._fetch_series(
+            self._PATH_HASH_RATE, "hash_rate",
+            interval=interval, since_days=since_days,
+            source="glassnode_layer_a",
+        )
+
     # ==================================================================
     # 高层组合抓取
     # ==================================================================
@@ -760,6 +771,7 @@ class GlassnodeCollector:
             ("reserve_risk",        self.fetch_reserve_risk),
             ("puell_multiple",      self.fetch_puell_multiple),
             ("lth_net_position_change", self.fetch_lth_net_position_change),
+            ("hash_rate",          self.fetch_hash_rate),
             # Sprint 1.6(建模 v1.3 §2.4):4 个新链上端点
             ("sth_supply",         self.fetch_sth_supply),
             ("ssr",                self.fetch_ssr),

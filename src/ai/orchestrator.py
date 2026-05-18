@@ -469,7 +469,7 @@ class AIOrchestrator:
                 "series_samples": spot_ctx.get("series_samples") or {},
             },
             "model_notes": [
-                "Layer A 单一大周期裁决:四个 deterministic 数据包 + 一次 AI 调用。",
+                "Layer A 单一大周期裁决:三个 deterministic 数据包(price_structure / onchain / macro_flow)+ 一次 AI 调用。",
                 "Layer A 独立于 Layer B:不创建 thesis,不进入虚拟账户,不影响开平仓。"
             ],
         })

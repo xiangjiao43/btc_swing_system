@@ -417,14 +417,62 @@
             <div class="text-[12px] text-slate-600 dark:text-slate-400"
                  x-text="spotStrategy()?.a1_cycle_stage?.stage_change_reason || '阶段无变化或暂无迁移说明。'"></div>
 
-            <div class="rounded border border-slate-200 dark:border-slate-800 p-3">
-              <div class="text-[13px] font-bold leading-snug"
-                   x-text="spotFinalAdvice()"></div>
-              <p class="mt-1 text-[12px] leading-snug text-slate-700 dark:text-slate-300"
-                 x-text="spotFinalSummary()"></p>
+            <div id="region-layer-a-cycle-adjudicator"
+                 class="rounded border border-slate-200 dark:border-slate-800 p-3 space-y-3">
+              <div>
+                <div class="text-[13px] font-bold leading-snug"
+                     x-text="spotFinalAdvice()"></div>
+                <p class="mt-1 text-[12px] leading-snug text-slate-700 dark:text-slate-300"
+                   x-text="spotFinalSummary()"></p>
+              </div>
+              <!-- 大周期裁决:5 段详情(supporting / next_stage_signals / opposing /
+                   invalidation_signals / data_quality),默认全部展开 -->
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-3 pt-2 border-t border-slate-100 dark:border-slate-800 text-[11.5px]">
+                <div x-show="(cycleAdjudicatorDetails().supporting || []).length > 0">
+                  <div class="stat-label mb-1">支持证据</div>
+                  <ul class="space-y-0.5">
+                    <template x-for="item in cycleAdjudicatorDetails().supporting" :key="item">
+                      <li class="leading-snug" x-text="'• ' + item"></li>
+                    </template>
+                  </ul>
+                </div>
+                <div x-show="(cycleAdjudicatorDetails().next_stage_signals || []).length > 0">
+                  <div class="stat-label mb-1">下一阶段确认条件</div>
+                  <ul class="space-y-0.5">
+                    <template x-for="item in cycleAdjudicatorDetails().next_stage_signals" :key="item">
+                      <li class="leading-snug" x-text="'• ' + item"></li>
+                    </template>
+                  </ul>
+                </div>
+                <div x-show="(cycleAdjudicatorDetails().opposing || []).length > 0">
+                  <div class="stat-label mb-1">反方证据</div>
+                  <ul class="space-y-0.5">
+                    <template x-for="item in cycleAdjudicatorDetails().opposing" :key="item">
+                      <li class="leading-snug" x-text="'• ' + item"></li>
+                    </template>
+                  </ul>
+                </div>
+                <div x-show="(cycleAdjudicatorDetails().invalidation_signals || []).length > 0">
+                  <div class="stat-label mb-1">当前阶段失效条件</div>
+                  <ul class="space-y-0.5">
+                    <template x-for="item in cycleAdjudicatorDetails().invalidation_signals" :key="item">
+                      <li class="leading-snug" x-text="'• ' + item"></li>
+                    </template>
+                  </ul>
+                </div>
+                <div x-show="(cycleAdjudicatorDetails().data_quality || []).length > 0"
+                     class="md:col-span-2">
+                  <div class="stat-label mb-1">数据质量备注</div>
+                  <ul class="space-y-0.5 text-slate-500 dark:text-slate-400">
+                    <template x-for="item in cycleAdjudicatorDetails().data_quality" :key="item">
+                      <li class="leading-snug" x-text="'• ' + item"></li>
+                    </template>
+                  </ul>
+                </div>
+              </div>
             </div>
 
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3">
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
               <template x-for="card in spotLayerCards()" :key="card.key">
                 <article class="border border-slate-200 dark:border-slate-800 rounded p-3 space-y-2 min-w-0">
                   <header class="flex items-baseline justify-between gap-2">

@@ -1369,9 +1369,8 @@ function app() {
             const s = this.spotStrategy();
             if (!s) return [];
             const packets = s.data_packets || {};
-            const adj = s.cycle_adjudicator || {};
             const topDq = s.data_quality || {};
-            const packetCards = [
+            return [
                 ['price_structure_packet', '价格结构', '价格'],
                 ['onchain_packet', '链上估值与持有者', '链上'],
                 ['macro_flow_packet', '资金流与宏观', '宏观'],
@@ -1396,28 +1395,22 @@ function app() {
                     ].filter(Boolean),
                 };
             });
-            return [
-                ...packetCards,
-                {
-                    key: 'layer_a_cycle_adjudicator',
-                    title: '大周期裁决',
-                    badge: this.spotConfidenceLabel(adj.cycle_stage_confidence || s.a5_spot_adjudicator?.confidence),
-                    label: this.spotActionLabel(adj.final_spot_action || s.a5_spot_adjudicator?.spot_action),
-                    summary: adj.trader_summary || s.a5_spot_adjudicator?.human_summary,
-                    supporting: [
-                        ...(adj.supporting_evidence || []),
-                        ...(adj.what_would_confirm_next_stage || []),
-                    ],
-                    opposing: [
-                        ...(adj.opposing_evidence || []),
-                        ...(adj.what_would_invalidate_current_stage || []),
-                    ],
-                    dataQuality: [
-                        ...(adj.data_quality_notes || []),
-                        ...((s.validator && s.validator.warnings) || []),
-                    ],
-                },
-            ];
+        },
+        cycleAdjudicatorDetails() {
+            // 大周期裁决的 5 段详情,挂在"交易员结论"横幅下方。
+            // prompt 第八节四个分离字段 + 数据质量备注合并 validator.warnings。
+            const s = this.spotStrategy() || {};
+            const adj = s.cycle_adjudicator || {};
+            return {
+                supporting: adj.supporting_evidence || [],
+                next_stage_signals: adj.what_would_confirm_next_stage || [],
+                opposing: adj.opposing_evidence || [],
+                invalidation_signals: adj.what_would_invalidate_current_stage || [],
+                data_quality: [
+                    ...(adj.data_quality_notes || []),
+                    ...((s.validator && s.validator.warnings) || []),
+                ].filter(Boolean),
+            };
         },
 
         // ============== 派生 ==============

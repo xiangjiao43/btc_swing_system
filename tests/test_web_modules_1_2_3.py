@@ -597,7 +597,11 @@ def test_layer_a_spot_js_renders_strategy_or_fallback(js):
     assert "price_structure_packet" in js
     assert "onchain_packet" in js
     assert "macro_flow_packet" in js
-    assert "layer_a_cycle_adjudicator" in js
+    # 大周期裁决合并到交易员结论横幅,数据走 cycleAdjudicatorDetails() getter
+    assert "cycleAdjudicatorDetails()" in js
+    # spotLayerCards 此时只返回 3 个数据包(不再含 cycle_adjudicator)
+    assert js.count("price_structure_packet'") + js.count('price_structure_packet"') >= 1
+    assert "spotLayerCards()" in js
     for legacy_title in (
         "A1 大周期阶段", "A2 链上与宏观", "A3 现货策略机会",
         "A4 现货风险", "A5 大周期主裁",
@@ -606,14 +610,37 @@ def test_layer_a_spot_js_renders_strategy_or_fallback(js):
 
 
 def test_layer_a_spot_summary_is_compact_and_trader_like(html, js):
-    """Layer A 首页只展示短结论,长证据继续放在折叠详情里。"""
+    """Layer A 首页:交易员结论横幅默认展开 5 段裁决详情。"""
     assert "交易员结论:" in js
     assert "spotFinalAdvice()" in html
     assert "spotFinalSummary()" in html
     assert "spotCardSummary(card)" in html
     assert ':title="card.summary || \'-\'"' in html
+    # 数据包卡片自身的详情仍走折叠
     assert "查看详细 ▼" in html
-    assert "数据质量备注" in html
+    # 大周期裁决 5 段详情:横幅下方默认展开(无折叠按钮)
+    assert 'id="region-layer-a-cycle-adjudicator"' in html
+    assert "cycleAdjudicatorDetails()" in html
+    for label in ("支持证据", "下一阶段确认条件", "反方证据", "当前阶段失效条件", "数据质量备注"):
+        assert label in html
+
+
+def test_layer_a_spot_layer_cards_only_three_packets(js, html):
+    """spotLayerCards() 不再含 cycle_adjudicator;下方只剩 3 个数据包卡片。"""
+    # JS 端 3 packet 配置
+    assert "['price_structure_packet'" in js
+    assert "['onchain_packet'" in js
+    assert "['macro_flow_packet'" in js
+    # spotLayerCards 不再 push 第 4 张 cycle_adjudicator 卡片
+    assert "title: '大周期裁决'" not in js
+    assert "key: 'layer_a_cycle_adjudicator'" not in js
+    # Layer A 区域(region-layer-a-spot)内的卡片网格已从 5 列改为 3 列
+    region_start = html.index('id="region-layer-a-spot"')
+    region_end = html.index('id="region-layer-b-swing"')
+    layer_a_html = html[region_start:region_end]
+    assert "spotLayerCards()" in layer_a_html
+    assert "lg:grid-cols-3" in layer_a_html
+    assert "lg:grid-cols-5" not in layer_a_html
 
 
 def test_js_refresh_v14_modules_function(js):

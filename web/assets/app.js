@@ -17,6 +17,8 @@ function app() {
 
         // 折叠状态(Region 4 每个 group 独立)
         expandedGroups: {},
+        // Sprint Web Transparency Commit 5:每个卡片"详情"展开 toggle 状态
+        expandedCards: {},
 
         // Sprint 2.3 tuning:独立顶栏价格(每分钟刷一次)
         livePriceData: null,
@@ -1953,8 +1955,13 @@ function app() {
             ];
             return specs.map(s => {
                 const group = cards.filter(c => c.group === s.key);
-                const primary = group.filter(c => c.is_primary);
-                const secondary = group.filter(c => !c.is_primary);
+                // Sprint Web Transparency Commit 5:advanced=true 排到末尾(分组内稳定排序)
+                const stableSort = (arr) => arr
+                    .map((c, i) => ({ c, i, adv: c && c.advanced ? 1 : 0 }))
+                    .sort((a, b) => a.adv - b.adv || a.i - b.i)
+                    .map(x => x.c);
+                const primary = stableSort(group.filter(c => c.is_primary));
+                const secondary = stableSort(group.filter(c => !c.is_primary));
                 // Sprint 2.3 R2:2 列等宽网格,主要在前(绿左边框),次要在后
                 const allOrdered = [...primary, ...secondary];
                 return { ...s, primary, secondary, allOrdered };
@@ -2122,8 +2129,38 @@ function app() {
             return '-';
         },
         factorStatusLine(c) {
-            const layer = c && c.linked_layer ? c.linked_layer : '-';
+            // Sprint Web Transparency Commit 5:渲染简化三档标签,fallback 到旧 linked_layer
+            const layer = (c && c.linked_layer_simplified)
+                || (c && c.linked_layer)
+                || '-';
             return '状态:' + this.factorStatusLabel(c) + ' · ' + layer;
+        },
+        // Sprint Web Transparency Commit 5:三档标签颜色映射
+        factorLayerClass(c) {
+            const label = (c && c.linked_layer_simplified) || (c && c.linked_layer) || '';
+            if (label === 'Layer A') return 'text-blue-600 dark:text-blue-300';
+            if (label === 'Layer B') return 'text-amber-600 dark:text-amber-300';
+            if (label === 'Layer A / B') return 'text-purple-600 dark:text-purple-300';
+            return 'text-slate-500 dark:text-slate-400';
+        },
+        // Sprint Web Transparency Commit 5:详情展开 — 把 consumed_by_layers 展示为人话
+        factorConsumedDetail(c) {
+            const layers = (c && c.consumed_by_layers) || [];
+            if (!layers.length) return '尚未确认消费层(可能是死卡或新加入)';
+            const a = layers.filter(x => x === 'Layer A');
+            const b = layers.filter(x => /^L[1-5]$/.test(x));
+            const parts = [];
+            if (a.length) parts.push('Layer A 大周期裁决');
+            if (b.length) parts.push('Layer B ' + b.join(' / '));
+            return '该因子被 ' + parts.join(' + ') + ' 消费';
+        },
+        // Sprint Web Transparency Commit 5:卡片展开 toggle 状态(详情区)
+        toggleCardDetail(cardId) {
+            this.expandedCards = this.expandedCards || {};
+            this.expandedCards = {
+                ...this.expandedCards,
+                [cardId]: !this.expandedCards[cardId],
+            };
         },
 
         // ---- Sprint 2.6-H.1:单行 fetched_at_bjt 显示 ----

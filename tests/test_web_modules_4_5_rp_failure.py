@@ -82,7 +82,13 @@ def test_raw_factor_module_reuses_existing_region_for_layer_a_factors(html, js):
     assert "状态:" in js
     assert "layerAFactorCoverageSummary()" in html
     assert "Layer A 因子覆盖" in js
-    assert html.count("factorStatusLine(c)") == 1
+    # Sprint Web Transparency Commit 5:不再用 factorStatusLine(c) 整段,改为
+    # inline 渲染 factorStatusLabel + linked_layer_simplified + factorLayerClass
+    # 以支持三档颜色 + 详情展开。HTML 中应有新的渲染函数引用:
+    assert "factorStatusLabel(c)" in html
+    assert "linked_layer_simplified" in html
+    assert "factorLayerClass(c)" in html
+    assert "toggleCardDetail" in html
 
 
 def test_layer_a_new_factor_names_are_available_to_raw_factor_cards(js):
@@ -192,10 +198,16 @@ def test_layer_a_p0_factors_are_rendered_in_existing_raw_factor_module(js, html)
 
 
 def test_layer_a_raw_factor_cards_keep_existing_status_style(js, html):
-    """新增因子复用原始因子卡片:数值、说明、状态、抓取时间都走旧结构。"""
+    """新增因子复用原始因子卡片:数值、说明、状态、抓取时间都走旧结构。
+
+    Sprint Web Transparency Commit 5:渲染从 factorStatusLine(c) 整段
+    改为 inline 拼接(factorStatusLabel + linked_layer_simplified + factorLayerClass),
+    支持三档颜色 + 详情展开。但 layerAFactorCards 内部数据结构(linked_layer / plain_interpretation)未变。
+    """
     assert "plain_interpretation: interpretation" in js
     assert "linked_layer: 'Layer A'" in js
-    assert "factorStatusLine(c)" in html
+    # Commit 5:status 行拆成两段(status + layer)
+    assert "factorStatusLabel(c)" in html
     assert "fetchedAtPrimary(c) || '-'" in html
     assert "Layer A context" not in js
     assert "proxy_endpoint_404" not in html
@@ -232,7 +244,11 @@ def test_raw_factor_cards_use_plain_border_without_green_left_rail(html):
     assert "border-l-2 border-l" not in raw_section
     assert "左绿边" not in raw_section
     assert "freshnessColor(c.data_fresh ? 'green' : 'red')" in raw_section
-    assert "factorStatusLine(c)" in raw_section
+    # Sprint Web Transparency Commit 5:factorStatusLine 被拆成 inline 三段
+    assert "factorStatusLabel(c)" in raw_section
+    assert "linked_layer_simplified" in raw_section
+    assert "factorLayerClass(c)" in raw_section
+    assert "toggleCardDetail" in raw_section
     assert "formatFactorValue(c.current_value)" in raw_section
     assert "fetchedAtPrimary(c) || '-'" in raw_section
 

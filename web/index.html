@@ -880,10 +880,29 @@
                   <!-- Sprint 2.6-H.1:单行显示 fetched_at_bjt(K 线 bar 时间对用户没用,
                        误导为"数据停留")。fetched 缺失时降级到 captured。 -->
                   <div class="flex items-center justify-between text-[10px] leading-tight">
-                    <span :class="directionClass(c.impact_direction)"
-                          x-text="factorStatusLine(c)"></span>
+                    <!-- Sprint Web Transparency Commit 5:标签三档颜色 + 详情展开 -->
+                    <span class="flex items-center gap-1">
+                      <span x-text="'状态:' + factorStatusLabel(c) + ' · '"></span>
+                      <span :class="factorLayerClass(c)"
+                            x-text="(c.linked_layer_simplified || c.linked_layer || '-')"></span>
+                      <button type="button"
+                              class="text-[9px] text-slate-400 hover:text-slate-600 ml-0.5"
+                              @click="toggleCardDetail(c.card_id)"
+                              :title="'查看 ' + c.name + ' 的层消费详情'">
+                        <span x-text="(expandedCards[c.card_id] ? '▴' : '▾')"></span>
+                      </button>
+                    </span>
                     <span class="font-mono tabular-nums text-slate-500 truncate ml-2"
                           x-text="fetchedAtPrimary(c) || '-'"></span>
+                  </div>
+                  <!-- Sprint Web Transparency Commit 5:详情展开区(consumed_by_layers + advanced) -->
+                  <div x-show="expandedCards[c.card_id]"
+                       class="mt-1 px-2 py-1.5 rounded bg-slate-50 dark:bg-slate-800/50
+                              text-[10px] text-slate-600 dark:text-slate-300 leading-snug">
+                    <div x-text="factorConsumedDetail(c)"></div>
+                    <div x-show="c.advanced" class="mt-0.5 text-slate-400 italic">
+                      ⊕ 高级因子(默认排在分组末尾)
+                    </div>
                   </div>
                 </article>
               </template>

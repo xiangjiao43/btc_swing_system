@@ -298,4 +298,17 @@ push + restart 之后,建议用户:
 
 ---
 
+## 14. Push 前最后补扫(2026-05-19)
+
+应用户要求,push 前补扫 master prompt + master input builder:
+
+```
+grep -nE 'long_cycle_context|cycle_position|is_against_long_cycle|9 档|9-band' src/ai/agents/prompts/master_adjudicator.txt
+grep -nE 'long_cycle_context|cycle_position|is_against_long_cycle' src/ai/master_input_builder.py
+```
+
+**Master prompt + input builder 已清,无残留**。
+
+---
+
 **报告完**。

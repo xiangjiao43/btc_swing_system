@@ -264,11 +264,15 @@ def test_override_dict_funding_rate_layer_b_only():
     assert _consumed_by_layers_from_card_id("derivatives_funding_rate_aggregated_20260519") == ["L4"]
 
 
-def test_override_dict_events_layer_b_l5():
-    """events_* 5 卡都是 L5 only(Layer A 不消费 events)。"""
+def test_override_dict_events_display_only_after_fix():
+    """Sprint Web Transparency Fix:5 张 event_*_next 卡从 ["L5"] 改为
+    ["display_only"]。emitter 显示的是 unbounded countdown 时间,但 L5 prompt
+    只消费 72h 窗口内的 events_calendar_72h。90% 时间 countdown 数据不进
+    任何 prompt(见 sprint_web_factor_transparency_execute.md §核查)。
+    event_extreme_flags_summary 不在此 override(emit 函数显式 ["L5"])。"""
     from src.strategy.factor_card_emitter import _consumed_by_layers_from_card_id
-    assert _consumed_by_layers_from_card_id("event_cpi_next_20260519") == ["L5"]
-    assert _consumed_by_layers_from_card_id("event_fomc_next_20260519") == ["L5"]
+    assert _consumed_by_layers_from_card_id("event_cpi_next_20260519") == ["display_only"]
+    assert _consumed_by_layers_from_card_id("event_fomc_next_20260519") == ["display_only"]
 
 
 def test_override_dict_price_ma_200_layer_a_d4_correction():
@@ -542,3 +546,42 @@ def test_etf_flow_card_augmented_with_sub_periods():
     assert "Layer A 派生" in pi
     assert "7d 累计" in pi
     assert "30d 累计" in pi
+
+
+# ============================================================
+# Sprint Web Transparency Fix: "仅展示" 第 4 档 + 5 张 event_*_next 改档
+# ============================================================
+
+def test_derive_simplified_label_display_only():
+    """consumed_by_layers=['display_only'] → simplified='仅展示'"""
+    from src.strategy.factor_card_emitter import _derive_simplified_label
+    assert _derive_simplified_label(["display_only"]) == "仅展示"
+
+
+def test_event_next_5_cards_are_display_only():
+    """5 张 event_*_next 卡 override 后 linked_layer_simplified == '仅展示'。"""
+    from src.strategy.factor_card_emitter import _consumed_by_layers_from_card_id, _derive_simplified_label
+    for base in ["event_cpi_next", "event_fomc_next", "event_nfp_next",
+                 "event_options_expiry_major_next", "event_pce_next"]:
+        cb = _consumed_by_layers_from_card_id(f"{base}_20260519")
+        assert cb == ["display_only"], f"{base} consumed_by_layers should be ['display_only'], got {cb}"
+        assert _derive_simplified_label(cb) == "仅展示", f"{base} should simplify to '仅展示'"
+
+
+def test_event_extreme_flags_summary_stays_layer_b():
+    """event_extreme_flags_summary 不在 override dict 中,emit 函数显式传 ['L5'],
+    应保持 'Layer B'(真消费 + 强决策影响)。"""
+    state = {"composite_factors": {}, "evidence_reports": {"layer_1": {}}}
+    ctx = {"onchain": {}, "derivatives": {}, "macro": {},
+           "extreme_event_flags": {
+               "geopolitical_conflict_active": False,
+               "major_bank_crisis_signal": False,
+               "regulatory_crackdown_recent": False,
+               "flash_crash_detected_24h": False,
+               "stablecoin_depeg_active": False,
+           }}
+    cards = emit_factor_cards(state, ctx)
+    eef = next((c for c in cards if c["card_id"].startswith("event_extreme_flags_summary_")), None)
+    assert eef is not None, "extreme_flags_summary 卡应该 emit"
+    assert eef["consumed_by_layers"] == ["L5"], "extreme_flags_summary 真消费 L5"
+    assert eef["linked_layer_simplified"] == "Layer B", "应该是 Layer B,不是仅展示"

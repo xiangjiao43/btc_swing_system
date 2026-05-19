@@ -150,6 +150,9 @@ def _impact_direction_from_value(
 
 
 _LAYER_B_TAGS = {"L1", "L2", "L3", "L4", "L5"}
+# Sprint Web Transparency Fix:第 4 档"仅展示" — 卡片在网页显示但 AI prompt 不消费
+_DISPLAY_ONLY_TAG = "display_only"
+_DISPLAY_ONLY_LABEL = "仅展示"
 
 
 # ============================================================
@@ -189,12 +192,20 @@ _CONSUMED_BY_LAYERS_OVERRIDES: dict[str, list[str]] = {
     "derivatives_btc_dominance":             ["L5"],
     "derivatives_etf_flow":                  ["Layer A", "L5"],
 
-    # ---- 事件(只 Layer B L5)----
-    "event_cpi_next":                  ["L5"],
-    "event_fomc_next":                 ["L5"],
-    "event_nfp_next":                  ["L5"],
-    "event_options_expiry_major_next": ["L5"],
-    "event_pce_next":                  ["L5"],
+    # ---- 事件倒计时(仅展示 — Sprint Web Transparency Fix 修正)----
+    # 这 5 张 event_*_next 卡显示的是 unbounded "下次 X 距今 N 小时",但 L5 prompt
+    # 只消费 72h 窗口内的 events_calendar_72h(详见 sprint_layer_b_factor_reaudit
+    # § event 部分)。90% 时间 unbounded countdown 数据不进任何 prompt → 标"仅展示"。
+    # emitter 原 Sprint 1.5q 标 linked_layer=None + impact_weight=0,Commit 2 把它
+    # 们误标 ["L5"],本 commit 改回正确语义。
+    "event_cpi_next":                  [_DISPLAY_ONLY_TAG],
+    "event_fomc_next":                 [_DISPLAY_ONLY_TAG],
+    "event_nfp_next":                  [_DISPLAY_ONLY_TAG],
+    "event_options_expiry_major_next": [_DISPLAY_ONLY_TAG],
+    "event_pce_next":                  [_DISPLAY_ONLY_TAG],
+    # event_extreme_flags_summary 卡保持真消费(extreme_event_flags 直接驱动
+    # L5 extreme_event_detected → PROTECTION;不在此 override 但 emit 函数显式
+    # 传 consumed_by_layers=["L5"])。
 
     # ---- 宏观(部分共用)----
     "macro_btc_nasdaq_corr_60d":  ["L5"],
@@ -243,9 +254,10 @@ def _consumed_by_layers_from_card_id(card_id: str) -> Optional[list[str]]:
 
 
 def _derive_simplified_label(consumed_by_layers: list[str]) -> str:
-    """根据 consumed_by_layers 推导三档简化标签。
+    """根据 consumed_by_layers 推导四档简化标签。
 
-    规则:
+    规则(Sprint Web Transparency Fix 增第 4 档):
+      - "display_only" 在 list → "仅展示"(网页显示但无 AI prompt 消费)
       - "Layer A" + 任一 L1-L5 同时存在 → "Layer A / B"
       - 只有 "Layer A" → "Layer A"
       - 只有 L1-L5 → "Layer B"
@@ -253,6 +265,8 @@ def _derive_simplified_label(consumed_by_layers: list[str]) -> str:
     """
     if not consumed_by_layers:
         return "未使用"
+    if _DISPLAY_ONLY_TAG in consumed_by_layers:
+        return _DISPLAY_ONLY_LABEL
     has_a = "Layer A" in consumed_by_layers
     has_b = any(t in _LAYER_B_TAGS for t in consumed_by_layers)
     if has_a and has_b:

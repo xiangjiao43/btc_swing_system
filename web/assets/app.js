@@ -2135,18 +2135,24 @@ function app() {
                 || '-';
             return '状态:' + this.factorStatusLabel(c) + ' · ' + layer;
         },
-        // Sprint Web Transparency Commit 5:三档标签颜色映射
+        // Sprint Web Transparency Commit 5(+ Fix 加 4th 档):四档标签颜色映射
         factorLayerClass(c) {
             const label = (c && c.linked_layer_simplified) || (c && c.linked_layer) || '';
             if (label === 'Layer A') return 'text-blue-600 dark:text-blue-300';
             if (label === 'Layer B') return 'text-amber-600 dark:text-amber-300';
             if (label === 'Layer A / B') return 'text-purple-600 dark:text-purple-300';
+            // Sprint Web Transparency Fix:第 4 档"仅展示"用低饱和灰色,视觉降权
+            if (label === '仅展示') return 'text-slate-400 dark:text-slate-500 italic';
             return 'text-slate-500 dark:text-slate-400';
         },
-        // Sprint Web Transparency Commit 5:详情展开 — 把 consumed_by_layers 展示为人话
+        // Sprint Web Transparency Commit 5(+ Fix):详情展开 — 把 consumed_by_layers 展示为人话
         factorConsumedDetail(c) {
             const layers = (c && c.consumed_by_layers) || [];
             if (!layers.length) return '尚未确认消费层(可能是死卡或新加入)';
+            // Sprint Web Transparency Fix:第 4 档"仅展示"
+            if (layers.indexOf('display_only') !== -1) {
+                return '此因子仅在网页展示,不参与 AI 决策';
+            }
             const a = layers.filter(x => x === 'Layer A');
             const b = layers.filter(x => /^L[1-5]$/.test(x));
             const parts = [];

@@ -150,7 +150,7 @@ def test_v13_path_calls_context_builder_orchestrator_mapper(db_path):
     fake_ctx = {"_shared": {"current_close": 75000.0,
                             "reference_timestamp_utc": "2026-05-01T08:00:00Z"},
                 "l5": {"extreme_event_flags": {}},
-                "l2": {"rule_cycle_position": {"label": "early_bull"}}}
+                "l2": {}}  # Sprint Layer-B Cleanup: rule_cycle_position 已删除
     fake_result = {
         "layers": {
             "l1": {"regime": "trend_up"}, "l2": {"stance": "bullish"},
@@ -189,7 +189,7 @@ def test_v13_path_db_row_action_state_matches_master_to_state(db_path):
     fake_ctx = {"_shared": {"current_close": 80000.0,
                             "reference_timestamp_utc": "2026-05-01T16:00:00Z"},
                 "l5": {"extreme_event_flags": {}},
-                "l2": {"rule_cycle_position": {}}}
+                "l2": {}}  # Sprint Layer-B Cleanup: rule_cycle_position 已删除
     fake_result = {
         "layers": {
             "l1": {}, "l2": {"stance": "bearish"}, "l3": {}, "l4": {}, "l5": {},

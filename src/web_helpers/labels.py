@@ -179,8 +179,9 @@ ANTI_PATTERN_LABELS = {
     "liquidation_cascade": "⚠️ 清算瀑布(大额爆仓,资金费率急转)",
     "exhaustion_signal": "⚠️ 力竭信号(新高新低但成交量不配合)",
     # v1.3 §3.3.3 实际命名(anti_pattern_signals.py)
+    # Sprint Layer-B Cleanup:删 is_against_long_cycle(Layer A 独立子系统
+    # 负责大周期判断,Layer B 反模式回归纯波段 4 类)
     "is_extending_late_phase": "⚠️ 趋势末段追单(phase 已 late/exhausted)",
-    "is_against_long_cycle": "⚠️ 与长周期反向(stance vs cycle 反向)",
     "is_chasing_breakout_no_pullback": "⚠️ 突破追单无回踩",
     "is_failing_at_resistance": "⚠️ 在阻力位反复测试失败",
     "is_after_extreme_event_no_reset": "⚠️ 极端事件后未充分整理",

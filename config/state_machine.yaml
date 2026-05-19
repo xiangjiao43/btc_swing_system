@@ -32,14 +32,8 @@ flip_watch:
   base_max_hours: 96
   hard_floor_min_hours: 8       # effective_min 下限
   hard_ceil_max_hours: 168      # effective_max 上限
-  # 动态乘数(v1.2 删除 previous outcome_type 影响)
-  cycle_position_multipliers:
-    late_bull: 0.7
-    distribution: 0.7
-    late_bear: 0.7
-    accumulation: 0.7
-    mid_bull: 1.3
-    mid_bear: 1.3
+  # Sprint Layer-B Cleanup:删除 cycle_position_multipliers
+  # — Layer A 独立子系统负责大周期判断,FLIP_WATCH 永远走 base 时长。
   volatility_multipliers:
     extreme: 1.3
     low: 0.8

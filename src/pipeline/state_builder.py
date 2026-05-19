@@ -42,7 +42,6 @@ from ..data.storage.dao import (
     RunMetadataDAO,
     StrategyStateDAO,
 )
-from ..composite import CyclePositionFactor
 from ..utils.pipeline_progress import pipeline_stage
 
 # Sprint 1.8.1:旧 v1.2 evidence layers / composites / adjudicator 已退役
@@ -51,6 +50,7 @@ from ..utils.pipeline_progress import pipeline_stage
 # 实际 .compute() / .adjudicate() 调用时抛 NotImplementedError,
 # 由 _run_stage 兜成 degraded 写入 fallback_log,不 crash。
 # 同时 scheduler.yaml 里 pipeline_run job 已 disabled,生产端不会真触发。
+# Sprint Layer-B Cleanup:CyclePositionFactor 整删,这里也 stub。
 
 class _RetiredV12Module:
     """v1.2 退役模块 stub。任何调用都抛 NotImplementedError。"""
@@ -75,6 +75,7 @@ TruthTrendFactor = _RetiredV12Module
 BandPositionFactor = _RetiredV12Module
 CrowdingFactor = _RetiredV12Module
 MacroHeadwindFactor = _RetiredV12Module
+CyclePositionFactor = _RetiredV12Module  # Sprint Layer-B Cleanup
 Layer1Regime = _RetiredV12Module
 Layer2Direction = _RetiredV12Module
 Layer3Opportunity = _RetiredV12Module

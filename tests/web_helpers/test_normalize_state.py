@@ -50,8 +50,7 @@ def _v13_state_full() -> dict:
                 "phase": "early",
                 "key_levels": {"nearest_support": 75320,
                                 "nearest_resistance": 78900},
-                "long_cycle_context": {"ai_assessment": "agree",
-                                        "rule_cycle_position": "early_bull"},
+                # Sprint Layer-B Cleanup: long_cycle_context 整段删除
                 "narrative": "看多结构成立。HH+HL 序列连续 3 根。多头方向中等可信。",
                 "key_observations": ["HH+HL 序列成立"],
                 "confidence": 0.7,
@@ -98,9 +97,9 @@ def _v13_state_full() -> dict:
         "validator": {"violations": [], "passed": True},
         "status": "ok",
         "context_summary": {
+            # Sprint Layer-B Cleanup: 反模式 5 类 → 4 类(删 is_against_long_cycle)
             "anti_pattern_signals": {
                 "is_extending_late_phase": False,
-                "is_against_long_cycle": False,
                 "is_chasing_breakout_no_pullback": False,
                 "is_failing_at_resistance": False,
                 "is_after_extreme_event_no_reset": False,

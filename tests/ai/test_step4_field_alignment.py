@@ -61,8 +61,9 @@ def test_l2_prompt_contains_required_v2_fields(empty_db_ctx):
     prompt = agent._build_user_prompt(l2_ctx)
     assert "klines_1d_30d_close" in prompt
     assert "computed_indicators" in prompt
-    assert "rule_cycle_position" in prompt
     assert "l1_output" in prompt
+    # Sprint Layer-B Cleanup:rule_cycle_position 已删除
+    assert "rule_cycle_position" not in prompt
     # 不应含旧字段名
     assert "derivatives_snapshot" not in prompt
     assert "onchain_structure_snapshot" not in prompt
@@ -75,9 +76,9 @@ def test_l3_prompt_contains_v3_fields_no_label_drift(empty_db_ctx):
     l3_ctx = dict(empty_db_ctx["l3"])
     l3_ctx["l1_output"] = {"regime": "trend_up"}
     l3_ctx["l2_output"] = {"stance": "bullish"}
+    # Sprint Layer-B Cleanup:反模式 5 类 → 4 类(删 is_against_long_cycle)
     l3_ctx["anti_pattern_signals"] = {
         "is_extending_late_phase": False,
-        "is_against_long_cycle": False,
         "is_chasing_breakout_no_pullback": False,
         "is_failing_at_resistance": False,
         "is_after_extreme_event_no_reset": False,

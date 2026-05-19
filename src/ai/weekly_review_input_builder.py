@@ -532,9 +532,9 @@ def _aggregate_anti_pattern_signals(
 ) -> dict[str, Any]:
     """聚合 strategy_runs.full_state_json.layers.l3.anti_pattern_flags 触发率。
 
-    每个反模式 5 类(extending_late_phase / against_long_cycle / chasing_breakout
-    _no_pullback / failing_at_resistance / after_extreme_event_no_reset)
-    分别统计触发次数 + 占总有效 run 比例。
+    每个反模式 4 类(extending_late_phase / chasing_breakout_no_pullback /
+    failing_at_resistance / after_extreme_event_no_reset)分别统计触发次数 +
+    占总有效 run 比例。(Sprint Layer-B Cleanup:`against_long_cycle` 已删除。)
 
     Returns:
       {total_runs_with_l3, anti_pattern_counts: {flag: count},

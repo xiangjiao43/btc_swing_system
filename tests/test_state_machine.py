@@ -43,7 +43,6 @@ def _state(
     l3_permission: str = "watch",
     l4_overall_risk: str = "moderate",
     l5_macro_stance: str = "risk_neutral",
-    cycle_position: Optional[str] = None,
     l5_extreme: bool = False,
     fallback_level: Optional[int] = None,
     trade_plan: Optional[dict] = None,
@@ -76,11 +75,8 @@ def _state(
                 "extreme_event_detected": l5_extreme,
             },
         },
-        "composite_factors": {
-            "cycle_position": (
-                {"cycle_position": cycle_position} if cycle_position else {}
-            ),
-        },
+        # Sprint Layer-B Cleanup: composite_factors.cycle_position 已删除
+        "composite_factors": {},
         "trade_plan": trade_plan or {},
         "lifecycle": lifecycle or {},
         "adjudicator": adjudicator or {},

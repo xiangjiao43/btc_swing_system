@@ -340,7 +340,6 @@ def _build_full_state_json(
             "events_count_72h": shared.get("events_count_72h"),
             "btc_macro_corr_60d": shared.get("btc_macro_corr_60d"),
             "extreme_event_flags": l5.get("extreme_event_flags"),
-            "rule_cycle_position": l2.get("rule_cycle_position"),
         },
     }
     return json.dumps(payload, ensure_ascii=False, default=str)

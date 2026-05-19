@@ -99,7 +99,6 @@ def _build_context(current_state: str = "FLAT", **overrides) -> dict[str, Any]:
         "l2": {
             "klines_1d_30d_close": klines_1d["close"].iloc[-30:].tolist(),
             "computed_indicators": {"ema_20_current": 75320},
-            "rule_cycle_position": {"label": "early_bull", "confidence": 0.74},
             "previous_l2": None,
         },
         "l3": {

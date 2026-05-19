@@ -13,7 +13,6 @@ state_machine.py — Sprint 1.5a,建模 §5 唯一权威 14 档状态机。
 
 输入契约(strategy_state):
   * evidence_reports.layer_1/2/3/4/5(同 Sprint 1.12 形状)
-  * composite_factors.cycle_position(用于 FLIP_WATCH 冷却乘数)
   * trade_plan(由 AI 裁决产出 / Sprint 1.5b 起链式注入)
   * lifecycle(由 Sprint 1.5b 的 lifecycle_manager 产出;v1 可缺省)
   * macro_events.extreme_event_detected(由 L5 产出)
@@ -190,7 +189,9 @@ class StateMachine:
         self._fw_base_max = float(fw.get("base_max_hours", 96))
         self._fw_floor = float(fw.get("hard_floor_min_hours", 8))
         self._fw_ceil = float(fw.get("hard_ceil_max_hours", 168))
-        self._fw_cycle_mult = dict(fw.get("cycle_position_multipliers") or {})
+        # Sprint Layer-B Cleanup:删除 self._fw_cycle_mult(cycle_position_multipliers)
+        # — Layer A 独立子系统负责大周期,FLIP_WATCH 永远走 base 时长,
+        # 不再有 cycle 乘数
         self._fw_vol_mult = dict(fw.get("volatility_multipliers") or {})
 
         op = self.config.get("open_phase") or {}
@@ -980,7 +981,8 @@ def _build_field_snapshot(
     l3 = _get_layer(strategy_state, "layer_3")
     l4 = _get_layer(strategy_state, "layer_4")
     l5 = _get_layer(strategy_state, "layer_5")
-    cp = ((strategy_state.get("composite_factors") or {}).get("cycle_position") or {})
+    # Sprint Layer-B Cleanup:删除 cycle_position 读取
+    # (composite/cycle_position.py 已删,Layer A 6 阶段替代)
     trade_plan = strategy_state.get("trade_plan") or {}
     lifecycle = strategy_state.get("lifecycle") or {}
     macro_events = strategy_state.get("macro_events") or {}
@@ -1027,11 +1029,6 @@ def _build_field_snapshot(
         "l5_macro_stance": l5.get("macro_stance") or l5.get("macro_environment"),
         "l5_extreme_event_detected": bool(
             l5.get("extreme_event_detected", False)
-        ),
-
-        # ---- 组合因子 ----
-        "cycle_position": (
-            cp.get("cycle_position") or cp.get("band")
         ),
 
         # ---- trade_plan / lifecycle / AI verdict ----

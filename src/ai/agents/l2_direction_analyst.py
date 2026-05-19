@@ -39,8 +39,9 @@ class L2DirectionAnalyst(BaseAgent):
     LAYER_ID = 2
 
     def _build_user_prompt(self, context: dict[str, Any]) -> str:
-        """v2 prompt 期望:klines_1d_30d_close + computed_indicators + l1_output
-        + rule_cycle_position + previous_l2。
+        """Sprint Layer-B Cleanup:prompt 期望 klines_1d_30d_close +
+        computed_indicators + l1_output + previous_l2
+        (rule_cycle_position 已删 — Layer A 独立子系统负责大周期判断)。
 
         Sprint E Step 2:开头加「L2 因子状态」段。
         """
@@ -48,7 +49,6 @@ class L2DirectionAnalyst(BaseAgent):
             "klines_1d_30d_close": context.get("klines_1d_30d_close"),
             "computed_indicators": context.get("computed_indicators"),
             "l1_output": context.get("l1_output"),
-            "rule_cycle_position": context.get("rule_cycle_position"),
             "previous_l2": context.get("previous_l2"),
         }
         snapshot = {k: v for k, v in snapshot.items() if v is not None}

@@ -1,6 +1,8 @@
-"""tests/ai/test_anti_pattern_signals.py — Sprint 1.9-A.3 反模式 5 类 bool。
+"""tests/ai/test_anti_pattern_signals.py — Sprint Layer-B Cleanup 反模式 4 类 bool。
 
 每个独立检测器 + 主入口 compute_anti_pattern_signals 都测触发/不触发。
+(Sprint Layer-B Cleanup:`is_against_long_cycle` 删除 — Layer A 独立子系统
+负责大周期判断,Layer B 反模式回归纯波段 4 类。)
 """
 
 from __future__ import annotations
@@ -10,7 +12,6 @@ import pytest
 from src.ai.anti_pattern_signals import (
     compute_anti_pattern_signals,
     is_after_extreme_event_no_reset,
-    is_against_long_cycle,
     is_chasing_breakout_no_pullback,
     is_extending_late_phase,
     is_failing_at_resistance,
@@ -40,46 +41,9 @@ def test_extending_late_phase_handles_missing():
 
 
 # ============================================================
-# is_against_long_cycle
+# is_against_long_cycle — DELETED (Sprint Layer-B Cleanup)
+# Layer A 独立子系统负责大周期判断,Layer B 反模式回归纯波段 4 类。
 # ============================================================
-
-def test_against_long_cycle_bullish_in_distribution():
-    """stance=bullish + cycle=distribution → True。"""
-    l2 = {
-        "stance": "bullish",
-        "long_cycle_context": {"rule_cycle_position": "distribution"},
-    }
-    assert is_against_long_cycle(l2) is True
-
-
-def test_against_long_cycle_bearish_in_accumulation():
-    l2 = {
-        "stance": "bearish",
-        "long_cycle_context": {"rule_cycle_position": "accumulation"},
-    }
-    assert is_against_long_cycle(l2) is True
-
-
-def test_against_long_cycle_aligned_no_trigger():
-    """stance=bullish + cycle=early_bull → False(同向)。"""
-    l2 = {
-        "stance": "bullish",
-        "long_cycle_context": {"rule_cycle_position": "early_bull"},
-    }
-    assert is_against_long_cycle(l2) is False
-
-
-def test_against_long_cycle_uses_ai_alternative():
-    """有 ai_alternative 时优先用它(覆盖 rule)。"""
-    l2 = {
-        "stance": "bullish",
-        "long_cycle_context": {
-            "rule_cycle_position": "accumulation",
-            "ai_alternative": "late_bull",   # AI disagree → 用这个
-        },
-    }
-    # ai_alternative=late_bull 是 bearish_cycle → 触发
-    assert is_against_long_cycle(l2) is True
 
 
 # ============================================================
@@ -179,19 +143,17 @@ def test_after_extreme_event_handles_missing():
 # 主入口 compute_anti_pattern_signals
 # ============================================================
 
-def test_compute_anti_pattern_signals_returns_5_keys():
+def test_compute_anti_pattern_signals_returns_4_keys():
     out = compute_anti_pattern_signals(
         l1_output={"regime": "trend_up"},
         l2_output={"stance": "bullish", "phase": "early",
                    "key_levels": {"nearest_resistance": 78900,
-                                  "nearest_support": 75320},
-                   "long_cycle_context": {"rule_cycle_position": "early_bull"}},
+                                  "nearest_support": 75320}},
         current_close=75320.0,
         extreme_event_flags={"flash_crash_detected_24h": False},
     )
     assert set(out.keys()) == {
         "is_extending_late_phase",
-        "is_against_long_cycle",
         "is_chasing_breakout_no_pullback",
         "is_failing_at_resistance",
         "is_after_extreme_event_no_reset",
@@ -199,15 +161,13 @@ def test_compute_anti_pattern_signals_returns_5_keys():
     # 在 nearest_support 上(75320),距 nearest_resistance 78900 还有 4.5% → failing 不触发
     assert out["is_failing_at_resistance"] is False
     assert out["is_extending_late_phase"] is False
-    assert out["is_against_long_cycle"] is False
 
 
 def test_compute_anti_pattern_signals_late_phase_triggers():
     out = compute_anti_pattern_signals(
         l1_output={},
         l2_output={"stance": "bullish", "phase": "late",
-                   "key_levels": {},
-                   "long_cycle_context": {"rule_cycle_position": "early_bull"}},
+                   "key_levels": {}},
         current_close=80000.0,
     )
     assert out["is_extending_late_phase"] is True
@@ -221,7 +181,6 @@ def test_compute_anti_pattern_signals_neutral_stance_minimal_trigger():
         current_close=75000.0,
     )
     assert out["is_extending_late_phase"] is False
-    assert out["is_against_long_cycle"] is False
     assert out["is_chasing_breakout_no_pullback"] is False
     assert out["is_failing_at_resistance"] is False
     assert out["is_after_extreme_event_no_reset"] is False

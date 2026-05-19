@@ -147,10 +147,9 @@ def test_build_full_context_returns_all_required_top_level_keys(db_path):
     assert set(ctx["l1"].keys()) == {
         "klines_1d_30d_close", "computed_indicators", "previous_l1",
     }
-    # L2 ctx
+    # L2 ctx (Sprint Layer-B Cleanup: rule_cycle_position 已删除)
     assert set(ctx["l2"].keys()) == {
-        "klines_1d_30d_close", "computed_indicators",
-        "rule_cycle_position", "previous_l2",
+        "klines_1d_30d_close", "computed_indicators", "previous_l2",
     }
     # L3 ctx
     assert set(ctx["l3"].keys()) == {
@@ -195,15 +194,14 @@ def test_build_full_context_computed_indicators_has_required_subfields(db_path):
     assert "ema_50_slope_30d" in ci
     assert "swing_5_recent" in ci
 
-    # L2 必有
+    # L2 必有 (Sprint Layer-B Cleanup: 删除 lth/sth_supply_90d_pct_change +
+    # lth_realized_price,只保留 sth_realized_price 作波段背景)
     assert "ema_20_4h_current" in ci
     assert "ema_50_4h_current" in ci
     assert "swing_high_3_recent" in ci
     assert "swing_low_3_recent" in ci
-    assert "lth_supply_90d_pct_change" in ci
-    assert "sth_supply_90d_pct_change" in ci
     assert "exchange_net_flow_30d_sum" in ci
-    assert "lth_realized_price_current" in ci
+    assert "sth_realized_price" in ci
 
     # L4 必有
     assert "current_close" in ci

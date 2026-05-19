@@ -1,15 +1,16 @@
-"""src/ai/anti_pattern_signals.py — Sprint 1.9-A.3 v1.3 §3.3.3 反模式 5 类 bool。
+"""src/ai/anti_pattern_signals.py — Sprint Layer-B Cleanup §3.3.3 反模式 4 类 bool。
 
-L3 prompt 期望输入 `anti_pattern_signals` 5 类 bool:
+L3 prompt 期望输入 `anti_pattern_signals` 4 类 bool:
   - is_extending_late_phase            — L2 phase ∈ {late, exhausted}
-  - is_against_long_cycle              — stance vs cycle_position 反向
   - is_chasing_breakout_no_pullback    — 突破 nearest_resistance 后无回踩
   - is_failing_at_resistance           — 反复测试 resistance 失败
   - is_after_extreme_event_no_reset    — 极端事件后未充分整理
 
 铁律对齐:
-- v1.3 §3.3.3 显式定义"系统计算给 5 类 bool 给 L3 用"(类型 B)。
-- 这 5 类是基于 L1 + L2 输出 + 价格 K 线的客观判断,不是给 AI 的"标签",
+- v1.3 §3.3.3 原定义"系统计算给 5 类 bool 给 L3 用"(类型 B)。Sprint
+  Layer-B Cleanup 后:`is_against_long_cycle` 删除 — Layer A 独立子系统
+  负责大周期判断,Layer B 反模式回归纯波段。
+- 这 4 类是基于 L1 + L2 输出 + 价格 K 线的客观判断,不是给 AI 的"标签",
   AI 看到 bool 后还要综合判断 grade(铁律 3)。
 
 调用时机:Orchestrator 在 L3 之前 / L2 之后调用本模块。
@@ -36,37 +37,6 @@ def is_extending_late_phase(l2_output: dict[str, Any]) -> bool:
         return False
     phase = l2_output.get("phase")
     return phase in ("late", "exhausted")
-
-
-def is_against_long_cycle(l2_output: dict[str, Any]) -> bool:
-    """L2 stance 与 long_cycle_context.ai_assessment 反向 → True。
-
-    判据:
-      - stance=bullish + cycle 处于 distribution / late_bull / mid_bear /
-        late_bear / early_bear → True
-      - stance=bearish + cycle 处于 accumulation / early_bull / mid_bull → True
-    """
-    if not isinstance(l2_output, dict):
-        return False
-    stance = l2_output.get("stance")
-    long_ctx = l2_output.get("long_cycle_context") or {}
-    if not isinstance(long_ctx, dict):
-        return False
-    # ai_alternative 优先(L2 显式覆盖了 rule),其次 rule_cycle_position
-    cycle_label = (long_ctx.get("ai_alternative")
-                   or long_ctx.get("rule_cycle_position") or "")
-
-    bearish_cycles = {
-        "distribution", "late_bull", "early_bear",
-        "mid_bear", "late_bear",
-    }
-    bullish_cycles = {"accumulation", "early_bull", "mid_bull"}
-
-    if stance == "bullish" and cycle_label in bearish_cycles:
-        return True
-    if stance == "bearish" and cycle_label in bullish_cycles:
-        return True
-    return False
 
 
 def is_chasing_breakout_no_pullback(
@@ -174,22 +144,22 @@ def compute_anti_pattern_signals(
     extreme_event_flags: Optional[dict[str, Any]] = None,
     klines_1d: Optional[pd.DataFrame] = None,
 ) -> dict[str, bool]:
-    """主入口:返回 L3 prompt 期望的 5 类 bool dict。
+    """主入口:返回 L3 prompt 期望的 4 类 bool dict。
 
     Args:
         l1_output: L1 AI 已跑出的 dict
-        l2_output: L2 AI 已跑出的 dict(必有 stance/phase/key_levels/long_cycle_context)
+        l2_output: L2 AI 已跑出的 dict(必有 stance/phase/key_levels)
         current_close: 现价(L4 也用,通常在 context 里)
         extreme_event_flags: 5 类极端事件 bool dict(从 detect_extreme_events 取)
         klines_1d: 备用(本 sprint 不强制使用)
     Returns:
-        dict[str, bool],5 个 key,顺序与 L3 prompt 一致。
+        dict[str, bool],4 个 key,顺序与 L3 prompt 一致。
+        (Sprint Layer-B Cleanup:`is_against_long_cycle` 已删除 —
+        大周期判断归 Layer A 独立子系统,Layer B 反模式回归纯波段。)
     """
     return {
         "is_extending_late_phase":
             is_extending_late_phase(l2_output),
-        "is_against_long_cycle":
-            is_against_long_cycle(l2_output),
         "is_chasing_breakout_no_pullback":
             is_chasing_breakout_no_pullback(l2_output, current_close),
         "is_failing_at_resistance":

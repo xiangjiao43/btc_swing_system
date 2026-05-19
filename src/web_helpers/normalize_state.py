@@ -692,30 +692,23 @@ def _master_card_v14(
 # ============================================================
 
 def _l1_supporting_data(ctx: dict) -> dict:
-    """L1 用 ADX / EMA 关系 / ATR 等。从 context_summary 取(可能空)。"""
-    out: dict[str, Any] = {}
-    rule_cycle = ctx.get("rule_cycle_position") or {}
-    if rule_cycle.get("label"):
-        out["rule_cycle_position"] = {
-            "value": rule_cycle.get("label"),
-            "explanation": "规则版长周期定位(辅助参考)",
-        }
-    return out
+    """L1 用 ADX / EMA 关系 / ATR 等。从 context_summary 取(可能空)。
+
+    Sprint Layer-B Cleanup:删除 rule_cycle_position 辅助显示
+    (Layer A 6 阶段替代 9 档,L1 不再显示长周期定位)。
+    """
+    return {}
 
 
 def _l2_supporting_data(l2: dict, ctx: dict) -> dict:
+    """Sprint Layer-B Cleanup:删除 long_cycle_context 显示
+    (Layer A 独立子系统负责大周期判断)。"""
     out: dict[str, Any] = {}
     key_levels = l2.get("key_levels") or {}
     if key_levels:
         out["key_levels"] = {
             "value": key_levels,
             "explanation": "关键价格位(支撑/阻力)",
-        }
-    long_cycle = l2.get("long_cycle_context") or {}
-    if long_cycle:
-        out["long_cycle_context"] = {
-            "value": long_cycle,
-            "explanation": "长周期背景判断(AI 看 cycle_position 是否 agree)",
         }
     return out
 

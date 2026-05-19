@@ -224,8 +224,7 @@ class AIOrchestrator:
                           funding_rate_series, open_interest_series,
                           exchange_net_flow_series, current_close, ...}
           - "l1":       {klines_1d_30d_close, computed_indicators, previous_l1}
-          - "l2":       {klines_1d_30d_close, computed_indicators,
-                          rule_cycle_position, previous_l2}
+          - "l2":       {klines_1d_30d_close, computed_indicators, previous_l2}
           - "l3":       {risk_preview, current_state, previous_l3}
           - "l4":       {computed_indicators, current_state, previous_l4}
           - "l5":       {computed_macro_indicators, events_calendar_72h,

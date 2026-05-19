@@ -33,7 +33,6 @@ from typing import Any, Optional
 import numpy as np
 import pandas as pd
 
-from ..composite.cycle_position import CyclePositionFactor
 from ..data.storage.dao import (
     BTCKlinesDAO,
     DerivativesDAO,
@@ -601,11 +600,13 @@ class ContextBuilder:
             "master": {...},        # orchestrator 还要补 l1-l5 输出 + _system_provided
           }
 
-        Sprint 1.9-A.4:
-        - 加 5 个 ❌ 项:klines_1d_30d_close / price_position_in_90d_range /
-          rule_cycle_position / extreme_event_flags / (anti_pattern_signals 在
-          orchestrator 调,因需 l1+l2 输出)
+        Sprint 1.9-A.4 + Sprint Layer-B Cleanup:
+        - 加 4 个 ❌ 项:klines_1d_30d_close / price_position_in_90d_range /
+          extreme_event_flags / (anti_pattern_signals 在 orchestrator 调,
+          因需 l1+l2 输出)
         - previous_l1-l5 从 strategy_runs.full_state_json 解析(零 schema 改动)
+        - rule_cycle_position 已删除(Layer A 6 阶段替代 9 档,Layer B 不再
+          做大周期判断)
         """
         with pipeline_stage("fetch / load market data"):
             klines_1d = BTCKlinesDAO.get_recent_as_df(
@@ -658,23 +659,7 @@ class ContextBuilder:
         )
         price_position_90d = compute_price_position_in_90d_range(klines_1d)
 
-        # ❌3:rule_cycle_position(调 CyclePositionFactor)
-        try:
-            cp_dict = CyclePositionFactor().compute({
-                "onchain": onchain, "klines_1d": klines_1d,
-            })
-            rule_cycle_position = {
-                "label": cp_dict.get("cycle_position", "unclear"),
-                "confidence": cp_dict.get("cycle_confidence", 0.30),
-                "voting_details": cp_dict.get("voting_breakdown") or {},
-            }
-        except Exception as e:
-            logger.warning("rule_cycle_position compute failed: %s", e)
-            rule_cycle_position = {
-                "label": "unclear", "confidence": 0.30, "voting_details": {},
-            }
-
-        # ❌4:extreme_event_flags(L5 用,5 类 bool)
+        # extreme_event_flags(L5 用,5 类 bool)
         try:
             extreme_event_flags = detect_extreme_events(self.conn)
         except Exception as e:
@@ -696,9 +681,9 @@ class ContextBuilder:
             "atr_14_1d_current": atr["atr_14_current"],
             "atr_180d_percentile": atr["atr_180d_percentile"],
             "price_position_in_90d_range": price_position_90d,
-            **{k: v for k, v in lth_sth.items()},
-            # 别名(prompt 用 _current 后缀的 / 不带后缀的两种命名共存)
-            "lth_realized_price": lth_sth["lth_realized_price_current"],
+            # Sprint Layer-B Cleanup:LTH/STH supply 变化 + LTH realized price
+            # 不再注入 Layer B context(Layer A 仍独立计算,数据源不动)。
+            # 只保留 sth_realized_price 作为 L2 波段背景。
             "sth_realized_price": lth_sth["sth_realized_price_current"],
             "exchange_net_flow_30d": ex_flow["exchange_net_flow_30d_sum"],
             "exchange_net_flow_30d_sum": ex_flow["exchange_net_flow_30d_sum"],
@@ -772,7 +757,6 @@ class ContextBuilder:
         l2_ctx = {
             "klines_1d_30d_close": klines_1d_30d_close,
             "computed_indicators": computed_indicators,
-            "rule_cycle_position": rule_cycle_position,
             "previous_l2": previous_layers["previous_l2"],
             # l1_output 由 orchestrator 在 L1 跑完后注入
         }

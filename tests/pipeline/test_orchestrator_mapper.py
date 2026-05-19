@@ -91,8 +91,7 @@ def _make_context() -> dict:
             "reference_timestamp_utc": "2026-05-01T08:00:00Z",
         },
         "l5": {"extreme_event_flags": {"flash_crash_detected_24h": False}},
-        "l2": {"rule_cycle_position": {"label": "early_bull",
-                                       "confidence": 0.74}},
+        "l2": {},  # Sprint Layer-B Cleanup: rule_cycle_position 已删除
     }
 
 
@@ -302,7 +301,8 @@ def test_col_19_full_state_json_contains_context_summary(conn):
     assert cs["events_count_72h"] == 2
     assert cs["btc_macro_corr_60d"] == 0.45
     assert "extreme_event_flags" in cs
-    assert "rule_cycle_position" in cs
+    # Sprint Layer-B Cleanup:rule_cycle_position 已从 context_summary 删除
+    assert "rule_cycle_position" not in cs
 
 
 def test_col_19_full_state_json_does_not_contain_pandas_objects(conn):

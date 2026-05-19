@@ -187,9 +187,10 @@
 输入新加 5 段数据,你必须用它们做评估:
 
 ## 第 8 段 — 反模式触发率
-L3 anti_pattern_signals 5 类(extending_late_phase / against_long_cycle /
+L3 anti_pattern_signals 4 类(extending_late_phase /
 chasing_breakout_no_pullback / failing_at_resistance / after_extreme_event_no_reset)
-触发占比。
+触发占比。(Sprint Layer-B Cleanup:`against_long_cycle` 已删除,Layer A
+独立负责大周期判断。)
 - 单周触发率 > 40% → 默认只建议“审计 / 观察 / 补诊断”,severity=warning。
   不要直接建议修改 src/ai/agents/prompts/l3_opportunity.txt。
   只有连续多周异常,或 ai_vs_actual_comparison 证明错过大量真实机会时,

@@ -314,7 +314,7 @@ class WeeklyReviewAnalyst(BaseAgent):
             json.dumps(sample_base, ensure_ascii=False, indent=2),
             "",
             "# 8. 反模式触发率(Sprint H Part B 新加)",
-            "L3 anti_pattern_signals 5 类(extending_late_phase / against_long_cycle "
+            "L3 anti_pattern_signals 4 类(extending_late_phase "
             "/ chasing_breakout_no_pullback / failing_at_resistance / "
             "after_extreme_event_no_reset)在过去 7 天的触发次数 + 占比。",
             "单周某条触发率 > 40% 时,默认只能给 warning 级别的审计/观察/"

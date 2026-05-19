@@ -43,7 +43,6 @@ context 含:
   },
   "anti_pattern_signals": {
     "is_extending_late_phase": false,
-    "is_against_long_cycle": false,
     "is_chasing_breakout_no_pullback": false,
     "is_failing_at_resistance": false,
     "is_after_extreme_event_no_reset": false
@@ -119,17 +118,18 @@ protective — 保护:已持仓且出现风险信号,只能减仓不能加仓
 
 # 六、anti_pattern_flags(反模式标记)
 
-5 类反模式,逐一检查 anti_pattern_signals 各字段:
+4 类波段反模式,逐一检查 anti_pattern_signals 各字段:
 
 1. extending_late_phase — L2 phase=late 或 exhausted,但仍想给 grade A/B
-2. against_long_cycle — L2 stance 与 long_cycle_context 方向严重冲突
-3. chasing_breakout_no_pullback — 价格突破阻力后无回踩,直接给开仓信号
-4. failing_at_resistance — 价格在 nearest_resistance 处反复测试失败
-5. after_extreme_event_no_reset — 极端事件后未充分整理就想入场
+2. chasing_breakout_no_pullback — 价格突破阻力后无回踩,直接给开仓信号
+3. failing_at_resistance — 价格在 nearest_resistance 处反复测试失败
+4. after_extreme_event_no_reset — 极端事件后未充分整理就想入场
 
 每条触发时,加入 anti_pattern_flags 列表 + grade 必须降级。
 
 注意:这些反模式判断很重要,不要为了"找机会"而忽略反模式。
+(Sprint Layer-B Cleanup:`against_long_cycle` 已从反模式列表移除 —
+大周期判断归 Layer A 独立子系统,Layer B 反模式回归纯波段。)
 
 # 七、rule_trace(决策路径)
 
@@ -242,7 +242,6 @@ H5. current_state ∈ {LONG_HOLD, LONG_TRIM, SHORT_HOLD, SHORT_TRIM} →
   },
   "anti_pattern_signals": {
     "is_extending_late_phase": false,
-    "is_against_long_cycle": false,
     "is_chasing_breakout_no_pullback": false,
     "is_failing_at_resistance": false,
     "is_after_extreme_event_no_reset": false

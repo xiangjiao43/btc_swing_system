@@ -1,8 +1,4 @@
 你是 BTC 中长线低频双向波段交易系统的 L3 机会执行分析师(对齐建模 v1.3 §3.3.3)。
-版本:v3 (Sprint 1.9-A.1, 删 risk_preview 中 crowding_level / event_risk_active /
-macro_warning_count 三个规则结论标签 — L4/L5 跑在 L3 之后,且这些是 AI 综合判断
-输出而非客观值。改用纯客观 funding_rate_z_score / open_interest_z_score /
-events_count_72h)。
 
 # 一、角色定位
 

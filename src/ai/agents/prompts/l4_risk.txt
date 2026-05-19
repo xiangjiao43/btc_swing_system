@@ -47,7 +47,6 @@ context 含:
     "open_interest_z_score_90d": 0.42,
     "exchange_net_flow_30d_sum": -8500,
     "exchange_net_flow_30d_max_outflow": -1200,
-    "lth_supply_30d_pct_change": 0.85,
     "max_drawdown_60d_pct": -8.2
   },
   "l1_output": {"regime": "trend_up", "volatility_regime": "normal", ...},
@@ -171,8 +170,8 @@ crowding_risk:衍生品市场拥挤度
 - 低:funding 中性 + OI 正常
 
 liquidity_risk:流动性风险(链上 + 交易所)
-- 高:exchange_net_flow 大量流入 + LTH 派发加速
-- 低:净流出 + LTH 累积
+- 高:exchange_net_flow 大量流入 + 单日最大流出极值发生在回撤期
+- 低:持续净流出 + 流出节奏均匀
 
 event_risk:已知重大事件风险
 - 高:24-72h 内有 FOMC / CPI / 减半 / 重大解锁
@@ -260,7 +259,6 @@ chart_l4.png:[图描述]主图 1d K 线 90 天连续抬升,价格 75749 在 EMA-
     "funding_rate_z_score_90d": 0.85,
     "open_interest_z_score_90d": 0.42,
     "exchange_net_flow_30d_sum": -8500,
-    "lth_supply_30d_pct_change": 0.85,
     "swing_5_recent": [
       {"date": "2026-04-25", "type": "low",  "price": 73200},
       {"date": "2026-04-15", "type": "high", "price": 78500}

@@ -149,6 +149,31 @@ def _impact_direction_from_value(
     return "neutral"
 
 
+_LAYER_B_TAGS = {"L1", "L2", "L3", "L4", "L5"}
+
+
+def _derive_simplified_label(consumed_by_layers: list[str]) -> str:
+    """根据 consumed_by_layers 推导三档简化标签。
+
+    规则:
+      - "Layer A" + 任一 L1-L5 同时存在 → "Layer A / B"
+      - 只有 "Layer A" → "Layer A"
+      - 只有 L1-L5 → "Layer B"
+      - 空列表 → "未使用"(理论不应出现 — emitter 不该 emit 死卡)
+    """
+    if not consumed_by_layers:
+        return "未使用"
+    has_a = "Layer A" in consumed_by_layers
+    has_b = any(t in _LAYER_B_TAGS for t in consumed_by_layers)
+    if has_a and has_b:
+        return "Layer A / B"
+    if has_a:
+        return "Layer A"
+    if has_b:
+        return "Layer B"
+    return "未使用"
+
+
 def _make_card(
     *,
     card_id: str,
@@ -169,6 +194,8 @@ def _make_card(
     impact_direction: str = "neutral",
     impact_weight: float = 0.5,
     expected_range: str = "",
+    consumed_by_layers: Optional[list[str]] = None,
+    advanced: bool = False,
 ) -> dict[str, Any]:
     """构造 factor card dict。data_fresh 自动从 captured_at_bjt 推,也可显式给。
 
@@ -177,12 +204,34 @@ def _make_card(
                        前端区域 4 分组用(从 category 自动映射)
       * is_primary    bool,等同 tier == 'primary'(给前端区分"平铺/折叠")
       * expected_range: 冷启动期告诉用户"这个因子正常什么区间"
+
+    Sprint Web Transparency 新增字段(2026-05-19):
+      * consumed_by_layers: list[str] — 该因子被哪些层 prompt 真实消费
+          Layer A 消费 → "Layer A"
+          Layer B L1-L5 消费 → "L1"/"L2"/"L3"/"L4"/"L5"(可多选)
+          例:["Layer A", "L2"] 表示 Layer A onchain_packet + Layer B L2 都消费
+      * linked_layer_simplified: 派生字段,由 consumed_by_layers 自动算出
+          "Layer A" / "Layer B" / "Layer A / B"
+      * advanced: bool,默认 False。UI 把 advanced=true 卡片在分组内排到末尾。
+      * linked_layer(legacy): 兼容旧字段,缺省值 = linked_layer_simplified
     """
     if current_value is None and not plain_interpretation:
         plain_interpretation = "数据不足(冷启动期或数据源失败)"
     if data_fresh is None:
         data_fresh = _is_fresh(captured_at_bjt) if current_value is not None else False
     group = _category_to_group(category)
+
+    # consumed_by_layers 默认 fallback:旧调用方未提供时,尝试从 linked_layer 推
+    # 这是 backwards-compat 兜底,正确做法是各 emit 函数显式传 consumed_by_layers。
+    if consumed_by_layers is None:
+        if linked_layer in {"Layer A"}:
+            consumed_by_layers = ["Layer A"]
+        elif linked_layer in _LAYER_B_TAGS:
+            consumed_by_layers = [linked_layer]
+        else:
+            consumed_by_layers = []  # → "未使用"
+    simplified = _derive_simplified_label(consumed_by_layers)
+
     return {
         "card_id": card_id,
         "category": category,
@@ -205,7 +254,10 @@ def _make_card(
         "impact_direction": impact_direction,
         "impact_weight": impact_weight,
         "expected_range": expected_range,
-        "linked_layer": linked_layer,
+        "linked_layer": linked_layer,  # legacy field for backwards-compat
+        "consumed_by_layers": consumed_by_layers,
+        "linked_layer_simplified": simplified,
+        "advanced": advanced,
         "source": source,
     }
 

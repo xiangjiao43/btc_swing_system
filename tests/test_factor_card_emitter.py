@@ -141,3 +141,101 @@ def test_drawdown_from_ath_computed():
     dd_card = next(c for c in cards if c["card_id"].startswith("price_drawdown_from_ath_"))
     assert dd_card["current_value"] is not None
     assert dd_card["current_value"] < -15
+
+
+# ============================================================
+# Sprint Web Transparency: consumed_by_layers + linked_layer_simplified + advanced
+# ============================================================
+
+def test_consumed_by_layers_derive_layer_a_only():
+    """consumed_by_layers=['Layer A'] → simplified='Layer A'"""
+    from src.strategy.factor_card_emitter import _derive_simplified_label
+    assert _derive_simplified_label(["Layer A"]) == "Layer A"
+
+
+def test_consumed_by_layers_derive_layer_b_only():
+    """consumed_by_layers 只含 L1-L5 → simplified='Layer B'"""
+    from src.strategy.factor_card_emitter import _derive_simplified_label
+    assert _derive_simplified_label(["L2"]) == "Layer B"
+    assert _derive_simplified_label(["L4"]) == "Layer B"
+    assert _derive_simplified_label(["L1", "L2", "L4"]) == "Layer B"
+
+
+def test_consumed_by_layers_derive_both():
+    """consumed_by_layers 含 Layer A + 任一 L1-L5 → simplified='Layer A / B'"""
+    from src.strategy.factor_card_emitter import _derive_simplified_label
+    assert _derive_simplified_label(["Layer A", "L2"]) == "Layer A / B"
+    assert _derive_simplified_label(["Layer A", "L1", "L4"]) == "Layer A / B"
+
+
+def test_consumed_by_layers_derive_empty():
+    """空 list → '未使用'(死卡防御性 fallback)"""
+    from src.strategy.factor_card_emitter import _derive_simplified_label
+    assert _derive_simplified_label([]) == "未使用"
+
+
+def test_make_card_with_consumed_by_layers():
+    """_make_card 显式传 consumed_by_layers,output 含全部新字段。"""
+    from src.strategy.factor_card_emitter import _make_card
+    card = _make_card(
+        card_id="test_x_20260519",
+        category="onchain",
+        tier="primary",
+        name="测试卡",
+        name_en="Test",
+        linked_layer="Layer A",  # legacy field 仍存在
+        source="test",
+        consumed_by_layers=["Layer A", "L2"],
+        advanced=True,
+    )
+    assert card["consumed_by_layers"] == ["Layer A", "L2"]
+    assert card["linked_layer_simplified"] == "Layer A / B"
+    assert card["advanced"] is True
+    assert card["linked_layer"] == "Layer A"  # legacy 保留
+
+
+def test_make_card_legacy_fallback_layer_a():
+    """旧调用方不传 consumed_by_layers + linked_layer='Layer A' → 自动 ['Layer A']"""
+    from src.strategy.factor_card_emitter import _make_card
+    card = _make_card(
+        card_id="test_y_20260519",
+        category="onchain",
+        tier="primary",
+        name="Legacy",
+        name_en="Legacy",
+        linked_layer="Layer A",
+        source="test",
+    )
+    assert card["consumed_by_layers"] == ["Layer A"]
+    assert card["linked_layer_simplified"] == "Layer A"
+    assert card["advanced"] is False
+
+
+def test_make_card_legacy_fallback_layer_b():
+    """旧调用方不传 consumed_by_layers + linked_layer='L2' → 自动 ['L2']"""
+    from src.strategy.factor_card_emitter import _make_card
+    card = _make_card(
+        card_id="test_z_20260519",
+        category="derivatives",
+        tier="primary",
+        name="Legacy B",
+        name_en="LegacyB",
+        linked_layer="L2",
+        source="test",
+    )
+    assert card["consumed_by_layers"] == ["L2"]
+    assert card["linked_layer_simplified"] == "Layer B"
+
+
+def test_make_card_advanced_default_false():
+    from src.strategy.factor_card_emitter import _make_card
+    card = _make_card(
+        card_id="test_default_20260519",
+        category="onchain",
+        tier="primary",
+        name="DefaultAdv",
+        name_en="DefaultAdv",
+        linked_layer="L2",
+        source="test",
+    )
+    assert card["advanced"] is False

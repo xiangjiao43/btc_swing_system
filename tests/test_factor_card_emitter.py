@@ -345,3 +345,200 @@ def test_ma_200_card_still_emitted_and_layer_a(minimal_state, minimal_context):
     assert ma200 is not None
     assert ma200["consumed_by_layers"] == ["Layer A"]
     assert ma200["linked_layer_simplified"] == "Layer A"
+
+
+# ============================================================
+# Sprint Web Transparency Commit 4: 13 张新增卡验证
+# ============================================================
+
+def _make_full_ctx_for_new_cards():
+    """构造能让 13 张新卡都计算成功的 context。"""
+    import pandas as pd
+    idx_1d = pd.date_range("2024-01-01", periods=200, freq="D", tz="UTC")
+    closes = [50000 + i * 100 for i in range(200)]
+    highs = [c * 1.02 for c in closes]
+    lows = [c * 0.98 for c in closes]
+    klines_1d = pd.DataFrame({
+        "open": closes, "high": highs, "low": lows, "close": closes,
+        "volume_btc": [1.0] * 200,
+    }, index=idx_1d)
+    idx_4h = pd.date_range("2025-01-01", periods=300, freq="4h", tz="UTC")
+    klines_4h = pd.DataFrame({
+        "open": [60000.0] * 300, "high": [61000.0] * 300,
+        "low": [59000.0] * 300, "close": [60500.0] * 300,
+        "volume_btc": [0.5] * 300,
+    }, index=idx_4h)
+    idx_macro = pd.date_range("2025-01-01", periods=120, freq="D", tz="UTC")
+    macro = {
+        "us10y": pd.Series([4.3] * 120, index=idx_macro),
+        "us2y": pd.Series([4.6] * 120, index=idx_macro),
+        "etf_flow": pd.Series([1e7] * 120, index=idx_macro),
+    }
+    onchain = {
+        "lth_supply": pd.Series([14_500_000.0] * 120, index=idx_macro),
+        "sth_supply": pd.Series([2_500_000.0] * 120, index=idx_macro),
+    }
+    extreme_event_flags = {
+        "geopolitical_conflict_active": False,
+        "major_bank_crisis_signal": False,
+        "regulatory_crackdown_recent": False,
+        "flash_crash_detected_24h": False,
+        "stablecoin_depeg_active": False,
+    }
+    return {
+        "klines_1d": klines_1d, "klines_4h": klines_4h, "klines_1w": klines_1d,
+        "onchain": onchain, "derivatives": {}, "macro": macro,
+        "extreme_event_flags": extreme_event_flags,
+    }
+
+
+def test_new_card_btc_close_emitted():
+    """新卡 1: BTC 当前收盘价 — Layer A / B 共用,advanced=True"""
+    state = {"composite_factors": {}, "evidence_reports": {"layer_1": {}}}
+    ctx = _make_full_ctx_for_new_cards()
+    cards = emit_factor_cards(state, ctx)
+    c = next((x for x in cards if x["card_id"].startswith("price_btc_close_")), None)
+    assert c is not None, "BTC 当前收盘价卡未 emit"
+    assert c["consumed_by_layers"] == ["Layer A", "L1", "L2", "L4"]
+    assert c["linked_layer_simplified"] == "Layer A / B"
+    assert c["advanced"] is True
+
+
+def test_new_card_ema_4h_emitted_advanced():
+    """新卡 2-3: EMA-20/50 (4h) — L2 only,advanced"""
+    state = {"composite_factors": {}, "evidence_reports": {"layer_1": {}}}
+    ctx = _make_full_ctx_for_new_cards()
+    cards = emit_factor_cards(state, ctx)
+    for span in (20, 50):
+        c = next((x for x in cards if x["card_id"].startswith(f"price_ema_{span}_4h_")), None)
+        assert c is not None, f"EMA-{span} (4h) 卡未 emit"
+        assert c["consumed_by_layers"] == ["L2"]
+        assert c["linked_layer_simplified"] == "Layer B"
+        assert c["advanced"] is True
+
+
+def test_new_card_ema_slope_30d_emitted():
+    """新卡 4-5: EMA-20/50 30d 斜率 — L1 only,advanced"""
+    state = {"composite_factors": {}, "evidence_reports": {"layer_1": {}}}
+    ctx = _make_full_ctx_for_new_cards()
+    cards = emit_factor_cards(state, ctx)
+    for span in (20, 50):
+        c = next((x for x in cards if x["card_id"].startswith(f"price_ema_{span}_slope_30d_")), None)
+        assert c is not None, f"EMA-{span} 30d slope 卡未 emit"
+        assert c["consumed_by_layers"] == ["L1"]
+        assert c["advanced"] is True
+
+
+def test_new_card_atr_14_1d_emitted():
+    """新卡 6: ATR-14 (1d) — L4 only,advanced"""
+    state = {"composite_factors": {}, "evidence_reports": {"layer_1": {}}}
+    ctx = _make_full_ctx_for_new_cards()
+    cards = emit_factor_cards(state, ctx)
+    c = next((x for x in cards if x["card_id"].startswith("price_atr_14_1d_")), None)
+    assert c is not None
+    assert c["consumed_by_layers"] == ["L4"]
+    assert c["advanced"] is True
+
+
+def test_new_card_price_position_90d_emitted():
+    """新卡 7: 价格 90 天区间分位 — L1 only,advanced"""
+    state = {"composite_factors": {}, "evidence_reports": {"layer_1": {}}}
+    ctx = _make_full_ctx_for_new_cards()
+    cards = emit_factor_cards(state, ctx)
+    c = next((x for x in cards if x["card_id"].startswith("price_position_in_90d_range_")), None)
+    assert c is not None
+    assert c["consumed_by_layers"] == ["L1"]
+    assert c["advanced"] is True
+
+
+def test_new_card_max_drawdown_60d_emitted():
+    """新卡 8: 60 天最大回撤 — L4 only,advanced"""
+    state = {"composite_factors": {}, "evidence_reports": {"layer_1": {}}}
+    ctx = _make_full_ctx_for_new_cards()
+    cards = emit_factor_cards(state, ctx)
+    c = next((x for x in cards if x["card_id"].startswith("price_max_drawdown_60d_")), None)
+    assert c is not None
+    assert c["consumed_by_layers"] == ["L4"]
+    assert c["advanced"] is True
+
+
+def test_new_card_yield_curve_spread_emitted_not_advanced():
+    """新卡 9: 收益率曲线 2y-10y 利差 — L5,非 advanced"""
+    state = {"composite_factors": {}, "evidence_reports": {"layer_1": {}}}
+    ctx = _make_full_ctx_for_new_cards()
+    cards = emit_factor_cards(state, ctx)
+    c = next((x for x in cards if x["card_id"].startswith("macro_yield_curve_2_10_spread_")), None)
+    assert c is not None
+    assert c["consumed_by_layers"] == ["L5"]
+    assert c["advanced"] is False
+
+
+def test_new_card_extreme_event_summary_emitted():
+    """新卡 10: 极端事件标志 summary — L5,非 advanced"""
+    state = {"composite_factors": {}, "evidence_reports": {"layer_1": {}}}
+    ctx = _make_full_ctx_for_new_cards()
+    cards = emit_factor_cards(state, ctx)
+    c = next((x for x in cards if x["card_id"].startswith("event_extreme_flags_summary_")), None)
+    assert c is not None
+    assert c["consumed_by_layers"] == ["L5"]
+    assert c["advanced"] is False
+
+
+def test_new_card_weekly_structure_emitted():
+    """新卡 11: 周线 OHLC 结构 — Layer A only,非 advanced"""
+    state = {"composite_factors": {}, "evidence_reports": {"layer_1": {}}}
+    ctx = _make_full_ctx_for_new_cards()
+    cards = emit_factor_cards(state, ctx)
+    c = next((x for x in cards if x["card_id"].startswith("price_weekly_structure_")), None)
+    assert c is not None
+    assert c["consumed_by_layers"] == ["Layer A"]
+    assert c["advanced"] is False
+
+
+def test_new_card_lth_supply_total_emitted():
+    """新卡 12: LTH 持有总量 — Layer A only,非 advanced"""
+    state = {"composite_factors": {}, "evidence_reports": {"layer_1": {}}}
+    ctx = _make_full_ctx_for_new_cards()
+    cards = emit_factor_cards(state, ctx)
+    c = next((x for x in cards if x["card_id"].startswith("onchain_lth_supply_total_")), None)
+    assert c is not None
+    assert c["consumed_by_layers"] == ["Layer A"]
+    assert c["advanced"] is False
+
+
+def test_new_card_sth_supply_90d_change_emitted():
+    """新卡 13: STH 持有 90 日变化 — Layer A only,非 advanced"""
+    state = {"composite_factors": {}, "evidence_reports": {"layer_1": {}}}
+    ctx = _make_full_ctx_for_new_cards()
+    cards = emit_factor_cards(state, ctx)
+    c = next((x for x in cards if x["card_id"].startswith("onchain_sth_supply_90d_change_")), None)
+    assert c is not None
+    assert c["consumed_by_layers"] == ["Layer A"]
+    assert c["advanced"] is False
+
+
+def test_advanced_card_count_eq_8():
+    """D3 决策:advanced=True 卡数 = 8(BTC close + EMA-4h×2 + slope×2 + ATR + pp_90d + drawdown_60d)"""
+    state = {"composite_factors": {}, "evidence_reports": {"layer_1": {}}}
+    ctx = _make_full_ctx_for_new_cards()
+    cards = emit_factor_cards(state, ctx)
+    advanced_cards = [c for c in cards if c.get("advanced")]
+    assert len(advanced_cards) == 8, f"advanced 卡应该 8 张,实际 {len(advanced_cards)}: {[c['card_id'] for c in advanced_cards]}"
+
+
+def test_etf_flow_card_augmented_with_sub_periods():
+    """derivatives_etf_flow 卡 plain_interpretation 末尾被追加 7d/30d sub-period 信息。"""
+    state = {"composite_factors": {}, "evidence_reports": {"layer_1": {}}}
+    ctx = _make_full_ctx_for_new_cards()
+    # 加 etf_flow 到 derivatives 也加到 macro(emitter 主 etf_flow 卡读 derivatives,
+    # 但增强逻辑读 macro["etf_flow"]因 compute_macro_features 输出在 macro 命名空间)
+    import pandas as pd
+    idx = pd.date_range("2025-10-01", periods=60, freq="D", tz="UTC")
+    ctx["derivatives"] = {"etf_flow": pd.Series([1e8] * 60, index=idx)}
+    cards = emit_factor_cards(state, ctx)
+    c = next((x for x in cards if x["card_id"].startswith("derivatives_etf_flow_")), None)
+    assert c is not None
+    pi = c.get("plain_interpretation") or ""
+    assert "Layer A 派生" in pi
+    assert "7d 累计" in pi
+    assert "30d 累计" in pi

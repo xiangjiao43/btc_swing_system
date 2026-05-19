@@ -464,6 +464,12 @@ def emit_factor_cards(
     # ========== Sprint 1.6:9 个 v1.3 新因子卡(占位文案,Sprint 1.10 细化)==========
     cards.extend(_emit_v13_new_factors(onchain, derivatives, today))
 
+    # ========== Sprint Web Transparency Commit 4:13 张新增卡 ==========
+    cards.extend(_emit_sprint_transparency_new_cards(context, today))
+
+    # ========== Sprint Web Transparency Commit 2:ETF flow 7d/30d 合并显示 ==========
+    _augment_etf_flow_card_with_sub_periods(cards, macro, today)
+
     # Sprint 2.6-J:per-metric inserted_at_utc 回填 fetched_at_bjt(秒级精度)
     _stamp_fetched_at(cards, context.get("metric_inserted_at") or {}, today)
 
@@ -1874,3 +1880,403 @@ def _emit_v13_new_factors(
     ))
 
     return cards
+
+
+# ============================================================
+# Sprint Web Transparency Commit 4: 13 张新增卡片
+# ============================================================
+# 数据来源:docs/cc_reports/sprint_web_factor_transparency_plan.md §4
+# 目标:补全 Layer A + Layer B 实际消费但 UI 漏显的因子
+#
+# advanced=True 的 8 张(D3 决策,UI 排在分组末尾):
+#   btc_price / ema_20_4h / ema_50_4h / ema_20_slope_30d /
+#   ema_50_slope_30d / atr_14_1d / max_drawdown_60d_pct /
+#   price_position_in_90d_range
+#
+# 非 advanced 的 5 张:
+#   yield_curve_2_10_spread_bps / extreme_event_flags / weekly_structure /
+#   lth_supply / sth_supply_90d_pct_change
+#
+# (etf_flow_7d/30d 合并:见下方 _augment_etf_flow_card 修改现有 derivatives_etf_flow)
+
+def _emit_sprint_transparency_new_cards(
+    context: dict[str, Any],
+    today: str,
+) -> list[dict[str, Any]]:
+    """13 张 Sprint Web Transparency 新增卡。"""
+    cards: list[dict[str, Any]] = []
+    onchain: dict[str, Any] = context.get("onchain") or {}
+    macro: dict[str, Any] = context.get("macro") or {}
+    klines_1d = context.get("klines_1d")
+    klines_4h = context.get("klines_4h")
+    extreme_event_flags = context.get("extreme_event_flags") or {}
+
+    # ---- 1. BTC 当前收盘价(advanced;合并 btc_price + current_close) ----
+    if isinstance(klines_1d, pd.DataFrame) and len(klines_1d) > 0:
+        current_close = float(klines_1d["close"].iloc[-1])
+        ts_bjt = _to_bjt(klines_1d.index[-1])
+    else:
+        current_close, ts_bjt = None, None
+    cards.append(_make_card(
+        card_id=f"price_btc_close_{today}",
+        category="price_structure", tier="primary",
+        name="BTC 当前收盘价", name_en="BTC Close",
+        current_value=round(current_close, 2) if current_close is not None else None,
+        value_unit="USD",
+        captured_at_bjt=ts_bjt,
+        plain_interpretation=(
+            f"📊 当前 BTC 收盘价 ${current_close:,.0f}\n"
+            f"🔍 Layer A 用作 200w MA 乖离率分母;Layer B L1/L2/L4 用作止损 / 仓位计算锚点"
+            if current_close is not None
+            else "📊 数据不足\n🔍 系统所有层的价格锚点"
+        ),
+        strategy_impact="📍 BTC 当前 1d K 线收盘价。Layer A 大周期判断 + Layer B 全层都依赖此价格。",
+        impact_direction="neutral", impact_weight=0.5,
+        linked_layer="Layer A",  # legacy,UI 渲染用 linked_layer_simplified
+        source="CoinGlass klines",
+        consumed_by_layers=["Layer A", "L1", "L2", "L4"],
+        advanced=True,
+    ))
+
+    # ---- 2-3. EMA-20/50 (4h) advanced ----
+    if isinstance(klines_4h, pd.DataFrame) and len(klines_4h) >= 50:
+        ema_20_4h = float(klines_4h["close"].astype(float).ewm(span=20, adjust=False).mean().iloc[-1])
+        ema_50_4h = float(klines_4h["close"].astype(float).ewm(span=50, adjust=False).mean().iloc[-1])
+        ts4h = _to_bjt(klines_4h.index[-1])
+    else:
+        ema_20_4h, ema_50_4h, ts4h = None, None, None
+    for span, val, name_cn, name_en in [
+        (20, ema_20_4h, "EMA-20 (4h)", "EMA-20 4H"),
+        (50, ema_50_4h, "EMA-50 (4h)", "EMA-50 4H"),
+    ]:
+        cards.append(_make_card(
+            card_id=f"price_ema_{span}_4h_{today}",
+            category="price_structure", tier="reference",
+            name=name_cn, name_en=name_en,
+            current_value=round(val, 2) if val is not None else None,
+            value_unit="USD",
+            captured_at_bjt=ts4h,
+            plain_interpretation=(
+                f"📊 4h K 线 EMA-{span} = ${val:,.0f}\n"
+                f"🔍 L2 多周期一致性判定的{('短端' if span == 20 else '中端')}"
+                if val is not None
+                else f"📊 4h 数据不足\n🔍 L2 多周期一致性判定的{('短端' if span == 20 else '中端')}"
+            ),
+            strategy_impact=f"📍 4h 时间框架 EMA-{span},L2 判 4h/1d 多周期方向是否一致。",
+            impact_direction="neutral", impact_weight=0.4,
+            linked_layer="L2",
+            source="CoinGlass klines",
+            consumed_by_layers=["L2"],
+            advanced=True,
+        ))
+
+    # ---- 4-5. EMA-20/50 30d 斜率 advanced ----
+    if isinstance(klines_1d, pd.DataFrame) and len(klines_1d) >= 80:
+        close = klines_1d["close"].astype(float)
+        ema_20_1d = close.ewm(span=20, adjust=False).mean()
+        ema_50_1d = close.ewm(span=50, adjust=False).mean()
+        slope_20_30d = (ema_20_1d.iloc[-1] - ema_20_1d.iloc[-31]) / ema_20_1d.iloc[-31] * 100 if len(ema_20_1d) >= 31 else None
+        slope_50_30d = (ema_50_1d.iloc[-1] - ema_50_1d.iloc[-31]) / ema_50_1d.iloc[-31] * 100 if len(ema_50_1d) >= 31 else None
+        ts_slope = _to_bjt(klines_1d.index[-1])
+    else:
+        slope_20_30d, slope_50_30d, ts_slope = None, None, None
+    for span, slope, name_cn in [(20, slope_20_30d, "EMA-20 30 天斜率"), (50, slope_50_30d, "EMA-50 30 天斜率")]:
+        cards.append(_make_card(
+            card_id=f"price_ema_{span}_slope_30d_{today}",
+            category="price_structure", tier="reference",
+            name=name_cn, name_en=f"EMA-{span} 30d Slope",
+            current_value=round(slope, 2) if slope is not None else None,
+            value_unit="%",
+            captured_at_bjt=ts_slope,
+            plain_interpretation=(
+                f"📊 EMA-{span} 过去 30 天涨幅 {slope:+.2f}%\n"
+                f"🔍 趋势加速度信号;> 0 = 趋势在加速向上,< 0 = 趋势在减速或反向"
+                if slope is not None
+                else f"📊 数据不足(需 80 天 K 线)\n🔍 EMA-{span} 30 天斜率反映趋势加速度"
+            ),
+            strategy_impact=f"📍 EMA-{span} 在过去 30 天的相对变化率,L1 regime 判定的辅助加速度信号。",
+            impact_direction=_impact_direction_from_value(slope, bull_above=2, bear_below=-2),
+            impact_weight=0.4,
+            linked_layer="L1",
+            source="CoinGlass klines (derived)",
+            consumed_by_layers=["L1"],
+            advanced=True,
+        ))
+
+    # ---- 6. ATR-14 (1d) advanced ----
+    atr_result = compute_atr_features(klines_1d) if isinstance(klines_1d, pd.DataFrame) else {}
+    atr_14 = atr_result.get("atr_14_current")
+    ts_atr = _to_bjt(klines_1d.index[-1]) if isinstance(klines_1d, pd.DataFrame) and len(klines_1d) > 0 else None
+    cards.append(_make_card(
+        card_id=f"price_atr_14_1d_{today}",
+        category="price_structure", tier="reference",
+        name="ATR-14 (1d)", name_en="ATR-14 Daily",
+        current_value=round(atr_14, 2) if atr_14 is not None else None,
+        value_unit="USD",
+        captured_at_bjt=ts_atr,
+        plain_interpretation=(
+            f"📊 ATR-14 = ${atr_14:,.0f}\n"
+            f"🔍 平均真实波幅(绝对值),L4 用来计算止损距离"
+            if atr_14 is not None
+            else "📊 数据不足\n🔍 ATR-14 = 14 天平均真实波幅"
+        ),
+        strategy_impact="📍 ATR-14 绝对值,L4 计算 hard_invalidation_levels 止损距离的依据。",
+        impact_direction="neutral", impact_weight=0.5,
+        linked_layer="L4",
+        source="CoinGlass klines (derived)",
+        consumed_by_layers=["L4"],
+        advanced=True,
+    ))
+
+    # ---- 7. 价格 90d 区间分位 advanced ----
+    if isinstance(klines_1d, pd.DataFrame) and len(klines_1d) >= 90:
+        last90 = klines_1d.iloc[-90:]
+        high_90 = float(last90["high"].max())
+        low_90 = float(last90["low"].min())
+        curr = float(klines_1d.iloc[-1]["close"])
+        pp_90 = ((curr - low_90) / (high_90 - low_90) * 100) if high_90 != low_90 else 50.0
+    else:
+        pp_90 = None
+    cards.append(_make_card(
+        card_id=f"price_position_in_90d_range_{today}",
+        category="price_structure", tier="reference",
+        name="价格 90 天区间分位", name_en="Price Position in 90D Range",
+        current_value=round(pp_90, 1) if pp_90 is not None else None,
+        value_unit="%",
+        captured_at_bjt=ts_atr,
+        plain_interpretation=(
+            f"📊 当前价格在过去 90 天高低区间的 {pp_90:.0f}% 位置\n"
+            f"🔍 0 = 90d 最低;100 = 90d 最高;L1 判贵贱的辅助指标"
+            if pp_90 is not None
+            else "📊 数据不足(需 90 天 K 线)\n🔍 价格在 90 天区间的相对位置"
+        ),
+        strategy_impact="📍 价格在 90 天区间中的相对位置,L1 regime 判定价格相对水平。",
+        impact_direction="neutral", impact_weight=0.4,
+        linked_layer="L1",
+        source="CoinGlass klines (derived)",
+        consumed_by_layers=["L1"],
+        advanced=True,
+    ))
+
+    # ---- 8. 60 天最大回撤 advanced ----
+    if isinstance(klines_1d, pd.DataFrame) and len(klines_1d) >= 60:
+        close = klines_1d["close"].astype(float)
+        last60 = close.iloc[-60:]
+        peak = last60.cummax()
+        max_dd = float(((last60 - peak) / peak * 100).min())
+    else:
+        max_dd = None
+    cards.append(_make_card(
+        card_id=f"price_max_drawdown_60d_{today}",
+        category="price_structure", tier="reference",
+        name="60 天最大回撤", name_en="Max Drawdown 60D",
+        current_value=round(max_dd, 2) if max_dd is not None else None,
+        value_unit="%",
+        captured_at_bjt=ts_atr,
+        plain_interpretation=(
+            f"📊 过去 60 天最大回撤 {max_dd:.1f}%\n"
+            f"🔍 L4 用作仓位削减依据;< -20% 表示波段刚承受过大跌"
+            if max_dd is not None
+            else "📊 数据不足\n🔍 60 天滚动峰值的最大回撤"
+        ),
+        strategy_impact="📍 过去 60 天的最大回撤,L4 判 structure_risk + position_cap_multiplier 微调。",
+        impact_direction=_impact_direction_from_value(max_dd, bear_below=-20),
+        impact_weight=0.4,
+        linked_layer="L4",
+        source="CoinGlass klines (derived)",
+        consumed_by_layers=["L4"],
+        advanced=True,
+    ))
+
+    # ---- 9. 收益率曲线 2y-10y 利差(非 advanced) ----
+    yc_spread = None
+    if isinstance(macro, dict):
+        # pandas Series truthy 报 ambiguous,显式 None 检查
+        us10y_s = macro.get("us10y")
+        if us10y_s is None:
+            us10y_s = macro.get("dgs10")
+        us2y_s = macro.get("us2y")
+        if us10y_s is not None and us2y_s is not None:
+            try:
+                yc_spread = (float(us10y_s.dropna().iloc[-1]) - float(us2y_s.dropna().iloc[-1])) * 100  # bps
+            except Exception:
+                yc_spread = None
+    cards.append(_make_card(
+        card_id=f"macro_yield_curve_2_10_spread_{today}",
+        category="macro", tier="reference",
+        name="收益率曲线 2y-10y 利差", name_en="Yield Curve 2Y-10Y Spread",
+        current_value=round(yc_spread, 1) if yc_spread is not None else None,
+        value_unit="bps",
+        plain_interpretation=(
+            f"📊 10y - 2y 利差 {yc_spread:.1f} bps\n"
+            f"🔍 < 0 = 倒挂(衰退预警);> 0 = 正常;L5 宏观逆风评估依据之一"
+            if yc_spread is not None
+            else "📊 数据不足\n🔍 美债 10y-2y 利差,< 0 是衰退信号"
+        ),
+        strategy_impact="📍 美债收益率曲线 2y-10y 利差,L5 macro_stance 判定中的衰退预警维度。",
+        impact_direction=_impact_direction_from_value(yc_spread, bear_below=0),
+        impact_weight=0.4,
+        linked_layer="L5",
+        source="FRED (derived)",
+        consumed_by_layers=["L5"],
+        advanced=False,
+    ))
+
+    # ---- 10. 极端事件标志 summary(非 advanced) ----
+    eef_flags = extreme_event_flags if isinstance(extreme_event_flags, dict) else {}
+    active_count = sum(1 for v in eef_flags.values() if v)
+    flag_names_cn = {
+        "geopolitical_conflict_active": "地缘冲突",
+        "major_bank_crisis_signal": "银行危机",
+        "regulatory_crackdown_recent": "监管打击",
+        "flash_crash_detected_24h": "24h 闪崩",
+        "stablecoin_depeg_active": "稳定币脱锚",
+    }
+    active_names = [flag_names_cn.get(k, k) for k, v in eef_flags.items() if v]
+    cards.append(_make_card(
+        card_id=f"event_extreme_flags_summary_{today}",
+        category="events", tier="primary",
+        name="极端事件标志", name_en="Extreme Event Flags",
+        current_value=active_count,
+        plain_interpretation=(
+            f"⚠️ 当前激活 {active_count} 类极端事件:{', '.join(active_names)}\n"
+            f"🔍 任一为真 → L5 触发 extreme_event_detected → 系统进入 PROTECTION"
+            if active_count > 0
+            else "📊 5 类极端事件全部正常\n🔍 地缘 / 银行 / 监管 / 闪崩 / 稳定币脱锚"
+        ),
+        strategy_impact="📍 5 类系统级极端事件标志的聚合,L5 prompt 直接消费,任一激活强制 PROTECTION。",
+        impact_direction="bearish" if active_count > 0 else "neutral",
+        impact_weight=1.0 if active_count > 0 else 0.3,
+        linked_layer="L5",
+        source="detect_extreme_events (derived)",
+        consumed_by_layers=["L5"],
+        advanced=False,
+    ))
+
+    # ---- 11. 周线 OHLC 结构(Layer A) ----
+    # 数据来源:Layer A spot_cycle_context_builder 派生,Layer B 不消费
+    # weekly_structure 是 dict / str(higher_highs / lower_lows 等),非数值
+    weekly_structure = None
+    if isinstance(klines_1d, pd.DataFrame) and len(klines_1d) >= 90:
+        # 简化:看最近 4 周的周收盘趋势 (every 7 days)
+        weekly_closes = klines_1d["close"].astype(float).iloc[::-7][:4].iloc[::-1]
+        if len(weekly_closes) >= 3:
+            diffs = weekly_closes.diff().dropna()
+            ups = (diffs > 0).sum()
+            downs = (diffs < 0).sum()
+            if ups > downs:
+                weekly_structure = "higher_highs"
+            elif downs > ups:
+                weekly_structure = "lower_lows"
+            else:
+                weekly_structure = "mixed"
+    cards.append(_make_card(
+        card_id=f"price_weekly_structure_{today}",
+        category="price_structure", tier="primary",
+        name="周线 OHLC 结构", name_en="Weekly OHLC Structure",
+        current_value=weekly_structure,
+        plain_interpretation=(
+            f"📊 周线结构:{weekly_structure}\n"
+            f"🔍 higher_highs = 周线连续抬升(看多);lower_lows = 周线连续下移(看空)"
+            if weekly_structure
+            else "📊 数据不足\n🔍 周线 OHLC 结构 Layer A 大周期支撑判定依据"
+        ),
+        strategy_impact="📍 周线 OHLC 结构,Layer A price_structure_packet 消费的核心结构因子。",
+        impact_direction=("bullish" if weekly_structure == "higher_highs"
+                          else "bearish" if weekly_structure == "lower_lows" else "neutral"),
+        impact_weight=0.7,
+        linked_layer="Layer A",
+        source="CoinGlass klines (derived)",
+        consumed_by_layers=["Layer A"],
+        advanced=False,
+    ))
+
+    # ---- 12. LTH 长期持有者总持仓(Layer A) ----
+    val, ts = _latest(onchain.get("lth_supply"))
+    cards.append(_make_card(
+        card_id=f"onchain_lth_supply_total_{today}",
+        category="onchain", tier="reference",
+        name="LTH 持有总量", name_en="LTH Supply Total",
+        current_value=round(val, 0) if val is not None else None,
+        value_unit="BTC",
+        captured_at_bjt=ts,
+        plain_interpretation=(
+            f"📊 长期持有者(≥ 155 天)总持仓 {val:,.0f} BTC\n"
+            f"🔍 Layer A 大周期估值核心,绝对值反映 LTH 群体规模"
+            if val is not None
+            else "📊 数据不足\n🔍 LTH 总持仓量"
+        ),
+        strategy_impact="📍 长期持有者总持仓绝对值,Layer A onchain_packet 大周期估值的核心因子之一。",
+        impact_direction="neutral", impact_weight=0.5,
+        linked_layer="Layer A",
+        source="Glassnode",
+        consumed_by_layers=["Layer A"],
+        advanced=False,
+    ))
+
+    # ---- 13. STH 90 天变化(Layer A) ----
+    sth_supply = onchain.get("sth_supply")
+    sth_90d_change = _pct_change(sth_supply, 90) if sth_supply is not None else None
+    _, ts_sth = _latest(sth_supply)
+    cards.append(_make_card(
+        card_id=f"onchain_sth_supply_90d_change_{today}",
+        category="onchain", tier="reference",
+        name="STH 持有 90 日变化", name_en="STH Supply 90d Change",
+        current_value=round(sth_90d_change, 2) if sth_90d_change is not None else None,
+        value_unit="%",
+        captured_at_bjt=ts_sth,
+        plain_interpretation=(
+            f"📊 STH 总持仓过去 90 天变化 {sth_90d_change:+.1f}%\n"
+            f"🔍 > +2% = STH 接货(山顶接盘风险);< -3% = STH 派发(可能成 LTH)"
+            if sth_90d_change is not None
+            else "📊 数据不足(需 90 天历史)\n🔍 STH 90 天变化反映短线持有者行为"
+        ),
+        strategy_impact="📍 短期持有者 90 天 % 变化,Layer A 区分 STH 接货 / 派发 行为。",
+        impact_direction=_impact_direction_from_value(sth_90d_change, bear_above=2, bull_below=-3),
+        impact_weight=0.5,
+        linked_layer="Layer A",
+        source="Glassnode (derived)",
+        consumed_by_layers=["Layer A"],
+        advanced=False,
+    ))
+
+    return cards
+
+
+def _augment_etf_flow_card_with_sub_periods(
+    cards: list[dict[str, Any]],
+    macro: dict[str, Any],
+    today: str,
+) -> None:
+    """Sprint Web Transparency D4 决策:在 derivatives_etf_flow 卡的 plain_interpretation
+    末尾追加 7d / 30d 累计 sub-period 信息(不新增卡,只增强现有卡显示)。
+
+    Layer A macro_flow_packet 消费 etf_flow_7d_sum_usd + etf_flow_30d_sum_usd 派生值;
+    Layer B L5 直接消费 etf_flow raw series。合并显示反映"Layer A / B" 共用。
+    """
+    if not isinstance(macro, dict):
+        return
+    etf_series = macro.get("etf_flow")
+    if etf_series is None:
+        return
+    try:
+        s = etf_series.dropna().astype(float)
+        sum_7d = float(s.iloc[-7:].sum()) if len(s) >= 7 else None
+        sum_30d = float(s.iloc[-30:].sum()) if len(s) >= 30 else None
+    except Exception:
+        return
+
+    for c in cards:
+        cid = c.get("card_id") or ""
+        if cid.startswith(f"derivatives_etf_flow_") and cid.endswith(today):
+            extras = []
+            if sum_7d is not None:
+                extras.append(f"7d 累计 ${sum_7d/1e6:+,.0f}M")
+            if sum_30d is not None:
+                extras.append(f"30d 累计 ${sum_30d/1e6:+,.0f}M")
+            if extras:
+                c["plain_interpretation"] = (
+                    (c.get("plain_interpretation") or "")
+                    + f"\n📈 Layer A 派生:{' / '.join(extras)}"
+                )
+            break

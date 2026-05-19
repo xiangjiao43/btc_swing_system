@@ -239,3 +239,67 @@ def test_make_card_advanced_default_false():
         source="test",
     )
     assert card["advanced"] is False
+
+
+# ============================================================
+# Sprint Web Transparency Commit 2: override dict 生效验证
+# ============================================================
+
+def test_override_dict_mvrv_z_layer_a_only():
+    """onchain_mvrv_z 在 override dict 中应映射 Layer A only。"""
+    from src.strategy.factor_card_emitter import _consumed_by_layers_from_card_id
+    assert _consumed_by_layers_from_card_id("onchain_mvrv_z_20260519") == ["Layer A"]
+
+
+def test_override_dict_sth_realized_price_both_layers():
+    """sth_realized_price 是 Layer A + Layer B L2 共用。"""
+    from src.strategy.factor_card_emitter import _consumed_by_layers_from_card_id
+    assert _consumed_by_layers_from_card_id("onchain_sth_realized_price_20260519") == ["Layer A", "L2"]
+
+
+def test_override_dict_funding_rate_layer_b_only():
+    """funding_rate 系列只在 Layer B L2/L4 消费。"""
+    from src.strategy.factor_card_emitter import _consumed_by_layers_from_card_id
+    assert _consumed_by_layers_from_card_id("derivatives_funding_rate_current_20260519") == ["L2", "L4"]
+    assert _consumed_by_layers_from_card_id("derivatives_funding_rate_aggregated_20260519") == ["L4"]
+
+
+def test_override_dict_events_layer_b_l5():
+    """events_* 5 卡都是 L5 only(Layer A 不消费 events)。"""
+    from src.strategy.factor_card_emitter import _consumed_by_layers_from_card_id
+    assert _consumed_by_layers_from_card_id("event_cpi_next_20260519") == ["L5"]
+    assert _consumed_by_layers_from_card_id("event_fomc_next_20260519") == ["L5"]
+
+
+def test_override_dict_price_ma_200_layer_a_d4_correction():
+    """D4 修正:price_ma_200 是 SMA-200d,映射 Layer A(不是 plan 里的 Layer B)。"""
+    from src.strategy.factor_card_emitter import _consumed_by_layers_from_card_id
+    assert _consumed_by_layers_from_card_id("price_ma_200_20260519") == ["Layer A"]
+
+
+def test_override_dict_etf_flow_merged_both_layers():
+    """derivatives_etf_flow 合并 7d/30d 显示,Layer A macro_flow_packet + Layer B L5 共用。"""
+    from src.strategy.factor_card_emitter import _consumed_by_layers_from_card_id
+    assert _consumed_by_layers_from_card_id("derivatives_etf_flow_20260519") == ["Layer A", "L5"]
+
+
+def test_override_dict_dead_cards_not_in_dict():
+    """死卡(Commit 3 将删 emit)不应在 override dict 中,返回 None → legacy fallback → 未使用。"""
+    from src.strategy.factor_card_emitter import _consumed_by_layers_from_card_id
+    for dead_base in [
+        "derivatives_liquidation_24h", "derivatives_lsr_change_24h",
+        "derivatives_top_long_short_ratio", "onchain_lth_mvrv",
+        "onchain_sth_mvrv", "onchain_ssr",
+        "price_ma_20", "price_ma_60", "price_ma_120",
+        "price_tf_alignment_4h_1d_1w",
+    ]:
+        assert _consumed_by_layers_from_card_id(f"{dead_base}_20260519") is None
+
+
+def test_emitter_makes_card_with_dict_override(minimal_state, minimal_context):
+    """端到端:emit_factor_cards 产 mvrv_z 卡,通过 dict 自动注入 consumed_by_layers。"""
+    cards = emit_factor_cards(minimal_state, minimal_context)
+    mvrv_card = next((c for c in cards if c["card_id"].startswith("onchain_mvrv_z_")), None)
+    assert mvrv_card is not None
+    assert mvrv_card["consumed_by_layers"] == ["Layer A"]
+    assert mvrv_card["linked_layer_simplified"] == "Layer A"

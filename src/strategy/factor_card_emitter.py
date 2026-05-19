@@ -152,6 +152,96 @@ def _impact_direction_from_value(
 _LAYER_B_TAGS = {"L1", "L2", "L3", "L4", "L5"}
 
 
+# ============================================================
+# Sprint Web Transparency: card_id 前缀 → consumed_by_layers 集中映射
+# ============================================================
+#
+# 数据来源:docs/cc_reports/sprint_web_factor_transparency_plan.md §3.3
+# 校准依据:
+#   - Layer A 真消费 = build_layer_a_cycle_adjudicator_context 三个 packet 字段(45)
+#   - Layer B 真消费 = build_full_context L1-L5 ctx(32)
+#
+# 维护规则:
+#   1. card_id 前缀(去 _YYYYMMDD 后缀)做 key
+#   2. value 是 list,元素 ∈ {"Layer A","L1","L2","L3","L4","L5"}
+#   3. 同 raw 因子既被 Layer A 又被某 Lx 消费 → 都列上(派生为 "Layer A / B")
+#   4. 死卡 → 不在此 dict 中(由 Commit 3 整删 emit 代码)
+#
+# 4 处歧义决策(用户 D4 拍板):
+#   - price_ma_200: 经 grep 确认 emitter 是 SMA(line 1516 .mean()),对应
+#     Layer A ma_200d → "Layer A"。price_ma_20/60/120 同为 SMA,Layer A 只用
+#     ma_200d/ma_200w,Layer B 用 EMA-N(不同 metric),所以 ma_20/60/120
+#     全成死卡(Commit 3 删 emit)
+#   - derivatives_etf_flow: 合并 7d / 30d 累计显示,Layer A macro_flow_packet
+#     + Layer B L5 都消费 → "Layer A / B"
+#   - events_*_next 5 卡:Layer B L5 消费 events_calendar_72h,Layer A
+#     macro_flow_packet 不含 events → ["L5"]
+#   - btc_price / current_close:Commit 4 新增合并卡 → ["Layer A","L1","L2","L4"]
+_CONSUMED_BY_LAYERS_OVERRIDES: dict[str, list[str]] = {
+    # ---- 衍生品(funding / OI = Layer B only)----
+    "derivatives_funding_rate_30d_pctile":   ["L4"],
+    "derivatives_funding_rate_7d_avg":       ["L4"],
+    "derivatives_funding_rate_aggregated":   ["L4"],
+    "derivatives_funding_rate_current":      ["L2", "L4"],
+    "derivatives_funding_rate_zscore_90d":   ["L2", "L4"],
+    "derivatives_oi_24h_change":             ["L4"],
+    "derivatives_oi_current":                ["L4"],
+    "derivatives_btc_dominance":             ["L5"],
+    "derivatives_etf_flow":                  ["Layer A", "L5"],
+
+    # ---- 事件(只 Layer B L5)----
+    "event_cpi_next":                  ["L5"],
+    "event_fomc_next":                 ["L5"],
+    "event_nfp_next":                  ["L5"],
+    "event_options_expiry_major_next": ["L5"],
+    "event_pce_next":                  ["L5"],
+
+    # ---- 宏观(部分共用)----
+    "macro_btc_nasdaq_corr_60d":  ["L5"],
+    "macro_dxy_20d_change":       ["Layer A", "L5"],
+    "macro_nasdaq_20d_change":    ["Layer A", "L5"],
+    "macro_us10y_30d_change":     ["L5"],
+    "macro_vix_current":          ["Layer A", "L5"],
+
+    # ---- 链上(Layer A only / 共用 / Layer B only)----
+    "onchain_asopr_primary":         ["Layer A"],       # sopr
+    "onchain_cdd":                   ["Layer A"],
+    "onchain_exchange_flow_7d":      ["Layer A", "L2", "L4"],  # exchange_net_flow_30d_sum
+    "onchain_hodl_waves_long":       ["Layer A"],
+    "onchain_lth_realized_price":    ["Layer A"],
+    "onchain_lth_supply_90d_change": ["Layer A"],
+    "onchain_mvrv":                  ["Layer A"],
+    "onchain_mvrv_z":                ["Layer A"],
+    "onchain_nupl":                  ["Layer A"],
+    "onchain_realized_price":        ["Layer A"],
+    "onchain_sth_realized_price":    ["Layer A", "L2"],   # 用户决策保留 Layer B L2
+    "onchain_sth_supply":            ["Layer A"],
+
+    # ---- 价格技术(L1 K 线派生 = Layer B only;SMA-200 = Layer A)----
+    "price_adx_14_1d":          ["L1"],
+    "price_atr_percentile_180d":["L1", "L4"],
+    "price_drawdown_from_ath":  ["Layer A"],   # ath_drawdown_pct
+    "price_ma_200":             ["Layer A"],   # SMA-200 = Layer A ma_200d(D4 修正)
+
+    # 死卡不在此 dict(Commit 3 删 emit 代码):
+    #   derivatives_liquidation_24h / derivatives_lsr_change_24h /
+    #   derivatives_top_long_short_ratio / onchain_lth_mvrv / onchain_sth_mvrv /
+    #   onchain_ssr / price_ma_20 / price_ma_60 / price_ma_120 /
+    #   price_tf_alignment_4h_1d_1w
+}
+
+
+def _consumed_by_layers_from_card_id(card_id: str) -> Optional[list[str]]:
+    """从 card_id 推导 consumed_by_layers(去日期后缀后查 override dict)。
+
+    返回 None = 未在 dict 中(走 legacy fallback)。
+    """
+    # 去掉 _YYYYMMDD 日期后缀
+    parts = card_id.rsplit("_", 1)
+    base = parts[0] if len(parts) == 2 and parts[1].isdigit() and len(parts[1]) == 8 else card_id
+    return _CONSUMED_BY_LAYERS_OVERRIDES.get(base)
+
+
 def _derive_simplified_label(consumed_by_layers: list[str]) -> str:
     """根据 consumed_by_layers 推导三档简化标签。
 
@@ -221,8 +311,12 @@ def _make_card(
         data_fresh = _is_fresh(captured_at_bjt) if current_value is not None else False
     group = _category_to_group(category)
 
-    # consumed_by_layers 默认 fallback:旧调用方未提供时,尝试从 linked_layer 推
-    # 这是 backwards-compat 兜底,正确做法是各 emit 函数显式传 consumed_by_layers。
+    # consumed_by_layers 解析优先级(Sprint Web Transparency Commit 2):
+    #   1. 调用方显式传 → 用之
+    #   2. 在 _CONSUMED_BY_LAYERS_OVERRIDES dict 中 → 用 dict 值(权威表)
+    #   3. fallback:从 linked_layer legacy 字段推
+    if consumed_by_layers is None:
+        consumed_by_layers = _consumed_by_layers_from_card_id(card_id)
     if consumed_by_layers is None:
         if linked_layer in {"Layer A"}:
             consumed_by_layers = ["Layer A"]

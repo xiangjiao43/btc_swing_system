@@ -528,6 +528,10 @@ def _emit_composite_cards(composite: dict[str, Any], today: str) -> list[dict[st
     cards: list[dict[str, Any]] = []
     now_bjt = datetime.now(_BJT).strftime("%Y-%m-%d %H:%M (BJT)")
 
+    # Sprint Layer-B Cleanup:删除 cycle_position composite spec(Layer A 6 阶段
+    # 替代 9 档,Layer B 不再做大周期判断)。其他 v1.2 composite specs(truth_trend
+    # / band_position / crowding / macro_headwind / event_risk)同属 retired v1.2
+    # 路径,scheduler 已 disabled,保留 stub 待整体 state_builder 退役 sprint。
     _composite_specs: list[tuple[str, str, str, str, str, str]] = [
         # (key, card_id_suffix, name_cn, name_en, linked_layer, plain_impact)
         ("truth_trend", "truth_trend", "趋势真实性指数",
@@ -536,9 +540,6 @@ def _emit_composite_cards(composite: dict[str, Any], today: str) -> list[dict[st
         ("band_position", "band_position", "波段位置综合指数",
          "BandPosition", "L2",
          "📍 用价格几何(swing 扩展比、结构序列、MA 距离、回撤深度)判定当前波段处在初段/中段/末段/衰竭期。"),
-        ("cycle_position", "cycle_position", "长周期位置",
-         "CyclePosition", "L2",
-         "📍 用 MVRV、NUPL、LTH 持仓和距 ATH 跌幅,判断 BTC 处于 9 档长周期中的哪一档,直接影响系统做多/做空的门槛。"),
         ("crowding", "crowding", "拥挤度指数",
          "Crowding", "L4",
          "📍 用 funding、OI、多空比、basis、Put/Call 综合判定衍生品是否极端拥挤。≥6 极度拥挤,系统会收紧仓位。"),
@@ -552,12 +553,10 @@ def _emit_composite_cards(composite: dict[str, Any], today: str) -> list[dict[st
 
     for key, slug, name_cn, name_en, layer, impact in _composite_specs:
         data = composite.get(key) or {}
-        # 每个 composite 有自己的"值"字段:score / band / phase / cycle_position
+        # 每个 composite 有自己的"值"字段:score / band / phase
+        # Sprint Layer-B Cleanup:删除 cycle_position fallback
         score = data.get("score")
-        band = (
-            data.get("band") or data.get("phase")
-            or data.get("cycle_position")
-        )
+        band = data.get("band") or data.get("phase")
         current_value = score if score is not None else band
         if current_value is None:
             current_value = "n/a"
@@ -586,10 +585,10 @@ def _emit_composite_cards(composite: dict[str, Any], today: str) -> list[dict[st
 
 
 def _composite_category(key: str) -> str:
+    # Sprint Layer-B Cleanup:删除 cycle_position 映射
     return {
         "truth_trend": "price_structure",
         "band_position": "price_structure",
-        "cycle_position": "onchain",
         "crowding": "derivatives",
         "macro_headwind": "macro",
         "event_risk": "events",
@@ -597,21 +596,16 @@ def _composite_category(key: str) -> str:
 
 
 def _composite_direction(key: str, data: dict[str, Any]) -> str:
+    # Sprint Layer-B Cleanup:删除 cycle_position fallback + cycle_position 分支
     if not data:
         return "neutral"
     score = data.get("score")
-    band = data.get("band") or data.get("phase") or data.get("cycle_position")
+    band = data.get("band") or data.get("phase")
     if key == "truth_trend":
         if score is None:
             return "neutral"
         if score >= 6:
             return "bullish"  # 真趋势,但方向由 L1 regime 定,这里只表示"强"
-        return "neutral"
-    if key == "cycle_position":
-        if band in {"accumulation", "early_bull", "mid_bull"}:
-            return "bullish"
-        if band in {"late_bull", "distribution", "early_bear", "mid_bear", "late_bear"}:
-            return "bearish"
         return "neutral"
     if key == "crowding":
         # crowding 高 → 反向风险
@@ -637,10 +631,11 @@ def _composite_direction(key: str, data: dict[str, Any]) -> str:
 
 
 def _composite_plain_reading(key: str, data: dict[str, Any]) -> str:
+    # Sprint Layer-B Cleanup:删除 cycle_position fallback + cycle_position 分支
     if not data:
         return "📊 数据不足(该组合因子未能产出)\n🔍 等数据齐全后系统会重新计算"
     score = data.get("score")
-    band = data.get("band") or data.get("phase") or data.get("cycle_position")
+    band = data.get("band") or data.get("phase")
 
     if key == "truth_trend":
         if score is None:
@@ -653,23 +648,6 @@ def _composite_plain_reading(key: str, data: dict[str, Any]) -> str:
                     f"🔍 ≥6 = 真趋势;4-5 = 弱趋势;≤3 = 无趋势")
         return (f"📊 当前趋势信号 {score}/9 分,无趋势,以区间思路为主\n"
                 f"🔍 ≥6 = 真趋势;4-5 = 弱趋势;≤3 = 无趋势")
-
-    if key == "cycle_position":
-        if band is None or band == "unclear":
-            return ("📊 长周期位置不明朗,三主指标未形成共识\n"
-                    "🔍 三主指标 = MVRV-Z / NUPL / LTH 90 日变化;一致 = 高置信,分歧 = 不明")
-        labels = {
-            "accumulation": "底部累积期(底部吸筹)",
-            "early_bull": "牛市早期",
-            "mid_bull": "牛市中段",
-            "late_bull": "牛市晚期",
-            "distribution": "顶部派发期",
-            "early_bear": "熊市早期",
-            "mid_bear": "熊市中段",
-            "late_bear": "熊市晚期",
-        }
-        return (f"📊 当前处于 {labels.get(band, band)},系统按此调整做多/做空门槛\n"
-                f"🔍 9 档:底部累积期 → 牛市早/中/晚期 → 顶部派发期 → 熊市早/中/晚期")
 
     if key == "crowding":
         if score is None:
@@ -795,6 +773,9 @@ def _emit_onchain_primary(
     ))
 
     # LTH Supply 90 日变化
+    # Sprint Layer-B Cleanup:Layer B 已不消费此因子(lth_supply_90d_pct_change
+    # 从 L2 ctx 删除),但 Layer A onchain_packet 仍在用(spot_cycle_context_builder
+    # L461/L664/L1036),保留卡片作为系统级数据展示。linked_layer 改为 L_A 提示来源。
     series = onchain.get("lth_supply") if isinstance(onchain, dict) else None
     change_90d = _pct_change(series, 90)
     _, ts = _latest(series)
@@ -817,12 +798,12 @@ def _emit_onchain_primary(
                   ) if change_90d is not None
             else "📊 数据不足(需 90 天历史)\n🔍 > +2% = 净增持;±2% = 稳定;< -3% = 净减持"
         ),
-        strategy_impact="📍 长期持有者(持有 ≥ 155 天)的总持仓在过去 90 天的变化。增持往往伴随底部吸筹,减持往往伴随顶部派发。",
+        strategy_impact="📍 长期持有者(持有 ≥ 155 天)的总持仓在过去 90 天的变化。增持往往伴随底部吸筹,减持往往伴随顶部派发。used by Layer A onchain_packet。",
         impact_direction=_impact_direction_from_value(
             change_90d, bull_above=2, bear_below=-3,
         ),
         impact_weight=0.85,
-        linked_layer="L2", source="Glassnode",
+        linked_layer="Layer A", source="Glassnode",
     ))
 
     # Exchange Net Flow 7 日均
@@ -1223,6 +1204,10 @@ def _emit_macro_primary(macro: dict[str, Any], today: str) -> list[dict[str, Any
 # ============================================================
 
 def _emit_onchain_reference(onchain: dict[str, Any], today: str) -> list[dict[str, Any]]:
+    # Sprint Layer-B Cleanup:lth_realized_price 卡片保留 — Layer B L2 已删除
+    # 该字段消费,但 Layer A onchain_packet 仍在用(spot_cycle_context_builder
+    # L46/L443/L658/L1023),作为系统级数据展示保留。sth_realized_price 保留作
+    # L2 波段背景(用户决策),mvrv / realized_price 等 reference 因子保留。
     cards: list[dict[str, Any]] = []
     _ref_specs = [
         ("mvrv", "onchain_mvrv", "MVRV 比率", "MVRV Ratio",
@@ -1871,7 +1856,7 @@ def _emit_v13_new_factors(
             if val is not None
             else "📊 数据不足\n🔍 调整后 SOPR,> 1 盈利 / < 1 亏损卖出"
         ),
-        strategy_impact="📍 [Sprint 1.10 占位] 1.6 升级:替代 SOPR 在 cycle_position 中的位置(1.8 接入)。",
+        strategy_impact="📍 [Sprint 1.10 占位] 1.6 升级:aSOPR 去 1h 噪声替代基础 SOPR。",
         impact_direction="neutral", impact_weight=0.7,
         linked_layer="L3", source="Glassnode",
     ))

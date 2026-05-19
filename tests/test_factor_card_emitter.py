@@ -41,7 +41,9 @@ def test_emits_at_least_35_cards(minimal_state, minimal_context):
 def test_tier_breakdown(minimal_state, minimal_context):
     cards = emit_factor_cards(minimal_state, minimal_context)
     by_tier = Counter(c["tier"] for c in cards)
-    assert by_tier["composite"] == 6, "六大组合因子必须齐全"
+    # Sprint Layer-B Cleanup:cycle_position composite 卡删除,composite 5 个
+    # (truth_trend / band_position / crowding / macro_headwind / event_risk)
+    assert by_tier["composite"] == 5, "5 大组合因子(cycle_position 已删,Layer A 6 阶段替代)"
     assert by_tier["primary"] >= 13, "主裁决因子 ≥ 13(含 5 链上 + 4 衍生品 + 3 技术 + 2 宏观)"
     assert by_tier["reference"] >= 15, "参考因子 ≥ 15"
 
@@ -84,11 +86,12 @@ def test_missing_data_graceful(minimal_state, minimal_context):
     assert len(insufficient) >= 5
 
 
-def test_composite_cards_all_six(minimal_state, minimal_context):
+def test_composite_cards_all_five(minimal_state, minimal_context):
+    """Sprint Layer-B Cleanup:composite 卡 6 个 → 5 个(删 cycle_position)。"""
     cards = emit_factor_cards(minimal_state, minimal_context)
     composite_ids = {c["card_id"] for c in cards if c["tier"] == "composite"}
     expected_suffixes = {
-        "truth_trend", "band_position", "cycle_position",
+        "truth_trend", "band_position",
         "crowding", "macro_headwind", "event_risk",
     }
     # 每个 composite 卡的 id 形如 composite_{suffix}_{date}
@@ -97,6 +100,9 @@ def test_composite_cards_all_six(minimal_state, minimal_context):
         if any(f"composite_{s}_" in cid for cid in composite_ids)
     }
     assert found == expected_suffixes
+    # cycle_position 卡必须不存在
+    assert not any("composite_cycle_position" in cid for cid in composite_ids), \
+        "cycle_position composite 卡应已删除(Sprint Layer-B Cleanup)"
 
 
 def test_with_real_onchain_series():

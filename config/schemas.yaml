@@ -122,9 +122,9 @@ common_types:
       values: [early, mid, late, exhausted, unclear, n_a]
       notes: "§4.3.4;波段位置"
 
-    cycle_position:
-      values: [accumulation, early_bull, mid_bull, late_bull, distribution, early_bear, mid_bear, late_bear, unclear]
-      notes: "§3.8.4 九档(M1/M2);unclear 为伪档,投票池空时输出(M17)"
+    # Sprint Layer-B Cleanup:cycle_position 9 档枚举已删除
+    # (Layer A 6 阶段替代:bear_bottom / recovery / bull_main / bull_late /
+    # top_distribution / bear_decline,定义在 spot_cycle_stage_state.py)
 
     # ---- Layer 3 ----
     opportunity_grade:
@@ -624,11 +624,8 @@ layer_2_direction_schema:
       required: true
       description: "{estimated_pct_of_move, estimation_basis, reliability}"
 
-    long_cycle_context:
-      type: dict
-      required: true
-      description: "{cycle_position, cycle_confidence, data_basis, last_stable_cycle_position(展示用,不参与决策,M17)}"
-
+    # Sprint Layer-B Cleanup:long_cycle_context 已删除(Layer A 独立子系统
+    # 负责大周期判断,L2 不再输出此字段)
     band_position_score:
       type: number
       required: true
@@ -893,43 +890,8 @@ composite_factors_schemas:
         description: "每个评分项对各 phase 的贡献"
 
   # -------- CyclePosition(§3.8.4,L2 long_cycle_context)--------
-  cycle_position_output:
-    single_use_point: l2_long_cycle_context
-    fields:
-      cycle_position:
-        type: enum
-        enum: cycle_position
-        required: true
-      cycle_confidence:
-        type: number
-        required: true
-        range: [0.0, 1.0]
-      voting_pool:
-        type: list
-        item_type: string
-        required: true
-        description: "通过辅助条件后进入投票的候选档"
-      voting_breakdown:
-        type: dict
-        required: true
-        description: "{mvrv_z_candidate, nupl_candidate, lth_candidate} 三个主指标的候选档"
-      aux_conditions_passed:
-        type: dict
-        required: true
-        description: "每个候选档的辅助条件检查结果(时间/跌幅)"
-      last_stable_cycle_position:
-        type: enum
-        enum: cycle_position
-        required: false
-        notes: "M17:展示 / 复盘用,不参与当前决策"
-      halving_window_active:
-        type: bool
-        required: true
-        description: "是否在减半 ±6 个月窗口内;置信度自动降一档"
-      mvrv_z_stabilizing_check_result:
-        type: bool
-        required: false
-        description: "late_bear 候选时有值;对应 thresholds 的 trend_stabilizing_check_required"
+  # Sprint Layer-B Cleanup:cycle_position_output schema 已删除
+  # (composite/cycle_position.py 整删,Layer A 6 阶段替代 9 档)
 
   # -------- Crowding(§3.8.3,L4)--------
   crowding_output:

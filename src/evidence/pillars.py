@@ -183,26 +183,8 @@ def _pillars_l2(l2: dict[str, Any]) -> dict[str, Any]:
         pos_interp = "波段位置未输出"
         pos_status = "missing"
 
-    # 支柱三:长周期背景
-    lcc = l2.get("long_cycle_context") or {}
-    cp = lcc.get("cycle_position") if isinstance(lcc, dict) else None
-    cp_conf = lcc.get("cycle_confidence") if isinstance(lcc, dict) else None
-    cp_labels = {
-        "accumulation": "累积期", "early_bull": "牛市早期",
-        "mid_bull": "牛市中段", "late_bull": "牛市晚期",
-        "distribution": "顶部分发", "early_bear": "熊市早期",
-        "mid_bear": "熊市中段", "late_bear": "熊市晚期",
-        "unclear": "不明朗",
-    }
-    if cp and cp != "unclear":
-        cycle_interp = (
-            cp_labels.get(cp, cp)
-            + (f"(置信度 {cp_conf:.2f})" if isinstance(cp_conf, (int, float)) else "")
-        )
-        cycle_status = "ok"
-    else:
-        cycle_interp = "周期位置未共识(三主链上指标分歧)"
-        cycle_status = "missing"
+    # Sprint Layer-B Cleanup:删除支柱三(长周期背景)— Layer A 独立子系统
+    # 负责大周期判断,Layer B L2 三支柱降为二支柱(结构序列 + 相对位置)。
 
     return {
         "core_question": "方向偏哪边?当前波段走到第几阶段?",
@@ -213,25 +195,17 @@ def _pillars_l2(l2: dict[str, Any]) -> dict[str, Any]:
             {"id": "relative_position", "name": "相对位置",
              "value": phase, "interpretation": pos_interp,
              "status": pos_status},
-            {"id": "long_cycle_context", "name": "长周期背景",
-             "value": cp, "interpretation": cycle_interp,
-             "status": cycle_status},
         ],
-        "downstream_hint": _l2_downstream_hint(l2, cp),
+        "downstream_hint": _l2_downstream_hint(l2),
     }
 
 
-def _l2_downstream_hint(l2: dict[str, Any], cp: Optional[str]) -> str:
+def _l2_downstream_hint(l2: dict[str, Any]) -> str:
+    """Sprint Layer-B Cleanup:删除 cp 参数 + 9 档 thresholds 字典 —
+    Layer A 独立子系统负责大周期判断,L2 用统一门槛(做多 0.65 / 做空 0.70)。"""
     stance = l2.get("stance")
     conf = _as_float(l2.get("stance_confidence"))
-    # 动态门槛(建模 §4.3.6)
-    thresholds = {
-        "early_bull": (0.55, 0.75), "mid_bull": (0.60, 0.70),
-        "late_bull": (0.65, 0.65), "distribution": (0.70, 0.60),
-        "early_bear": (0.75, 0.55), "mid_bear": (0.75, 0.55),
-        "late_bear": (0.65, 0.65), "accumulation": (0.60, 0.70),
-    }
-    long_t, short_t = thresholds.get(cp or "", (0.65, 0.70))
+    long_t, short_t = 0.65, 0.70  # 统一门槛(不再因 cycle_position 调整)
     if stance == "neutral":
         return (f"方向不明,系统目前不给机会档"
                 f"(做多信心要超过 {long_t*100:.0f}%,做空要超过 {short_t*100:.0f}%)")

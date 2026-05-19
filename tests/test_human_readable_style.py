@@ -80,9 +80,7 @@ def _build_sample_state() -> dict[str, Any]:
                     "latest_structure": "HH",
                 },
                 "trend_position": {"estimated_pct_of_move": 65.0},
-                "long_cycle_context": {
-                    "cycle_position": "early_bull", "cycle_confidence": 0.7,
-                },
+                # Sprint Layer-B Cleanup:long_cycle_context 已从 L2 输出删除
                 "ma_60_distance_pct": 0.05,
                 "latest_pullback_depth": 0.3,
                 "health_status": "healthy",

@@ -72,33 +72,14 @@ layer_1_regime:
 # ============================================================
 layer_2_direction:
 
-  # ---- 做多/做空动态门槛表(§4.3.6)----
-  # 键为 cycle_position(九档),值为 {long_threshold, short_threshold}。
-  # 语义:L2 stance 迁移到该方向,需要 stance_confidence ≥ 对应门槛。
-  #
-  # 关于 cycle=unclear 的边界行为:
-  #   cycle=unclear 时,CyclePosition confidence 固定 0.30(见
-  #   cycle_position_decision.voting.empty_pool_confidence),而 L2 的
-  #   stance_confidence 在长周期背景不明时通常自然偏低,所以 0.65/0.70
-  #   门槛**不意味着必然触发迁移**。编码期需验证这个组合下的实际覆盖率。
-  dynamic_direction_thresholds:
-    accumulation:  { long: 0.60, short: 0.70 }
-    early_bull:    { long: 0.55, short: 0.75 }
-    mid_bull:      { long: 0.60, short: 0.70 }
-    late_bull:     { long: 0.65, short: 0.65 }
-    distribution:  { long: 0.70, short: 0.60 }
-    early_bear:    { long: 0.75, short: 0.55 }
-    mid_bear:      { long: 0.75, short: 0.55 }
-    late_bear:     { long: 0.65, short: 0.65 }
-    unclear:       { long: 0.65, short: 0.70 }   # v1.2 明确(原建模默认)
-
-  # stance_confidence 的硬边界(§4.3.6)
-  stance_confidence_floor:   0.55
-  stance_confidence_ceiling: 0.75
-
-  # cycle_position 切换后门槛延迟生效天数(§4.3.6)
-  # 过渡期内对新旧档位的门槛做线性插值
-  cycle_position_switch_delay_days: 7
+  # Sprint Layer-B Cleanup 删除:
+  #   - dynamic_direction_thresholds(9 档 cycle_position 动态门槛,
+  #     CyclePositionFactor 已整删)
+  #   - cycle_position_switch_delay_days(9 档切换延迟)
+  # L2 stance 门槛改用 evidence/pillars.py:_l2_downstream_hint 内的
+  # 统一阈值(做多 0.65 / 做空 0.70),不再因 cycle_position 调整。
+  # stance_confidence_floor / ceiling 同期归档(0 consumer),整体由
+  # 未来 layer_2_direction 配置块退役 sprint 清理。
 
 
 # ============================================================
@@ -140,7 +121,7 @@ layer_3_opportunity:
   short_grade_rules:
     - grade: A
       conditions:
-        cycle_position: [distribution, early_bear, mid_bear]
+        # Sprint Layer-B Cleanup:cycle_position 9 档判定已退役,Layer A 6 阶段替代
         stance: [bearish]
         stance_confidence_at_or_above_dynamic_threshold: true
         regime: [trend_down, transition_down, range_high]
@@ -150,7 +131,7 @@ layer_3_opportunity:
         truth_trend_direction: down
     - grade: B
       conditions:
-        cycle_position: [distribution, early_bear, mid_bear]
+        # Sprint Layer-B Cleanup:cycle_position 9 档判定已退役,Layer A 6 阶段替代
         stance: [bearish]
         stance_confidence_at_or_above_dynamic_threshold: true
         regime: [trend_down, transition_down, range_high]
@@ -510,90 +491,13 @@ kpi_tracker:
 # 6 AI 角色综合判断 + AdjudicatorValidator)
 
 
-# ---- 8.3 CyclePosition(§3.8.4,L2,九档)----
-cycle_position_decision:
-  # 九档判定:每档规定 MVRV Z / NUPL / LTH 90d 变化的允许范围
-  # 和必要的辅助条件(时间/跌幅)。投票池 = 通过辅助检查的主指标候选。
-  bands:
-    accumulation:
-      mvrv_z:       { range: [null, -0.5] }         # < -0.5
-      nupl:         { range: [null, 0] }            # < 0
-      lth_90d_chg:  { range: [0.02, null] }         # > +2% 持续增持
-      aux_min_days_since_last_distribution: 180
-
-    early_bull:
-      mvrv_z:       { range: [-0.5, 2] }
-      nupl:         { range: [0, 0.25] }
-      lth_90d_chg:  { range: [-0.005, null] }       # 持续增持或稳定
-      aux_min_days_since_last_accumulation: 60
-
-    mid_bull:
-      mvrv_z:       { range: [2, 4] }
-      nupl:         { range: [0.25, 0.5] }
-      lth_90d_chg:  { range: [null, 0.005] }        # 缓慢减持或稳定
-
-    late_bull:
-      mvrv_z:       { range: [4, 6] }
-      nupl:         { range: [0.5, 0.65] }
-      lth_90d_chg:  { range: [null, 0] }            # 开始减持
-
-    distribution:
-      mvrv_z:       { range: [6, null] }            # > 6
-      nupl:         { range: [0.65, null] }
-      lth_90d_chg:  { range: [null, -0.03] }        # < -3% 快速减持
-
-    early_bear:
-      mvrv_z:       { range: [2, 6], trend: down }
-      nupl:         { range: [0.25, 0.5], trend: down }
-      lth_90d_chg:  { range: [null, 0] }
-      aux_min_ath_drawdown_pct: 0.20                # 已跌 > 20%
-
-    mid_bear:
-      mvrv_z:       { range: [-0.5, 2], trend: down }
-      nupl:         { range: [-0.25, 0.25] }
-      lth_90d_chg:  { range: [-0.01, null] }        # 减持放缓
-      aux_min_drawdown_duration_days: 90
-
-    late_bear:
-      # 建模 §3.8.4 原文:MVRV Z "< -0.5 未企稳"。数值范围只表达
-      # "< -0.5",语义上还需要"未企稳"这层检查。代码侧需实现
-      # is_mvrv_z_stabilizing(series) -> bool,该 flag = true 时
-      # late_bear 候选只在"未企稳" 成立时才进投票池。
-      # 具体判据(如 MVRV Z 一阶差分均值是否仍 < 0、变化率是否持续负
-      # 等)在 Sprint 1 时定义。
-      mvrv_z:       { range: [null, -0.5] }
-      nupl:         { range: [null, -0.25] }
-      lth_90d_chg:  { range: [null, null] }         # 减持放缓或转增持(宽)
-      aux_min_drawdown_duration_days: 180
-      trend_stabilizing_check_required: true
-
-    unclear:
-      # 伪档(pseudo band):不走 bands 数值匹配,仅作配置完整性登记。
-      # 触发条件:投票池为空,或三主指标全不一致(§3.8.4 判定优先级)。
-      # 运行时逻辑:CyclePosition.compute() 先按其他 8 档跑候选匹配
-      #   → 投票 → 若三票全不一致或池空 → 输出 unclear + confidence=0.30
-      # M17 纪律:不允许维持上一次档位,必须输出 unclear。
-      auto_fallback: true
-
-  # 投票与置信度(§3.8.4 判定优先级)
-  voting:
-    three_agree_confidence: 0.85
-    two_agree_confidence:   0.60
-    empty_pool_confidence:  0.30       # unclear + 0.30
-
-  # 失真修正
-  # 减半前后 6 个月 CyclePosition 置信度自动降一档(-0.15)
-  halving_confidence_penalty: 0.15
-  halving_window_months_around: 6
-
-  # ETF 时代 MVRV 基准偏移(每半年人工校准一次,提醒占位)
-  etf_era_mvrv_recalibrate_months: 6
-
-
-# Sprint 1.8.1 删除:
-#   8.4 crowding_scoring(composite/crowding.py 已退役)
-#   8.5 macro_headwind_scoring(composite/macro_headwind.py 已退役)
-#   8.6 event_risk_scoring(EventRisk 已在 1.5q.1 退役;阈值表跟着退)
-# v1.3 改用 6 AI 角色:L4 risk_breakdown.crowding_risk + L5 macro_stance,
-# Orchestrator._compute_crowding_multiplier / _compute_event_multiplier
-# 读 AI 输出推导 multipliers,不再读这里的硬阈值。
+# Sprint Layer-B Cleanup 删除:
+#   8.3 cycle_position_decision(composite/cycle_position.py 整删,Layer A
+#       6 阶段 bear_bottom/recovery/bull_main/bull_late/top_distribution/
+#       bear_decline 替代 9 档判断)
+# 已与之前 1.8.1 退役的:
+#   8.1 truth_trend_scoring / 8.2 band_position_scoring(composite/truth_trend.py
+#       + composite/band_position.py 退役)
+#   8.4 crowding_scoring / 8.5 macro_headwind_scoring / 8.6 event_risk_scoring
+#       (对应 composite/*.py 都退役;v1.3 改用 6 AI 角色综合判断)
+# 一并归档。生产端不消费任何 composite 阈值表。

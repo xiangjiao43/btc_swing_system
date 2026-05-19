@@ -254,7 +254,7 @@ sources:
     frequency: daily
     freshness_class: onchain
     role_in_v1: primary
-    serves: [mvrv_z_score, cycle_position]
+    serves: [mvrv_z_score]  # Sprint Layer-B Cleanup: cycle_position 派生因子已删
 
   - name: glassnode_nupl
     platform: glassnode
@@ -263,7 +263,7 @@ sources:
     frequency: daily
     freshness_class: onchain
     role_in_v1: primary
-    serves: [nupl, cycle_position]
+    serves: [nupl]  # Sprint Layer-B Cleanup: cycle_position 派生因子已删
 
   - name: glassnode_lth_sum
     platform: glassnode
@@ -272,7 +272,7 @@ sources:
     frequency: daily
     freshness_class: onchain
     role_in_v1: primary
-    serves: [lth_supply_90d_change, cycle_position]
+    serves: [lth_supply_90d_change]  # Sprint Layer-B Cleanup: cycle_position 派生因子已删
 
   - name: glassnode_exchange_net_flow
     platform: glassnode
@@ -925,19 +925,9 @@ composite_factors:
     output_range: null                   # 输出 phase + confidence,不是单一数值
     notes: "§3.8.2;v1.2 只用价格几何,已移除 MVRV Z 和 STH-SOPR"
 
-  - name: cycle_position
-    depends_on:
-      - mvrv_z_score
-      - nupl
-      - lth_supply_90d_change
-      - ath_drawdown
-    formula_ref: src/composite/cycle_position.py::compute
-    layer: L2
-    single_use_point: l2_long_cycle_context
-    output_range: null                   # 九档枚举 + confidence
-    notes: >
-      §3.8.4;v1.2 九档完整化(M1/M2)。辅助条件是否决权(B2),
-      投票池为空 → unclear,不允许维持上一次档位(M17)。
+  # Sprint Layer-B Cleanup:cycle_position 派生因子已删除
+  # (src/composite/cycle_position.py 整删,Layer A 6 阶段
+  # bear_bottom/recovery/bull_main/bull_late/top_distribution/bear_decline 替代)
 
   - name: crowding
     depends_on:

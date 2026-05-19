@@ -33,8 +33,7 @@ context 含:
       "nearest_resistance": 78900,
       "major_support": 71420,
       "major_resistance": 82100
-    },
-    "long_cycle_context": {"ai_assessment": "agree", ...}
+    }
   },
   "risk_preview": {
     "funding_rate_z_score_90d": 0.85,
@@ -232,8 +231,7 @@ H5. current_state ∈ {LONG_HOLD, LONG_TRIM, SHORT_HOLD, SHORT_TRIM} →
   "l1_output": {"regime": "trend_up", "regime_stability": "stable", "confidence": 0.90},
   "l2_output": {
     "stance": "bullish", "stance_confidence_tier": "high", "phase": "early",
-    "key_levels": {"nearest_support": 75320, ...},
-    "long_cycle_context": {"ai_assessment": "agree"}
+    "key_levels": {"nearest_support": 75320, ...}
   },
   "risk_preview": {
     "funding_rate_z_score_90d": 0.85,

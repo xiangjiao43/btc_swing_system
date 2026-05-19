@@ -303,3 +303,45 @@ def test_emitter_makes_card_with_dict_override(minimal_state, minimal_context):
     assert mvrv_card is not None
     assert mvrv_card["consumed_by_layers"] == ["Layer A"]
     assert mvrv_card["linked_layer_simplified"] == "Layer A"
+
+
+# ============================================================
+# Sprint Web Transparency Commit 3: 10 张死卡删除验证
+# ============================================================
+
+def test_dead_cards_not_emitted(minimal_state, minimal_context):
+    """删除的 10 张死卡不应再出现在 emit_factor_cards 输出。"""
+    cards = emit_factor_cards(minimal_state, minimal_context)
+    card_id_prefixes = {c["card_id"].rsplit("_", 1)[0] for c in cards}
+
+    dead_prefixes = {
+        "derivatives_liquidation_24h",
+        "derivatives_lsr_change_24h",
+        "derivatives_top_long_short_ratio",
+        "onchain_lth_mvrv",
+        "onchain_sth_mvrv",
+        "onchain_ssr",
+        "price_ma_20",
+        "price_ma_60",
+        "price_ma_120",
+        "price_tf_alignment_4h_1d_1w",
+    }
+    leaked = card_id_prefixes & dead_prefixes
+    assert not leaked, f"dead cards leaked into emit output: {leaked}"
+
+
+def test_ma_200_card_still_emitted_and_layer_a(minimal_state, minimal_context):
+    """price_ma_200 卡仍 emit,且 D4 修正后标 Layer A。"""
+    import pandas as pd
+    idx = pd.date_range("2024-01-01", periods=210, freq="D", tz="UTC")
+    closes = [50000 + i * 100 for i in range(210)]
+    df = pd.DataFrame({
+        "open": closes, "high": closes, "low": closes, "close": closes,
+        "volume_btc": [1.0] * 210,
+    }, index=idx)
+    ctx = {"onchain": {}, "derivatives": {}, "macro": {}, "klines_1d": df}
+    cards = emit_factor_cards(minimal_state, ctx)
+    ma200 = next((c for c in cards if c["card_id"].startswith("price_ma_200_")), None)
+    assert ma200 is not None
+    assert ma200["consumed_by_layers"] == ["Layer A"]
+    assert ma200["linked_layer_simplified"] == "Layer A"

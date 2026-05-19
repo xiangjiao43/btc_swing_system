@@ -48,37 +48,10 @@ def _daily_series(values: list[float], days_back_start: int | None = None) -> pd
 # liquidation 24h:daily bar 直接当 24h 累计
 # ============================================================
 
-def test_24h_liquidation_uses_daily_last_value():
-    """daily series 末值 = 7,686,347.99 → current_value = 7,686,347.99
-    (1.5e.1 老代码会 sum 24 行 = 假数据)。"""
-    liq = _daily_series([1_000_000.0, 2_000_000.0, 7_686_347.99])
-    cards = emit_factor_cards(_make_state(), {
-        "derivatives": {"liquidation_total": liq},
-        "macro": {}, "onchain": {},
-    })
-    c = _find(cards, "derivatives_liquidation_24h")
-    assert c is not None
-    assert c["current_value"] == 7_686_347.99
-
-
-def test_24h_liquidation_only_one_day_still_works():
-    """只有 1 行 daily → 直接显示该值(daily bar 自带 24h 含义)。"""
-    liq = _daily_series([5_000_000.0])
-    cards = emit_factor_cards(_make_state(), {
-        "derivatives": {"liquidation_total": liq},
-        "macro": {}, "onchain": {},
-    })
-    c = _find(cards, "derivatives_liquidation_24h")
-    assert c["current_value"] == 5_000_000.0
-
-
-def test_24h_liquidation_none_when_empty():
-    cards = emit_factor_cards(_make_state(), {
-        "derivatives": {},
-        "macro": {}, "onchain": {},
-    })
-    c = _find(cards, "derivatives_liquidation_24h")
-    assert c["current_value"] is None
+# Sprint Web Transparency Commit 3 删除:test_24h_liquidation_* 3 个测试
+# 原因:derivatives_liquidation_24h 卡是死卡(Layer A 排除衍生品,Layer B L4
+# prompt 不消费 liquidation_total),已从 emitter 删除。
+# coinglass.py liquidation collector + DB 列保留。
 
 
 # ============================================================
@@ -114,24 +87,7 @@ def test_24h_oi_none_when_only_one_day():
 # LSR 24h change:_pct_change(daily, days=1)
 # ============================================================
 
-def test_24h_lsr_uses_daily_pct_change():
-    """daily 末两值 [0.94, 0.81] → ((0.81/0.94)-1)*100 ≈ -13.83%。"""
-    lsr = _daily_series([1.0, 0.94, 0.81])
-    cards = emit_factor_cards(_make_state(), {
-        "derivatives": {"long_short_ratio": lsr},
-        "macro": {}, "onchain": {},
-    })
-    c = _find(cards, "derivatives_lsr_change_24h")
-    assert c is not None
-    expected = (0.81 / 0.94 - 1.0) * 100.0
-    assert c["current_value"] == pytest.approx(expected, abs=0.01)
-
-
-def test_24h_lsr_none_when_only_one_day():
-    lsr = _daily_series([1.5])
-    cards = emit_factor_cards(_make_state(), {
-        "derivatives": {"long_short_ratio": lsr},
-        "macro": {}, "onchain": {},
-    })
-    c = _find(cards, "derivatives_lsr_change_24h")
-    assert c["current_value"] is None
+# Sprint Web Transparency Commit 3 删除:test_24h_lsr_* 2 个测试
+# 原因:derivatives_lsr_change_24h 卡是死卡(Layer A 排除衍生品,Layer B L4
+# prompt 不消费 long_short_ratio),已从 emitter 删除。
+# coinglass.py long_short_ratio collector + DB 列保留。

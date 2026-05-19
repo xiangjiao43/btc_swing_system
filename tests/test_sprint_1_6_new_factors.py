@@ -312,13 +312,12 @@ def _series(value: float, ts: str = "2026-04-30T00:00:00Z") -> pd.Series:
     return pd.Series([value], index=pd.to_datetime([ts], utc=True))
 
 
-def test_emit_v13_new_factors_returns_9_cards():
+def test_emit_v13_new_factors_returns_6_cards():
+    """Sprint Web Transparency Commit 3:_emit_v13_new_factors 删除 3 张死卡
+    (LTH-MVRV / STH-MVRV / SSR),从原 9 张降到 6 张。"""
     from src.strategy.factor_card_emitter import _emit_v13_new_factors
     onchain = {
         "sth_supply": _series(2_500_000.0),
-        "lth_mvrv": _series(2.0),
-        "sth_mvrv": _series(1.05),
-        "ssr": _series(8.5),
         "cdd": _series(1_500_000.0),
         "sopr_adjusted": _series(1.012),
         "hodl_waves_1y_2y": _series(0.11),
@@ -329,23 +328,18 @@ def test_emit_v13_new_factors_returns_9_cards():
         "btc_dominance": _series(60.36),
     }
     cards = _emit_v13_new_factors(onchain, derivatives, "20260430")
-    assert len(cards) == 9
+    assert len(cards) == 6
     names = {c["name"] for c in cards}
     expected = {
-        "STH Supply", "LTH-MVRV", "STH-MVRV", "SSR",
+        "STH Supply",
         "HODL Waves (>1y)", "CDD", "aSOPR",
         "ETF Flows", "Bitcoin Dominance",
     }
     assert names == expected
 
 
-def test_emit_v13_lth_mvrv_card_uses_computed_source():
-    from src.strategy.factor_card_emitter import _emit_v13_new_factors
-    cards = _emit_v13_new_factors(
-        onchain={"lth_mvrv": _series(2.0)}, derivatives={}, today="20260430",
-    )
-    lth_card = next(c for c in cards if c["name"] == "LTH-MVRV")
-    assert lth_card["source"] == "computed"
+# Sprint Web Transparency Commit 3 删除 test_emit_v13_lth_mvrv_card_uses_computed_source
+# 原因:LTH-MVRV 是死卡(无 prompt 消费),已从 _emit_v13_new_factors 删除。
 
 
 def test_emit_v13_etf_flow_l5_layer():

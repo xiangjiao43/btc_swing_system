@@ -1134,38 +1134,9 @@ def _emit_derivatives_primary(
         linked_layer="L4", source="CoinGlass",
     ))
 
-    # 多空比(Top Accounts)
-    series = None
-    if isinstance(derivatives, dict):
-        # 不能用 `a or b`:pd.Series 的 bool 会报 ambiguous。显式 None 检查。
-        for k in ("long_short_ratio", "long_short_ratio_top",
-                  "long_short_ratio_global"):
-            v = derivatives.get(k)
-            if v is not None:
-                series = v
-                break
-    val, ts = _latest(series)
-    cards.append(_make_card(
-        card_id=f"derivatives_top_long_short_ratio_{today}",
-        category="derivatives", tier="primary",
-        # Sprint 1.5e:CoinGlass v4 LSR 单交易所端点,源 = Binance
-        name="Binance 大户多空比", name_en="Top Long/Short Ratio (Binance)",
-        current_value=round(val, 3) if val is not None else None,
-        captured_at_bjt=ts,
-        plain_interpretation=(
-            (f"📊 大户多空比 {val:.2f},多头占比极高,多头拥挤(反向挤压风险)\n"
-             f"🔍 > 2.5 = 多头过度拥挤;0.7 ~ 2.0 = 正常区间;< 0.5 = 空头过度拥挤"
-             ) if val is not None and val > 2.5
-            else (f"📊 大户多空比 {val:.2f},多空相对均衡\n"
-                  f"🔍 > 2.5 = 多头过度拥挤;0.7 ~ 2.0 = 正常区间;< 0.5 = 空头过度拥挤"
-                  ) if val is not None
-            else "📊 数据不足\n🔍 > 2.5 = 多头过度拥挤;0.7 ~ 2.0 = 正常;< 0.5 = 空头过度拥挤"
-        ),
-        strategy_impact="📍 币安大户(高净值合约账户)中持有多头仓位 / 持有空头仓位的比值。极端值往往是反向信号,因为聪明钱的拥挤往往不持续。",
-        impact_direction=_impact_direction_from_value(val, bear_above=2.5),
-        impact_weight=0.6,
-        linked_layer="L4", source="CoinGlass (Binance)",
-    ))
+    # Sprint Web Transparency Commit 3:删除 derivatives_top_long_short_ratio 卡
+    # (Layer A 显式排除衍生品 prompt;Layer B L4 prompt 不消费 LSR — 死卡)
+    # coinglass.py:fetch_long_short_ratio_history 数据采集保留,DB 列保留。
 
     return cards
 
@@ -1236,42 +1207,11 @@ def _emit_price_tech_primary(
         linked_layer="L1", source="Binance klines",
     ))
 
-    # 多周期方向一致性 —— 1.8.2-J:emitter 自算 4H/1D/1W EMA-20 斜率投票
-    tf_result = compute_tf_alignment(klines_4h, klines_1d, klines_1w)
-    alignment_level = tf_result.get("level")
-    alignment_score = tf_result.get("score")
-    if alignment_level == "三周期一致":
-        interp = ("📊 三周期(4H/1D/1W)EMA-20 同向 → 趋势明确\n"
-                  "🔍 三周期一致 = 趋势确立;两周期一致 = 弱信号;三周期分歧 = 无趋势")
-    elif alignment_level == "两周期一致":
-        interp = ("📊 两周期 EMA-20 同向 → 趋势弱信号\n"
-                  "🔍 三周期一致 = 趋势确立;两周期一致 = 弱信号;三周期分歧 = 无趋势")
-    elif alignment_level == "三周期分歧":
-        interp = ("📊 三周期分歧 → 无明显趋势,震荡市\n"
-                  "🔍 三周期一致 = 趋势确立;两周期一致 = 弱信号;三周期分歧 = 无趋势")
-    else:
-        interp = ("📊 数据不足或各周期方向分歧\n"
-                  "🔍 三周期一致 = 趋势确立;两周期一致 = 弱信号;三周期分歧 = 无趋势")
-    if alignment_score is None:
-        impact_dir = "neutral"
-    elif alignment_score > 0:
-        impact_dir = "bullish"
-    elif alignment_score < 0:
-        impact_dir = "bearish"
-    else:
-        impact_dir = "neutral"
-    cards.append(_make_card(
-        card_id=f"price_tf_alignment_4h_1d_1w_{today}",
-        category="price_structure", tier="primary",
-        name="多周期方向一致性", name_en="Multi-Timeframe Alignment",
-        current_value=alignment_score,
-        captured_at_bjt=ts,
-        plain_interpretation=interp,
-        strategy_impact="📍 综合 4H / 1D / 1W EMA-20 斜率投票,判定趋势是否多周期共振。",
-        impact_direction=impact_dir,
-        impact_weight=0.7,
-        linked_layer="L1", source="Binance klines",
-    ))
+    # Sprint Web Transparency Commit 3:删除 price_tf_alignment_4h_1d_1w 卡
+    # (Layer A inventory 有 tf_alignment 但 3 个 packet 都不含,即 prompt 不消费;
+    # Layer B context_builder 中 compute_tf_alignment 函数已定义但 build_full_context
+    # 不调用 — 双不消费,纯死卡)。compute_tf_alignment 仍被 spot_cycle_context_builder
+    # 调用作 inventory display(D6:Layer A 代码不动)。
     return cards
 
 
@@ -1488,72 +1428,10 @@ def _emit_derivatives_reference(
         linked_layer="L4", source="CoinGlass",
     ))
 
-    # 清算(liquidation)— 不能用 `a or b`,pd.Series bool 报 ambiguous
-    # Sprint 2.6-C:DerivativesDAO.get_all_metrics 把 liquidation_total/long/short
-    # 作为独立 key,优先用 liquidation_total(代表 24h 总清算)。
-    # 兼容旧名 'liquidation' / 'liquidation_24h' 仅作 fallback。
-    liq_series = None
-    if isinstance(derivatives, dict):
-        for k in ("liquidation_total", "liquidation", "liquidation_24h"):
-            v = derivatives.get(k)
-            if v is not None:
-                liq_series = v
-                break
-    # Sprint 1.5f-revised:衍生品 series 是 daily,liquidation 单 daily bar
-    # 本身就是当天 0-24h 累计 USD,直接 `_latest(liq_series)` 即可。
-    # 1.5e.1 的"24 行 sum"假设 hourly 是错的(经 SSH 真 DB 复检后发现 hourly 行
-    # 是调试遗留污染)。
-    val, ts = _latest(liq_series)
-    cards.append(_make_card(
-        card_id=f"derivatives_liquidation_24h_{today}",
-        category="derivatives", tier="reference",
-        # Sprint 1.5e:CoinGlass v4 liquidation 单交易所端点,源 = Binance
-        name="Binance 24h 清算总额", name_en="Liquidation 24h (Binance)",
-        current_value=round(val, 2) if val is not None else None,
-        value_unit="USD",
-        captured_at_bjt=ts,
-        plain_interpretation=(
-            f"📊 过去 24 小时币安累计清算 ${val:,.0f}\n"
-            f"🔍 极端单日清算(数十亿美元)常伴随急涨急跌的反向行情结束"
-            if val is not None
-            else "📊 数据不足\n🔍 极端清算事件是去杠杆信号"
-        ),
-        strategy_impact="📍 币安过去 24 小时被强制平仓的合约总额(美元,daily bar 即 24h 累计)。极端值往往是市场情绪反转的信号(瀑布式清算后常出现反弹)。",
-        impact_direction="neutral", impact_weight=0.4,
-        linked_layer="L4", source="CoinGlass (Binance)",
-    ))
-
-    # 多空比变化率(24h 变化)— 同上
-    # Sprint 1.5f-revised:daily series → days=1 = 今 daily / 昨 daily - 1
-    lsr_series = None
-    if isinstance(derivatives, dict):
-        for k in ("long_short_ratio", "long_short_ratio_top",
-                  "long_short_ratio_global"):
-            v = derivatives.get(k)
-            if v is not None:
-                lsr_series = v
-                break
-    lsr_24h_change = _pct_change(lsr_series, 1)
-    val, ts = _latest(lsr_series)
-    cards.append(_make_card(
-        card_id=f"derivatives_lsr_change_24h_{today}",
-        category="derivatives", tier="reference",
-        # Sprint 1.5e:LSR 单交易所端点,源 = Binance
-        name="Binance 多空比 24h 变化",
-        name_en="LSR 24h Change (Binance)",
-        current_value=round(lsr_24h_change, 2) if lsr_24h_change is not None else None,
-        value_unit="%",
-        captured_at_bjt=ts,
-        plain_interpretation=(
-            f"📊 币安大户多空比 24h 变化 {lsr_24h_change:+.1f}%\n"
-            f"🔍 短时间剧烈变化常意味着大户立场转变,值得留意"
-            if lsr_24h_change is not None
-            else "📊 数据不足\n🔍 短时间剧烈变化常反映大户情绪转向"
-        ),
-        strategy_impact="📍 币安大户多空比的 24 小时变化速度。跟踪大户情绪变化的快慢,配合绝对值看是趋势性还是噪声。",
-        impact_direction="neutral", impact_weight=0.3,
-        linked_layer="L4", source="CoinGlass (Binance)",
-    ))
+    # Sprint Web Transparency Commit 3:删除 derivatives_liquidation_24h +
+    # derivatives_lsr_change_24h(Layer A 排除衍生品;Layer B L4 prompt 不消费
+    # liquidation / LSR — 死卡)。coinglass.py liquidation / LSR collector +
+    # DB 列保留。
 
     # 全交易所加权资金费率(若有)
     series_agg = derivatives.get("funding_rate_aggregated") if isinstance(derivatives, dict) else None
@@ -1584,28 +1462,28 @@ def _emit_derivatives_reference(
 # ============================================================
 
 def _emit_price_tech_reference(klines_1d: Any, today: str) -> list[dict[str, Any]]:
+    """Sprint Web Transparency Commit 3:删除 MA-20 / MA-60 / MA-120 三张死卡。
+    SMA-20/60/120 无任何 prompt 消费(Layer A 只用 ma_200d/ma_200w,Layer B 用
+    EMA-N 不同 metric)。只保留 MA-200(= Layer A ma_200d)。
+    """
     cards: list[dict[str, Any]] = []
     if klines_1d is None or not isinstance(klines_1d, pd.DataFrame) or len(klines_1d) < 20:
-        # 4 张占位
-        for name_en, name_cn in [
-            ("MA-20", "MA 20"), ("MA-60", "MA 60"),
-            ("MA-120", "MA 120"), ("MA-200", "MA 200"),
-        ]:
-            cards.append(_make_card(
-                card_id=f"price_{name_en.lower().replace('-', '_')}_{today}",
-                category="price_structure", tier="reference",
-                name=name_cn, name_en=name_en,
-                linked_layer="L1", source="Binance klines",
-                plain_interpretation=("📊 数据不足(需至少 20 天 K 线)\n"
-                                      "🔍 价格在均线上方 = 支撑;在下方 = 阻力"),
-                strategy_impact=f"📍 {name_cn}(均线)。价格相对均线的位置反映该周期内的趋势倾向。",
-            ))
+        # 1 张 MA-200 占位(其他周期死卡删)
+        cards.append(_make_card(
+            card_id=f"price_ma_200_{today}",
+            category="price_structure", tier="reference",
+            name="MA 200", name_en="MA-200",
+            linked_layer="Layer A", source="Binance klines",
+            plain_interpretation=("📊 数据不足(需至少 200 天 K 线)\n"
+                                  "🔍 价格在 200 日均线上方 = Layer A 大周期支撑"),
+            strategy_impact="📍 MA 200(SMA-200d,等同 Layer A 的 ma_200d 因子)。价格相对 200 日均线的位置是 Layer A 大周期判断的核心信号之一。",
+        ))
         return cards
     closes = klines_1d["close"].astype(float)
     current = float(closes.iloc[-1])
     ts = _to_bjt(klines_1d.index[-1])
-    for period, name_cn in [(20, "MA 20"), (60, "MA 60"),
-                            (120, "MA 120"), (200, "MA 200")]:
+    # Sprint Web Transparency Commit 3:从 (20, 60, 120, 200) 缩减为 (200,)
+    for period, name_cn in [(200, "MA 200")]:
         if len(closes) >= period:
             ma = float(closes.tail(period).mean())
             diff_pct = (current / ma - 1.0) * 100.0
@@ -1633,10 +1511,10 @@ def _emit_price_tech_reference(klines_1d: Any, today: str) -> list[dict[str, Any
             current_value=round(ma, 2) if ma is not None else None,
             captured_at_bjt=ts,
             plain_interpretation=interp,
-            strategy_impact=(f"📍 {name_cn}(过去 {period} 个交易日的算术平均价)。"
-                             f"价格相对均线的位置反映该周期内的趋势倾向。"),
+            strategy_impact=(f"📍 {name_cn}(过去 {period} 个交易日的算术平均价 = SMA-{period}d,等同 Layer A 的 ma_200d 因子)。"
+                             f"价格相对该均线的位置是 Layer A 大周期判断核心信号。"),
             impact_direction=direction, impact_weight=0.4,
-            linked_layer="L1", source="Binance klines",
+            linked_layer="Layer A", source="Binance klines",
         ))
     return cards
 
@@ -1878,64 +1756,12 @@ def _emit_v13_new_factors(
         linked_layer="L2", source="Glassnode",
     ))
 
-    # ---- 2. LTH-MVRV (L2,本地计算) ----
-    val, ts = _latest(onchain.get("lth_mvrv"))
-    cards.append(_make_card(
-        card_id=f"onchain_lth_mvrv_{today}",
-        category="onchain", tier="primary",
-        name="LTH-MVRV", name_en="LTH MVRV",
-        current_value=round(val, 3) if val is not None else None,
-        captured_at_bjt=ts,
-        plain_interpretation=(
-            f"📊 当前 {val:.3f}(price / lth_realized_price 比率)\n"
-            f"🔍 长持有者(LTH)平均盈亏比 — > 3 顶部区域,< 1 底部区域。"
-            if val is not None
-            else "📊 数据不足(等 collector 跑完)\n🔍 价格 / LTH 实现价格"
-        ),
-        strategy_impact="📍 [Sprint 1.10 占位] LTH 浮盈状态,本地计算自 price/lth_realized_price。",
-        impact_direction="neutral", impact_weight=0.5,
-        linked_layer="L2", source="computed",
-    ))
+    # Sprint Web Transparency Commit 3:删除 3 张死卡 — LTH-MVRV / STH-MVRV /
+    # SSR(Layer A onchain_packet 不含;Layer B prompt 不消费)。
+    # glassnode.py:fetch_ssr 数据采集保留;lth_mvrv / sth_mvrv 是本地计算派生,
+    # 计算源(price / lth_realized_price / sth_realized_price)在 Layer A 仍消费。
 
-    # ---- 3. STH-MVRV (L2,本地计算) ----
-    val, ts = _latest(onchain.get("sth_mvrv"))
-    cards.append(_make_card(
-        card_id=f"onchain_sth_mvrv_{today}",
-        category="onchain", tier="primary",
-        name="STH-MVRV", name_en="STH MVRV",
-        current_value=round(val, 3) if val is not None else None,
-        captured_at_bjt=ts,
-        plain_interpretation=(
-            f"📊 当前 {val:.3f}(price / sth_realized_price 比率)\n"
-            f"🔍 短持有者(STH)平均盈亏比 — > 1 STH 整体浮盈,< 1 浮亏。"
-            if val is not None
-            else "📊 数据不足(等 collector 跑完)\n🔍 价格 / STH 实现价格"
-        ),
-        strategy_impact="📍 [Sprint 1.10 占位] STH 浮盈状态,本地计算。",
-        impact_direction="neutral", impact_weight=0.5,
-        linked_layer="L2", source="computed",
-    ))
-
-    # ---- 4. SSR (L5) ----
-    val, ts = _latest(onchain.get("ssr"))
-    cards.append(_make_card(
-        card_id=f"onchain_ssr_{today}",
-        category="onchain", tier="primary",
-        name="SSR", name_en="Stablecoin Supply Ratio",
-        current_value=round(val, 3) if val is not None else None,
-        captured_at_bjt=ts,
-        plain_interpretation=(
-            f"📊 当前 SSR {val:.3f}\n"
-            f"🔍 BTC 市值 / 稳定币供应 — 低值意味稳定币购买力相对 BTC 充裕(潜在买盘)。"
-            if val is not None
-            else "📊 数据不足\n🔍 稳定币供应比率"
-        ),
-        strategy_impact="📍 [Sprint 1.10 占位] 稳定币购买力,L5 宏观背景信号。",
-        impact_direction="neutral", impact_weight=0.5,
-        linked_layer="L5", source="Glassnode",
-    ))
-
-    # ---- 5. HODL Waves(>1y 区段聚合)(L2) ----
+    # ---- HODL Waves(>1y 区段聚合)(Layer A 消费 hodl_waves_1y_plus_aggregate)----
     # 求和 1y_2y + 2y_3y + 3y_5y + 5y_7y + 7y_10y + more_10y
     long_buckets = (
         "hodl_waves_1y_2y", "hodl_waves_2y_3y", "hodl_waves_3y_5y",

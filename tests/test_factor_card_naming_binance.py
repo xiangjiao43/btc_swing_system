@@ -63,27 +63,12 @@ def test_funding_rate_current_card_named_binance(cards):
     assert "(Binance)" in c.get("source") or "Binance" in (c.get("source") or "")
 
 
-def test_top_long_short_ratio_card_named_binance(cards):
-    c = _find(cards, "derivatives_top_long_short_ratio")
-    assert c is not None
-    assert "Binance" in c["name"]
-    assert "Binance" in (c.get("source") or "")
-
-
-def test_liquidation_24h_card_named_binance(cards):
-    c = _find(cards, "derivatives_liquidation_24h")
-    assert c is not None
-    assert "Binance" in c["name"]
-    assert "Binance" in (c.get("source") or "")
-    # plain_interpretation 也应注明
-    assert "币安" in (c.get("plain_interpretation") or "")
-
-
-def test_lsr_change_24h_card_named_binance(cards):
-    c = _find(cards, "derivatives_lsr_change_24h")
-    assert c is not None
-    assert "Binance" in c["name"]
-    assert "Binance" in (c.get("source") or "")
+# Sprint Web Transparency Commit 3 删除以下 3 个测试:
+#   test_top_long_short_ratio_card_named_binance
+#   test_liquidation_24h_card_named_binance
+#   test_lsr_change_24h_card_named_binance
+# 原因:对应 3 张卡是死卡(Layer A 排除衍生品,Layer B L4 prompt 不消费 LSR /
+# liquidation),已从 emitter 删除。coinglass.py 数据采集保留。
 
 
 # ============================================================

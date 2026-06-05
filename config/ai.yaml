@@ -12,7 +12,7 @@
 #   * 不要只改本 yaml 就切 SDK;若要换协议,必须同步改 src/ai/client.py 与测试。
 #
 # 重要说明 —— 模型选择:
-#   * 建模文档 v1.4 当前默认 **claude-sonnet-4-5-20250929**
+#   * 建模文档 v1.4 当前默认 **claude-sonnet-4-6**
 #   * 调用端需从响应里读实际模型名,写入 StrategyState.ai_model_actual
 #     (M37,见下面 model_tracking 段),以防中转站隐式降级。
 #
@@ -50,7 +50,7 @@ endpoint:
 adjudicator:
   # 默认调用的模型名。.env 的 OPENAI_MODEL 可覆盖。
   model_name_env: "OPENAI_MODEL"
-  model_name_default: "claude-sonnet-4-5-20250929"
+  model_name_default: "claude-sonnet-4-6"
 
   # 采样参数
   temperature: 0.1         # 策略生成优先确定性;0.0 有时会触发中转站的"非法值"校验
@@ -58,7 +58,7 @@ adjudicator:
   max_tokens: 4000         # StrategyState JSON + narrative 合计大致 2-3k,留裕量
 
   # 单次调用的超时与重试(网络层)
-  timeout_sec: 60          # 叙事生成较慢,放宽
+  timeout_sec: 180         # Sprint 2026-06-05: Sonnet 4.6 比 4.5 慢 1.5-2x,加长避免 fallback
   retry:
     max_attempts: 2        # 失败超过 2 次走 Fallback Level 1(base.yaml)
     backoff_sec: 3
@@ -91,13 +91,13 @@ fallback_models:
 layer5_macro_summary:
   # 允许和主裁决不同的模型;默认同主裁决
   model_name_env: "OPENAI_L5_MODEL"
-  model_name_default: "claude-sonnet-4-5-20250929"
+  model_name_default: "claude-sonnet-4-6"
 
   temperature: 0.3         # 叙事可以稍微活一点
   top_p: 1.0
   max_tokens: 800
 
-  timeout_sec: 30
+  timeout_sec: 180
   retry:
     max_attempts: 2
     backoff_sec: 2

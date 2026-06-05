@@ -38,7 +38,7 @@ class LayerACycleAdjudicator(BaseAgent):
             "layer_a_adjudicator_estimated_context_tokens": max(1, len(payload) // 4),
             "layer_a_packet_keys": list((adjudicator_context.get("data_packets") or {}).keys()),
             "layer_a_history_count": len(adjudicator_context.get("recent_stage_history") or []),
-            "timeout_sec": 120,
+            "timeout_sec": 240,
             "ai_call_count_target": 1,
         }
         record_instant_stage(

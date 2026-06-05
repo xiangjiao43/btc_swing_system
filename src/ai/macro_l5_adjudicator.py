@@ -32,7 +32,7 @@ from .client import (
 logger = logging.getLogger(__name__)
 
 
-_DEFAULT_TIMEOUT_SEC: float = 120.0
+_DEFAULT_TIMEOUT_SEC: float = 240.0
 _MAX_TOKENS: int = 1500
 _TEMPERATURE: float = 0.2
 _RETRY_TEMPERATURE: float = 0.0

@@ -27,10 +27,10 @@ except ImportError:  # pragma: no cover
 logger = logging.getLogger(__name__)
 
 
-DEFAULT_MODEL: str = "claude-sonnet-4-5-20250929"
+DEFAULT_MODEL: str = "claude-sonnet-4-6"
 # 手动 pipeline 需要能在中转站无响应时及时降级。120s 是单次 AI 请求上限,
 # BaseAgent 仍会按原有重试策略 fallback/degraded。
-DEFAULT_TIMEOUT_SEC: float = 120.0
+DEFAULT_TIMEOUT_SEC: float = 240.0
 _ROOT = Path(__file__).resolve().parents[2]
 _AI_CONFIG_PATH = _ROOT / "config" / "ai.yaml"
 

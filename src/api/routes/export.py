@@ -13,6 +13,10 @@ from typing import Any
 
 from src.ai.context_builder import ContextBuilder
 from src.ai.spot_cycle_context_builder import SpotCycleContextBuilder
+from src.strategy.local_indicators import (
+    compute_mayer_multiple,
+    compute_pi_cycle,
+)
 
 _BJT = timezone(timedelta(hours=8))
 
@@ -61,6 +65,119 @@ _SECTION_MAP = {
     ],
     "衍生品": ["market_context"],
     "宏观": ["macro"],
+}
+
+# 因子 → 用途标签(3 档:大周期 / 波段 / 通用)。
+#
+# 分类原则(用户 2026-06-08 定稿):
+#   [大周期] — 链上估值 / 链上持有者 / 链上周期类(MVRV/NUPL/RHODL/Puell/
+#              LTH/STH/SOPR/CDD/HODL Waves/SSR ...)
+#            + 大周期价格择时(MA200d/MA200w/ATH 回撤/Pi Cycle/Mayer)
+#            + 宏观货币"慢变量"(M2 / Fed Balance Sheet / Fed Funds /
+#              CPI / Core CPI)— 季度~月度尺度,趋势影响 BTC 流动性大环境
+#            + 收益率曲线 10Y-2Y(衰退信号,长周期)
+#
+#   [波段]   — 价格技术日内/4h(EMA20/50/200/ADX/ATR/swing/价位)
+#            + 衍生品(funding/OI/long_short/liquidation/btc_dominance)
+#            + 期权(若加入)
+#
+#   [通用]   — 宏观市场"快变量"(DXY / VIX / NASDAQ / 收益率 us10y/us2y/
+#              real_yield / BTC-纳指相关)— 周内 / 月内尺度,既给大周期定背景
+#              也给波段提供风险情绪输入
+#            + 价格基准(current_close / tf_alignment)
+#            + 资金流(交易所余额变化 30d 累计 / ETF 流量)— Layer A 估"长钱
+#              动向"、Layer B 估"周内压力"
+#
+# 兜底:无显式映射 → [通用]
+_LAYER_TAG_BIG = "[大周期]"
+_LAYER_TAG_SWING = "[波段]"
+_LAYER_TAG_BOTH = "[通用]"
+_LAYER_TAG_MAP: dict[str, str] = {
+    # ---- 价格技术 ----
+    "current_close": _LAYER_TAG_BOTH,
+    "ath_drawdown_pct": _LAYER_TAG_BIG,
+    "ma_200d": _LAYER_TAG_BIG,
+    "ma_200w": _LAYER_TAG_BIG,
+    "ma_200w_deviation_pct": _LAYER_TAG_BIG,
+    "monthly_ohlc_structure": _LAYER_TAG_BIG,
+    "major_support_resistance_zones": _LAYER_TAG_BIG,
+    "tf_alignment": _LAYER_TAG_BOTH,
+    "ema_20_4h_current": _LAYER_TAG_SWING,
+    "ema_50_4h_current": _LAYER_TAG_SWING,
+    "ema_20_1d_current": _LAYER_TAG_SWING,
+    "ema_50_1d_current": _LAYER_TAG_SWING,
+    "ema_200_1d_current": _LAYER_TAG_SWING,
+    "ema_50_slope_30d": _LAYER_TAG_SWING,
+    "adx_14_1d_current": _LAYER_TAG_SWING,
+    "adx_14_1d_5d_avg": _LAYER_TAG_SWING,
+    "atr_14_1d_current": _LAYER_TAG_SWING,
+    "atr_180d_percentile": _LAYER_TAG_SWING,
+    "price_position_in_90d_range": _LAYER_TAG_SWING,
+    "max_drawdown_60d_pct": _LAYER_TAG_SWING,
+    "swing_high_3_recent": _LAYER_TAG_SWING,
+    "swing_low_3_recent": _LAYER_TAG_SWING,
+    # ---- 大周期估值/择时(新增本地算)----
+    "pi_cycle_ratio": _LAYER_TAG_BIG,
+    "mayer_multiple": _LAYER_TAG_BIG,
+    # ---- 链上 / 估值 ----
+    "mvrv_z_score": _LAYER_TAG_BIG,
+    "mvrv": _LAYER_TAG_BIG,
+    "nupl": _LAYER_TAG_BIG,
+    "realized_price": _LAYER_TAG_BIG,
+    "lth_realized_price": _LAYER_TAG_BIG,
+    "sth_realized_price": _LAYER_TAG_BOTH,
+    "lth_mvrv": _LAYER_TAG_BIG,
+    "sth_mvrv": _LAYER_TAG_BIG,
+    "percent_supply_in_profit": _LAYER_TAG_BIG,
+    "rhodl_ratio": _LAYER_TAG_BIG,
+    "reserve_risk": _LAYER_TAG_BIG,
+    "puell_multiple": _LAYER_TAG_BIG,
+    "hash_rate": _LAYER_TAG_BIG,
+    # ---- 链上 / 持币者 ----
+    "lth_supply": _LAYER_TAG_BIG,
+    "sth_supply": _LAYER_TAG_BIG,
+    "lth_supply_90d_pct_change": _LAYER_TAG_BIG,
+    "sth_supply_90d_pct_change": _LAYER_TAG_BIG,
+    "sopr_adjusted": _LAYER_TAG_BIG,
+    "hodl_waves_1y_plus_aggregate": _LAYER_TAG_BIG,
+    "cdd": _LAYER_TAG_BIG,
+    "ssr": _LAYER_TAG_BIG,
+    "lth_sopr": _LAYER_TAG_BIG,
+    "sth_sopr": _LAYER_TAG_BIG,
+    "lth_net_position_change": _LAYER_TAG_BIG,
+    "percent_supply_in_loss": _LAYER_TAG_BIG,
+    # ---- 链上 / 交易所流 ----
+    "exchange_balance": _LAYER_TAG_BIG,
+    "exchange_net_position_change": _LAYER_TAG_BIG,
+    "exchange_net_flow": _LAYER_TAG_BIG,
+    "exchange_net_flow_30d_sum": _LAYER_TAG_BOTH,
+    "etf_flow": _LAYER_TAG_BOTH,
+    "etf_flow_7d_sum_usd": _LAYER_TAG_BOTH,
+    "etf_flow_30d_sum_usd": _LAYER_TAG_BOTH,
+    # ---- 衍生品 / 市场情绪 ----
+    "btc_dominance": _LAYER_TAG_SWING,
+    "funding_rate": _LAYER_TAG_SWING,
+    "funding_rate_z_score_90d": _LAYER_TAG_SWING,
+    "open_interest": _LAYER_TAG_SWING,
+    "open_interest_z_score_90d": _LAYER_TAG_SWING,
+    "long_short_ratio": _LAYER_TAG_SWING,
+    "liquidation_total": _LAYER_TAG_SWING,
+    # ---- 宏观 ----
+    # 宏观市场快变量(周内 / 月内尺度) → 通用
+    "dxy": _LAYER_TAG_BOTH,
+    "us10y": _LAYER_TAG_BOTH,
+    "us2y": _LAYER_TAG_BOTH,
+    "real_yield": _LAYER_TAG_BOTH,
+    "vix": _LAYER_TAG_BOTH,
+    "nasdaq": _LAYER_TAG_BOTH,
+    "btc_nasdaq_corr_60d": _LAYER_TAG_BOTH,
+    # 宏观货币慢变量(月度 / 季度尺度) → 大周期
+    "fed_funds_rate": _LAYER_TAG_BIG,
+    "cpi": _LAYER_TAG_BIG,
+    "core_cpi": _LAYER_TAG_BIG,
+    "m2": _LAYER_TAG_BIG,
+    "fed_balance_sheet": _LAYER_TAG_BIG,
+    "yield_curve_2_10_spread_bps": _LAYER_TAG_BIG,  # 用户指定
 }
 
 # 因子中文名 + 单位 + 排序权重(越小越靠前)
@@ -130,6 +247,13 @@ _FACTOR_META: dict[str, tuple[str, str, int]] = {
     "vix": ("VIX 恐慌指数", "", 109),
     "nasdaq": ("纳斯达克指数", "", 110),
     "btc_nasdaq_corr_60d": ("BTC-纳指 60d 相关性", "ρ", 111),
+    "yield_curve_2_10_spread_bps": ("收益率曲线(10Y-2Y)", "bps", 102),
+}
+
+# 大周期估值/择时新增段(本地算)。单位用 "ratio2" 触发 2 位小数显示。
+_CYCLE_VALUATION_META: dict[str, tuple[str, str, int]] = {
+    "pi_cycle_ratio": ("Pi Cycle Ratio (SMA111/SMA350×2)", "ratio2", 1),
+    "mayer_multiple": ("Mayer Multiple (close/SMA200)", "ratio2", 2),
 }
 
 # ContextBuilder.computed_indicators 中专属波段技术因子
@@ -213,6 +337,8 @@ def _fmt_scalar(v: Any, unit: str, factor_key: str = "") -> str:
             return f"{v:+.2f}%" if factor_key in _PCT_SIGNED_KEYS else f"{v:.2f}%"
         if unit == "ratio":
             return f"{v:.4f}"
+        if unit == "ratio2":
+            return f"{v:.2f}"
         if unit == "BTC":
             if abs(v) >= 1e3:
                 return f"{v:,.0f} BTC"
@@ -230,6 +356,8 @@ def _fmt_scalar(v: Any, unit: str, factor_key: str = "") -> str:
             return f"{v:+.3f}"
         if unit == "pct":
             return f"{v * 100:.1f}%" if abs(v) <= 1 else f"{v:.1f}%"
+        if unit == "bps":
+            return f"{v:+.0f} bps"
         # 默认数值
         if abs(v) >= 100:
             return f"{v:,.2f}"
@@ -301,6 +429,71 @@ def render_factors_markdown(conn: sqlite3.Connection) -> str:
             )
         )
 
+    # 收益率曲线 10Y-2Y(已在 compute_macro_features 算好,从 L5 ctx 取)
+    l5_macro = (layer_b_ctx.get("l5") or {}).get("computed_macro_indicators") or {}
+    yc_bps = l5_macro.get("yield_curve_2_10_spread_bps")
+    if yc_bps is not None:
+        # 继承 us10y 的 as_of 作为新鲜度判定基准
+        us10y_leaf = (
+            spot_ctx.get("available_factors", {})
+            .get("macro", {})
+            .get("us10y", {})
+        )
+        leaves.append(
+            (
+                "macro",
+                "yield_curve_2_10_spread_bps",
+                {
+                    "actual_value": yc_bps,
+                    "status": "available",
+                    "source": "fred_macro_derived",
+                    "as_of": us10y_leaf.get("as_of") or us10y_leaf.get("fetched_at_utc"),
+                    "freshness": {"is_stale": False},
+                    "_derived_from": "us10y - us2y",
+                },
+            )
+        )
+
+    # 大周期估值/择时(本地算):Pi Cycle + Mayer Multiple
+    pi = compute_pi_cycle(conn)
+    if pi.get("status") == "available":
+        leaves.append(
+            (
+                "__cycle_valuation__",
+                "pi_cycle_ratio",
+                {
+                    "actual_value": pi["ratio"],
+                    "status": "available",
+                    "source": "derived_from_klines",
+                    "as_of": pi["as_of"],
+                    "freshness": {"is_stale": False},
+                    "_detail": (
+                        f"SMA-111={pi['sma_111']:.0f} / "
+                        f"SMA-350×2={pi['sma_350x2']:.0f}"
+                    ),
+                },
+            )
+        )
+    mm = compute_mayer_multiple(conn)
+    if mm.get("status") == "available":
+        leaves.append(
+            (
+                "__cycle_valuation__",
+                "mayer_multiple",
+                {
+                    "actual_value": mm["mayer"],
+                    "status": "available",
+                    "source": "derived_from_klines",
+                    "as_of": mm["as_of"],
+                    "freshness": {"is_stale": False},
+                    "_detail": (
+                        f"close={mm['current_close']:.0f} / "
+                        f"SMA-200={mm['sma_200']:.0f};参照 >2.4 偏高 / <1 偏低"
+                    ),
+                },
+            )
+        )
+
     # 去重(同 key 取第一次出现)+ 已知重复别名黑名单
     _DUP_ALIASES = {"sopr"}  # sopr 与 sopr_adjusted 走同一 DB series,渲染时只保留 sopr_adjusted
     seen: set[str] = set()
@@ -326,6 +519,7 @@ def render_factors_markdown(conn: sqlite3.Connection) -> str:
 
     section_buckets: dict[str, list[tuple[str, dict]]] = {
         "价格技术": [],
+        "大周期估值/择时": [],
         "链上": [],
         "衍生品": [],
         "宏观": [],
@@ -335,6 +529,7 @@ def render_factors_markdown(conn: sqlite3.Connection) -> str:
         for g in groups:
             group_to_section[g] = sec
     group_to_section["__swing_tech__"] = "价格技术"
+    group_to_section["__cycle_valuation__"] = "大周期估值/择时"
 
     for grp, k, leaf in deduped:
         sec = group_to_section.get(grp)
@@ -348,6 +543,7 @@ def render_factors_markdown(conn: sqlite3.Connection) -> str:
     all_meta: dict[str, tuple[str, str, int]] = {
         **_FACTOR_META,
         **_SWING_TECH_META,
+        **_CYCLE_VALUATION_META,
     }
     for sec in section_buckets:
         section_buckets[sec].sort(
@@ -411,7 +607,7 @@ def render_factors_markdown(conn: sqlite3.Connection) -> str:
     )
     lines.append("")
 
-    for sec_name in ["价格技术", "链上", "衍生品", "宏观"]:
+    for sec_name in ["价格技术", "大周期估值/择时", "链上", "衍生品", "宏观"]:
         lines.append(f"## {sec_name}")
         lines.append("")
         items = section_buckets[sec_name]
@@ -425,8 +621,11 @@ def render_factors_markdown(conn: sqlite3.Connection) -> str:
             ts = leaf.get("as_of") or leaf.get("fetched_at_utc")
             ts_str = _short_date(ts)
             tag = _fresh_tag(k, leaf)
+            layer_tag = _LAYER_TAG_MAP.get(k, _LAYER_TAG_BOTH)
+            detail = leaf.get("_detail")
+            detail_str = f"  （派生:{detail}）" if detail else ""
             lines.append(
-                f"- {zh_name}: {val_str} ｜ 数据时间: {ts_str} ｜ {tag}"
+                f"- {zh_name}: {val_str} ｜ 数据时间: {ts_str} ｜ {tag} ｜ {layer_tag}{detail_str}"
             )
         lines.append("")
 

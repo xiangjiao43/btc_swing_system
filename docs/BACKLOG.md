@@ -131,3 +131,53 @@
 **优先级**:中(不影响生产,只是回归 baseline 持续显示 4 fail)
 
 ---
+
+### BACKLOG-MIDDLEWARE-OUTAGE:中转站(alphanode)偶发挂掉无法在本系统内解决
+
+**触发日期**:2026-06-08
+**触发场景**:Glassnode / CoinGlass 数据全部经 `api.alphanode.work` 中转,
+本系统无主源直连能力。alphanode 上游(Glassnode / CoinGlass 本家)或中转站
+本身故障,本系统的 collector 重试 / 错峰 / per-fetcher skip 都救不回:
+
+- **2026-05-19 ~ 2026-06-06** :12 天连续 `auth_error`(中转站 401 鉴权失效),
+  期间所有 Glassnode 指标停更
+- **2026-06-07 ~ 2026-06-08** :`rate_limited`,中转站对部分 endpoint
+  (puell_multiple / lth_net_position_change / btc_price_close 等)持续返 429,
+  本地 3 次重试 + 主补救双档 cron 都打不穿,这些指标 stuck 至 4+ 天前
+
+**约束**:
+- 不能换中转站(用户已尝试 alphanode 是当前性价比最高的)
+- 不能直连 Glassnode / CoinGlass 主源(美国 IP 封锁 + 商业 plan 太贵)
+- 不能扩 retry 太狠(中转站对超量重试会临时封 IP)
+
+**当前缓解**:
+- `_fetcher_completed_today()` per-fetcher skip → 单 fetcher 失败不阻塞其他
+- 主档 09:30 BJT + 补救档 10:30 错峰
+- `/api/export/snapshot.md` 用"数据时间 + ⚠️STALE 阈值"暴露缺失,**靠人工识别**
+
+**修复方向(都是缓解,不是根治)**:
+- (a) 增加第三档 cron(BJT 14:00 / 18:00)单独跑 `_fetcher_completed_today=False`
+- (b) `retry.max_attempts` 3 → 5,backoff 8s→16s→32s→64s
+- (c) 加 Deribit / Coinbase 等独立源做 sanity check(只作 cross-ref,不主用)
+- (d) snapshot markdown 在 STALE 行附额外提示"中转站上游问题,非可修复"
+
+**优先级**:低(本质是外部依赖)。把缺失暴露给人是当前唯一健壮兜底,
+不要试图在系统内"修"
+
+---
+
+### BACKLOG-DB-CLEANUP-SOPR-LEGACY:onchain_metrics 中 `sopr` 老 metric 残留
+
+**触发日期**:2026-06-08
+**触发场景**:`glassnode.py` 历史曾有 `fetch_sopr` 老 fetcher,后被替换为
+`fetch_sopr_adjusted` 但 DB 里 `metric_name='sopr'` 行仍存(cap 卡在
+2026-04-29)。系统现在只跑 `sopr_adjusted`,功能上完全替代。
+
+**修复方向**:
+- `DELETE FROM onchain_metrics WHERE metric_name='sopr'`(746 行历史数据)
+- 已在 `src/api/routes/export.py:_DUP_ALIASES` 把 `sopr` 别名 dedup 掉,
+  不影响 snapshot 显示
+
+**优先级**:极低(纯清污)
+
+---

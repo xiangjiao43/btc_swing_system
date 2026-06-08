@@ -83,3 +83,51 @@
 但 backfill / 手动 / 测试容易踩)
 
 ---
+
+## 文档 / 纪律
+
+### BACKLOG-CLAUDE-MD-SYNC:删 AI 判断层时同步改 CLAUDE.md
+
+**触发日期**:2026-06-08
+**触发场景**:项目方向调整为"保留数据采集 + 退出本系统内 AI 判断 + 简化网页",
+新增 `/api/export/snapshot.md` 端点供外部 AI 读数据自己判。但 CLAUDE.md 里
+以下段落仍按"AI 判断在系统内"假设写:
+
+- **§双轨输出原则**(L19-36):"AI 只参与综合裁决,不参与因子解释" — 一旦
+  Master / L5 删除,这条原则失效
+- **§合规 AI 出口清单**(L28-32):#1 Master、#2 L5 — 删除后清单为空
+- **§系统硬纪律 #10 AI 裁决 System Prompt**(L73-75):指向已删除的 prompt 段
+- **§工程纪律 §X 旧代码必须删除**(L199-232):举例仍引用 `master_adjudicator`、
+  `l5_macro_analyst` — 这俩本身就是要删的对象
+
+**修复方向**(等"AI 判断层删除"sprint):
+- 删除上述 4 段或改写为"用户外部 AI 工作流"语义
+- 在 §合规 AI 出口清单 加 #3 `/api/export/snapshot.md`(供外部 AI 的唯一出口)
+- 把"双轨输出"重写为"数据采集 + 数据导出"
+
+**触发时机**:启动"删 AI 判断层 + 简化网页"sprint 时,CLAUDE.md 改动必须
+作为该 sprint 的一部分一起 commit,不能事后补
+
+---
+
+### BACKLOG-TESTS-54f89a5-DRIFT:Sprint sonnet-4-6 切换遗留 4 个 test 失败
+
+**触发日期**:2026-06-08
+**触发场景**:commit 54f89a5(sonnet-4-6 + timeout 120→180)未更新对应测试,
+全量 pytest 暴露 4 个 pre-existing 失败:
+
+| 测试 | 失败点 | 根因 |
+|---|---|---|
+| `test_ai_client_default_timeout_is_120_seconds` | `assert DEFAULT_TIMEOUT_SEC == 120.0` | 已改 180 |
+| `test_restricted_model_error_uses_configured_fallback` | hardcoded `claude-sonnet-4-5-20250929` | 已切 4-6 |
+| `test_overloaded_error_uses_fallback_after_short_retry` | 同上 | 同上 |
+| `test_jobs_fetch_attempts_integration::test_collect_klines_1h_kline_succeeds_derivatives_fail` | 期望 `api_error`,实际 `provider_error` | failure_reason 分类语义漂移 |
+
+**修复方向**:
+- 前 3 个:改 assertion 跟随 54f89a5(`120.0 → 180.0`、`4-5-20250929 → 4-6`)
+- 第 4 个:对齐 collector 实际 failure_reason 分类(`api_error` → `provider_error`)
+- 一次 commit 修完,或纳入 BACKLOG-AI-CONFIG-UNIFY-01 sprint 一起做
+
+**优先级**:中(不影响生产,只是回归 baseline 持续显示 4 fail)
+
+---

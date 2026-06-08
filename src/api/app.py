@@ -29,6 +29,7 @@ from .routes import alerts as alerts_routes
 from .routes import data as data_routes
 from .routes import data_sources as data_sources_routes
 from .routes import evidence as evidence_routes
+from .routes import export as export_routes
 from .routes import fallback as fallback_routes
 from .routes import health as health_routes
 from .routes import lifecycle as lifecycle_routes
@@ -152,6 +153,8 @@ def create_app(
     app.include_router(orders_routes.router, prefix="/api")
     app.include_router(review_weekly_routes.router, prefix="/api")
     app.include_router(review_pending_routes.router, prefix="/api")
+    # 数据导出端点(供外部 AI 分析使用,markdown 文本)
+    app.include_router(export_routes.router, prefix="/api")
 
     # Sprint 2.6-D.1:events_calendar 在 FastAPI startup 时 seed
     # (systemd 跑的是 uvicorn → src.api.app:app,不会走 scheduler/main.run_forever)

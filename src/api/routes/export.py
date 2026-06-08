@@ -179,6 +179,11 @@ _LAYER_TAG_MAP: dict[str, str] = {
     "fed_balance_sheet": _LAYER_TAG_BIG,
     "yield_curve_2_10_spread_bps": _LAYER_TAG_BIG,
     "fear_greed_index": _LAYER_TAG_BOTH,  # 极端区有大周期参考,日常波动有波段参考
+    # 批 3
+    "cvdd": _LAYER_TAG_BIG,
+    "atm_iv_1m": _LAYER_TAG_SWING,
+    "25delta_skew_1m": _LAYER_TAG_SWING,
+    "max_pain_1m": _LAYER_TAG_SWING,
 }
 
 # 因子中文名 + 单位 + 排序权重(越小越靠前)
@@ -250,6 +255,14 @@ _FACTOR_META: dict[str, tuple[str, str, int]] = {
     "btc_nasdaq_corr_60d": ("BTC-纳指 60d 相关性", "ρ", 111),
     "yield_curve_2_10_spread_bps": ("收益率曲线(10Y-2Y)", "bps", 102),
     "fear_greed_index": ("Fear & Greed Index (CoinGlass)", "fg", 95),
+    # 批 3(2026-06-08):4 个 Glassnode 精选指标
+    "cvdd": ("CVDD (累积销毁币天美元化)", "USD", 19),  # 大周期估值/择时段
+    "atm_iv_1m": ("ATM IV 1月 (Deribit, 年化)", "iv", 90),  # 衍生品段
+    "25delta_skew_1m": (
+        "25 Δ Skew 1月 (put IV - call IV;>0=put 贵=偏恐慌,<0=call 贵=偏 FOMO)",
+        "skew", 91,
+    ),
+    "max_pain_1m": ("Max Pain 1月 (期权到期磁吸价位)", "USD", 92),
 }
 
 # 大周期估值/择时新增段(本地算)。单位用 "ratio2" 触发 2 位小数显示。
@@ -360,6 +373,19 @@ def _fmt_scalar(v: Any, unit: str, factor_key: str = "") -> str:
             return f"{v * 100:.1f}%" if abs(v) <= 1 else f"{v:.1f}%"
         if unit == "bps":
             return f"{v:+.0f} bps"
+        if unit == "iv":
+            # 隐含波动率(Glassnode 返回小数,如 0.35 = 35%)
+            pct = v * 100.0 if abs(v) <= 5 else v
+            return f"{pct:.1f}%"
+        if unit == "skew":
+            # 25 Δ Skew 已归一,显示带符号 + 语义辅助
+            if v > 0.10:
+                hint = "偏恐慌"
+            elif v < -0.05:
+                hint = "偏 FOMO"
+            else:
+                hint = "中性"
+            return f"{v:+.3f} ({hint})"
         if unit == "fg":
             # Fear & Greed:0-24 极端恐惧 / 25-49 恐惧 / 50 中性 / 51-74 贪婪 / 75-100 极端贪婪
             v_int = int(round(v))
@@ -444,6 +470,35 @@ def render_factors_markdown(conn: sqlite3.Connection) -> str:
                 },
             )
         )
+
+    # 批 3(2026-06-08):4 个 Glassnode 精选指标(全在 onchain_metrics)。
+    # 分别归到 "大周期估值/择时"(cvdd) 和 "衍生品"(IV/Skew/MaxPain)章节。
+    _BATCH3_GROUP_MAP = {
+        "cvdd": "__cycle_valuation__",
+        "atm_iv_1m": "market_context",
+        "25delta_skew_1m": "market_context",
+        "max_pain_1m": "market_context",
+    }
+    for m_name, group_key in _BATCH3_GROUP_MAP.items():
+        row = conn.execute(
+            "SELECT value, captured_at_utc FROM onchain_metrics "
+            "WHERE metric_name=? ORDER BY captured_at_utc DESC LIMIT 1",
+            (m_name,),
+        ).fetchone()
+        if row and row["value"] is not None:
+            leaves.append(
+                (
+                    group_key,
+                    m_name,
+                    {
+                        "actual_value": float(row["value"]),
+                        "status": "available",
+                        "source": "glassnode",
+                        "as_of": row["captured_at_utc"],
+                        "freshness": {"is_stale": False},
+                    },
+                )
+            )
 
     # Fear & Greed Index(批 2 新增,CoinGlass 来源,存 macro_metrics)
     fg_row = conn.execute(

@@ -100,6 +100,12 @@ class GlassnodeCollector:
     _PATH_LTH_NET_CHANGE         = f"{_BASE_PATH}/supply/lth_net_change"
     _PATH_HASH_RATE              = f"{_BASE_PATH}/mining/hash_rate_mean"
 
+    # 批 3(2026-06-08):4 个精选指标,单独 cron BJT 12:00 抓,避开 09:30/10:30 主档限流
+    _PATH_CVDD                   = f"{_BASE_PATH}/indicators/cvdd"
+    _PATH_ATM_IV_1M              = f"{_BASE_PATH}/derivatives/options_atm_implied_volatility_1_month"
+    _PATH_25DELTA_SKEW_1M        = f"{_BASE_PATH}/derivatives/options_25delta_skew_1_month"
+    _PATH_OPTIONS_MAX_PAIN       = f"{_BASE_PATH}/options/max_pain"
+
     # 155 天切分(行业惯例 LTH/STH 阈值)。
     # 3m_6m 桶包含 90-180 天,桶中点 135 天 < 155 天 → 归 STH(简化处理)
     _STH_BUCKETS: tuple[str, ...] = ("24h", "1d_1w", "1w_1m", "1m_3m", "3m_6m")
@@ -732,6 +738,96 @@ class GlassnodeCollector:
             interval=interval, since_days=since_days,
             source="glassnode_layer_a",
         )
+
+    # ==================================================================
+    # 批 3(2026-06-08):4 个精选指标,放单独 cron BJT 12:00
+    # 避开 09:30/10:30 主档限流。配额预估:4 calls/天 ≈ 124 calls/月。
+    # ==================================================================
+
+    def fetch_cvdd(
+        self, interval: str = "24h", since_days: int = 180,
+    ) -> list[dict[str, Any]]:
+        """CVDD(Cumulative Value Days Destroyed,累积销毁币天美元化)。
+
+        语义:历史上 BTC 价格极少跌破 CVDD,常作为大周期"绝对底"参考线。
+              当前价 / CVDD 比值越接近 1 → 越接近周期底部。
+        """
+        return self._fetch_series(
+            self._PATH_CVDD, "cvdd",
+            interval=interval, since_days=since_days,
+            source="glassnode_layer_a",
+        )
+
+    def fetch_atm_iv_1m(
+        self, interval: str = "24h", since_days: int = 180,
+    ) -> list[dict[str, Any]]:
+        """ATM Implied Volatility(1 个月期权,按 Deribit 数据)。
+
+        语义:1 个月期权的隐含波动率(年化%),反映市场对未来 1 月波动的定价。
+              ↑ = 市场预期波动大/恐慌升温;↓ = 预期平稳。
+        """
+        return self._fetch_series(
+            self._PATH_ATM_IV_1M, "atm_iv_1m",
+            interval=interval, since_days=since_days,
+            source="glassnode_layer_a",
+        )
+
+    def fetch_25delta_skew_1m(
+        self, interval: str = "24h", since_days: int = 180,
+    ) -> list[dict[str, Any]]:
+        """25 Delta Skew(1 个月期权)。
+
+        语义:1m 25-delta Put IV - 1m 25-delta Call IV(再按 ATM IV 归一,
+              Glassnode 已计算)。值越**正**=put 比 call 贵 = 市场愿为下跌
+              付溢价(恐慌/对冲偏向)。值越**负**=call 比 put 贵 = 市场愿
+              为上涨付溢价(乐观/追多偏向)。
+              历史经验:> +0.10 = 偏恐慌;< -0.05 = 偏 FOMO;~0 = 中性。
+        """
+        return self._fetch_series(
+            self._PATH_25DELTA_SKEW_1M, "25delta_skew_1m",
+            interval=interval, since_days=since_days,
+            source="glassnode_layer_a",
+        )
+
+    def fetch_max_pain_1m(
+        self, interval: str = "24h", since_days: int = 180,
+    ) -> list[dict[str, Any]]:
+        """Max Pain 价位(1 个月期权,从 multi-tenor 响应中取 1month 期限)。
+
+        语义:期权到期日,使最多期权(call+put 综合)归零的标的价位。
+              市场假说:价格有向 Max Pain 磁吸的倾向(临近到期日尤甚)。
+              单位 USD。
+
+        响应特殊:`o = {"1month":78000,"1w":75000,"3month":...,"aggregated":...}`
+        本方法只取 "1month" 子键,转 list[{timestamp, metric_name, metric_value}]。
+        """
+        params: dict[str, Any] = {"a": "BTC", "i": interval}
+        if since_days and since_days > 0:
+            params["s"] = since_days_ago_unix(since_days, unit="s")
+        body = self._request("GET", self._PATH_OPTIONS_MAX_PAIN, params=params)
+        rows = self._unwrap_data(body)
+        self._log_response_shape("max_pain_1m", rows)
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            t_raw = row.get("t")
+            o = row.get("o") or {}
+            v = o.get("1month") if isinstance(o, dict) else None
+            if t_raw is None or v is None:
+                continue
+            try:
+                ts = to_iso_utc(t_raw, unit="s")
+                value = float(v)
+            except (TypeError, ValueError):
+                continue
+            result.append({
+                "timestamp": ts,
+                "metric_name": "max_pain_1m",
+                "metric_value": value,
+                "source": "glassnode_layer_a",
+            })
+        return result
 
     # ==================================================================
     # 高层组合抓取

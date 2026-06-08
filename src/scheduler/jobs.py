@@ -957,7 +957,7 @@ def job_collect_onchain(
         fetched_count = 0
         skipped_count = 0
 
-        for fn_name in _GLASSNODE_FETCHERS:
+        for fn_idx, fn_name in enumerate(_GLASSNODE_FETCHERS):
             # Sprint 1.6.2 per-fetcher skip:此 fetcher 今天已写过 → 跳过,
             # 不浪费 HTTP 配额。puell 这类前档失败的 fetcher 仍会被抓。
             if _fetcher_completed_today(conn, fn_name):
@@ -967,6 +967,10 @@ def job_collect_onchain(
                     fn_name,
                 )
                 continue
+            # 批 3(2026-06-08):fetcher 之间 5s 间隔,拉开 alphanode 上游
+            # 突发频次,降低 puell 等热点 endpoint 的 429 概率。
+            if fn_idx > 0:
+                time.sleep(5)
             try:
                 fn = getattr(gn, fn_name, None)
                 if fn is None:
@@ -1045,6 +1049,96 @@ def job_collect_onchain(
         }
     return _wrap_job("collect_onchain", _body, conn_factory=conn_factory,
                      refresh_cards_on_success=True)
+
+
+# 批 3(2026-06-08):4 个精选 Glassnode 端点,单独 cron BJT 12:00,避开
+# 09:30/10:30 主档限流。配额预估:4 calls/天 ≈ 124 calls/月。
+_GLASSNODE_EXTRAS_FETCHERS: tuple[str, ...] = (
+    "fetch_cvdd",
+    "fetch_atm_iv_1m",
+    "fetch_25delta_skew_1m",
+    "fetch_max_pain_1m",
+)
+
+
+def job_collect_glassnode_extras(
+    *,
+    conn_factory: Optional[Callable[[], Any]] = None,
+) -> dict[str, Any]:
+    """批 3:4 个精选 Glassnode 指标(CVDD / ATM IV / Skew / Max Pain)。
+
+    - 单独 cron BJT 12:00,避开 09:30/10:30 onchain 主档 + 11:35 master 时段
+    - fetcher 间 5s 间隔
+    - 全部入 onchain_metrics(都是 Glassnode 来源,metric_name 区分语义)
+    - per-fetcher skip:今日已写则跳过(idempotent)
+    """
+    def _body(conn: Any) -> dict[str, Any]:
+        from ..data.collectors.glassnode import GlassnodeCollector
+        from ..data.storage.dao import OnchainDAO, OnchainMetric
+        gn = GlassnodeCollector()
+        total = 0
+        by_fn: dict[str, int] = {}
+        errors: dict[str, str] = {}
+        first_exc: Optional[BaseException] = None
+        start_ts = time.time()
+        fetched_count = 0
+        skipped_count = 0
+
+        for fn_idx, fn_name in enumerate(_GLASSNODE_EXTRAS_FETCHERS):
+            if _fetcher_completed_today(conn, fn_name):
+                skipped_count += 1
+                logger.info("collect_glassnode_extras.%s 今天已写 → skip", fn_name)
+                continue
+            if fn_idx > 0:
+                time.sleep(5)
+            try:
+                fn = getattr(gn, fn_name, None)
+                if fn is None:
+                    continue
+                rows = fn(since_days=180)
+                fetched_count += 1
+                if not rows:
+                    by_fn[fn_name] = 0
+                    continue
+                metrics = [
+                    OnchainMetric(
+                        timestamp=r["timestamp"],
+                        metric_name=r.get("metric_name"),
+                        metric_value=r.get("metric_value"),
+                        source=r.get("source", "glassnode_primary"),
+                    )
+                    for r in rows
+                ]
+                n = OnchainDAO.upsert_batch(conn, metrics)
+                total += n
+                by_fn[fn_name] = n
+            except Exception as e:
+                fetched_count += 1
+                if first_exc is None:
+                    first_exc = e
+                logger.warning(
+                    "collect_glassnode_extras.%s failed: %s", fn_name, e,
+                )
+                errors[fn_name] = str(e)[:200]
+
+        if fetched_count > 0:
+            _record_fetch_attempt(
+                conn, source="glassnode_extras", start_ts=start_ts,
+                rows_upserted=total, first_exc=first_exc,
+            )
+        conn.commit()
+        return {
+            "by_fetcher": by_fn,
+            "total_upserted": total,
+            "errors": errors,
+            "fetcher_fetched_count": fetched_count,
+            "fetcher_skipped_count": skipped_count,
+        }
+
+    return _wrap_job(
+        "collect_glassnode_extras", _body, conn_factory=conn_factory,
+        refresh_cards_on_success=True,
+    )
 
 
 def job_event_listener(
@@ -1758,6 +1852,8 @@ _JOB_FUNCTIONS: dict[str, Callable[..., Any]] = {
     "collect_klines_weekly": job_collect_klines_weekly,
     "collect_macro": job_collect_macro,
     "collect_onchain": job_collect_onchain,
+    # 批 3(2026-06-08):4 精选指标(CVDD/ATM IV/Skew/Max Pain)单独 cron
+    "collect_glassnode_extras": job_collect_glassnode_extras,
     "event_listener": job_event_listener,
     # Sprint 1.10-G v1.4 §10.4.1 新增 2 个独立 cron job
     "hard_invalidation_monitor": job_hard_invalidation_monitor,

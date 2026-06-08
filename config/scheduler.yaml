@@ -113,6 +113,17 @@ jobs:
     max_instances: 1
     description: 'Glassnode 22 个 metric(2 档错峰:主 + 1 补救;per-fetcher skip)'
 
+  # 批 3(2026-06-08):4 精选 Glassnode 指标(CVDD / ATM IV / Skew / Max Pain)
+  # 单独 cron 避开 09:30/10:30 onchain 主档 + 11:35 master 时段。
+  # fetcher 间 5s 间隔,4 calls/天 ≈ 124 calls/月。
+  collect_glassnode_extras:
+    enabled: true
+    cron: {hour: 12, minute: 0}        # BJT 12:00 = UTC 04:00
+    misfire_grace_time: 600
+    coalesce: true
+    max_instances: 1
+    description: '批 3:CVDD / ATM IV 1m / 25 Δ Skew 1m / Max Pain 1m'
+
   # ------------- Layer A / Layer B pipeline --------------------
 
   layer_a_spot_strategy:

@@ -752,6 +752,34 @@ def job_collect_klines_daily(
             + by_tf.get("fetch_etf_flow_history", 0)
         )
 
+        # 批 2(2026-06-08):Fear & Greed Index → macro_metrics
+        # 复用同一 CoinGlass collector;F&G 是日频情绪指数,与 VIX/DXY 同级。
+        from ..data.storage.dao import MacroDAO, MacroMetric
+        fg_start = time.time()
+        fg_first_exc: Optional[BaseException] = None
+        fg_count = 0
+        try:
+            fg_rows = cg.fetch_fear_greed_index()
+            if fg_rows:
+                metrics = [
+                    MacroMetric(
+                        timestamp=r["timestamp"],
+                        metric_name=r["metric_name"],
+                        metric_value=r["metric_value"],
+                        source="coinglass",
+                    )
+                    for r in fg_rows
+                ]
+                fg_count = MacroDAO.upsert_batch(conn, metrics)
+            by_tf["fetch_fear_greed_index"] = fg_count
+        except Exception as e:
+            fg_first_exc = e
+            logger.warning(
+                "collect_klines_daily.fetch_fear_greed_index failed: %s", e,
+            )
+            errors["fetch_fear_greed_index"] = str(e)[:200]
+            by_tf["fetch_fear_greed_index"] = 0
+
         # Sprint A:每个 source bucket 跑完写一行 fetch_attempts
         _record_fetch_attempt(
             conn, source="binance_kline", start_ts=kl_start,
@@ -760,6 +788,10 @@ def job_collect_klines_daily(
         _record_fetch_attempt(
             conn, source="coinglass_derivatives", start_ts=deriv_start,
             rows_upserted=deriv_count, first_exc=deriv_first_exc,
+        )
+        _record_fetch_attempt(
+            conn, source="coinglass_fear_greed", start_ts=fg_start,
+            rows_upserted=fg_count, first_exc=fg_first_exc,
         )
 
         conn.commit()

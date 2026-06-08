@@ -63,7 +63,7 @@ OnchainSource = Literal[
 # Sprint 2.6-A.4:Yahoo 已弃用,FRED 是当前唯一可用 macro 主源。
 # 历史 DB 中可能仍有 source='yahoo_finance' 的旧行(Sprint 2.4 backfill 残留),
 # 不影响读取;新写入只会用 'fred'。
-MacroSource = Literal["fred", "yahoo_finance"]
+MacroSource = Literal["fred", "yahoo_finance", "coinglass"]
 FallbackLevel = Literal["level_1", "level_2", "level_3"]
 RunStatus = Literal["started", "completed", "failed", "fallback"]
 EventTimezone = Literal["America/New_York", "UTC"]

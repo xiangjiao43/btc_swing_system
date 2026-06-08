@@ -177,7 +177,8 @@ _LAYER_TAG_MAP: dict[str, str] = {
     "core_cpi": _LAYER_TAG_BIG,
     "m2": _LAYER_TAG_BIG,
     "fed_balance_sheet": _LAYER_TAG_BIG,
-    "yield_curve_2_10_spread_bps": _LAYER_TAG_BIG,  # 用户指定
+    "yield_curve_2_10_spread_bps": _LAYER_TAG_BIG,
+    "fear_greed_index": _LAYER_TAG_BOTH,  # 极端区有大周期参考,日常波动有波段参考
 }
 
 # 因子中文名 + 单位 + 排序权重(越小越靠前)
@@ -248,6 +249,7 @@ _FACTOR_META: dict[str, tuple[str, str, int]] = {
     "nasdaq": ("纳斯达克指数", "", 110),
     "btc_nasdaq_corr_60d": ("BTC-纳指 60d 相关性", "ρ", 111),
     "yield_curve_2_10_spread_bps": ("收益率曲线(10Y-2Y)", "bps", 102),
+    "fear_greed_index": ("Fear & Greed Index (CoinGlass)", "fg", 95),
 }
 
 # 大周期估值/择时新增段(本地算)。单位用 "ratio2" 触发 2 位小数显示。
@@ -358,6 +360,20 @@ def _fmt_scalar(v: Any, unit: str, factor_key: str = "") -> str:
             return f"{v * 100:.1f}%" if abs(v) <= 1 else f"{v:.1f}%"
         if unit == "bps":
             return f"{v:+.0f} bps"
+        if unit == "fg":
+            # Fear & Greed:0-24 极端恐惧 / 25-49 恐惧 / 50 中性 / 51-74 贪婪 / 75-100 极端贪婪
+            v_int = int(round(v))
+            if v_int <= 24:
+                cls = "Extreme Fear 极端恐惧"
+            elif v_int <= 49:
+                cls = "Fear 恐惧"
+            elif v_int == 50:
+                cls = "Neutral 中性"
+            elif v_int <= 74:
+                cls = "Greed 贪婪"
+            else:
+                cls = "Extreme Greed 极端贪婪"
+            return f"{v_int} ({cls})"
         # 默认数值
         if abs(v) >= 100:
             return f"{v:,.2f}"
@@ -424,6 +440,27 @@ def render_factors_markdown(conn: sqlite3.Connection) -> str:
                     "status": "available" if val not in (None, [], "") else "missing",
                     "source": "derived_from_klines",
                     "as_of": kline_ts,
+                    "freshness": {"is_stale": False},
+                },
+            )
+        )
+
+    # Fear & Greed Index(批 2 新增,CoinGlass 来源,存 macro_metrics)
+    fg_row = conn.execute(
+        "SELECT value, captured_at_utc FROM macro_metrics "
+        "WHERE metric_name='fear_greed_index' "
+        "ORDER BY captured_at_utc DESC LIMIT 1"
+    ).fetchone()
+    if fg_row and fg_row["value"] is not None:
+        leaves.append(
+            (
+                "macro",
+                "fear_greed_index",
+                {
+                    "actual_value": float(fg_row["value"]),
+                    "status": "available",
+                    "source": "coinglass",
+                    "as_of": fg_row["captured_at_utc"],
                     "freshness": {"is_stale": False},
                 },
             )

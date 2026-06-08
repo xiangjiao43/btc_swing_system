@@ -170,6 +170,8 @@ class CoinglassCollector:
     # Sprint 1.6(建模 v1.3 §2.6):新增机构 / 市场结构 2 端点
     _PATH_BTC_DOMINANCE = f"{_PATH_PREFIX}/index/bitcoin-dominance"
     _PATH_ETF_FLOW      = f"{_PATH_PREFIX}/etf/bitcoin/flow-history"
+    # 批 2(2026-06-08):CoinGlass 自家 Fear & Greed Index
+    _PATH_FEAR_GREED    = f"{_PATH_PREFIX}/index/fear-greed-history"
 
     def __init__(self) -> None:
         cfg = load_source_config("coinglass")
@@ -536,6 +538,44 @@ class CoinglassCollector:
             result.append({
                 "timestamp": ts,
                 "metric_name": "etf_flow",
+                "metric_value": value,
+            })
+        return result
+
+    def fetch_fear_greed_index(self) -> list[dict[str, Any]]:
+        """Crypto Fear & Greed Index(CoinGlass 自家 0-100 综合情绪指数)。
+
+        GET /api/index/fear-greed-history
+        响应:{code, data: {data_list:[..值..], time_list:[..ms epoch..]}}
+        两列并行,长度相等(历史回溯 ~ 8 年日频)。
+
+        Returns: list[{timestamp, metric_name='fear_greed_index', metric_value}]
+                 timestamp 归一为 YYYY-MM-DDT00:00:00Z(F&G 是日频)。
+
+        本批 2(2026-06-08)新增;入 macro_metrics(MacroDAO),
+        语义"市场情绪",与 VIX/DXY 同级。
+        """
+        body = self._request("GET", self._PATH_FEAR_GREED)
+        data = body.get("data") if isinstance(body, dict) else None
+        if not isinstance(data, dict):
+            return []
+        values = data.get("data_list") or []
+        times = data.get("time_list") or []
+        if len(values) != len(times):
+            return []
+        result: list[dict[str, Any]] = []
+        for t_raw, v_raw in zip(times, values):
+            try:
+                ts = _normalize_timestamp(t_raw)
+                # CoinGlass 时间戳是当日 UTC 00:20,归一为 00:00 同 macro 表习惯
+                if isinstance(ts, str) and len(ts) >= 10:
+                    ts = ts[:10] + "T00:00:00Z"
+                value = float(v_raw)
+            except (TypeError, ValueError):
+                continue
+            result.append({
+                "timestamp": ts,
+                "metric_name": "fear_greed_index",
                 "metric_value": value,
             })
         return result

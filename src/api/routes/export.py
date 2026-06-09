@@ -40,6 +40,81 @@ _STALE_DAYS_BY_FACTOR: dict[str, int] = {
     "etf_flow_30d_sum_usd": 5,
 }
 
+# 抓取类因子 → (table, metric_name)。
+# 这些因子从外部 API 直拉(Glassnode / CoinGlass / FRED),DB 有对应原始行。
+# 行尾标 "抓取于 <BJT>",时间取该行的 inserted_at_utc。
+#
+# 不在此 dict 中的因子视为"本地计算类"(EMA / 均线 / Z-score / Pi Cycle 等),
+# 标 "计算于 <render time BJT>"(渲染时刻)。
+_DIRECT_FETCH_FACTORS: dict[str, tuple[str, str | None]] = {
+    # —— onchain_metrics(metric_name 索引)——
+    "mvrv_z_score": ("onchain_metrics", "mvrv_z_score"),
+    "mvrv": ("onchain_metrics", "mvrv"),
+    "nupl": ("onchain_metrics", "nupl"),
+    "realized_price": ("onchain_metrics", "realized_price"),
+    "lth_realized_price": ("onchain_metrics", "lth_realized_price"),
+    "sth_realized_price": ("onchain_metrics", "sth_realized_price"),
+    "lth_mvrv": ("onchain_metrics", "lth_mvrv"),
+    "sth_mvrv": ("onchain_metrics", "sth_mvrv"),
+    "percent_supply_in_profit": ("onchain_metrics", "percent_supply_in_profit"),
+    "rhodl_ratio": ("onchain_metrics", "rhodl_ratio"),
+    "reserve_risk": ("onchain_metrics", "reserve_risk"),
+    "puell_multiple": ("onchain_metrics", "puell_multiple"),
+    "hash_rate": ("onchain_metrics", "hash_rate"),
+    "lth_supply": ("onchain_metrics", "lth_supply"),
+    "sth_supply": ("onchain_metrics", "sth_supply"),
+    "sopr_adjusted": ("onchain_metrics", "sopr_adjusted"),
+    "cdd": ("onchain_metrics", "cdd"),
+    "ssr": ("onchain_metrics", "ssr"),
+    "lth_sopr": ("onchain_metrics", "lth_sopr"),
+    "sth_sopr": ("onchain_metrics", "sth_sopr"),
+    "lth_net_position_change": ("onchain_metrics", "lth_net_position_change"),
+    "exchange_balance": ("onchain_metrics", "exchange_balance"),
+    "exchange_net_flow": ("onchain_metrics", "exchange_net_flow"),
+    "cvdd": ("onchain_metrics", "cvdd"),
+    "atm_iv_1m": ("onchain_metrics", "atm_iv_1m"),
+    "25delta_skew_1m": ("onchain_metrics", "25delta_skew_1m"),
+    "max_pain_1m": ("onchain_metrics", "max_pain_1m"),
+    # —— macro_metrics(metric_name 索引)——
+    "dxy": ("macro_metrics", "dxy"),
+    "us10y": ("macro_metrics", "us10y"),
+    "us2y": ("macro_metrics", "us2y"),
+    "real_yield": ("macro_metrics", "real_yield"),
+    "fed_funds_rate": ("macro_metrics", "fed_funds_rate"),
+    "cpi": ("macro_metrics", "cpi"),
+    "core_cpi": ("macro_metrics", "core_cpi"),
+    "m2": ("macro_metrics", "m2"),
+    "fed_balance_sheet": ("macro_metrics", "fed_balance_sheet"),
+    "vix": ("macro_metrics", "vix"),
+    "nasdaq": ("macro_metrics", "nasdaq"),
+    "fear_greed_index": ("macro_metrics", "fear_greed_index"),
+    # —— derivatives_snapshots(宽表,共享 inserted_at_utc;metric_name 用 None 哨兵)——
+    "funding_rate": ("derivatives_snapshots", None),
+    "open_interest": ("derivatives_snapshots", None),
+    "btc_dominance": ("derivatives_snapshots", None),
+    "long_short_ratio": ("derivatives_snapshots", None),
+    "liquidation_total": ("derivatives_snapshots", None),
+    "etf_flow": ("derivatives_snapshots", None),
+    # —— price_candles(只有 1d 收盘自己是"抓取",衍生 EMA/ADX/ATR/swing 都是"计算")——
+    "current_close": ("price_candles_1d", None),
+}
+
+
+# 当天还没到触发时间的 cron → 这些因子归"待今日 cron"档,不算真异常。
+# 映射 factor_key → (BJT hour, BJT minute)。取该 cron 的最晚一档(主+补救)。
+_TODAY_PENDING_CRON_FACTORS: dict[str, tuple[int, int]] = {
+    # batch3 独立 cron BJT 10:50
+    "cvdd": (10, 50),
+    "atm_iv_1m": (10, 50),
+    "25delta_skew_1m": (10, 50),
+    "max_pain_1m": (10, 50),
+}
+
+# FRED 月频源:每月只发布一次,当月没出新数据时 inserted_at_utc 不动。
+# 这些归"月频源未发布"档,与"真异常"区分。
+_MONTHLY_SOURCE_FACTORS: set[str] = {"cpi", "core_cpi", "m2", "pce"}
+
+
 # 派生指标 → 基准 series 的 factor_key 映射。
 # 派生指标自身没有 as_of(series 直接计算,不带时间戳),按基准的 as_of 判新鲜度。
 _DERIVED_BASE: dict[str, str] = {
@@ -295,6 +370,55 @@ def _short_date(ts: Any) -> str:
         return "—"
     s = str(ts)
     return s[:10]
+
+
+def _utc_str_to_bjt_pretty(utc_iso: Any) -> str:
+    """ISO 字符串(UTC)→ "MM-DD HH:MM BJT"(去年份,窄屏友好)。"""
+    if not utc_iso:
+        return "—"
+    s = str(utc_iso).replace("Z", "+00:00")
+    try:
+        dt_utc = datetime.fromisoformat(s)
+    except ValueError:
+        return str(utc_iso)[5:16]
+    if dt_utc.tzinfo is None:
+        dt_utc = dt_utc.replace(tzinfo=timezone.utc)
+    return dt_utc.astimezone(_BJT).strftime("%m-%d %H:%M BJT")
+
+
+def _lookup_fetch_at_utc(
+    conn: sqlite3.Connection, factor_key: str,
+) -> str | None:
+    """查 _DIRECT_FETCH_FACTORS 对应行的 inserted_at_utc。
+
+    返回 ISO UTC 字符串;不在 dict 中 / 行不存在 → None。
+    """
+    spec = _DIRECT_FETCH_FACTORS.get(factor_key)
+    if spec is None:
+        return None
+    table, metric_name = spec
+    if table == "onchain_metrics" or table == "macro_metrics":
+        row = conn.execute(
+            f"SELECT inserted_at_utc FROM {table} WHERE metric_name=? "
+            "ORDER BY captured_at_utc DESC LIMIT 1",
+            (metric_name,),
+        ).fetchone()
+    elif table == "derivatives_snapshots":
+        row = conn.execute(
+            "SELECT inserted_at_utc FROM derivatives_snapshots "
+            "ORDER BY captured_at_utc DESC LIMIT 1"
+        ).fetchone()
+    elif table == "price_candles_1d":
+        row = conn.execute(
+            "SELECT inserted_at_utc FROM price_candles "
+            "WHERE symbol='BTCUSDT' AND timeframe='1d' "
+            "ORDER BY open_time_utc DESC LIMIT 1"
+        ).fetchone()
+    else:
+        return None
+    if row and row["inserted_at_utc"]:
+        return str(row["inserted_at_utc"])
+    return None
 
 
 def _days_since(ts: Any) -> float | None:
@@ -655,8 +779,68 @@ def render_factors_markdown(conn: sqlite3.Connection) -> str:
             else:
                 fresh += 1
 
-    now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    now_bjt = datetime.now(_BJT).strftime("%Y-%m-%d %H:%M BJT")
+    now_utc_dt = datetime.now(timezone.utc)
+    now_utc = now_utc_dt.strftime("%Y-%m-%d %H:%M UTC")
+    now_bjt_dt = now_utc_dt.astimezone(_BJT)
+    now_bjt = now_bjt_dt.strftime("%Y-%m-%d %H:%M BJT")
+    render_compute_bjt = now_bjt  # 本地计算类的"计算于"取渲染时刻
+
+    # 当天 BJT 0:00 阈值,用于"已抓取/未抓取"判定(UTC 比较)
+    today_bjt_midnight_utc = now_bjt_dt.replace(
+        hour=0, minute=0, second=0, microsecond=0,
+    ).astimezone(timezone.utc)
+
+    # 为每个 leaf 计算"更新时间"(UTC ISO) + 类型(fetched/computed)
+    leaf_update_info: dict[str, dict[str, Any]] = {}
+    fetched_today_count = 0
+    # "未抓取" 分 3 类:待今日 cron / 月频源未发布 / 真异常
+    pending_cron: list[tuple[str, str]] = []  # (zh_name, "10:50 档")
+    monthly_pending: list[str] = []
+    anomaly: list[str] = []
+    total_count = 0
+    for items in section_buckets.values():
+        for k, leaf in items:
+            total_count += 1
+            fetched_utc = _lookup_fetch_at_utc(conn, k)
+            if fetched_utc:
+                kind = "fetched"
+                update_utc = fetched_utc
+            else:
+                kind = "computed"
+                update_utc = now_utc_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+            leaf_update_info[k] = {
+                "kind": kind,
+                "update_utc": update_utc,
+                "update_bjt": _utc_str_to_bjt_pretty(update_utc),
+            }
+            try:
+                upd_dt = datetime.fromisoformat(
+                    update_utc.replace("Z", "+00:00")
+                )
+                if upd_dt.tzinfo is None:
+                    upd_dt = upd_dt.replace(tzinfo=timezone.utc)
+            except ValueError:
+                upd_dt = None
+            if upd_dt is not None and upd_dt >= today_bjt_midnight_utc:
+                fetched_today_count += 1
+                continue
+            zh_name = all_meta.get(k, (k, "", 9999))[0]
+            # 分类未抓取项
+            if k in _TODAY_PENDING_CRON_FACTORS:
+                hr, mn = _TODAY_PENDING_CRON_FACTORS[k]
+                # 当前 BJT 是否还没到 cron 时间?
+                cron_today_bjt = now_bjt_dt.replace(
+                    hour=hr, minute=mn, second=0, microsecond=0,
+                )
+                if now_bjt_dt < cron_today_bjt:
+                    pending_cron.append((zh_name, f"{hr:02d}:{mn:02d} 档"))
+                    continue
+                # 已过 cron 时间仍未抓到 → 真异常
+                anomaly.append(zh_name)
+            elif k in _MONTHLY_SOURCE_FACTORS:
+                monthly_pending.append(zh_name)
+            else:
+                anomaly.append(zh_name)
 
     lines: list[str] = []
     lines.append("# BTC 系统数据快照（供外部 AI 分析）")
@@ -666,6 +850,30 @@ def render_factors_markdown(conn: sqlite3.Connection) -> str:
     lines.append(
         f"新鲜度总览：总 {total} | 新鲜 {fresh} | ⚠️STALE {stale} | "
         f"❌缺失 {missing} | 事件 {len(events)}"
+    )
+    lines.append(
+        f"当天抓取情况（BJT 0:00 起）：总 {total_count} | "
+        f"已抓取 {fetched_today_count} | "
+        f"待今日 cron {len(pending_cron)} | "
+        f"月频源未发布 {len(monthly_pending)} | "
+        f"真异常 {len(anomaly)}"
+    )
+    if pending_cron:
+        # 按 cron 档分组(同档列在一起)
+        by_slot: dict[str, list[str]] = {}
+        for name, slot in pending_cron:
+            by_slot.setdefault(slot, []).append(name)
+        for slot, names in by_slot.items():
+            lines.append(
+                f"  待今日 cron（{slot}）：{', '.join(names)}"
+            )
+    if monthly_pending:
+        lines.append(
+            f"  月频源未发布（FRED 月度）：{', '.join(monthly_pending)}"
+        )
+    # 真异常那行始终显示(健康哨兵)
+    lines.append(
+        f"  真异常：{', '.join(anomaly) if anomaly else '（无）'}"
     )
     lines.append("")
     lines.append(
@@ -716,8 +924,13 @@ def render_factors_markdown(conn: sqlite3.Connection) -> str:
             layer_tag = _LAYER_TAG_MAP.get(k, _LAYER_TAG_BOTH)
             detail = leaf.get("_detail")
             detail_str = f"  （派生:{detail}）" if detail else ""
+            upd = leaf_update_info.get(k) or {}
+            kind = upd.get("kind", "computed")
+            upd_bjt = upd.get("update_bjt") or render_compute_bjt
+            upd_label = "抓取于" if kind == "fetched" else "计算于"
             lines.append(
-                f"- {zh_name}: {val_str} ｜ 数据时间: {ts_str} ｜ {tag} ｜ {layer_tag}{detail_str}"
+                f"- {zh_name}: {val_str} ｜ 数据时间: {ts_str} ｜ {tag} ｜ "
+                f"{layer_tag} ｜ {upd_label} {upd_bjt}{detail_str}"
             )
         lines.append("")
 

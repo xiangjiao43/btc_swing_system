@@ -959,15 +959,42 @@ __all__ = ["render_factors_markdown", "router"]
 # FastAPI 路由
 # ---------------------------------------------------------------------------
 
+import re  # noqa: E402
+
+import pandas as pd  # noqa: E402
 from fastapi import APIRouter, HTTPException, Request  # noqa: E402
-from fastapi.responses import FileResponse, PlainTextResponse  # noqa: E402
+from fastapi.responses import (  # noqa: E402
+    FileResponse,
+    HTMLResponse,
+    PlainTextResponse,
+)
 from pathlib import Path  # noqa: E402
 
 router = APIRouter(prefix="/export", tags=["export"])
 
-# 项目根目录(用于定位 packages/)
+# 项目根目录(用于定位 packages/ + CSV)
 _PROJECT_ROOT_FOR_PACK = Path(__file__).resolve().parent.parent.parent.parent
 _PACKAGES_DIR = _PROJECT_ROOT_FOR_PACK / "packages"
+
+# 5 CSV 新鲜度阈值(天) — 必须与 scripts/refresh_and_build.py 保持一致
+_CSV_FRESHNESS_THRESHOLDS: dict[str, int] = {
+    "btc_onchain_history.csv": 2,
+    "btc_swing_deriv_4h.csv": 1,
+    "btc_swing_deriv_1d.csv": 1,
+    "btc_swing_macro.csv": 7,
+    "btc_swing_options.csv": 2,
+}
+
+# 新增列(批 1+2+3)latest 行非空检查
+_NEW_COLS_CHECK: dict[str, list[str]] = {
+    "btc_onchain_history.csv": [
+        "liveliness", "illiquid_supply_btc", "nrpl_usd",
+        "lth_profit_btc", "lth_loss_btc", "sopr", "sopr_adjusted",
+    ],
+    "btc_swing_options.csv": [
+        "est_leverage_ratio", "pcr_volume", "atm_iv_1w",
+    ],
+}
 
 
 @router.get(
@@ -984,6 +1011,341 @@ def get_snapshot_markdown(request: Request) -> PlainTextResponse:
     finally:
         conn.close()
     return PlainTextResponse(content=md, media_type="text/markdown; charset=utf-8")
+
+
+def _build_pack_status(snapshot_md: str) -> dict[str, Any]:
+    """轻量本地校验 + 包元数据,返回结构化 status 给 HTML 渲染。"""
+    now_bjt = datetime.now(_BJT)
+    today_bjt = now_bjt.date()
+    today_str = today_bjt.strftime("%Y-%m-%d")
+
+    # === 包元数据 ===
+    pkg = _PACKAGES_DIR / f"analysis_package_{today_str}.zip"
+    pkg_info: dict[str, Any] = {"exists": pkg.exists(), "path": str(pkg)}
+    if pkg.exists():
+        st = pkg.stat()
+        pkg_info["size_kb"] = round(st.st_size / 1024, 1)
+        pkg_info["built_at_bjt"] = datetime.fromtimestamp(
+            st.st_mtime, tz=timezone.utc,
+        ).astimezone(_BJT).strftime("%Y-%m-%d %H:%M BJT")
+
+    # === 校验 a) CSV 新鲜度 ===
+    csv_status: list[dict[str, Any]] = []
+    gate_a_errors: list[str] = []
+    for name, max_lag in _CSV_FRESHNESS_THRESHOLDS.items():
+        p = _PROJECT_ROOT_FOR_PACK / name
+        item: dict[str, Any] = {"name": name, "threshold_days": max_lag}
+        if not p.exists():
+            item["latest_date"] = "—"
+            item["lag_days"] = None
+            item["ok"] = False
+            item["reason"] = "文件不存在"
+            gate_a_errors.append(f"{name}: 不存在")
+        else:
+            try:
+                df = pd.read_csv(p)
+                latest_str = str(df["date"].max())[:10]
+                latest = datetime.strptime(latest_str, "%Y-%m-%d").date()
+                lag = (today_bjt - latest).days
+                item["latest_date"] = latest_str
+                item["lag_days"] = lag
+                item["ok"] = lag <= max_lag
+                if not item["ok"]:
+                    item["reason"] = f"lag {lag}d > {max_lag}d"
+                    gate_a_errors.append(
+                        f"{name}: latest {latest_str} (lag {lag}d > 阈值 {max_lag}d)"
+                    )
+            except Exception as e:
+                item["latest_date"] = "—"
+                item["lag_days"] = None
+                item["ok"] = False
+                item["reason"] = f"读取异常 {type(e).__name__}"
+                gate_a_errors.append(f"{name}: {type(e).__name__}: {e}")
+        csv_status.append(item)
+
+    # === 校验 b) 新增列非空 ===
+    gate_b_errors: list[str] = []
+    for csv_name, cols in _NEW_COLS_CHECK.items():
+        p = _PROJECT_ROOT_FOR_PACK / csv_name
+        if not p.exists():
+            continue
+        try:
+            df = pd.read_csv(p).sort_values("date").reset_index(drop=True)
+            if df.empty:
+                gate_b_errors.append(f"{csv_name}: 空表")
+                continue
+            latest_row = df.iloc[-1]
+            for col in cols:
+                if col not in df.columns:
+                    gate_b_errors.append(f"{csv_name}: 缺列 {col}")
+                elif pd.isna(latest_row[col]):
+                    gate_b_errors.append(f"{csv_name} 最新行 {col} 为空")
+        except Exception as e:
+            gate_b_errors.append(f"{csv_name}: {type(e).__name__}: {e}")
+
+    # === 校验 c) snapshot 真异常 = 0 ===
+    gate_c_errors: list[str] = []
+    m = re.search(r"真异常\s+(\d+)", snapshot_md)
+    if not m:
+        gate_c_errors.append("snapshot 缺真异常统计行")
+        anomaly_n = -1
+        anomaly_detail = ""
+    else:
+        anomaly_n = int(m.group(1))
+        detail_m = re.search(r"真异常：([^\n]+)", snapshot_md)
+        anomaly_detail = detail_m.group(1).strip() if detail_m else ""
+        if anomaly_n > 0:
+            gate_c_errors.append(f"真异常 = {anomaly_n}: {anomaly_detail}")
+
+    # === 校验 d) BTC 现价锚点 ===
+    gate_d_errors: list[str] = []
+    snap_price_m = re.search(r"BTC 现价: \$([\d,]+\.?\d*)", snapshot_md)
+    csv_1d = _PROJECT_ROOT_FOR_PACK / "btc_swing_deriv_1d.csv"
+    if not snap_price_m:
+        gate_d_errors.append("snapshot 没找到 BTC 现价行")
+    elif not csv_1d.exists():
+        pass  # gate_a 已报
+    else:
+        try:
+            snap_price = float(snap_price_m.group(1).replace(",", ""))
+            df = pd.read_csv(csv_1d).sort_values("date").reset_index(drop=True)
+            csv_close = float(df["close"].iloc[-1])
+            rel = abs(snap_price - csv_close) / snap_price
+            if rel > 0.01:
+                gate_d_errors.append(
+                    f"snapshot ${snap_price:.2f} vs CSV ${csv_close:.2f} "
+                    f"(差 {rel * 100:.2f}% > 1%)"
+                )
+        except Exception as e:
+            gate_d_errors.append(f"锚点计算异常 {type(e).__name__}: {e}")
+
+    # === 校验 e) snapshot 端点可用(本路由调用了 render,代表 endpoint OK)===
+    gate_e_errors: list[str] = []
+    if not snapshot_md or len(snapshot_md) < 100:
+        gate_e_errors.append("snapshot 内容异常短或空")
+
+    gates = [
+        {"name": "a) CSV 新鲜度", "ok": not gate_a_errors, "errors": gate_a_errors},
+        {"name": "b) 新增列非空", "ok": not gate_b_errors, "errors": gate_b_errors},
+        {"name": "c) snapshot 真异常 = 0", "ok": not gate_c_errors,
+         "errors": gate_c_errors, "anomaly_n": anomaly_n,
+         "anomaly_detail": anomaly_detail},
+        {"name": "d) BTC 现价锚点", "ok": not gate_d_errors, "errors": gate_d_errors},
+        {"name": "e) snapshot 端点", "ok": not gate_e_errors, "errors": gate_e_errors},
+    ]
+    overall_ok = all(g["ok"] for g in gates)
+
+    return {
+        "today_str": today_str,
+        "now_bjt_str": now_bjt.strftime("%Y-%m-%d %H:%M BJT"),
+        "package": pkg_info,
+        "csvs": csv_status,
+        "gates": gates,
+        "overall_ok": overall_ok,
+    }
+
+
+_PACK_STATUS_HTML = """<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BTC 分析包状态 — {today}</title>
+<style>
+  body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+        "Hiragino Sans GB", sans-serif; max-width: 860px; margin: 1.5em auto;
+        padding: 0 1em; color: #222; line-height: 1.5; }}
+  h1 {{ margin: 0 0 .2em; }}
+  h2 {{ margin-top: 1.6em; border-bottom: 1px solid #eee; padding-bottom: .3em; }}
+  .date {{ font-size: 1.15em; color: #555; margin-bottom: 1em; }}
+  .banner {{ padding: 1em 1.2em; border-radius: 6px; font-size: 1.05em; margin: 1em 0; }}
+  .banner.ok {{ background: #d4edda; color: #155724; border-left: 4px solid #28a745; }}
+  .banner.fail {{ background: #f8d7da; color: #721c24; border-left: 4px solid #dc3545; }}
+  table {{ border-collapse: collapse; width: 100%; margin: .8em 0; }}
+  th, td {{ padding: .55em .8em; text-align: left; border-bottom: 1px solid #eee; }}
+  th {{ background: #f7f7f7; font-weight: 600; }}
+  .ok {{ color: #28a745; font-weight: 600; }}
+  .fail {{ color: #dc3545; font-weight: 600; }}
+  .pkg-box {{ background: #f7f7f7; padding: .8em 1em; border-radius: 6px; }}
+  .download-btn {{
+    display: inline-block; padding: .9em 2.2em; margin: 1em 0;
+    background: #28a745; color: white !important; text-decoration: none;
+    border-radius: 6px; font-size: 1.1em; font-weight: 600;
+    box-shadow: 0 2px 4px rgba(0,0,0,.1);
+  }}
+  .download-btn:hover {{ background: #1e7e34; }}
+  .download-btn.disabled {{
+    background: #adb5bd; pointer-events: none; opacity: .6; cursor: not-allowed;
+  }}
+  ul.err {{ margin: .3em 0 .3em 1.2em; color: #721c24; }}
+  ul.err li {{ font-family: monospace; font-size: .92em; }}
+  footer {{ margin-top: 2em; color: #888; font-size: .88em; border-top: 1px solid #eee;
+            padding-top: 1em; }}
+  code {{ background: #f0f0f0; padding: .1em .3em; border-radius: 3px; font-size: .9em; }}
+</style>
+</head>
+<body>
+  <h1>📦 BTC 分析包状态</h1>
+  <div class="date">📅 {today} (BJT)</div>
+
+  {banner}
+
+  <h2>分析包 zip</h2>
+  {pkg_html}
+
+  {download_btn}
+
+  <h2>5 项校验</h2>
+  <table>
+    <thead><tr><th style="width:30%">校验项</th><th style="width:12%">状态</th><th>详情</th></tr></thead>
+    <tbody>
+      {gates_rows}
+    </tbody>
+  </table>
+
+  <h2>CSV 新鲜度</h2>
+  <table>
+    <thead><tr><th>文件</th><th>最新数据</th><th>距今</th><th>阈值</th><th>状态</th></tr></thead>
+    <tbody>
+      {csv_rows}
+    </tbody>
+  </table>
+
+  <footer>
+    页面生成于 <code>{now_bjt}</code>。
+    包由 cron BJT 11:00 自动构建;手动重建 SSH 服务器:
+    <code>python3 scripts/refresh_and_build.py</code>。
+    <br>下载接口:<code>/api/export/pack/today.zip</code> ·
+    snapshot:<code>/api/export/snapshot.md</code>
+  </footer>
+</body>
+</html>
+"""
+
+
+def _render_pack_status_html(status: dict[str, Any]) -> str:
+    overall_ok = status["overall_ok"]
+    pkg = status["package"]
+
+    # === Banner ===
+    if overall_ok and pkg["exists"]:
+        banner = (
+            '<div class="banner ok">'
+            '✅ <strong>今日数据正常,可下载分析包</strong>'
+            '</div>'
+        )
+    elif not overall_ok:
+        # 找出哪些 gate 失败
+        failed = [g["name"] for g in status["gates"] if not g["ok"]]
+        banner = (
+            '<div class="banner fail">'
+            f'🚨 <strong>今日数据异常,不建议下载</strong> — '
+            f'未过校验项:{", ".join(failed)}'
+            '</div>'
+        )
+    else:
+        # 校验过但包还没生成
+        banner = (
+            '<div class="banner fail">'
+            '⏳ <strong>校验通过,但今日包尚未生成</strong> — '
+            '等 BJT 11:00 cron,或 SSH 服务器手动跑 refresh_and_build.py'
+            '</div>'
+        )
+
+    # === Package box ===
+    if pkg["exists"]:
+        pkg_html = (
+            '<div class="pkg-box">'
+            f'✅ <strong>analysis_package_{status["today_str"]}.zip</strong><br>'
+            f'生成时间:{pkg["built_at_bjt"]}<br>'
+            f'大小:{pkg["size_kb"]} KB · 7 个文件 (5 CSV + snapshot + README)'
+            '</div>'
+        )
+    else:
+        pkg_html = (
+            '<div class="pkg-box" style="background:#fdf2f2;">'
+            f'⏳ 今日 zip ({status["today_str"]}) 尚未生成'
+            '</div>'
+        )
+
+    # === Download button ===
+    if overall_ok and pkg["exists"]:
+        download_btn = (
+            '<a href="/api/export/pack/today.zip" class="download-btn">'
+            '⬇️ 下载今日分析包 (today.zip)'
+            '</a>'
+        )
+    else:
+        download_btn = (
+            '<a href="#" class="download-btn disabled" '
+            'title="数据异常 / 包未生成,不可下载">'
+            '⬇️ 下载今日分析包 (不可用)'
+            '</a>'
+        )
+
+    # === Gates rows ===
+    gate_rows = []
+    for g in status["gates"]:
+        status_html = (
+            '<span class="ok">✅ 通过</span>' if g["ok"]
+            else '<span class="fail">❌ 失败</span>'
+        )
+        if g["ok"]:
+            detail = "—"
+        else:
+            errs = "".join(f"<li>{_esc_html(e)}</li>" for e in g["errors"])
+            detail = f'<ul class="err">{errs}</ul>'
+        gate_rows.append(
+            f'<tr><td>{_esc_html(g["name"])}</td><td>{status_html}</td><td>{detail}</td></tr>'
+        )
+
+    # === CSV rows ===
+    csv_rows = []
+    for c in status["csvs"]:
+        latest = c["latest_date"]
+        lag = "—" if c["lag_days"] is None else f"{c['lag_days']}d"
+        threshold = f"≤ {c['threshold_days']}d"
+        st_html = (
+            '<span class="ok">✅</span>' if c["ok"]
+            else f'<span class="fail">❌ {_esc_html(c.get("reason", "?"))}</span>'
+        )
+        csv_rows.append(
+            f'<tr><td><code>{_esc_html(c["name"])}</code></td><td>{latest}</td>'
+            f'<td>{lag}</td><td>{threshold}</td><td>{st_html}</td></tr>'
+        )
+
+    return _PACK_STATUS_HTML.format(
+        today=status["today_str"],
+        now_bjt=status["now_bjt_str"],
+        banner=banner,
+        pkg_html=pkg_html,
+        download_btn=download_btn,
+        gates_rows="\n      ".join(gate_rows),
+        csv_rows="\n      ".join(csv_rows),
+    )
+
+
+def _esc_html(s: Any) -> str:
+    return (str(s).replace("&", "&amp;").replace("<", "&lt;")
+            .replace(">", "&gt;").replace('"', "&quot;"))
+
+
+@router.get(
+    "/pack",
+    response_class=HTMLResponse,
+    summary="今日分析包状态门户(HTML 网页,含 5 项校验 + 下载按钮)",
+)
+def get_pack_status_page(request: Request) -> HTMLResponse:
+    ctx = request.app.state.ctx
+    conn = ctx.conn_factory()
+    try:
+        conn.row_factory = sqlite3.Row
+        snapshot_md = render_factors_markdown(conn)
+    finally:
+        conn.close()
+    status = _build_pack_status(snapshot_md)
+    html = _render_pack_status_html(status)
+    return HTMLResponse(content=html)
 
 
 @router.get(

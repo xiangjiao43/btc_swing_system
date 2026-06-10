@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 import os
 import sqlite3
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -126,13 +127,45 @@ class FredCollector:
         url = f"{self.base_url}/series/observations"
         logger.info("FRED GET %s series_id=%s start=%s", url, series_id, start_date)
 
-        with pipeline_stage(f"external FRED request {series_id}"):
-            resp = self._session.get(url, params=params, timeout=self.timeout_sec)
-        if not resp.ok:
+        # 2026-06-10:加 5xx 重试。FRED 端 DGS10 偶发 500/502,单次失败
+        # 直接抛错导致 cron run 跳过这条 series,inserted_at_utc 不更新,
+        # snapshot 会标"真异常"。3 次重试 + 5s 退避能覆盖 99% 抖动。
+        _RETRY_STATUSES = {500, 502, 503, 504, 408, 429}
+        _MAX_ATTEMPTS = 3
+        _BACKOFF_SEC = 5.0
+        last_status: int | None = None
+        last_body: str = ""
+        body: dict[str, Any] | None = None
+        for attempt in range(1, _MAX_ATTEMPTS + 1):
+            with pipeline_stage(f"external FRED request {series_id}"):
+                resp = self._session.get(url, params=params, timeout=self.timeout_sec)
+            if resp.ok:
+                body = resp.json()
+                if attempt > 1:
+                    logger.info("FRED %s recovered on attempt %d/%d",
+                                series_id, attempt, _MAX_ATTEMPTS)
+                break
+            last_status = resp.status_code
+            last_body = resp.text[:200]
+            if resp.status_code in _RETRY_STATUSES and attempt < _MAX_ATTEMPTS:
+                logger.warning(
+                    "FRED HTTP %d on %s (attempt %d/%d), retry in %.1fs",
+                    resp.status_code, series_id, attempt, _MAX_ATTEMPTS,
+                    _BACKOFF_SEC,
+                )
+                time.sleep(_BACKOFF_SEC)
+                continue
+            # 非重试码 / 已达上限 → 抛错
             raise FredCollectorError(
-                f"FRED HTTP {resp.status_code} on {series_id}: {resp.text[:200]}"
+                f"FRED HTTP {resp.status_code} on {series_id} "
+                f"(after {attempt} attempt{'s' if attempt > 1 else ''}): "
+                f"{resp.text[:200]}"
             )
-        body = resp.json()
+        if body is None:
+            raise FredCollectorError(
+                f"FRED {series_id}: all {_MAX_ATTEMPTS} attempts failed "
+                f"(last HTTP {last_status}: {last_body})"
+            )
         obs = body.get("observations") or []
         logger.info("  %s: %d observations; first keys=%s",
                     metric_name, len(obs), list(obs[0].keys())[:6] if obs else "empty")

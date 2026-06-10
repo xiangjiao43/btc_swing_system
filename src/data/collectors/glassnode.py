@@ -194,7 +194,22 @@ class GlassnodeCollector:
                     resp = self._session.request(
                         method, url, params=params, timeout=self.timeout_sec
                     )
+                    # 2026-06-10:429 单独处理 — alphanode 上游对热点 endpoint
+                    # (puell/lth_net/btc_price 等)是秒级窗口限频,3-6s 内重试
+                    # 几乎全 429。1 次试不通就跳,靠 _fetcher_completed_today
+                    # + 第二档 cron 自然兜底。**打 Tag 化日志方便 grep "持续 429"**。
+                    if resp.status_code == 429:
+                        logger.warning(
+                            "[GLASSNODE_429_SKIP] path=%s attempt=1/1 — "
+                            "429 不重试(上游秒级限频),交给下一档 cron 兜底",
+                            path,
+                        )
+                        last_exc = _RetryableHTTPError(
+                            f"HTTP 429: {resp.text[:200]}"
+                        )
+                        break
                     if resp.status_code in retry_on_status:
+                        # 5xx / 408:正常重试逻辑
                         raise _RetryableHTTPError(
                             f"HTTP {resp.status_code}: {resp.text[:200]}"
                         )

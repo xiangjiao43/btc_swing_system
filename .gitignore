@@ -76,3 +76,9 @@ Thumbs.db
 
 # ---- Jupyter ----
 .ipynb_checkpoints/
+
+# Sprint analysis-package (2026-06-10): 排除 zip + 数据 CSV
+packages/
+analysis_package_*.zip
+btc_onchain_history.csv
+btc_swing_*.csv

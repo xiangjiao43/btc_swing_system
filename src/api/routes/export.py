@@ -959,10 +959,15 @@ __all__ = ["render_factors_markdown", "router"]
 # FastAPI 路由
 # ---------------------------------------------------------------------------
 
-from fastapi import APIRouter, Request  # noqa: E402
-from fastapi.responses import PlainTextResponse  # noqa: E402
+from fastapi import APIRouter, HTTPException, Request  # noqa: E402
+from fastapi.responses import FileResponse, PlainTextResponse  # noqa: E402
+from pathlib import Path  # noqa: E402
 
 router = APIRouter(prefix="/export", tags=["export"])
+
+# 项目根目录(用于定位 packages/)
+_PROJECT_ROOT_FOR_PACK = Path(__file__).resolve().parent.parent.parent.parent
+_PACKAGES_DIR = _PROJECT_ROOT_FOR_PACK / "packages"
 
 
 @router.get(
@@ -979,3 +984,30 @@ def get_snapshot_markdown(request: Request) -> PlainTextResponse:
     finally:
         conn.close()
     return PlainTextResponse(content=md, media_type="text/markdown; charset=utf-8")
+
+
+@router.get(
+    "/pack/today.zip",
+    summary="下载当天 AI 分析包 zip（5 CSV + snapshot + 2 prompts + README）",
+)
+def get_today_pack() -> FileResponse:
+    """指向当天 packages/analysis_package_YYYY-MM-DD.zip(BJT 日期)。
+
+    生成由 scripts/refresh_and_build.py 完成,cron BJT 11:00。
+    """
+    today_bjt = datetime.now(_BJT).strftime("%Y-%m-%d")
+    pkg = _PACKAGES_DIR / f"analysis_package_{today_bjt}.zip"
+    if not pkg.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"今日 package ({today_bjt}) 还未生成。"
+                f"等 BJT 11:00 cron 跑完,或手动跑 "
+                f"`python3 scripts/refresh_and_build.py`。"
+            ),
+        )
+    return FileResponse(
+        pkg,
+        media_type="application/zip",
+        filename=f"analysis_package_{today_bjt}.zip",
+    )

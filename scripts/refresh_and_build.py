@@ -82,12 +82,21 @@ def log(msg: str) -> None:
     print(f"[{ts}] {msg}", flush=True)
 
 
+def _prepare_env() -> dict[str, str]:
+    """父进程继承 + key 别名映射(项目历史 env 名不统一)。"""
+    env = os.environ.copy()
+    # onchain 脚本读 GN_API_KEY;服务器 .env 里通常是 GLASSNODE_API_KEY
+    if not env.get("GN_API_KEY") and env.get("GLASSNODE_API_KEY"):
+        env["GN_API_KEY"] = env["GLASSNODE_API_KEY"]
+    return env
+
+
 def run_subprocess(cmd: list[str], label: str) -> int:
     """跑子进程,实时输出。返 exit code。"""
     log(f"=== 跑 {label} ===")
     log(f"    {' '.join(cmd)}")
     try:
-        res = subprocess.run(cmd, cwd=str(PROJECT_ROOT))
+        res = subprocess.run(cmd, cwd=str(PROJECT_ROOT), env=_prepare_env())
         log(f"    {label} exit={res.returncode}")
         return res.returncode
     except Exception as e:

@@ -104,6 +104,11 @@ SIMPLE_ENDPOINTS: dict[str, dict[str, str]] = {
         "path": "/v1/metrics/indicators/sopr_adjusted",
         "col": "sopr_adjusted",              # 1 上下(剔除 1 日内回收 UTXO 后)
     },
+    # ---- 批次 2026-06-10b:LTH-NUPL(大周期专属 NUPL 分群)----
+    "lth_nupl": {
+        "path": "/v1/metrics/indicators/nupl_more_155",
+        "col": "lth_nupl_ratio",             # -1~+1,LTH 整体浮盈浮亏比
+    },
 }
 
 

@@ -990,9 +990,11 @@ _NEW_COLS_CHECK: dict[str, list[str]] = {
     "btc_onchain_history.csv": [
         "liveliness", "illiquid_supply_btc", "nrpl_usd",
         "lth_profit_btc", "lth_loss_btc", "sopr", "sopr_adjusted",
+        "lth_nupl_ratio",
     ],
     "btc_swing_options.csv": [
         "est_leverage_ratio", "pcr_volume", "atm_iv_1w",
+        "sth_mvrv", "sth_realized_price_usd",
     ],
 }
 

@@ -729,16 +729,113 @@ _GN_ENDPOINTS: list[dict[str, Any]] = [
         "col": "atm_iv_1w",                   # 百分比(年化),1 周 ATM IV
         "parser": "tv",
     },
+    # ---- 批次 2026-06-10b:STH 维度(波段尺度的"新钱"行为)----
+    {
+        "name": "sth_mvrv",
+        "path": "/v1/metrics/market/mvrv_less_155",
+        "col": "sth_mvrv",                    # ~0.5-2,STH 整体浮盈浮亏比(<1=浮亏)
+        "parser": "tv",
+    },
+    {
+        # 派生:供给加权聚合 STH 5 桶(24h/1d_1w/1w_1m/1m_3m/3m_6m)
+        "name": "sth_realized_price",
+        "path": "DERIVED_STH_REALIZED",
+        "col": "sth_realized_price_usd",      # USD,STH 整体平均成本
+        "parser": "sth_realized_derived",
+    },
 ]
 
 
+# STH realized 派生:复用 onchain LTH realized 同样 2 endpoints,但桶反过来
+_STH_REALIZED_PATHS: dict[str, str] = {
+    "price_by_age": "/v1/metrics/breakdowns/price_realized_usd_by_age",
+    "supply_by_age": "/v1/metrics/breakdowns/supply_by_age",
+}
+_STH_BUCKETS: tuple[str, ...] = ("24h", "1d_1w", "1w_1m", "1m_3m", "3m_6m")
+
+
+def _gn_parse_by_age(raw: Any) -> dict[int, dict[str, float]]:
+    """[{"t": <sec>, "o": {"24h": ..., ...}}, ...] → {t_sec: {bucket: float}}"""
+    out: dict[int, dict[str, float]] = {}
+    if not isinstance(raw, list):
+        return out
+    for row in raw:
+        if not isinstance(row, dict):
+            continue
+        t = row.get("t")
+        o = row.get("o")
+        if t is None or not isinstance(o, dict):
+            continue
+        buckets: dict[str, float] = {}
+        for k, v in o.items():
+            try:
+                buckets[k] = float(v)
+            except (TypeError, ValueError):
+                continue
+        out[int(t)] = buckets
+    return out
+
+
+def _gn_aggregate_sth_realized(
+    price_by_t: dict[int, dict[str, float]],
+    supply_by_t: dict[int, dict[str, float]],
+) -> list[tuple[str, float]]:
+    """STH realized = Σ(price_b × supply_b) / Σ(supply_b),b ∈ _STH_BUCKETS"""
+    out: list[tuple[str, float]] = []
+    for t in sorted(set(price_by_t) & set(supply_by_t)):
+        p = price_by_t[t]
+        s = supply_by_t[t]
+        num = 0.0
+        denom = 0.0
+        for b in _STH_BUCKETS:
+            pv = p.get(b)
+            sv = s.get(b)
+            if pv is None or sv is None:
+                continue
+            num += pv * sv
+            denom += sv
+        if denom > 0:
+            dt = _ts_to_utc_dt(t)
+            d = _fmt_date(dt)
+            if d:
+                out.append((d, num / denom))
+    return out
+
+
+def _gn_fetch_sth_realized(*, since_unix: int | None) -> list[tuple[str, float]]:
+    """拉 2 个 breakdowns endpoints + 聚合 STH 5 桶,返 [(date, value), ...]。"""
+    p_params: dict[str, Any] = {"a": "BTC", "i": "24h"}
+    s_params: dict[str, Any] = {"a": "BTC", "i": "24h"}
+    if since_unix:
+        p_params["s"] = since_unix
+        s_params["s"] = since_unix
+    price_raw = _gn_get(_STH_REALIZED_PATHS["price_by_age"], params=p_params)
+    time.sleep(SPACING_GN)
+    supply_raw = _gn_get(_STH_REALIZED_PATHS["supply_by_age"], params=s_params)
+    if _is_err(price_raw) or _is_err(supply_raw):
+        return []
+    return _gn_aggregate_sth_realized(
+        _gn_parse_by_age(price_raw), _gn_parse_by_age(supply_raw),
+    )
+
+
 def probe_module_c() -> None:
-    print("=== Module C — Glassnode 期权 ===\n")
+    print("=== Module C — Glassnode 期权 + STH on-chain ===\n")
     print(f"Base: {GN_BASE}\nAuth: x-key: ****\n")
     for ep in _GN_ENDPOINTS:
-        print(f"——— {ep['name']:15s} ———")
+        print(f"——— {ep['name']:20s} ———")
+        if ep["parser"] == "sth_realized_derived":
+            print(f"  (派生:price_realized_usd_by_age + supply_by_age,STH 5 桶聚合)")
+            pairs = _gn_fetch_sth_realized(since_unix=None)
+            if pairs:
+                print(f"  ✅  parsed: date={pairs[0][0]}, value={pairs[0][1]:.2f}")
+                print(f"      latest: date={pairs[-1][0]}, value={pairs[-1][1]:.2f}")
+            else:
+                print("  ⚠️  STH 派生 0 rows(看 LTH realized 同样路径是否通)")
+            print()
+            time.sleep(SPACING_GN)
+            continue
         print(f"  path: {ep['path']}")
-        # probe 不传 s,默认返最近若干条
         raw = _gn_get(ep["path"], params={"a": "BTC", "i": "24h"})
         if _is_err(raw):
             print(f"  ❌  {raw}")
@@ -763,7 +860,18 @@ def full_module_c() -> None:
     print("\n=== Module C — Full ===\n")
     pieces: list[pd.DataFrame] = []
     for ep in _GN_ENDPOINTS:
-        print(f"  fetching {ep['col']:15s}", end=" ... ", flush=True)
+        print(f"  fetching {ep['col']:25s}", end=" ... ", flush=True)
+        if ep["parser"] == "sth_realized_derived":
+            pairs = _gn_fetch_sth_realized(since_unix=START_GN_UNIX)
+            if not pairs:
+                print("FAIL(STH 派生 0 rows)")
+                continue
+            df = pd.DataFrame(pairs, columns=["date", ep["col"]])
+            df = df.drop_duplicates("date", keep="last").set_index("date")
+            pieces.append(df)
+            print(f"{len(df)} rows ({df.index.min()} ~ {df.index.max()})")
+            time.sleep(SPACING_GN)
+            continue
         raw = _gn_get(ep["path"], params={
             "a": "BTC", "i": "24h", "s": START_GN_UNIX,
         })

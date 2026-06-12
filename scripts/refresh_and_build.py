@@ -241,13 +241,17 @@ def validate() -> list[str]:
                 df = pd.read_csv(csv_1d).sort_values("date").reset_index(drop=True)
                 csv_close = float(df["close"].iloc[-1])
                 rel = abs(snap_price - csv_close) / snap_price
-                if rel > 0.01:
+                # 5% 容差(2026-06-12 由 1% 放宽):snapshot 现价是 HTTP 调用
+                # 时刻的实时值,CSV 是 BJT 11:00 cron 那一刻的截图,**同一日内
+                # 不同时刻**,BTC 盘中波动 2-4% 常态。5% 才是"正常波动 vs
+                # 数据错乱"的合理分界。CSV 真停在旧日期由 gate (a) 单独抓。
+                if rel > 0.05:
                     errors.append(
                         f"[d] 锚点偏离: snapshot ${snap_price:.2f} "
-                        f"vs CSV ${csv_close:.2f} (差 {rel * 100:.2f}%)"
+                        f"vs CSV ${csv_close:.2f} (差 {rel * 100:.2f}% > 5%)"
                     )
                 else:
-                    log(f"    ✅ 锚点: snapshot ${snap_price:.2f} ≈ CSV ${csv_close:.2f} (差 {rel * 100:.3f}%)")
+                    log(f"    ✅ 锚点: snapshot ${snap_price:.2f} ≈ CSV ${csv_close:.2f} (差 {rel * 100:.2f}%, 阈值 5%)")
             except Exception as e:
                 errors.append(f"[d] 锚点计算异常: {type(e).__name__}: {e}")
 

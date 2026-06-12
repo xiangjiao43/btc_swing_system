@@ -1113,10 +1113,13 @@ def _build_pack_status(snapshot_md: str) -> dict[str, Any]:
             df = pd.read_csv(csv_1d).sort_values("date").reset_index(drop=True)
             csv_close = float(df["close"].iloc[-1])
             rel = abs(snap_price - csv_close) / snap_price
-            if rel > 0.01:
+            # 5% 容差(2026-06-12 由 1% 放宽):snapshot 现价 = HTTP 调用
+            # 时刻实时值,CSV close = BJT 11:00 cron 截图,同一日内不同时刻。
+            # BTC 盘中 2-4% 波动常态,5% 才是数据错乱门槛。
+            if rel > 0.05:
                 gate_d_errors.append(
                     f"snapshot ${snap_price:.2f} vs CSV ${csv_close:.2f} "
-                    f"(差 {rel * 100:.2f}% > 1%)"
+                    f"(差 {rel * 100:.2f}% > 5%)"
                 )
         except Exception as e:
             gate_d_errors.append(f"锚点计算异常 {type(e).__name__}: {e}")

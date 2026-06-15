@@ -75,26 +75,47 @@ def _env_or_die(name: str) -> str:
 # HTTP 通用
 # ============================================================
 def _http_get(url: str, *, headers: dict[str, str] | None = None) -> Any:
-    """GET → 解析后 JSON 或 {_err*: ...} 字典。"""
+    """GET → 解析后 JSON 或 {_err*: ...} 字典。
+
+    2026-06-15:5xx/超时 退避重试 3 次(5s/10s),429 → 1 次直接跳。
+    """
     req = Request(url, headers={
         "Accept": "application/json",
         "User-Agent": "btc-swing-history-fetcher/1.0",
         **(headers or {}),
     })
-    try:
-        with urlopen(req, timeout=TIMEOUT_SEC) as resp:
-            return json.loads(resp.read())
-    except HTTPError as e:
-        body_excerpt = ""
+    _RETRY_STATUSES = {500, 502, 503, 504, 408}
+    last_err: dict[str, Any] = {}
+    for attempt in range(1, 4):
         try:
-            body_excerpt = e.read().decode("utf-8", errors="replace")[:300]
-        except Exception:
-            pass
-        return {"_err_http": e.code, "_body": body_excerpt}
-    except URLError as e:
-        return {"_err_url": str(e)}
-    except Exception as e:
-        return {"_err_other": f"{type(e).__name__}: {e}"}
+            with urlopen(req, timeout=TIMEOUT_SEC) as resp:
+                return json.loads(resp.read())
+        except HTTPError as e:
+            body = ""
+            try:
+                body = e.read().decode("utf-8", errors="replace")[:300]
+            except Exception:
+                pass
+            last_err = {"_err_http": e.code, "_body": body}
+            if e.code == 429:
+                print(f"  [429_SKIP] {url[:80]} (attempt {attempt}/1)", flush=True)
+                return last_err
+            if e.code in _RETRY_STATUSES and attempt < 3:
+                delay = 5 * attempt
+                print(f"  HTTP {e.code} (attempt {attempt}/3), retry in {delay}s",
+                      flush=True)
+                time.sleep(delay)
+                continue
+            return last_err
+        except URLError as e:
+            last_err = {"_err_url": str(e)}
+            if attempt < 3:
+                time.sleep(5 * attempt)
+                continue
+            return last_err
+        except Exception as e:
+            return {"_err_other": f"{type(e).__name__}: {e}"}
+    return last_err
 
 
 def _is_err(body: Any) -> bool:

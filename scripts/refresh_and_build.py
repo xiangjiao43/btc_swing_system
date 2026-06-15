@@ -31,13 +31,16 @@ cron 用法(BJT 11:00,在服务器 crontab 里):
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
 import sys
+import time
 import urllib.parse
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 
@@ -46,7 +49,30 @@ import pandas as pd
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 PACKAGES_DIR = PROJECT_ROOT / "packages"
 LOGS_DIR = PROJECT_ROOT / "logs"
+STATE_FILE = PROJECT_ROOT / ".pipeline_state.json"
 BJT = timezone(timedelta(hours=8))
+
+
+def _load_dotenv() -> int:
+    """启动时自源 .env(根治 2026-06-15 5 天 cron 全失败的根因:
+    cron 命令行不 source .env → 所有 API_KEY 全空 → 脚本 1 秒退出)。
+    手动 SSH 跑也兼容(os.environ.setdefault 不覆盖已有值)。返回加载的 KV 数。
+    """
+    env_file = PROJECT_ROOT / ".env"
+    if not env_file.exists():
+        return 0
+    n = 0
+    for line in env_file.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, v = line.split("=", 1)
+        k = k.strip()
+        v = v.strip().strip('"').strip("'")
+        if k and k not in os.environ:
+            os.environ[k] = v
+            n += 1
+    return n
 
 DEFAULT_SNAPSHOT_URL = os.environ.get(
     "SNAPSHOT_URL", "http://127.0.0.1:8000/api/export/snapshot.md",
@@ -261,41 +287,104 @@ def validate() -> list[str]:
 # ============================================================
 # Main
 # ============================================================
+def _load_state() -> dict[str, Any]:
+    if not STATE_FILE.exists():
+        return {"last_success_at": None, "consecutive_failures": 0,
+                "last_failure_reason": None, "last_failure_at": None}
+    try:
+        return json.loads(STATE_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {"last_success_at": None, "consecutive_failures": 0,
+                "last_failure_reason": None, "last_failure_at": None}
+
+
+def _save_state(state: dict[str, Any]) -> None:
+    try:
+        STATE_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=2))
+    except Exception as e:
+        log(f"⚠️  state 写入失败: {e}")
+
+
+def _mark_success(state: dict[str, Any]) -> None:
+    state["last_success_at"] = datetime.now(BJT).strftime("%Y-%m-%d %H:%M BJT")
+    state["consecutive_failures"] = 0
+    state["last_failure_reason"] = None
+    state["last_failure_at"] = None
+    _save_state(state)
+
+
+def _mark_failure(state: dict[str, Any], reason: str) -> int:
+    state["consecutive_failures"] = state.get("consecutive_failures", 0) + 1
+    state["last_failure_reason"] = reason
+    state["last_failure_at"] = datetime.now(BJT).strftime("%Y-%m-%d %H:%M BJT")
+    _save_state(state)
+    return state["consecutive_failures"]
+
+
+def run_with_retry(cmd: list[str], label: str, max_retries: int = 1,
+                   retry_sleep: int = 60) -> int:
+    """跑子进程,失败自动重试 max_retries 次,间隔 retry_sleep 秒。返 final exit code。"""
+    for attempt in range(max_retries + 1):
+        rc = run_subprocess(cmd, label + (
+            f" (重试 {attempt}/{max_retries})" if attempt > 0 else ""
+        ))
+        if rc == 0:
+            return 0
+        if attempt < max_retries:
+            log(f"  ⏳ {label} 失败,{retry_sleep}s 后重试")
+            time.sleep(retry_sleep)
+    return rc
+
+
 def main() -> int:
     LOGS_DIR.mkdir(exist_ok=True)
     PACKAGES_DIR.mkdir(exist_ok=True)
 
+    # 2026-06-15 根治:启动时自加载 .env(crontab 不 source .env 也能跑)
+    n_env = _load_dotenv()
+
     log("=" * 60)
     log("refresh_and_build 启动")
+    log(f"  .env 加载: {n_env} 个 KV")
     log("=" * 60)
 
-    # Step 1: fetch onchain
-    rc = run_subprocess(
+    state = _load_state()
+
+    # Step 1: fetch onchain — 1 次重试
+    rc = run_with_retry(
         [sys.executable, "scripts/fetch_btc_onchain_history.py", "--full"],
         "fetch onchain --full",
     )
     if rc != 0:
-        notify("BTC pipeline failed: onchain fetch",
-               f"fetch_btc_onchain_history.py exit={rc}")
+        n_fail = _mark_failure(state, f"onchain fetch exit={rc}")
+        notify(f"BTC pipeline failed: onchain fetch (连续 {n_fail} 天)",
+               f"fetch_btc_onchain_history.py exit={rc}\n"
+               f"上次成功: {state.get('last_success_at') or '(从未)'}\n"
+               f"详情:`tail -100 logs/refresh.log`")
         return 10
 
-    # Step 2: fetch swing
-    rc = run_subprocess(
+    # Step 2: fetch swing — 1 次重试
+    rc = run_with_retry(
         [sys.executable, "scripts/fetch_btc_swing_history.py", "--full"],
         "fetch swing --full",
     )
     if rc != 0:
-        notify("BTC pipeline failed: swing fetch",
-               f"fetch_btc_swing_history.py exit={rc}")
+        n_fail = _mark_failure(state, f"swing fetch exit={rc}")
+        notify(f"BTC pipeline failed: swing fetch (连续 {n_fail} 天)",
+               f"fetch_btc_swing_history.py exit={rc}\n"
+               f"上次成功: {state.get('last_success_at') or '(从未)'}\n"
+               f"详情:`tail -100 logs/refresh.log`")
         return 11
 
     # Step 3: 校验
     errors = validate()
     if errors:
+        n_fail = _mark_failure(state, f"校验未过 {len(errors)} 项")
         body = "\n".join(f"  - {e}" for e in errors)
         notify(
-            f"BTC pipeline failed: 校验未过 ({len(errors)} 项)",
-            f"今日不打包,等修复后重跑。失败项:\n{body}\n\n"
+            f"BTC pipeline failed: 校验未过 ({len(errors)} 项,连续 {n_fail} 天)",
+            f"今日不打包。失败项:\n{body}\n\n"
+            f"上次成功:{state.get('last_success_at') or '(从未)'}\n"
             f"快照: {DEFAULT_SNAPSHOT_URL}",
         )
         return 20
@@ -308,7 +397,8 @@ def main() -> int:
         "build_analysis_package",
     )
     if rc != 0:
-        notify("BTC pipeline failed: build_analysis_package",
+        n_fail = _mark_failure(state, f"build exit={rc}")
+        notify(f"BTC pipeline failed: build_analysis_package (连续 {n_fail} 天)",
                f"build_analysis_package exit={rc}")
         return 30
 
@@ -318,8 +408,10 @@ def main() -> int:
         size_kb = pkg.stat().st_size / 1024
         log(f"✅ {pkg.name} ({size_kb:.0f} KB)")
         log(f"   下载 URL:http://124.222.89.86/api/export/pack/today.zip")
+        _mark_success(state)
     else:
-        notify("BTC pipeline 异常",
+        n_fail = _mark_failure(state, f"build exit=0 but zip missing")
+        notify(f"BTC pipeline 异常 (连续 {n_fail} 天)",
                f"build 报 exit=0 但 zip 不存在: {pkg}")
         return 31
 

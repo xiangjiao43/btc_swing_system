@@ -975,6 +975,7 @@ router = APIRouter(prefix="/export", tags=["export"])
 # 项目根目录(用于定位 packages/ + CSV)
 _PROJECT_ROOT_FOR_PACK = Path(__file__).resolve().parent.parent.parent.parent
 _PACKAGES_DIR = _PROJECT_ROOT_FOR_PACK / "packages"
+_STATE_FILE = _PROJECT_ROOT_FOR_PACK / ".pipeline_state.json"
 
 # 5 CSV 新鲜度阈值(天) — 必须与 scripts/refresh_and_build.py 保持一致
 _CSV_FRESHNESS_THRESHOLDS: dict[str, int] = {
@@ -1015,11 +1016,25 @@ def get_snapshot_markdown(request: Request) -> PlainTextResponse:
     return PlainTextResponse(content=md, media_type="text/markdown; charset=utf-8")
 
 
+def _load_pipeline_state() -> dict[str, Any]:
+    """读 .pipeline_state.json,refresh_and_build 维护。空文件 → 全 None。"""
+    if not _STATE_FILE.exists():
+        return {"last_success_at": None, "consecutive_failures": 0,
+                "last_failure_reason": None, "last_failure_at": None}
+    try:
+        import json as _json
+        return _json.loads(_STATE_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {"last_success_at": None, "consecutive_failures": 0,
+                "last_failure_reason": None, "last_failure_at": None}
+
+
 def _build_pack_status(snapshot_md: str) -> dict[str, Any]:
     """轻量本地校验 + 包元数据,返回结构化 status 给 HTML 渲染。"""
     now_bjt = datetime.now(_BJT)
     today_bjt = now_bjt.date()
     today_str = today_bjt.strftime("%Y-%m-%d")
+    pipeline_state = _load_pipeline_state()
 
     # === 包元数据 ===
     pkg = _PACKAGES_DIR / f"analysis_package_{today_str}.zip"
@@ -1147,6 +1162,7 @@ def _build_pack_status(snapshot_md: str) -> dict[str, Any]:
         "csvs": csv_status,
         "gates": gates,
         "overall_ok": overall_ok,
+        "pipeline_state": pipeline_state,
     }
 
 
@@ -1166,6 +1182,10 @@ _PACK_STATUS_HTML = """<!DOCTYPE html>
   .banner {{ padding: 1em 1.2em; border-radius: 6px; font-size: 1.05em; margin: 1em 0; }}
   .banner.ok {{ background: #d4edda; color: #155724; border-left: 4px solid #28a745; }}
   .banner.fail {{ background: #f8d7da; color: #721c24; border-left: 4px solid #dc3545; }}
+  .mega-alert {{ background: #dc3545; color: white; padding: 1.5em; border-radius: 8px;
+                font-size: 1.4em; font-weight: 700; text-align: center; margin: 1em 0;
+                box-shadow: 0 4px 12px rgba(220,53,69,.3); }}
+  .mega-alert small {{ font-size: .7em; font-weight: 400; opacity: .9; display: block; margin-top: .5em; }}
   table {{ border-collapse: collapse; width: 100%; margin: .8em 0; }}
   th, td {{ padding: .55em .8em; text-align: left; border-bottom: 1px solid #eee; }}
   th {{ background: #f7f7f7; font-weight: 600; }}
@@ -1193,6 +1213,7 @@ _PACK_STATUS_HTML = """<!DOCTYPE html>
   <h1>📦 BTC 分析包状态</h1>
   <div class="date">📅 {today} (BJT)</div>
 
+  {mega_alert}
   {banner}
 
   <h2>分析包 zip</h2>
@@ -1231,6 +1252,24 @@ _PACK_STATUS_HTML = """<!DOCTYPE html>
 def _render_pack_status_html(status: dict[str, Any]) -> str:
     overall_ok = status["overall_ok"]
     pkg = status["package"]
+    ps = status.get("pipeline_state") or {}
+
+    # === Mega alert(连续失败 >= 2 天)===
+    consec = ps.get("consecutive_failures") or 0
+    last_succ = ps.get("last_success_at") or "(从未)"
+    if consec >= 2:
+        reason = ps.get("last_failure_reason") or "未知"
+        last_fail_at = ps.get("last_failure_at") or "?"
+        mega_alert = (
+            '<div class="mega-alert">'
+            f'🚨 已连续 {consec} 天打包失败 — 请立即排查'
+            f'<small>上次成功:{_esc_html(last_succ)} ｜ '
+            f'最后失败:{_esc_html(last_fail_at)} ｜ 原因:{_esc_html(reason)}'
+            f'<br>详情看服务器 <code>tail -100 logs/refresh.log</code></small>'
+            '</div>'
+        )
+    else:
+        mega_alert = ""
 
     # === Banner ===
     if overall_ok and pkg["exists"]:
@@ -1322,6 +1361,7 @@ def _render_pack_status_html(status: dict[str, Any]) -> str:
     return _PACK_STATUS_HTML.format(
         today=status["today_str"],
         now_bjt=status["now_bjt_str"],
+        mega_alert=mega_alert,
         banner=banner,
         pkg_html=pkg_html,
         download_btn=download_btn,

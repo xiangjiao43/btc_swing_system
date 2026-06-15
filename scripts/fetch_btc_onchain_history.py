@@ -137,7 +137,11 @@ def _get_key() -> str:
 
 
 def _fetch(path: str, *, since_unix: int | None) -> Any:
-    """GET base_url + path(BTC, 24h)。返回解析后 JSON 或 {_err*: ...}。"""
+    """GET base_url + path(BTC, 24h)。返回解析后 JSON 或 {_err*: ...}。
+
+    2026-06-15:加 3 次重试。5xx/超时 → 退避(5s/10s) 重试,429 → 1 次直接跳
+    (等下次 cron 兜底,避免烧 quota)。
+    """
     params: dict[str, Any] = {"a": "BTC", "i": "24h"}
     if since_unix:
         params["s"] = since_unix
@@ -147,18 +151,35 @@ def _fetch(path: str, *, since_unix: int | None) -> Any:
         "Accept": "application/json",
         "User-Agent": "btc-onchain-history-fetcher/1.0",
     })
-    try:
-        with urlopen(req, timeout=TIMEOUT_SEC) as resp:
-            return json.loads(resp.read())
-    except HTTPError as e:
-        return {
-            "_err_http": e.code,
-            "_body": e.read().decode("utf-8", errors="replace")[:300],
-        }
-    except URLError as e:
-        return {"_err_url": str(e)}
-    except Exception as e:
-        return {"_err_other": f"{type(e).__name__}: {e}"}
+    _RETRY_STATUSES = {500, 502, 503, 504, 408}  # 注:不含 429
+    last_err: dict[str, Any] = {}
+    for attempt in range(1, 4):  # 1, 2, 3
+        try:
+            with urlopen(req, timeout=TIMEOUT_SEC) as resp:
+                return json.loads(resp.read())
+        except HTTPError as e:
+            body = e.read().decode("utf-8", errors="replace")[:300]
+            last_err = {"_err_http": e.code, "_body": body}
+            if e.code == 429:
+                # 429 → 直接跳,不重试(秒级窗口限频)
+                print(f"  [429_SKIP] {path} (attempt {attempt}/1)", flush=True)
+                return last_err
+            if e.code in _RETRY_STATUSES and attempt < 3:
+                delay = 5 * attempt  # 5s, 10s
+                print(f"  HTTP {e.code} on {path} (attempt {attempt}/3), "
+                      f"retry in {delay}s", flush=True)
+                time.sleep(delay)
+                continue
+            return last_err
+        except URLError as e:
+            last_err = {"_err_url": str(e)}
+            if attempt < 3:
+                time.sleep(5 * attempt)
+                continue
+            return last_err
+        except Exception as e:
+            return {"_err_other": f"{type(e).__name__}: {e}"}
+    return last_err
 
 
 def _to_iso_date(t_sec: int) -> str:

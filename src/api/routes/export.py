@@ -22,7 +22,10 @@ _BJT = timezone(timedelta(hours=8))
 
 # 每个指标的"可接受新鲜度上限(天)"。超过则在 markdown 里打 ⚠️STALE。
 # 按指标更新频率分档(用户指定):
-#   - 日频(价格/衍生品/DXY/VIX/股指/收益率类)/ Glassnode 链上: 3 天
+#   - 日频(价格/衍生品 / Glassnode 链上): 3 天
+#   - **FRED H.10/H.15 周更日频**(DXY/yields/VIX/纳指/真实利率): 8 天
+#     原 3 天与 FRED 实际节奏冲突:H.10 周一发布上周日数据,周二~周日
+#     一直 STALE 实际是 FRED 节奏自身,不是数据故障。8 天 = 7 天周期 + 1 天 buffer
 #   - 周度宏观(fed_balance_sheet H.4.1): 10 天
 #   - 月频(CPI / Core CPI / M2 / PCE): 40 天
 #   - 政策利率(fed_funds_rate): 45 天
@@ -38,6 +41,13 @@ _STALE_DAYS_BY_FACTOR: dict[str, int] = {
     "etf_flow": 5,
     "etf_flow_7d_sum_usd": 5,
     "etf_flow_30d_sum_usd": 5,
+    # FRED H.10 / H.15 周更日频(2026-06-15 用户决策:3 → 8 天)
+    "dxy": 8,
+    "us10y": 8,
+    "us2y": 8,
+    "real_yield": 8,
+    "vix": 8,
+    "nasdaq": 8,
 }
 
 # 抓取类因子 → (table, metric_name)。

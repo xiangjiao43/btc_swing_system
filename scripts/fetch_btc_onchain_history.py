@@ -151,9 +151,12 @@ def _fetch(path: str, *, since_unix: int | None) -> Any:
         "Accept": "application/json",
         "User-Agent": "btc-onchain-history-fetcher/1.0",
     })
+    # 2026-06-16:backoff 升级 5/10 → 10/30/60(4 次尝试,累计 ~100s)
+    # 覆盖更长的上游抖动(alphanode 偶发 60-90s 不通的网络/中转故障)
     _RETRY_STATUSES = {500, 502, 503, 504, 408}  # 注:不含 429
+    _BACKOFF_SEQ = [10, 30, 60]  # 第 1 次失败等 10s,第 2 次失败等 30s,第 3 次等 60s
     last_err: dict[str, Any] = {}
-    for attempt in range(1, 4):  # 1, 2, 3
+    for attempt in range(1, len(_BACKOFF_SEQ) + 2):  # 4 attempts: 1, 2, 3, 4
         try:
             with urlopen(req, timeout=TIMEOUT_SEC) as resp:
                 return json.loads(resp.read())
@@ -161,25 +164,65 @@ def _fetch(path: str, *, since_unix: int | None) -> Any:
             body = e.read().decode("utf-8", errors="replace")[:300]
             last_err = {"_err_http": e.code, "_body": body}
             if e.code == 429:
-                # 429 → 直接跳,不重试(秒级窗口限频)
+                # 429 → 直接跳,不重试(秒级窗口限频,等下一次 cron 兜底)
                 print(f"  [429_SKIP] {path} (attempt {attempt}/1)", flush=True)
                 return last_err
-            if e.code in _RETRY_STATUSES and attempt < 3:
-                delay = 5 * attempt  # 5s, 10s
-                print(f"  HTTP {e.code} on {path} (attempt {attempt}/3), "
+            if e.code in _RETRY_STATUSES and attempt <= len(_BACKOFF_SEQ):
+                delay = _BACKOFF_SEQ[attempt - 1]
+                print(f"  HTTP {e.code} on {path} (attempt {attempt}/4), "
                       f"retry in {delay}s", flush=True)
                 time.sleep(delay)
                 continue
             return last_err
         except URLError as e:
             last_err = {"_err_url": str(e)}
-            if attempt < 3:
-                time.sleep(5 * attempt)
+            if attempt <= len(_BACKOFF_SEQ):
+                delay = _BACKOFF_SEQ[attempt - 1]
+                print(f"  URLError (attempt {attempt}/4), retry in {delay}s",
+                      flush=True)
+                time.sleep(delay)
                 continue
             return last_err
         except Exception as e:
             return {"_err_other": f"{type(e).__name__}: {e}"}
     return last_err
+
+
+# 2026-06-16:共享 .last_failures.json 跟踪上次跑哪些 endpoint 失败,
+# 下次跑时优先重试 + 二次 pass + 持久化失败列表给监控用。
+_FAILURES_FILE = Path(__file__).resolve().parent.parent / ".last_failures.json"
+
+
+def _load_last_failures(script_key: str) -> list[dict[str, Any]]:
+    """读 .last_failures.json 里指定 script 的失败 endpoint 列表。"""
+    if not _FAILURES_FILE.exists():
+        return []
+    try:
+        data = json.loads(_FAILURES_FILE.read_text(encoding="utf-8"))
+        return data.get(script_key, [])
+    except Exception:
+        return []
+
+
+def _save_last_failures(script_key: str,
+                        failures: list[dict[str, Any]]) -> None:
+    """更新本 script 的失败列表(merge 其他 script 的不动)。"""
+    data: dict[str, Any] = {}
+    if _FAILURES_FILE.exists():
+        try:
+            data = json.loads(_FAILURES_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            data = {}
+    data[script_key] = failures
+    data["_last_updated"] = (
+        datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    )
+    try:
+        _FAILURES_FILE.write_text(
+            json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8",
+        )
+    except Exception as e:
+        print(f"⚠️  write .last_failures.json failed: {e}", flush=True)
 
 
 def _to_iso_date(t_sec: int) -> str:
@@ -310,62 +353,147 @@ def cmd_probe() -> None:
 # ============================================================
 # Full 模式 — 拉全量 + outer-join + 写 CSV
 # ============================================================
+def _try_fetch_endpoint(key: str, info: dict[str, Any],
+                       since_unix: int) -> tuple[pd.Series, bool]:
+    """单 endpoint 拉 + 解析。返 (series, ok)。ok=False 说明失败,series 为空。"""
+    raw = _fetch(info["path"], since_unix=since_unix)
+    col = info["col"]
+    if isinstance(raw, dict) and any(k.startswith("_err") for k in raw):
+        return pd.Series(dtype=float, name=col), False
+    pairs = _parse_tv(raw)
+    if not pairs:
+        return pd.Series(dtype=float, name=col), False
+    df = pd.DataFrame(pairs, columns=["date", col])
+    df = df.drop_duplicates("date", keep="last")
+    return df.set_index("date")[col], True
+
+
+def _try_fetch_lth_realized(since_unix: int) -> tuple[pd.Series, bool]:
+    """LTH realized 派生(2 个 breakdowns endpoints + 桶聚合)。"""
+    price_raw = _fetch(LTH_REALIZED_PATHS["price_by_age"], since_unix=since_unix)
+    time.sleep(SPACING_SEC)
+    supply_raw = _fetch(LTH_REALIZED_PATHS["supply_by_age"], since_unix=since_unix)
+    if (isinstance(price_raw, dict) and any(k.startswith("_err") for k in price_raw)) \
+       or (isinstance(supply_raw, dict) and any(k.startswith("_err") for k in supply_raw)):
+        return pd.Series(dtype=float, name=LTH_REALIZED_COL), False
+    price_by_t = _parse_by_age(price_raw)
+    supply_by_t = _parse_by_age(supply_raw)
+    pairs = _aggregate_lth_realized(price_by_t, supply_by_t)
+    if not pairs:
+        return pd.Series(dtype=float, name=LTH_REALIZED_COL), False
+    df = pd.DataFrame(pairs, columns=["date", LTH_REALIZED_COL])
+    df = df.drop_duplicates("date", keep="last")
+    return df.set_index("date")[LTH_REALIZED_COL], True
+
+
 def cmd_full() -> None:
     print(f"=== Full 模式:从 {START_DATE.date()} UTC 拉 6 指标日频\n")
     since_unix = int(START_DATE.timestamp())
 
-    series: list[pd.Series] = []
+    # 上轮失败记录:本轮优先重试(顺序提前 + 日志高亮)
+    prev_failures = _load_last_failures("onchain")
+    prev_failed_keys = {f["key"] for f in prev_failures}
+    if prev_failures:
+        print(f"⚠️  上轮 {len(prev_failures)} 个 endpoint 失败,本轮优先重试:")
+        for f in prev_failures:
+            print(f"    - {f['key']}")
+        print()
 
-    # 5 个简单 endpoint
-    for key, info in SIMPLE_ENDPOINTS.items():
-        print(f"  fetching {info['col']:36s}", end=" ... ", flush=True)
-        raw = _fetch(info["path"], since_unix=since_unix)
-        if isinstance(raw, dict) and any(k.startswith("_err") for k in raw):
-            print(f"FAIL {raw}")
-            series.append(pd.Series(dtype=float, name=info["col"]))
-            time.sleep(SPACING_SEC)
-            continue
-        pairs = _parse_tv(raw)
-        if not pairs:
-            print("0 rows(响应格式不匹配)")
-            series.append(pd.Series(dtype=float, name=info["col"]))
-            time.sleep(SPACING_SEC)
-            continue
-        df = pd.DataFrame(pairs, columns=["date", info["col"]])
-        df = df.drop_duplicates("date", keep="last")
-        s = df.set_index("date")[info["col"]]
-        series.append(s)
-        print(f"{len(s)} rows  ({s.index.min()} ~ {s.index.max()})")
+    # Phase 1:常规主 loop
+    results: dict[str, pd.Series] = {}
+    failed_keys: list[str] = []
+    # 先跑上次失败的,再跑其他(保证失败 endpoint 在 fresh quota 下先打)
+    ordered_items = (
+        [(k, SIMPLE_ENDPOINTS[k]) for k in prev_failed_keys
+         if k in SIMPLE_ENDPOINTS]
+        + [(k, v) for k, v in SIMPLE_ENDPOINTS.items()
+           if k not in prev_failed_keys]
+    )
+
+    for key, info in ordered_items:
+        marker = " (优先)" if key in prev_failed_keys else ""
+        print(f"  fetching {info['col']:36s}{marker}", end=" ... ", flush=True)
+        s, ok = _try_fetch_endpoint(key, info, since_unix)
+        if ok:
+            print(f"{len(s)} rows  ({s.index.min()} ~ {s.index.max()})")
+            results[key] = s
+        else:
+            print("FAIL")
+            results[key] = s
+            failed_keys.append(key)
         time.sleep(SPACING_SEC)
 
-    # LTH Realized(派生)
+    # LTH Realized(派生 — 单独处理因为 2 endpoints)
     print(f"  fetching {LTH_REALIZED_COL:36s}", end=" ... ", flush=True)
-    price_raw = _fetch(LTH_REALIZED_PATHS["price_by_age"], since_unix=since_unix)
-    time.sleep(SPACING_SEC)
-    supply_raw = _fetch(LTH_REALIZED_PATHS["supply_by_age"], since_unix=since_unix)
-    time.sleep(SPACING_SEC)
-    if (isinstance(price_raw, dict) and any(k.startswith("_err") for k in price_raw)) \
-       or (isinstance(supply_raw, dict) and any(k.startswith("_err") for k in supply_raw)):
-        print(f"FAIL price={price_raw!r} supply={supply_raw!r}")
-        series.append(pd.Series(dtype=float, name=LTH_REALIZED_COL))
+    s, ok = _try_fetch_lth_realized(since_unix)
+    if ok:
+        print(f"{len(s)} rows  ({s.index.min()} ~ {s.index.max()})")
+        results["__lth_realized__"] = s
     else:
-        price_by_t = _parse_by_age(price_raw)
-        supply_by_t = _parse_by_age(supply_raw)
-        pairs = _aggregate_lth_realized(price_by_t, supply_by_t)
-        if not pairs:
-            print("0 rows(桶结构不符 — 跑 --probe 看实际响应)")
-            series.append(pd.Series(dtype=float, name=LTH_REALIZED_COL))
-        else:
-            df = pd.DataFrame(pairs, columns=["date", LTH_REALIZED_COL])
-            df = df.drop_duplicates("date", keep="last")
-            s = df.set_index("date")[LTH_REALIZED_COL]
-            series.append(s)
-            print(f"{len(s)} rows  ({s.index.min()} ~ {s.index.max()})")
+        print("FAIL")
+        results["__lth_realized__"] = s
+        failed_keys.append("__lth_realized__")
+    time.sleep(SPACING_SEC)
+
+    # Phase 2:second-pass 自愈 — 失败 endpoint 等 90s 重试一次
+    if failed_keys:
+        print(f"\n⏳ Second-pass 自愈:{len(failed_keys)} 个 endpoint 失败,"
+              f"等 90s 后重试")
+        time.sleep(90)
+        still_failed: list[str] = []
+        for key in failed_keys:
+            if key == "__lth_realized__":
+                print(f"  retry {LTH_REALIZED_COL:36s}", end=" ... ", flush=True)
+                s, ok = _try_fetch_lth_realized(since_unix)
+                col = LTH_REALIZED_COL
+            else:
+                info = SIMPLE_ENDPOINTS[key]
+                print(f"  retry {info['col']:36s}", end=" ... ", flush=True)
+                s, ok = _try_fetch_endpoint(key, info, since_unix)
+                col = info["col"]
+            if ok:
+                print(f"RECOVERED ({len(s)} rows)")
+                results[key] = s
+            else:
+                print("STILL FAIL")
+                still_failed.append(key)
+            time.sleep(SPACING_SEC)
+        failed_keys = still_failed
+
+    # Phase 3:持久化最终失败列表(供下次 cron 优先重试 + 监控)
+    final_failures = []
+    for key in failed_keys:
+        if key == "__lth_realized__":
+            final_failures.append({
+                "key": key, "col": LTH_REALIZED_COL,
+                "paths": list(LTH_REALIZED_PATHS.values()),
+            })
+        elif key in SIMPLE_ENDPOINTS:
+            info = SIMPLE_ENDPOINTS[key]
+            final_failures.append({
+                "key": key, "col": info["col"], "path": info["path"],
+            })
+    _save_last_failures("onchain", final_failures)
+    if final_failures:
+        print(f"\n⚠️  最终 {len(final_failures)} 个 endpoint 失败(已写 "
+              f".last_failures.json,下次 cron 自动优先重试)")
+    elif prev_failures:
+        print(f"\n✅ 上轮失败的 {len(prev_failures)} 个 endpoint 本轮全部恢复 "
+              f"(.last_failures.json 已清空)")
+
+    # 重组 series(按原始顺序)
+    series: list[pd.Series] = []
+    for key in SIMPLE_ENDPOINTS:
+        series.append(results.get(key, pd.Series(
+            dtype=float, name=SIMPLE_ENDPOINTS[key]["col"],
+        )))
+    series.append(results.get("__lth_realized__", pd.Series(
+        dtype=float, name=LTH_REALIZED_COL,
+    )))
 
     # outer join on date
     merged = pd.concat(series, axis=1, join="outer").sort_index()
     merged.index.name = "date"
-    # 重要:不要 fillna(0),空值留空(to_csv 默认空字符串)
     merged.to_csv(OUTPUT_PATH, na_rep="")
     print(f"\n✅ 写入 {OUTPUT_PATH}  ({len(merged)} 行 × {len(merged.columns)} 列)")
     print(f"   日期范围: {merged.index.min()} ~ {merged.index.max()}")

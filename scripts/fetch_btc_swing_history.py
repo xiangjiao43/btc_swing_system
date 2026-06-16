@@ -84,9 +84,11 @@ def _http_get(url: str, *, headers: dict[str, str] | None = None) -> Any:
         "User-Agent": "btc-swing-history-fetcher/1.0",
         **(headers or {}),
     })
+    # 2026-06-16:backoff 升级 5/10 → 10/30/60(4 次尝试,~100s 累计)
     _RETRY_STATUSES = {500, 502, 503, 504, 408}
+    _BACKOFF_SEQ = [10, 30, 60]
     last_err: dict[str, Any] = {}
-    for attempt in range(1, 4):
+    for attempt in range(1, len(_BACKOFF_SEQ) + 2):  # 4 attempts: 1,2,3,4
         try:
             with urlopen(req, timeout=TIMEOUT_SEC) as resp:
                 return json.loads(resp.read())
@@ -100,22 +102,62 @@ def _http_get(url: str, *, headers: dict[str, str] | None = None) -> Any:
             if e.code == 429:
                 print(f"  [429_SKIP] {url[:80]} (attempt {attempt}/1)", flush=True)
                 return last_err
-            if e.code in _RETRY_STATUSES and attempt < 3:
-                delay = 5 * attempt
-                print(f"  HTTP {e.code} (attempt {attempt}/3), retry in {delay}s",
+            if e.code in _RETRY_STATUSES and attempt <= len(_BACKOFF_SEQ):
+                delay = _BACKOFF_SEQ[attempt - 1]
+                print(f"  HTTP {e.code} (attempt {attempt}/4), retry in {delay}s",
                       flush=True)
                 time.sleep(delay)
                 continue
             return last_err
         except URLError as e:
             last_err = {"_err_url": str(e)}
-            if attempt < 3:
-                time.sleep(5 * attempt)
+            if attempt <= len(_BACKOFF_SEQ):
+                delay = _BACKOFF_SEQ[attempt - 1]
+                print(f"  URLError (attempt {attempt}/4), retry in {delay}s",
+                      flush=True)
+                time.sleep(delay)
                 continue
             return last_err
         except Exception as e:
             return {"_err_other": f"{type(e).__name__}: {e}"}
     return last_err
+
+
+# 2026-06-16:共享 .last_failures.json,跟踪上次跑哪些 endpoint 失败,
+# 下次跑时优先重试 + 二次 pass + 持久化失败列表给监控用。
+_FAILURES_FILE = (
+    Path(__file__).resolve().parent.parent / ".last_failures.json"
+)
+
+
+def _load_last_failures(script_key: str) -> list[dict[str, Any]]:
+    if not _FAILURES_FILE.exists():
+        return []
+    try:
+        data = json.loads(_FAILURES_FILE.read_text(encoding="utf-8"))
+        return data.get(script_key, [])
+    except Exception:
+        return []
+
+
+def _save_last_failures(script_key: str,
+                        failures: list[dict[str, Any]]) -> None:
+    data: dict[str, Any] = {}
+    if _FAILURES_FILE.exists():
+        try:
+            data = json.loads(_FAILURES_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            data = {}
+    data[script_key] = failures
+    data["_last_updated"] = (
+        datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    )
+    try:
+        _FAILURES_FILE.write_text(
+            json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8",
+        )
+    except Exception as e:
+        print(f"⚠️  write .last_failures.json failed: {e}", flush=True)
 
 
 def _is_err(body: Any) -> bool:
@@ -877,42 +919,95 @@ def probe_module_c() -> None:
         time.sleep(SPACING_GN)
 
 
+def _gn_try_fetch_one(ep: dict[str, Any]) -> tuple[pd.DataFrame | None, bool]:
+    """单 endpoint 拉 + 解析,返 (df, ok)。"""
+    if ep["parser"] == "sth_realized_derived":
+        pairs = _gn_fetch_sth_realized(since_unix=START_GN_UNIX)
+        if not pairs:
+            return None, False
+        df = pd.DataFrame(pairs, columns=["date", ep["col"]])
+        return df.drop_duplicates("date", keep="last").set_index("date"), True
+    raw = _gn_get(ep["path"], params={
+        "a": "BTC", "i": "24h", "s": START_GN_UNIX,
+    })
+    if _is_err(raw):
+        return None, False
+    pairs = (_gn_parse_tv(raw) if ep["parser"] == "tv"
+             else _gn_parse_max_pain_1m(raw))
+    if not pairs:
+        return None, False
+    df = pd.DataFrame(pairs, columns=["date", ep["col"]])
+    return df.drop_duplicates("date", keep="last").set_index("date"), True
+
+
 def full_module_c() -> None:
     print("\n=== Module C — Full ===\n")
+
+    prev_failures = _load_last_failures("swing_module_c")
+    prev_failed_names = {f["name"] for f in prev_failures}
+    if prev_failures:
+        print(f"⚠️  上轮 {len(prev_failures)} 个 endpoint 失败,本轮优先重试:")
+        for f in prev_failures:
+            print(f"    - {f['name']}")
+        print()
+
+    # 优先跑上次失败的
+    ordered = (
+        [ep for ep in _GN_ENDPOINTS if ep["name"] in prev_failed_names]
+        + [ep for ep in _GN_ENDPOINTS if ep["name"] not in prev_failed_names]
+    )
+
+    results: dict[str, pd.DataFrame] = {}
+    failed_names: list[str] = []
+    for ep in ordered:
+        marker = " (优先)" if ep["name"] in prev_failed_names else ""
+        print(f"  fetching {ep['col']:25s}{marker}", end=" ... ", flush=True)
+        df, ok = _gn_try_fetch_one(ep)
+        if ok and df is not None:
+            results[ep["name"]] = df
+            print(f"{len(df)} rows ({df.index.min()} ~ {df.index.max()})")
+        else:
+            failed_names.append(ep["name"])
+            print("FAIL")
+        time.sleep(SPACING_GN)
+
+    # Second-pass 自愈
+    if failed_names:
+        print(f"\n⏳ Second-pass:{len(failed_names)} 个失败,等 90s 后重试")
+        time.sleep(90)
+        still_failed: list[str] = []
+        ep_by_name = {ep["name"]: ep for ep in _GN_ENDPOINTS}
+        for name in failed_names:
+            ep = ep_by_name[name]
+            print(f"  retry {ep['col']:25s}", end=" ... ", flush=True)
+            df, ok = _gn_try_fetch_one(ep)
+            if ok and df is not None:
+                results[name] = df
+                print(f"RECOVERED ({len(df)} rows)")
+            else:
+                still_failed.append(name)
+                print("STILL FAIL")
+            time.sleep(SPACING_GN)
+        failed_names = still_failed
+
+    # 持久化最终失败列表
+    final_failures = [
+        {"name": ep["name"], "col": ep["col"], "path": ep["path"]}
+        for ep in _GN_ENDPOINTS if ep["name"] in failed_names
+    ]
+    _save_last_failures("swing_module_c", final_failures)
+    if final_failures:
+        print(f"\n⚠️  最终 {len(final_failures)} 个 endpoint 失败 "
+              f"(已写 .last_failures.json,下次 cron 自动优先重试)")
+    elif prev_failures:
+        print(f"\n✅ 上轮失败的 {len(prev_failures)} 个 endpoint 本轮全部恢复")
+
+    # 重组按原顺序
     pieces: list[pd.DataFrame] = []
     for ep in _GN_ENDPOINTS:
-        print(f"  fetching {ep['col']:25s}", end=" ... ", flush=True)
-        if ep["parser"] == "sth_realized_derived":
-            pairs = _gn_fetch_sth_realized(since_unix=START_GN_UNIX)
-            if not pairs:
-                print("FAIL(STH 派生 0 rows)")
-                continue
-            df = pd.DataFrame(pairs, columns=["date", ep["col"]])
-            df = df.drop_duplicates("date", keep="last").set_index("date")
-            pieces.append(df)
-            print(f"{len(df)} rows ({df.index.min()} ~ {df.index.max()})")
-            time.sleep(SPACING_GN)
-            continue
-        raw = _gn_get(ep["path"], params={
-            "a": "BTC", "i": "24h", "s": START_GN_UNIX,
-        })
-        if _is_err(raw):
-            print(f"FAIL {raw}")
-            time.sleep(SPACING_GN)
-            continue
-        if ep["parser"] == "tv":
-            pairs = _gn_parse_tv(raw)
-        else:
-            pairs = _gn_parse_max_pain_1m(raw)
-        if not pairs:
-            print("0 rows(响应格式不匹配)")
-            time.sleep(SPACING_GN)
-            continue
-        df = pd.DataFrame(pairs, columns=["date", ep["col"]])
-        df = df.drop_duplicates("date", keep="last").set_index("date")
-        pieces.append(df)
-        print(f"{len(df)} rows ({df.index.min()} ~ {df.index.max()})")
-        time.sleep(SPACING_GN)
+        if ep["name"] in results:
+            pieces.append(results[ep["name"]])
+
     if not pieces:
         print("\n⚠️  全部 endpoint 空,跳过写文件")
         return

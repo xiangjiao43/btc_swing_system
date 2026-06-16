@@ -576,10 +576,12 @@ def render_factors_markdown(conn: sqlite3.Connection) -> str:
         .get("event_risk", {})
         .get("events", [])
     )
-    # 2026-06-15 加:对称查"过去 48h 已发生事件",让外部 AI 区分
+    # 2026-06-15 加:对称查"过去 72h 已发生事件",让外部 AI 区分
     # "已发生(上下文)" vs "即将发生(交易窗口)",避免把过去 CPI 误判成未来。
+    # 72h = 3 天:CPI/FOMC 等重大事件公布后 2-3 天市场仍在消化,
+    # 让 AI 能判读"市场对事件的反应"。
     from src.data.storage.dao import EventsCalendarDAO as _EvDAO
-    events_past = _EvDAO.get_recent_past_within_hours(conn, hours=48)
+    events_past = _EvDAO.get_recent_past_within_hours(conn, hours=72)
 
     leaves = _walk_factors(spot_ctx.get("available_factors", {}))
 
@@ -948,7 +950,7 @@ def render_factors_markdown(conn: sqlite3.Connection) -> str:
             )
         lines.append("")
 
-    # 事件段:分"已发生(过去 48h)" + "即将发生(未来 168h)" 两块,
+    # 事件段:分"已发生(过去 72h)" + "即将发生(未来 168h)" 两块,
     # 每条带"距今 +/- N h"标注,杜绝 AI 把过去事件误判为未来。
     def _ev_line(ev: dict, is_past: bool) -> str:
         name = ev.get("event_name") or ev.get("event_type") or "?"
@@ -968,12 +970,12 @@ def render_factors_markdown(conn: sqlite3.Connection) -> str:
 
     lines.append("## 事件日历")
     lines.append("")
-    lines.append("### 已发生（过去 48h，仅作上下文参考）")
+    lines.append("### 已发生（过去 72h，市场仍在消化的上下文）")
     if events_past:
         for ev in events_past:
             lines.append(_ev_line(ev, is_past=True))
     else:
-        lines.append("（过去 48h 无登记事件）")
+        lines.append("（过去 72h 无登记事件）")
     lines.append("")
     lines.append("### 即将发生（未来 168h，交易决策窗口）")
     if events:

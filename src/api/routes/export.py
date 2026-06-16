@@ -576,6 +576,10 @@ def render_factors_markdown(conn: sqlite3.Connection) -> str:
         .get("event_risk", {})
         .get("events", [])
     )
+    # 2026-06-15 加:对称查"过去 48h 已发生事件",让外部 AI 区分
+    # "已发生(上下文)" vs "即将发生(交易窗口)",避免把过去 CPI 误判成未来。
+    from src.data.storage.dao import EventsCalendarDAO as _EvDAO
+    events_past = _EvDAO.get_recent_past_within_hours(conn, hours=48)
 
     leaves = _walk_factors(spot_ctx.get("available_factors", {}))
 
@@ -944,19 +948,47 @@ def render_factors_markdown(conn: sqlite3.Connection) -> str:
             )
         lines.append("")
 
-    lines.append("## 事件日历（未来 168h）")
+    # 事件段:分"已发生(过去 48h)" + "即将发生(未来 168h)" 两块,
+    # 每条带"距今 +/- N h"标注,杜绝 AI 把过去事件误判为未来。
+    def _ev_line(ev: dict, is_past: bool) -> str:
+        name = ev.get("event_name") or ev.get("event_type") or "?"
+        etype = ev.get("event_type") or ""
+        utc_ts = ev.get("utc_trigger_time") or ev.get("date") or ""
+        impact = ev.get("impact_level") or ""
+        hours_to = ev.get("hours_to")
+        if hours_to is not None:
+            if is_past:
+                # 过去事件:hours_to 是负数,显示"已过 X h"
+                age_str = f"**已过 {abs(hours_to):.1f}h**"
+            else:
+                age_str = f"**距今 +{hours_to:.1f}h**"
+        else:
+            age_str = "时间未知"
+        return f"- {name} [{etype}] ｜ 触发: {utc_ts} UTC ｜ {age_str} ｜ 影响: {impact}"
+
+    lines.append("## 事件日历")
     lines.append("")
+    lines.append("### 已发生（过去 48h，仅作上下文参考）")
+    if events_past:
+        for ev in events_past:
+            lines.append(_ev_line(ev, is_past=True))
+    else:
+        lines.append("（过去 48h 无登记事件）")
+    lines.append("")
+    lines.append("### 即将发生（未来 168h，交易决策窗口）")
     if events:
         for ev in events:
-            name = ev.get("event_name") or ev.get("event_type") or "?"
-            etype = ev.get("event_type") or ""
-            utc_ts = ev.get("utc_trigger_time") or ev.get("date") or ""
-            impact = ev.get("impact_level") or ""
-            lines.append(
-                f"- {name} [{etype}] ｜ 触发: {utc_ts} UTC ｜ 影响: {impact}"
-            )
+            lines.append(_ev_line(ev, is_past=False))
     else:
         lines.append("（未来 168h 无登记事件）")
+    lines.append("")
+    lines.append(
+        "> ⚠️ **重要**:外部 AI 判读时,"
+        "**已发生段仅作上下文**(如 BTC 对 CPI 的反应已可观察),"
+        "**禁开仓 / 事件风险窗口** 仅基于"
+        "**即将发生段**(距今 +0~+24h 视为高风险窗口)。"
+        "时间已标注小时差,不要凭日期文字误判时序。"
+    )
     lines.append("")
 
     return "\n".join(lines)

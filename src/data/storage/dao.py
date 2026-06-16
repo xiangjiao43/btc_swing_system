@@ -1025,6 +1025,50 @@ class EventsCalendarDAO:
                 r["name"] = r["event_name"]
         return rows
 
+    @staticmethod
+    def get_recent_past_within_hours(
+        conn: sqlite3.Connection,
+        hours: float = 48,
+        now_utc: Optional[str] = None,
+    ) -> list[dict[str, Any]]:
+        """对称 get_upcoming_within_hours:返回 [now-hours, now) 已发生事件,
+        按时间升序。每条附 'hours_to' 字段(负数,表示距今几小时前)。
+
+        2026-06-15 加:snapshot 把"过去 48h 内已发生"事件单独列出,
+        让外部 AI 区分"已发生 vs 即将发生",避免把过去 CPI 误判成未来事件。
+        """
+        from datetime import datetime, timedelta, timezone
+        if now_utc is None:
+            now_dt = datetime.now(timezone.utc)
+        else:
+            s = now_utc.replace("Z", "+00:00")
+            now_dt = datetime.fromisoformat(s) if s else datetime.now(timezone.utc)
+            if now_dt.tzinfo is None:
+                now_dt = now_dt.replace(tzinfo=timezone.utc)
+        start_dt = now_dt - timedelta(hours=hours)
+        start_str = start_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+        # 用 now - 1s 作 end 避免包含正在发生(误差 1 秒可忽略)
+        end_str = now_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+        rows = EventsCalendarDAO.get_events_in_window(conn, start_str, end_str)
+        for r in rows:
+            try:
+                trig = r.get("utc_trigger_time")
+                if trig:
+                    s2 = trig.replace("Z", "+00:00")
+                    t_dt = datetime.fromisoformat(s2)
+                    if t_dt.tzinfo is None:
+                        t_dt = t_dt.replace(tzinfo=timezone.utc)
+                    r["hours_to"] = (
+                        (t_dt - now_dt).total_seconds() / 3600.0
+                    )
+                else:
+                    r["hours_to"] = None
+            except Exception:
+                r["hours_to"] = None
+            if "name" not in r and "event_name" in r:
+                r["name"] = r["event_name"]
+        return rows
+
 
 # ============================================================
 # Sprint D(2026-05-08)收尾:DataFetchLogDAO(已废弃)+ data_fetch_log 表

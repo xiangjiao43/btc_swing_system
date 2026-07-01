@@ -120,9 +120,16 @@ _TODAY_PENDING_CRON_FACTORS: dict[str, tuple[int, int]] = {
     "max_pain_1m": (10, 50),
 }
 
-# FRED 月频源:每月只发布一次,当月没出新数据时 inserted_at_utc 不动。
-# 这些归"月频源未发布"档,与"真异常"区分。
-_MONTHLY_SOURCE_FACTORS: set[str] = {"cpi", "core_cpi", "m2", "pce"}
+# 慢变量因子:更新节奏是月度 / FOMC 会议触发 / 特殊发布节奏。
+# 这些指标"没更新"是正常状态,不该被判"真异常"拦住打包。
+# 2026-07 新增 fed_funds_rate + fed_balance_sheet(用户报"联邦基金利率被误判"):
+#   - fed_funds_rate: 只在 FOMC 会议后变动(3-8 周一次),长期不变属正常
+#   - fed_balance_sheet: FRED H.4.1 周更但常常静止(quantitative tightening 期间尤甚)
+_SLOW_UPDATE_FACTORS: set[str] = {
+    "cpi", "core_cpi", "m2", "pce",       # 月频宏观
+    "fed_funds_rate",                       # FOMC 后才动
+    "fed_balance_sheet",                    # 周更 + 常静止
+}
 
 
 # 派生指标 → 基准 series 的 factor_key 映射。
@@ -853,7 +860,7 @@ def render_factors_markdown(conn: sqlite3.Connection) -> str:
                     continue
                 # 已过 cron 时间仍未抓到 → 真异常
                 anomaly.append(zh_name)
-            elif k in _MONTHLY_SOURCE_FACTORS:
+            elif k in _SLOW_UPDATE_FACTORS:
                 monthly_pending.append(zh_name)
             else:
                 anomaly.append(zh_name)
@@ -871,7 +878,7 @@ def render_factors_markdown(conn: sqlite3.Connection) -> str:
         f"当天抓取情况（BJT 0:00 起）：总 {total_count} | "
         f"已抓取 {fetched_today_count} | "
         f"待今日 cron {len(pending_cron)} | "
-        f"月频源未发布 {len(monthly_pending)} | "
+        f"慢变量源未更新 {len(monthly_pending)} | "
         f"真异常 {len(anomaly)}"
     )
     if pending_cron:
@@ -885,7 +892,8 @@ def render_factors_markdown(conn: sqlite3.Connection) -> str:
             )
     if monthly_pending:
         lines.append(
-            f"  月频源未发布（FRED 月度）：{', '.join(monthly_pending)}"
+            f"  慢变量源未更新（FRED 月频 / FOMC 后才动的利率类）："
+            f"{', '.join(monthly_pending)}"
         )
     # 真异常那行始终显示(健康哨兵)
     lines.append(

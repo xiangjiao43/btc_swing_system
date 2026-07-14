@@ -99,7 +99,7 @@ sources:
       backoff_strategy: "fixed"                         # 固定间隔 8s
       retry_on_status: [408, 429, 500, 502, 503, 504]
     rate_limit:
-      requests_per_minute: 15                           # 旧系统 RateLimiter 参数
+      requests_per_minute: 5                            # 2026-07:CoinGlass 上游降到 5/min
       on_exceed: "queue"
     freshness_class: "derivatives"                      # 价格与衍生品混合;细分见 data_catalog.yaml
     notes: >

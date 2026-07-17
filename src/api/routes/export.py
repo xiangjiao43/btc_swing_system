@@ -467,6 +467,27 @@ def _fresh_tag(factor_key: str, leaf: dict) -> str:
     return "新鲜"
 
 
+def _exceeds_stale_threshold(factor_key: str, leaf: dict) -> bool:
+    """数据 as_of 是否超出该因子的可接受新鲜度窗口(唯一"真异常"判据)。
+
+    与 _fresh_tag 用同一张阈值表(_STALE_DAYS_BY_FACTOR)。返回 True 仅当
+    数据日期超期或整项缺失 —— 即"日频数据超出周末/节假日仍未更新"。
+
+    注意:此处刻意**不**用"当天 BJT 是否插入新行"判故障。T+1 链上 /
+    周更 FRED 利率(us10y/us2y/real_yield)当天没有新行属正常节奏,不是故障;
+    只有数据日期真正超期才算真异常。这样健康哨兵与新鲜度总览口径一致,
+    也消除了逐批往 _SLOW_UPDATE_FACTORS 白名单打补丁的循环。
+    """
+    if leaf.get("status") == "missing" or leaf.get("actual_value") in (
+        None, [], "",
+    ):
+        return True
+    ts = leaf.get("as_of") or leaf.get("fetched_at_utc")
+    days = _days_since(ts)
+    threshold = _STALE_DAYS_BY_FACTOR.get(factor_key, _STALE_DAYS_DEFAULT)
+    return days is not None and days > threshold
+
+
 _PCT_SIGNED_KEYS = {
     "ath_drawdown_pct",
     "ma_200w_deviation_pct",
@@ -816,9 +837,12 @@ def render_factors_markdown(conn: sqlite3.Connection) -> str:
     # 为每个 leaf 计算"更新时间"(UTC ISO) + 类型(fetched/computed)
     leaf_update_info: dict[str, dict[str, Any]] = {}
     fetched_today_count = 0
-    # "未抓取" 分 3 类:待今日 cron / 月频源未发布 / 真异常
+    # "未抓取" 分 4 类:待今日 cron / 月频源未发布 / 结构性滞后 / 真异常。
+    # 真异常唯一判据 = 数据 as_of 超出该因子新鲜度窗口(见 _exceeds_stale_threshold);
+    # 其余"当天没抓到新行但数据仍在窗口内"的一律归结构性滞后,不算故障。
     pending_cron: list[tuple[str, str]] = []  # (zh_name, "10:50 档")
     monthly_pending: list[str] = []
+    structural_lag: list[str] = []
     anomaly: list[str] = []
     total_count = 0
     for items in section_buckets.values():
@@ -848,7 +872,11 @@ def render_factors_markdown(conn: sqlite3.Connection) -> str:
                 fetched_today_count += 1
                 continue
             zh_name = all_meta.get(k, (k, "", 9999))[0]
-            # 分类未抓取项
+            # 当天 BJT 没抓到新行。唯一"真异常"判据 = 数据 as_of 超期。
+            if _exceeds_stale_threshold(k, leaf):
+                anomaly.append(zh_name)
+                continue
+            # 数据仍在新鲜度窗口内 → 非故障,按原因归类展示(不进真异常)
             if k in _TODAY_PENDING_CRON_FACTORS:
                 hr, mn = _TODAY_PENDING_CRON_FACTORS[k]
                 # 当前 BJT 是否还没到 cron 时间?
@@ -857,13 +885,12 @@ def render_factors_markdown(conn: sqlite3.Connection) -> str:
                 )
                 if now_bjt_dt < cron_today_bjt:
                     pending_cron.append((zh_name, f"{hr:02d}:{mn:02d} 档"))
-                    continue
-                # 已过 cron 时间仍未抓到 → 真异常
-                anomaly.append(zh_name)
+                else:
+                    structural_lag.append(zh_name)
             elif k in _SLOW_UPDATE_FACTORS:
                 monthly_pending.append(zh_name)
             else:
-                anomaly.append(zh_name)
+                structural_lag.append(zh_name)
 
     lines: list[str] = []
     lines.append("# BTC 系统数据快照（供外部 AI 分析）")
@@ -879,6 +906,7 @@ def render_factors_markdown(conn: sqlite3.Connection) -> str:
         f"已抓取 {fetched_today_count} | "
         f"待今日 cron {len(pending_cron)} | "
         f"慢变量源未更新 {len(monthly_pending)} | "
+        f"结构性滞后 {len(structural_lag)} | "
         f"真异常 {len(anomaly)}"
     )
     if pending_cron:
@@ -894,6 +922,11 @@ def render_factors_markdown(conn: sqlite3.Connection) -> str:
         lines.append(
             f"  慢变量源未更新（FRED 月频 / FOMC 后才动的利率类）："
             f"{', '.join(monthly_pending)}"
+        )
+    if structural_lag:
+        lines.append(
+            f"  结构性滞后（当天源未出新点，但数据仍在新鲜度窗口内，非故障）："
+            f"{', '.join(structural_lag)}"
         )
     # 真异常那行始终显示(健康哨兵)
     lines.append(

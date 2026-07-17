@@ -87,3 +87,47 @@ def test_snapshot_endpoint_marks_missing_when_no_onchain(client: TestClient) -> 
     assert "❌缺失" in body
     # 至少一项缺失因子出现
     assert "❌缺失" in body.split("## 链上")[1]
+
+
+def test_snapshot_summary_has_structural_lag_bucket(client: TestClient) -> None:
+    """当天抓取情况行必须含"结构性滞后"档(区别于真异常)。"""
+    resp = client.get("/api/export/snapshot.md")
+    assert "结构性滞后" in resp.text
+
+
+def _leaf(*, value: object = 1.0, as_of: str | None, status: str | None = None) -> dict:
+    leaf: dict = {"actual_value": value, "status": status}
+    if as_of is not None:
+        leaf["as_of"] = as_of
+    return leaf
+
+
+def _days_ago(n: int) -> str:
+    return (datetime.now(timezone.utc) - timedelta(days=n)).strftime("%Y-%m-%d")
+
+
+def test_stale_threshold_within_window_not_anomaly() -> None:
+    """T+1 链上(默认 3d 窗口)当天没出新点但数据仅 1d 旧 → 不是真异常。
+
+    这是 2026-07-17 数据包"真异常=13"误报的回归锁:realized_price / cdd /
+    ssr 等当天没写新行,但数据在窗口内,曾被错判真异常。
+    """
+    from src.api.routes.export import _exceeds_stale_threshold
+
+    # 链上默认阈值 3d,1d 旧 → 未超期
+    assert _exceeds_stale_threshold("realized_price", _leaf(as_of=_days_ago(1))) is False
+    assert _exceeds_stale_threshold("cdd", _leaf(as_of=_days_ago(2))) is False
+    # FRED 利率 8d 窗口,6d 旧 → 未超期(us10y/us2y/real_yield 曾被误报)
+    assert _exceeds_stale_threshold("us10y", _leaf(as_of=_days_ago(6))) is False
+    assert _exceeds_stale_threshold("real_yield", _leaf(as_of=_days_ago(6))) is False
+
+
+def test_stale_threshold_beyond_window_is_anomaly() -> None:
+    """数据真正超出新鲜度窗口 → 仍判真异常(健康哨兵未被削弱)。"""
+    from src.api.routes.export import _exceeds_stale_threshold
+
+    assert _exceeds_stale_threshold("realized_price", _leaf(as_of=_days_ago(5))) is True
+    assert _exceeds_stale_threshold("us10y", _leaf(as_of=_days_ago(10))) is True
+    # 整项缺失也算异常
+    assert _exceeds_stale_threshold("cdd", _leaf(value=None, as_of=None)) is True
+    assert _exceeds_stale_threshold("ssr", _leaf(as_of=_days_ago(1), status="missing")) is True

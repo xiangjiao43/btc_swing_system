@@ -43,7 +43,7 @@ GN_BASE: str = "https://api.alphanode.work"
 FRED_BASE: str = "https://api.stlouisfed.org/fred/series/observations"
 
 SPACING_CG: float = 13.0         # CoinGlass 限频 2026-07 收紧到 5 次/分钟 → ≥12s,取 13s 加安全余量
-SPACING_GN: float = 5.0          # Glassnode 同
+SPACING_GN: float = 13.0         # Glassnode alphanode 上游 2026-07-17 收紧到 5/min → ≥12s
 SPACING_FRED: float = 1.0        # FRED 直连官方,可快一点
 
 TIMEOUT_SEC: int = 30

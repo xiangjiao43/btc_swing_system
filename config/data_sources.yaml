@@ -127,7 +127,7 @@ sources:
       backoff_strategy: "exponential"
       retry_on_status: [408, 429, 500, 502, 503, 504]
     rate_limit:
-      requests_per_minute: 120
+      requests_per_minute: 5                            # 2026-07-17:alphanode 上游同 CoinGlass 收紧到 5/min
       on_exceed: "queue"
     freshness_class: "onchain"   # > 48 h 视为 stale(§3.2.3)
     notes: >

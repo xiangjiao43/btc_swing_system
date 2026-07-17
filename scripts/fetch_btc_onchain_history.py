@@ -21,7 +21,7 @@
 中转站配置(若你的不同,改下面常量):
   BASE_URL          = https://api.alphanode.work
   AUTH_HEADER_NAME  = x-key
-  SPACING_SEC       = 5    请求间间隔,避免触发中转站对单 endpoint 的突发限流
+  SPACING_SEC       = 13   请求间间隔;alphanode 上游 2026-07 收紧到 5/min,取 ≥12s 加安全余量
 """
 
 from __future__ import annotations
@@ -47,7 +47,7 @@ import pandas as pd
 BASE_URL: str = "https://api.alphanode.work"
 AUTH_HEADER_NAME: str = "x-key"
 START_DATE: datetime = datetime(2021, 1, 1, tzinfo=timezone.utc)
-SPACING_SEC: float = 5.0
+SPACING_SEC: float = 13.0
 TIMEOUT_SEC: int = 30
 OUTPUT_PATH: str = "btc_onchain_history.csv"
 

@@ -473,15 +473,22 @@ def _exceeds_stale_threshold(factor_key: str, leaf: dict) -> bool:
     与 _fresh_tag 用同一张阈值表(_STALE_DAYS_BY_FACTOR)。返回 True 仅当
     数据日期超期或整项缺失 —— 即"日频数据超出周末/节假日仍未更新"。
 
-    注意:此处刻意**不**用"当天 BJT 是否插入新行"判故障。T+1 链上 /
-    周更 FRED 利率(us10y/us2y/real_yield)当天没有新行属正常节奏,不是故障;
-    只有数据日期真正超期才算真异常。这样健康哨兵与新鲜度总览口径一致,
-    也消除了逐批往 _SLOW_UPDATE_FACTORS 白名单打补丁的循环。
+    注意:
+    1) 此处刻意**不**用"当天 BJT 是否插入新行"判故障。T+1 链上 /
+       周更 FRED 利率(us10y/us2y/real_yield)当天没有新行属正常节奏,不是故障;
+       只有数据日期真正超期才算真异常。
+    2) 慢变量白名单(_SLOW_UPDATE_FACTORS)有数据时永不算真异常。
+       原因:CPI/M2/PCE 月频,BLS 中旬发,数据 as_of 与今天差 30-50 天属正常;
+       fed_funds_rate 只在 FOMC 后变(周期 6-8 周,可跨 45 天阈值);
+       fed_balance_sheet 周更但常静止。用静态阈值兜不住这些"发布节奏本身
+       随机的"因子,白名单短路是唯一稳的办法。missing 仍触发真异常(健康哨兵)。
     """
     if leaf.get("status") == "missing" or leaf.get("actual_value") in (
         None, [], "",
     ):
         return True
+    if factor_key in _SLOW_UPDATE_FACTORS:
+        return False
     ts = leaf.get("as_of") or leaf.get("fetched_at_utc")
     days = _days_since(ts)
     threshold = _STALE_DAYS_BY_FACTOR.get(factor_key, _STALE_DAYS_DEFAULT)

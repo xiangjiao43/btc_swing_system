@@ -98,7 +98,9 @@ jobs:
     description: 'FRED 9 个 series + alias(多档补救)'
 
   collect_onchain:
-    enabled: true
+    # 2026-07-24 停用:Glassnode 周期配额已耗尽,此 job(22 metric/天)是主消耗源。
+    # 8/14 额度重置前必须停,否则当天即按 ~26 次/天重新烧光。系统退役归档中。
+    enabled: false
     # Sprint 1.6.2(2026-05-17)错峰修正:旧 08:35/09:35/10:35(= 00:35/01:35/02:35 UTC)
     # 撞 Glassnode 全网 daily refresh 高峰(00:00 UTC 后约 30-90 分钟,alphanode
     # 中转站对热门 endpoint 如 puell_multiple 临时返 429)。
@@ -118,7 +120,8 @@ jobs:
   # 并且赶在 11:00 用户日常查看 snapshot 前刷新好。
   # fetcher 间 5s 间隔,4 calls/天 ≈ 124 calls/月。
   collect_glassnode_extras:
-    enabled: true
+    # 2026-07-24 停用:同 collect_onchain,Glassnode 配额耗尽,8/14 重置前停,防重烧。
+    enabled: false
     cron: {hour: 10, minute: 50}       # BJT 10:50 = UTC 02:50
     misfire_grace_time: 600
     coalesce: true

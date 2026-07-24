@@ -131,7 +131,9 @@ jobs:
   # ------------- Layer A / Layer B pipeline --------------------
 
   layer_a_spot_strategy:
-    enabled: true
+    # 2026-07-24 停用:AI 层已退役。Layer A 大周期裁决每天 1 次 AI 调用,
+    # 代理账户一充值就会自动扣费。系统退役归档中。
+    enabled: false
     # 北京时间 10:00 = UTC 02:00。Layer A 单独运行,避免与 11:35
     # Layer B 主策略连续调用 AI 导致 503 / 502 或长时间等待。
     cron: {hour: 10, minute: 0}
@@ -145,7 +147,9 @@ jobs:
   # pipeline_run_8h_onchain 用户决策保持 disabled(8h 链上档是 v1.2 残余,
   # 1.9.1 持仓健康检查会重新设计)。
   pipeline_run_regular:
-    enabled: true
+    # 2026-07-24 停用:这就是 Layer B L1-L5 + Master 主裁决,每天 1 次 AI 调用。
+    # AI 层已退役,代理账户充值即自动扣费。系统退役归档中。
+    enabled: false
     # Sprint F.1(2026-05-09):16:05 BJT → 11:35 BJT(= UTC 03:35)。
     # 用户中长线一天 1 次,16:05 太晚看不到。新时刻 11:35 在 Glassnode
     # 10:35 终档(Sprint C 3 档:8:35/9:35/10:35)+ 1h 缓冲后,
@@ -167,7 +171,9 @@ jobs:
   # ------------- 高频事件监听 ------------------------
 
   event_listener:
-    enabled: true
+    # 2026-07-24 停用:event_price/event_macro 命中时会 enqueue L1-L5/master 裁决
+    # (AI 调用)。AI 层已退役,避免充值后被事件触发扣费。系统退役归档中。
+    enabled: false
     interval: '60s'                    # 60 秒高频常驻
     misfire_grace_time: 30
     coalesce: true
@@ -199,7 +205,9 @@ jobs:
 
   # Sprint 1.10-H v1.4 §3.3.9 + §8.1 新增:周复盘 AI(每周日 22:00 BJT)
   weekly_review:
-    enabled: true
+    # 2026-07-24 停用:周复盘 AI(WeeklyReviewAnalyst)也是 AI 调用,充值即扣费。
+    # 严格说不属于 L1-L5/master 裁决,但同属"AI 层",一并停用。系统退役归档中。
+    enabled: false
     cron: {day_of_week: 'sun', hour: 22, minute: 0}    # 周日 22:00 BJT
     misfire_grace_time: 3600                            # 1h 容忍度
     coalesce: true
